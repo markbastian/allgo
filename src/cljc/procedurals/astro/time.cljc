@@ -30,6 +30,26 @@
 
 (defn mjd->jd [mjd] (+ mjd c/jd-mjd-offset))
 
+(defn mjd->calendar
+  "Calendar date and fractional hour from a Modified Julian Date -- the
+  inverse of `calendar->mjd`, by the standard integer reduction. Returns
+  `[year month day hour]`."
+  [mjd]
+  (let [jd (+ mjd c/jd-mjd-offset 0.5)
+        a  (long (math/floor jd))
+        f  (- jd a)
+        cc (if (< a 2299161)
+             (+ a 1524)
+             (let [b (long (math/floor (/ (- a 1867216.25) 36524.25)))]
+               (+ a b (- (long (math/floor (/ b 4.0)))) 1525)))
+        d  (long (math/floor (/ (- cc 122.1) 365.25)))
+        e  (long (math/floor (* 365.25 d)))
+        g  (long (math/floor (/ (- cc e) 30.6001)))
+        day   (- cc e (long (math/floor (* 30.6001 g))))
+        month (- g 1 (* 12 (long (math/floor (/ g 14.0)))))
+        year  (- d 4715 (long (math/floor (/ (+ 7 month) 10.0))))]
+    [year month day (* 24.0 f)]))
+
 (defn centuries-J2000
   "Julian centuries since J2000.0 -- the argument every polynomial in the
   reduction formulae is expanded in."

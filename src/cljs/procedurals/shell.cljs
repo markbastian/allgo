@@ -13,6 +13,7 @@
             [procedurals.lorenz :as lorenz]
             [procedurals.orbit-determination :as od]
             [procedurals.satellite :as satellite]
+            [procedurals.solar-system :as solar]
             [procedurals.terrain-webgl :as terrain]
             [reagent.core :as r]
             [reagent.dom.client :as rdom]))
@@ -28,7 +29,8 @@
    "lorenz"   {:start lorenz/start! :stop lorenz/stop!}
    "kepler"   {:start kepler/start! :stop kepler/stop!}
    "satellite" {:start satellite/start! :stop satellite/stop!}
-   "orbit-determination" {:start od/start! :stop od/stop!}})
+   "orbit-determination" {:start od/start! :stop od/stop!}
+   "solar-system" {:start solar/start! :stop solar/stop!}})
 
 (defn- demos
   "The page itself is the source of truth for which demos exist."

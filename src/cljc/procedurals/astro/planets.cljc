@@ -81,8 +81,10 @@
   [planet mjd-tt]
   (let [{:keys [a e i raan argp M]} (elements-at planet mjd-tt)
         nu (kep/mean->true M e)
-        ;; Kepler's own routine gives the ecliptic frame the elements live in
-        [r _] (kep/elements->state 1.0 {:a a :e e :i i :raan raan :argp argp :nu nu})
+        ;; Kepler's own routine, in the ecliptic frame the elements live in.
+        ;; Position does not depend on mu -- only the discarded velocity does
+        ;; -- but passing the real one keeps the call honest.
+        [r _] (kep/elements->state c/GM-sun {:a a :e e :i i :raan raan :argp argp :nu nu})
         ce (math/cos eph/obliquity-J2000)
         se (math/sin eph/obliquity-J2000)
         [x y z] r]

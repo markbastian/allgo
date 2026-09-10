@@ -1806,3 +1806,45 @@
           (is (< (abs (decl (pl/sun-from-earth (+ mjd d)))) 23.5)))))
     (testing "and the planetary Sun agrees with the Earth row negated"
       (is (< (mag (mapv + (pl/sun-from-earth mjd) (pl/heliocentric :earth mjd))) 1e-6)))))
+
+(deftest bodies-from-different-sources-can-simply-be-added
+  ;; What the shared frame buys, and the one thing the solar system demo
+  ;; depends on. The planets come from Vallado's elements and the Moon from
+  ;; an unrelated analytical series; placing the Moon heliocentrically is a
+  ;; vector addition only because neither needs rotating first.
+  (doseq [mjd [c/mjd-J2000 (t/calendar->mjd 2025 6 1) (t/calendar->mjd 1995 2 14)]]
+    (let [earth      (pl/heliocentric :earth mjd)
+          moon-geo   (eph/moon mjd)
+          moon-helio (mapv + earth moon-geo)]
+      (is (close? (mag moon-geo) (mag (mapv - moon-helio earth)) 1e-6)
+          "the sum minus the Earth gives the lunar distance back")
+      (is (< 356000.0 (mag moon-geo) 407000.0) "which is a real lunar distance")
+      (testing "and the Moon is never further from the Sun than Earth plus its own orbit"
+        (is (< (abs (- (mag moon-helio) (mag earth))) 410000.0))))))
+
+(deftest orbit-sampling-by-mean-anomaly-covers-the-whole-orbit
+  ;; The demo traces each orbit by stepping mean anomaly rather than time, so
+  ;; Neptune costs no more samples than Mercury. It has to reach both apsides.
+  (doseq [planet [:mercury :earth :mars :neptune]]
+    (let [el (pl/elements-at planet c/mjd-J2000)
+          rs (for [i (range 129)]
+               (let [nu (kep/mean->true (* c/two-pi (/ i 128.0)) (:e el))]
+                 (mag (first (kep/elements->state c/GM-sun (assoc el :nu nu :M nil))))))]
+      (is (close? (* (:a el) (- 1.0 (:e el))) (apply min rs) 1.0) (str (name planet) " periapsis"))
+      (is (close? (* (:a el) (+ 1.0 (:e el))) (apply max rs) 1.0) (str (name planet) " apoapsis")))))
+
+(deftest calendar-dates-round-trip
+  ;; The solar system demo shows a date, which needs the inverse of the
+  ;; conversion everything else uses.
+  (doseq [[y m d h] [[2000 1 1 12.0] [1858 11 17 0.0] [1900 1 1 0.0]
+                     [2024 2 29 6.0] [1582 10 15 0.0] [2100 12 31 23.5]]]
+    (let [[y2 m2 d2 h2] (t/mjd->calendar (t/calendar->mjd y m d h))]
+      (is (= [y m d] [y2 m2 d2]) (str y "-" m "-" d))
+      (is (close? h h2 1e-6) "and the hour")))
+  (testing "across a hundred years of consecutive days"
+    (let [bad (count (for [n (range 0 36525 7)
+                           :let [mjd (+ 40000.0 n)
+                                 [y m d _] (t/mjd->calendar mjd)]
+                           :when (> (abs (- mjd (t/calendar->mjd y m d 0.0))) 1e-9)]
+                       n))]
+      (is (zero? bad)))))
