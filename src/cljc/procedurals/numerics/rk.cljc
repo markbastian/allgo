@@ -1,5 +1,5 @@
-(ns procedurals.numerics.rk
-  "Explicit Runge-Kutta integrators (Montenbruck & Gill 4.1).
+  (ns procedurals.numerics.rk
+    "Explicit Runge-Kutta integrators (Montenbruck & Gill 4.1).
 
   Every method here is a Butcher tableau -- nodes `c`, stage weights `a`,
   and solution weights `b` -- run by one generic stepper, so a method is
@@ -8,7 +8,7 @@
   An embedded pair carries a second weight vector `b-hat` of lower order.
   The two solutions differ by the leading truncation error, which is what
   makes step-size control possible without integrating anything twice."
-  (:require [procedurals.numerics.core :as core]))
+    (:require [procedurals.numerics.core :as core]))
 
 ;; ------------------------------------------------------------- the stepper
 
