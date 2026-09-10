@@ -81,3 +81,55 @@
         cos-psi (/ (reduce + (map * r-body surface-point)) (* d rs))
         q  (/ rs d)]
     (* (/ GM d) q q 0.5 (- (* 3.0 cos-psi cos-psi) 1.0))))
+
+;; ---------------------------------------------------------------- the ocean
+
+(def k-ocean
+  "Effective degree-2 response of the oceans, as a Love number comparable to
+  `k2`. The oceans contribute roughly a tenth of what the solid Earth does."
+  0.032)
+
+(def ocean-lead
+  "How far the ocean bulge runs *ahead* of the body raising it, radians.
+
+  Not a lag. The Earth turns once a day while the Moon takes twenty-seven,
+  so rotation drags the bulge past the sub-lunar point before friction and
+  inertia can settle it. The couple that results is the reason the Moon
+  recedes by 38 mm a year and the day lengthens by 2 ms a century -- the
+  Earth is spinning down and handing the angular momentum to the Moon.
+
+  A few degrees, and the sign is the whole physics: reverse it and the Moon
+  would be spiralling in."
+  (* 3.0 c/degrees))
+
+(defn- lead-longitude
+  "Rotate a body eastward about the pole, into the direction the Earth turns."
+  [[x y z] angle]
+  (let [ca (math/cos angle) sa (math/sin angle)]
+    [(- (* ca x) (* sa y)) (+ (* sa x) (* ca y)) z]))
+
+(defn ocean-corrections
+  "Degree-2 harmonic corrections from ocean tides, from `[GM position]` pairs
+  in the Earth-fixed frame.
+
+  An equilibrium model: the oceans are treated as responding to the same
+  tide-raising potential as the solid Earth, at about a tenth the strength
+  and running a few degrees ahead. A real model carries a tabulated ocean
+  tide -- FES or GOT -- resolved into Doodson constituents, because the true
+  response depends on basin geometry and resonance rather than on the
+  forcing alone. What is here has the right size and the right lead; it does
+  not have the geography."
+  ([bodies] (ocean-corrections bodies k-ocean ocean-lead))
+  ([bodies love lead]
+   (corrections (mapv (fn [[GM r]] [GM (lead-longitude r lead)]) bodies) love)))
+
+(defn perturb-with-ocean
+  "Add both solid and ocean tidal corrections to a normalised gravity field."
+  [field bodies]
+  (let [solid (corrections bodies)
+        ocean (ocean-corrections bodies)
+        dC    (merge-with + (:C solid) (:C ocean))
+        dS    (merge-with + (:S solid) (:S ocean))]
+    (-> field
+        (update :C #(merge-with + (merge {[2 0] 0.0 [2 1] 0.0 [2 2] 0.0} %) dC))
+        (update :S #(merge-with + (merge {[2 1] 0.0 [2 2] 0.0} %) dS)))))

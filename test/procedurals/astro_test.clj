@@ -1848,3 +1848,55 @@
                            :when (> (abs (- mjd (t/calendar->mjd y m d 0.0))) 1e-9)]
                        n))]
       (is (zero? bad)))))
+
+;; ------------------------------------------------------------- ocean tides
+
+(deftest ocean-tides-are-a-tenth-of-the-solid-earth-tide
+  (let [solid (tid/corrections [[c/GM-moon moon-at]])
+        ocean (tid/ocean-corrections [[c/GM-moon moon-at]])]
+    (doseq [k [[2 0] [2 2]]]
+      (let [ratio (/ (get-in ocean [:C k]) (get-in solid [:C k]))]
+        (is (< 0.05 ratio 0.20) (str "C" (first k) (second k) " ratio " ratio))))))
+
+(deftest the-ocean-bulge-leads-the-body-raising-it
+  ;; Not lags. The Earth turns once a day while the Moon takes twenty-seven,
+  ;; so rotation drags the bulge past the sub-lunar point. The resulting
+  ;; couple is why the Moon recedes 38 mm a year and the day lengthens.
+  ;; Reverse this sign and the Moon would be spiralling in.
+  (let [axis (fn [corr]
+               (let [c22 (get-in corr [:C [2 2]])
+                     s22 (get-in corr [:S [2 2]])]
+                 (/ (* 0.5 (Math/atan2 s22 c22)) c/degrees)))]
+    (is (close? 0.0 (axis (tid/corrections [[c/GM-moon moon-at]])) 1e-9)
+        "the solid tide has no lead in this model")
+    (is (close? 3.0 (axis (tid/ocean-corrections [[c/GM-moon moon-at]])) 1e-6)
+        "the ocean bulge sits ahead, in the direction the Earth turns")
+    (is (pos? (axis (tid/ocean-corrections [[c/GM-moon moon-at]])))
+        "positive: ahead, not behind")))
+
+(deftest the-lead-angle-is-what-it-is-set-to
+  (doseq [lead [0.0 1.0 5.0 10.0]]
+    (let [corr (tid/ocean-corrections [[c/GM-moon moon-at]] tid/k-ocean (* lead c/degrees))
+          axis (/ (* 0.5 (Math/atan2 (get-in corr [:S [2 2]]) (get-in corr [:C [2 2]]))) c/degrees)]
+      (is (close? lead axis 1e-6) (str "lead of " lead " degrees")))))
+
+(deftest ocean-tides-add-to-the-acceleration
+  (let [j2 {:GM c/GM-earth :R c/R-earth :normalised? true
+            :C {[0 0] 1.0 [2 0] -4.841654e-4} :S {}}
+        bodies [[c/GM-moon moon-at] [c/GM-sun [c/AU 0.0 0.0]]]
+        r [7000.0 0.0 0.0]
+        solid (tid/perturb j2 bodies)
+        both  (tid/perturb-with-ocean j2 bodies)
+        a-solid (mag (mapv - (geo/acceleration solid r 2) (geo/acceleration j2 r 2)))
+        a-ocean (mag (mapv - (geo/acceleration both r 2) (geo/acceleration solid r 2)))]
+    (is (pos? a-ocean) "the oceans contribute something")
+    (is (< 0.05 (/ a-ocean a-solid) 0.20) "about a tenth of the solid tide")
+    (is (< 1e-9 (* 1000.0 a-ocean) 1e-6) "and lands in the published decade")))
+
+(deftest no-bodies-no-ocean-tide
+  (let [corr (tid/ocean-corrections [])]
+    (is (every? zero? (vals (:C corr))))
+    (is (every? zero? (vals (:S corr)))))
+  (let [f (tid/perturb-with-ocean geo/earth [])
+        r [7000.0 1000.0 2000.0]]
+    (is (close? 0.0 (mag (mapv - (geo/acceleration f r 4) (geo/acceleration geo/earth r 4))) 1e-30))))
