@@ -9,6 +9,7 @@
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.kepler :as kep]
             [procedurals.astro.observation :as obs]
+            [procedurals.astro.planets :as pl]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
             [procedurals.astro.tides :as tid]
@@ -1725,3 +1726,83 @@
   ;; problem does not announce itself.
   (is (some? (est/solve (lauchli-rows 1e-9) 3)) "the default copes")
   (is (nil? (est/solve (lauchli-rows 1e-9) 3 {:method :normal})) "the alternative does not"))
+
+;; ------------------------------------------------------------------ planets
+
+(deftest planetary-elements-give-the-right-orbits
+  (doseq [[planet a-au ecc days] [[:mercury 0.3871 0.2056 87.97]
+                                  [:venus   0.7233 0.0068 224.70]
+                                  [:earth   1.0000 0.0167 365.26]
+                                  [:mars    1.5237 0.0934 686.98]
+                                  [:jupiter 5.2029 0.0484 4332.6]
+                                  [:saturn  9.5367 0.0539 10759.2]
+                                  [:uranus  19.1892 0.0473 30685.4]
+                                  [:neptune 30.0699 0.0086 60189.0]]]
+    (testing (name planet)
+      (let [el (pl/elements-at planet c/mjd-J2000)]
+        (is (close? a-au (/ (:a el) c/AU) 1e-4) "semi-major axis")
+        (is (close? ecc (:e el) 1e-4) "eccentricity")
+        ;; Kepler's third law from the fitted axis, against the observed period
+        (is (< 0.999 (/ (pl/period planet c/mjd-J2000) days) 1.001) "period")))))
+
+(deftest planets-stay-near-the-ecliptic
+  ;; Every inclination is a couple of degrees or less, the solar system
+  ;; being flat. A frame error would show up here first.
+  (doseq [planet pl/order]
+    (is (< (/ (:i (pl/elements-at planet c/mjd-J2000)) c/degrees) 7.1)
+        (str (name planet) " inclination"))))
+
+(deftest mars-comes-and-goes
+  ;; Geocentric distance must swing between opposition and conjunction, which
+  ;; only works if the Earth's own place comes from the same table.
+  (let [ds (map #(/ (mag (pl/geocentric :mars (+ c/mjd-J2000 (* 10.0 %)))) c/AU) (range 0 1100))]
+    (is (close? 0.37 (apply min ds) 0.02) "closest approach")
+    (is (close? 2.68 (apply max ds) 0.03) "and the far side of the Sun")))
+
+(deftest two-independent-ephemerides-agree-at-j2000
+  ;; The M&G series and the Standish elements share no coefficients and no
+  ;; derivation. Agreement is therefore a real check on both -- and on the
+  ;; frame, since either being referred to a different equinox would show
+  ;; immediately.
+  (let [a (eph/sun c/mjd-J2000)
+        b (pl/sun-from-earth c/mjd-J2000)
+        sep (Math/acos (max -1.0 (min 1.0 (/ (reduce + (map * a b)) (* (mag a) (mag b))))))]
+    (is (< (/ sep c/arcsec) 10.0) "within ten arcseconds at the epoch")
+    (is (close? (mag a) (mag b) 5e3) "and within a few thousand km in distance")))
+
+(deftest the-low-precision-sun-drifts-in-longitude-not-latitude
+  ;; Recording a known limitation rather than leaving it to be rediscovered.
+  ;; The M&G series has a mean-longitude rate 0.35 deg/century short, which
+  ;; slides the Sun along the ecliptic at 12.7 arcsec a year. The frames are
+  ;; fine: a rotation would move latitude too, and latitude stays put.
+  (let [ecl (fn [v] (let [[x y z] v
+                          ce (Math/cos eph/obliquity-J2000)
+                          se (Math/sin eph/obliquity-J2000)]
+                      [x (+ (* ce y) (* se z)) (- (* ce z) (* se y))]))
+        gap (fn [yr]
+              (let [mjd (t/calendar->mjd yr 6 15)
+                    [ax ay az] (ecl (eph/sun mjd))
+                    [bx by bz] (ecl (pl/sun-from-earth mjd))]
+                {:lon (/ (- (Math/atan2 ay ax) (Math/atan2 by bx)) c/arcsec)
+                 :lat (/ (- (Math/asin (/ az (mag [ax ay az])))
+                            (Math/asin (/ bz (mag [bx by bz])))) c/arcsec)}))
+        g2000 (gap 2000) g2040 (gap 2040)]
+    (testing "longitude drifts secularly"
+      (is (< (abs (:lon g2000)) 10.0))
+      (is (> (abs (:lon g2040)) 300.0))
+      (is (close? 12.7 (/ (- (abs (:lon g2040)) (abs (:lon g2000))) 40.0) 2.0)
+          "about 12.7 arcsec a year"))
+    (testing "latitude does not, which is what rules out a frame error"
+      (is (< (abs (:lat g2040)) 30.0)))))
+
+(deftest everything-shares-one-frame
+  ;; The property that lets a satellite orbit, the Moon, the Sun and the
+  ;; planets be drawn in one picture without further rotation.
+  (let [mjd (t/calendar->mjd 2025 3 20)]
+    (testing "the Sun's declination is bounded by the J2000 obliquity"
+      (let [decl (fn [v] (/ (Math/asin (/ (nth v 2) (mag v))) c/degrees))]
+        (doseq [d (range 0 365 5)]
+          (is (< (abs (decl (eph/sun (+ mjd d)))) 23.5))
+          (is (< (abs (decl (pl/sun-from-earth (+ mjd d)))) 23.5)))))
+    (testing "and the planetary Sun agrees with the Earth row negated"
+      (is (< (mag (mapv + (pl/sun-from-earth mjd) (pl/heliocentric :earth mjd))) 1e-6)))))

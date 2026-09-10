@@ -8,16 +8,40 @@
   the perturbation itself is a millionth of Earth's pull, so an arcminute of
   error in the Sun's direction is far below anything else in the budget.
 
-  Positions are geocentric, equatorial, in kilometres."
+  The accuracy is not uniform in time, and the way it degrades is worth
+  knowing. Checked against the independent planetary elements of
+  `procedurals.astro.planets`, this Sun agrees to 3 arcseconds at J2000 and
+  then drifts by about 12.7 a year -- 8 arcminutes by 2040, past its own
+  nominal accuracy. The discrepancy is almost purely in longitude, the
+  latitude staying within 20 arcseconds, which identifies it as a slightly
+  short mean-longitude rate rather than a frame error: 35999.02 degrees a
+  century where the fitted value is 35999.37. For a perturbation that is
+  still irrelevant. For pointing, or for drawing the sky far from J2000,
+  prefer `planets/sun-from-earth`.
+
+  Positions are geocentric, equatorial, referred to the mean equator and
+  equinox of J2000 -- the same frame `procedurals.astro.forces` integrates
+  in and `procedurals.astro.frames` takes as its input. Everything in this
+  package shares that frame, so positions from here can be drawn alongside a
+  propagated orbit without further rotation."
   (:require [procedurals.astro.constants :as c]
             [procedurals.astro.time :as t]
             [clojure.math :as math]))
 
 (defn- frac [x] (- x (math/floor x)))
 
+(def obliquity-J2000
+  "Obliquity of the ecliptic at J2000, radians."
+  (* 23.43929111 c/degrees))
+
 (defn obliquity
-  "Obliquity of the ecliptic, radians. The tilt that turns the Sun's annual
-  path along the ecliptic into a seasonal swing in declination."
+  "Obliquity of the ecliptic at `mjd-tt`, radians -- the tilt that turns the
+  Sun's annual path along the ecliptic into a seasonal swing in declination.
+
+  Provided for work referred to the equator of date. The series below are
+  not: they use `obliquity-J2000`, because their longitudes are measured
+  from the J2000 equinox and rotating those by an obliquity of date would
+  produce a frame that is neither one thing nor the other."
   [mjd-tt]
   (* (- 23.43929111 (* 0.0130042 (t/centuries-J2000 mjd-tt))) c/degrees))
 
@@ -37,8 +61,12 @@
                                      (* 72.0 (math/sin (* 2.0 M))))
                                   1296.0e3))))
         r (- 149.619e6 (* 2.499e6 (math/cos M)) (* 0.021e6 (math/cos (* 2.0 M))))]
+    ;; The mean longitude advances 35999 degrees a century, not 36001, which
+    ;; identifies the series as referred to the fixed J2000 equinox rather
+    ;; than the moving equinox of date. The obliquity must match: using the
+    ;; one of date puts the Sun 8000 km out by 2025 and 33,000 by 2100.
     (ecliptic->equatorial [(* r (math/cos L)) (* r (math/sin L)) 0.0]
-                          (obliquity mjd-tt))))
+                          obliquity-J2000)))
 
 (defn moon
   "Geocentric position of the Moon, km.
@@ -81,8 +109,9 @@
                (* 205.0 (cos (- lp (* 2 D))))
                (* 171.0 (cos (+ l (* 2 D))))
                (* 152.0 (cos (- (+ l lp) (* 2 D)))))]
+    ;; L0 is likewise measured from the J2000 equinox.
     (ecliptic->equatorial [(* R (cos L) (cos B)) (* R (sin L) (cos B)) (* R (sin B))]
-                          (obliquity mjd-tt))))
+                          obliquity-J2000)))
 
 ;; ------------------------------------------------------------- the force
 
