@@ -1,5 +1,6 @@
 (ns procedurals.numerics-test
   (:require [procedurals.numerics.core :as core]
+            [procedurals.numerics.multistep :as ms]
             [procedurals.numerics.rk :as rk]
             [procedurals.numerics.rkn :as rkn]
             [clojure.test :refer [deftest is testing]]))
@@ -168,3 +169,92 @@
                              10.0)]
       (is (< (abs (- (first (:y s)) (Math/cos 10.0))) (* 100 tol))
           (str "tol " tol)))))
+
+;; ------------------------------------------------------------- multistep
+
+(defn- ratio-order [errs]
+  (mapv (fn [[a b]] (/ (Math/log (/ a b)) (Math/log 2.0))) (partition 2 1 errs)))
+
+(deftest adams-coefficients-match-the-published-tables
+  ;; Derived from the defining integral rather than transcribed, so this
+  ;; checks the derivation against the numbers everyone prints.
+  (letfn [(scaled [cs d] (mapv #(Math/round (* d %)) cs))]
+    (testing "Adams-Bashforth"
+      (is (= [1] (scaled (ms/adams-bashforth-coefficients 1) 1)))
+      (is (= [3 -1] (scaled (ms/adams-bashforth-coefficients 2) 2)))
+      (is (= [23 -16 5] (scaled (ms/adams-bashforth-coefficients 3) 12)))
+      (is (= [55 -59 37 -9] (scaled (ms/adams-bashforth-coefficients 4) 24)))
+      (is (= [1901 -2774 2616 -1274 251] (scaled (ms/adams-bashforth-coefficients 5) 720))))
+    (testing "Adams-Moulton"
+      (is (= [1] (scaled (ms/adams-moulton-coefficients 1) 1)))
+      (is (= [1 1] (scaled (ms/adams-moulton-coefficients 2) 2)))
+      (is (= [5 8 -1] (scaled (ms/adams-moulton-coefficients 3) 12)))
+      (is (= [9 19 -5 1] (scaled (ms/adams-moulton-coefficients 4) 24)))
+      (is (= [251 646 -264 106 -19] (scaled (ms/adams-moulton-coefficients 5) 720))))
+    (testing "Stoermer and Cowell"
+      (is (= [1] (scaled (ms/stoermer-coefficients 1) 1)))
+      (is (= [1 0] (scaled (ms/stoermer-coefficients 2) 1)))
+      (is (= [13 -2 1] (scaled (ms/stoermer-coefficients 3) 12)))
+      (is (= [1] (scaled (ms/cowell-coefficients 1) 1)))
+      (is (= [1 10 1] (scaled (ms/cowell-coefficients 3) 12))))))
+
+(deftest every-adams-weight-set-sums-to-one
+  (doseq [k (range 1 9)]
+    (is (< (abs (- (reduce + (ms/adams-bashforth-coefficients k)) 1.0)) 1e-12))
+    (is (< (abs (- (reduce + (ms/adams-moulton-coefficients k)) 1.0)) 1e-12))
+    ;; Stoermer-Cowell integrates twice, so its weights sum to one as well:
+    ;; a constant acceleration g must give exactly h^2 g of second difference.
+    (is (< (abs (- (reduce + (ms/stoermer-coefficients k)) 1.0)) 1e-12))
+    (is (< (abs (- (reduce + (ms/cowell-coefficients k)) 1.0)) 1e-12))))
+
+(deftest adams-methods-converge-at-their-stated-order
+  (doseq [method ms/catalog]
+    (testing (:name method)
+      (let [errs (mapv (fn [h]
+                         (max 1e-17 (abs (- (first (:y (core/step-until
+                                                        (ms/integrator method exponential 0.0 [1.0] h) 1.0)))
+                                            target))))
+                       [0.05 0.025 0.0125])]
+        (doseq [p (ratio-order errs)]
+          (is (< (- (:order method) 0.5) p (+ (:order method) 0.5))
+              (str (:name method) " observed " p)))))))
+
+(deftest stoermer-cowell-converges-at-its-stated-order
+  (doseq [method ms/catalog-2]
+    (testing (:name method)
+      (let [errs (mapv (fn [h]
+                         (max 1e-16 (abs (- (first (:dy (core/step-until
+                                                         (ms/integrator-2 method oscillator 0.0 [1.0] [0.0] h) 1.0)))
+                                            (- (Math/sin 1.0))))))
+                       [0.05 0.025 0.0125])]
+        ;; Velocity rides an Adams sum over the same history, so it carries
+        ;; the method's order rather than being capped by a difference.
+        (doseq [p (ratio-order errs)]
+          (is (< (- (:order method) 0.5) p (+ (:order method) 0.6))
+              (str (:name method) " velocity observed " p)))))))
+
+(deftest correcting-beats-predicting-alone
+  (testing "PECE has a much smaller error constant than the predictor at equal order"
+    (doseq [k [3 4 5]]
+      (let [err (fn [m] (abs (- (first (:y (core/step-until
+                                            (ms/integrator m exponential 0.0 [1.0] 0.02) 1.0)))
+                                target)))]
+        (is (< (err (ms/adams-pece k)) (err (ms/adams-bashforth k)))
+            (str "ABM" k " should beat AB" k))))))
+
+(deftest multistep-costs-one-or-two-evaluations-a-step
+  ;; The reason to tolerate a history and a starting procedure at all.
+  (is (every? #(= 1 (:stages %)) (mapv ms/adams-bashforth [2 3 4 5])))
+  (is (every? #(= 2 (:stages %)) (mapv ms/adams-pece [2 3 4 5])))
+  (is (= 7 (:stages rk/dopri54)) "against seven for a comparable single-step method"))
+
+(deftest the-starting-procedure-does-not-cap-the-order
+  ;; A startup one order too coarse silently limits everything after it, and
+  ;; would show up as a fifth-order method converging at four.
+  (let [errs (mapv (fn [h]
+                     (abs (- (first (:y (core/step-until
+                                         (ms/integrator (ms/adams-pece 5) exponential 0.0 [1.0] h) 1.0)))
+                             target)))
+                   [0.05 0.025 0.0125])]
+    (doseq [p (ratio-order errs)]
+      (is (> p 4.4) (str "order-5 Adams observed " p)))))
