@@ -1900,3 +1900,97 @@
   (let [f (tid/perturb-with-ocean geo/earth [])
         r [7000.0 1000.0 2000.0]]
     (is (close? 0.0 (mag (mapv - (geo/acceleration f r 4) (geo/acceleration geo/earth r 4))) 1e-30))))
+
+;; ----------------------------------------------------------- carrier phase
+
+(deftest carrier-wavelengths
+  (is (close? 0.1903 (* 1000.0 (obs/wavelength obs/L1)) 1e-4) "L1 is 19.03 cm")
+  (is (close? 0.2442 (* 1000.0 (obs/wavelength obs/L2)) 1e-4) "L2 is 24.42 cm")
+  (is (close? 0.8619 (* 1000.0 (obs/wavelength (- obs/L1 obs/L2))) 1e-4)
+      "widelane is 86 cm, which is why ambiguity resolution starts there")
+  (is (close? 0.1070 (* 1000.0 (obs/wavelength (+ obs/L1 obs/L2))) 1e-4) "narrowlane is 11 cm"))
+
+(deftest the-ionosphere-delays-code-and-advances-carrier
+  ;; Group and phase velocities move opposite ways in a dispersive medium,
+  ;; so a pseudorange comes out too long and a phase range too short by
+  ;; exactly the same amount. That opposition is what makes the ionosphere
+  ;; measurable rather than merely a nuisance.
+  (doseq [tec [10 50 100]]
+    (let [g 20000.0
+          code (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L1}))
+          ph   (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1}))]
+      (is (pos? (- code g)) "code long")
+      (is (neg? (- ph g)) "carrier short")
+      (is (close? 0.0 (+ (- code g) (- ph g)) 1e-15)
+          "and by the same amount, to the last bit"))))
+
+(deftest code-minus-phase-is-twice-the-ionosphere
+  ;; The relation that makes cycle-slip detection work: once the ambiguity is
+  ;; removed what is left is purely ionospheric and varies smoothly.
+  (doseq [tec [10 50 100]]
+    (let [g 20000.0 n 123456
+          code (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L1}))
+          ph   (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1 :ambiguity n}))]
+      ;; Tolerance set by cancellation, not by the model: this subtracts two
+      ;; numbers near 20,000 km to get 0.016, so six digits go immediately
+      ;; and 2e-12 km is the floor a double can offer here.
+      (is (close? (* 2.0 (obs/ionospheric-delay tec obs/L1))
+                  (+ (- code ph) (* (obs/wavelength obs/L1) n))
+                  1e-11)
+          (str tec " TECU")))))
+
+(deftest geometry-free-keeps-only-the-ionosphere
+  ;; Range, clocks and troposphere are all frequency-independent, so they
+  ;; cancel in the difference. Nothing about where the satellite is survives.
+  (let [tec 40
+        gf (fn [g clk trop]
+             (obs/geometry-free
+              (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1
+                                          :station-clock clk :elevation trop}))
+              (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L2
+                                          :station-clock clk :elevation trop}))))
+        base (gf 20000.0 0.0 nil)]
+    (is (close? base (gf 25000.0 1e-6 (* 10.0 c/degrees)) 1e-12) "geometry and clock gone")
+    (is (close? base (gf 30000.0 -3e-6 (* 40.0 c/degrees)) 1e-12) "troposphere gone too")
+    (testing "and what remains really is the ionosphere"
+      (is (close? (- (obs/ionospheric-delay tec obs/L2) (obs/ionospheric-delay tec obs/L1))
+                  base 1e-12)))))
+
+(deftest melbourne-wubbena-recovers-the-widelane-integer
+  ;; Geometry cancels because both combinations carry it identically;
+  ;; the ionosphere cancels because it enters them with opposite signs.
+  ;; What survives is an integer, observable with no orbit or clock
+  ;; knowledge whatever -- which is why ambiguity resolution can start
+  ;; before an orbit is known at all.
+  (let [n1 100000 n2 77000
+        widelane-n (- n1 n2)
+        mw (fn [g tec]
+             (obs/melbourne-wubbena
+              (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1 :ambiguity n1}))
+              (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L1}))
+              obs/L1
+              (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L2 :ambiguity n2}))
+              (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L2}))
+              obs/L2))]
+    (doseq [[g tec] [[20000.0 10] [25000.0 80] [30000.0 150] [22000.0 0]]]
+      (is (close? widelane-n (/ (mw g tec) (obs/wavelength (- obs/L1 obs/L2))) 1e-6)
+          (str "geometry " g ", " tec " TECU recovers " widelane-n " cycles")))))
+
+(deftest cycle-slips-show-in-the-geometry-free-combination
+  ;; It changes only when the receiver loses count, so a step is a slip and
+  ;; nothing else.
+  (let [smooth  (obs/geometry-free 20000.0 19995.8)
+        slipped (obs/geometry-free (+ 20000.0 (obs/wavelength obs/L1)) 19995.8)]
+    (is (not (obs/cycle-slip? smooth (+ smooth 1e-6))) "quiet epochs are quiet")
+    (is (obs/cycle-slip? smooth slipped)
+        "and one lost cycle on L1 -- 19 cm -- must be visible, which is the
+         whole purpose; a threshold in metres would report a clean series")
+    (testing "the default threshold sits under a single wavelength"
+      (is (< 5e-5 (obs/wavelength obs/L1))))))
+
+(deftest an-ambiguity-is-a-whole-number-of-wavelengths
+  (doseq [n [0 1 -5 123456]]
+    (let [p (obs/carrier-phase {:geometric 20000.0 :frequency obs/L1 :ambiguity n})]
+      (is (close? (* n (obs/wavelength obs/L1)) (:ambiguity p) 1e-12))
+      (is (close? (+ 20000.0 (* n (obs/wavelength obs/L1))) (:phase p) 1e-9)
+          "and it enters the phase range directly"))))

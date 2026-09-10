@@ -166,3 +166,85 @@
      :troposphere tropo
      :ionosphere iono
      :clock (* c/c-light (- station-clock satellite-clock))}))
+
+;; ------------------------------------------------------------ carrier phase
+;;
+;; The carrier is a thousand times more precise than the code and useless on
+;; its own, because a receiver counts cycles from an arbitrary starting point
+;; and cannot tell which cycle it began on. Everything below is arranged
+;; around that: an unknown integer that stays constant while lock is held,
+;; and combinations designed to isolate or eliminate it.
+;;
+;; The other thing to keep straight is a sign. Free electrons slow the code
+;; and speed the carrier by the same amount -- the group and phase velocities
+;; move in opposite directions in a dispersive medium -- so a pseudorange
+;; comes out too long and a phase range too short. That opposition is not a
+;; nuisance; it is what makes the ionosphere measurable.
+
+(defn wavelength [frequency] (/ c/c-light frequency))
+
+(defn carrier-phase
+  "Phase range in km: geometry, plus the media, plus an unknown whole number
+  of wavelengths.
+
+  Returned as a range rather than in cycles, which is what the estimator
+  wants and keeps it comparable with a pseudorange."
+  [{:keys [geometric elevation tec frequency ambiguity
+           station-clock satellite-clock]
+    :or   {tec 0.0 frequency L1 ambiguity 0 station-clock 0.0 satellite-clock 0.0}}]
+  (let [tropo (if elevation (tropospheric-delay elevation) 0.0)
+        iono  (ionospheric-delay tec frequency)]
+    {:phase (+ geometric tropo (- iono)
+               (* (wavelength frequency) ambiguity)
+               (* c/c-light (- station-clock satellite-clock)))
+     :troposphere tropo
+     :ionosphere  (- iono)
+     :ambiguity   (* (wavelength frequency) ambiguity)}))
+
+(defn geometry-free
+  "The difference of two phase ranges. Everything that does not depend on
+  frequency -- range, clocks, troposphere -- cancels, leaving the ionosphere
+  and a constant.
+
+  It is therefore both a measurement of the ionosphere and the standard way
+  to spot a cycle slip: the constant only changes when the receiver loses
+  and regains lock, so a step in this quantity is a slip and nothing else."
+  [phase-1 phase-2]
+  (- phase-1 phase-2))
+
+(defn widelane
+  "The combination whose effective wavelength is c/(f1 - f2).
+
+  At 86 cm against L1's 19 the ambiguity is far easier to pin to an integer,
+  which is why resolution starts here and works down."
+  [phase-1 f1 phase-2 f2]
+  (/ (- (* f1 phase-1) (* f2 phase-2)) (- f1 f2)))
+
+(defn narrowlane
+  "The combination with wavelength c/(f1 + f2), about 11 cm. Noisier in
+  ambiguity terms and quieter in every other, which is the opposite trade to
+  the widelane."
+  [obs-1 f1 obs-2 f2]
+  (/ (+ (* f1 obs-1) (* f2 obs-2)) (+ f1 f2)))
+
+(defn melbourne-wubbena
+  "Widelane phase less narrowlane code.
+
+  Geometry cancels because both combinations carry it identically, and the
+  ionosphere cancels because it enters the two with opposite signs. What
+  survives is the widelane ambiguity and noise -- an integer, observable
+  directly, with no orbit or clock knowledge whatever."
+  [phase-1 code-1 f1 phase-2 code-2 f2]
+  (- (widelane phase-1 f1 phase-2 f2)
+     (narrowlane code-1 f1 code-2 f2)))
+
+(defn cycle-slip?
+  "Whether the geometry-free combination has stepped by more than `tolerance`
+  km between epochs -- the signature of the receiver having lost count.
+
+  The default is 5 cm, comfortably under the 19 cm of a single L1 cycle,
+  because the whole point is to catch one lost cycle. A threshold in metres
+  would miss every slip worth detecting and report a clean series."
+  ([previous current] (cycle-slip? previous current 5e-5))
+  ([previous current tolerance]
+   (> (abs (- current previous)) tolerance)))
