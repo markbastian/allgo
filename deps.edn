@@ -1,0 +1,32 @@
+{:paths ["src/clj" "src/cljc" "src/cljs" "resources"]
+
+ :deps {org.clojure/clojure       {:mvn/version "1.12.5"}
+        org.clojure/clojurescript {:mvn/version "1.12.145"}
+        org.clojure/core.async    {:mvn/version "1.10.874-alpha3"
+                                   :exclusions  [org.clojure/tools.reader]}
+        quil/quil                 {:mvn/version "4.3.1563"}
+        reagent/reagent           {:mvn/version "2.0.1"}
+        cljsjs/hammer             {:mvn/version "2.0.8-0"}
+        clojure-lanterna/clojure-lanterna {:mvn/version "0.9.7"}}
+
+ :aliases
+ {:cljs
+  {:extra-deps {thheller/shadow-cljs {:mvn/version "3.5.0"}}}
+
+  :test
+  {:extra-paths ["test"]
+   :extra-deps  {io.github.cognitect-labs/test-runner
+                 {:git/tag "v0.5.1" :git/sha "dfb30dd6605cb6c0efc275e1df1736f6e90d4d73"}}
+   :main-opts   ["-m" "cognitect.test-runner"]}
+
+  :nrepl
+  {:extra-deps {nrepl/nrepl       {:mvn/version "1.7.0"}
+                cider/cider-nrepl {:mvn/version "0.62.2"}}
+   :main-opts  ["-m" "nrepl.cmdline" "--middleware" "[cider.nrepl/cider-middleware]"]}
+
+  :swingui
+  {:main-opts ["-m" "procedurals.swingui"]}
+
+  :build
+  {:deps       {io.github.clojure/tools.build {:mvn/version "0.10.14"}}
+   :ns-default build}}}

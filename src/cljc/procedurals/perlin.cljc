@@ -39,9 +39,14 @@
     0xE (- y x)
     0xF (- y (- x))))
 
+(defn- floor [x] #?(:clj (Math/floor x) :cljs (js/Math.floor x)))
+
+(defn- mask-idx [x0] #?(:clj (bit-and (long x0) 0xFF) :cljs (bit-and x0 0xFF)))
+
 (defn perlin [x y z]
   (letfn [(f [a] (reduce #(+ (p %1) %2) (conj a 0)))]
-    (let [xi (bit-and (int x) 0xFF) yi (bit-and (int y) 0xFF) zi (bit-and (int z) 0xFF)
+    (let [x0 (floor x) y0 (floor y) z0 (floor z)
+          xi (mask-idx x0) yi (mask-idx y0) zi (mask-idx z0)
           aaa (f [xi yi zi])
           aba (f [xi (inc yi) zi])
           aab (f [xi yi (inc zi)])
@@ -50,7 +55,7 @@
           bba (f [(inc xi) (inc yi) zi])
           bab (f [(inc xi) yi (inc zi)])
           bbb (f [(inc xi) (inc yi) (inc zi)])
-          xf (- x (int x)) yf (- y (int y)) zf (- z (int z))
+          xf (- x x0) yf (- y y0) zf (- z z0)
           u (fade xf) v (fade yf) w (fade zf)]
       (* 0.5 (inc (lerp (lerp (lerp (grad aaa xf yf zf) (grad baa (dec xf) yf zf) u)
                               (lerp (grad aba xf (dec yf) zf) (grad bba (dec xf) (dec yf) zf) u) v)
@@ -60,7 +65,7 @@
 (defn operlin [x y z persistence octaves]
   (loop [total 0.0 freq 1.0 amp 1.0 max-val 0.0 octave 0]
     (if (< octave octaves)
-      (recur (* amp (perlin (* x freq) (* y freq) (* z freq)))
+      (recur (+ total (* amp (perlin (* x freq) (* y freq) (* z freq))))
              (* freq 2.0)
              (* amp persistence)
              (+ max-val amp)

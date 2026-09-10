@@ -1,7 +1,8 @@
 (ns procedurals.core
   (:require [procedurals.cave :as c]
             [procedurals.dungeon-generator :as pdg]
-            [reagent.core :as reagent :refer [atom]]))
+            [reagent.core :refer [atom]]
+            [reagent.dom :as rdom]))
 
 (enable-console-print!)
 
@@ -18,7 +19,7 @@
     (add-watch state :grid-watch (fn [_ _ o n]
                                    (when (not= o n)
                                      (update-grid n))))
-    (reagent/render-component
+    (rdom/render
      [pdg/render state]
      app-context)))
 
