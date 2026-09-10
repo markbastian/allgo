@@ -40,24 +40,26 @@
   [p q]
   {:n (v- q p) :d (/ (- (norm-sq q) (norm-sq p)) 2.0)})
 
-(defn- offset-of [{:keys [n d]} pt] (- (dot n pt) d))
-
 (defn- crossing [a b sa sb]
   (let [t (/ sa (- sa sb))]
     (mapv (fn [x y] (+ x (* t (- y x)))) a b)))
 
 (defn- clip-face
-  "Clip convex polygon `pts` to the inside of `plane`, returning
-  `[surviving-loop points-on-the-cut]`."
-  [pts plane]
-  (let [n (count pts)]
+  "Clip convex polygon `pts` to the inside of the plane `n.x = d`, returning
+  `[surviving-loop points-on-the-cut]`. The plane arrives as primitives and
+  offsets are computed in one pass, so the loop does no map lookups and one
+  dot product per vertex rather than two."
+  [pts nx ny nz d]
+  (let [n    (count pts)
+        offs (mapv (fn [[x y z]] (- (+ (* nx x) (* ny y) (* nz z)) d)) pts)]
     (loop [i 0, out (transient []), cuts (transient [])]
       (if (= i n)
         [(persistent! out) (persistent! cuts)]
-        (let [a  (nth pts i)
-              b  (nth pts (rem (inc i) n))
-              sa (offset-of plane a)
-              sb (offset-of plane b)
+        (let [j  (rem (inc i) n)
+              sa (nth offs i)
+              sb (nth offs j)
+              a  (nth pts i)
+              b  (nth pts j)
               ia (<= sa eps)
               ib (<= sb eps)]
           (cond
@@ -69,21 +71,31 @@
             :else       (recur (inc i) out cuts)))))))
 
 (defn- distinct-points [pts]
-  (reduce (fn [acc p]
-            (if (some #(< (norm-sq (v- p %)) 1e-14) acc) acc (conj acc p)))
+  (reduce (fn [acc [x y z :as p]]
+            (if (some (fn [[ax ay az]]
+                        (let [dx (- x ax) dy (- y ay) dz (- z az)]
+                          (< (+ (* dx dx) (* dy dy) (* dz dz)) 1e-14)))
+                      acc)
+              acc
+              (conj acc p)))
           []
           pts))
 
 (defn- cap-loop
   "The new face sealing a cut: the cut points wound in order around their
-  centroid, in a basis spanning the cutting plane."
-  [cuts {:keys [n]}]
+  centroid, in a basis spanning the cutting plane. Angles are precomputed --
+  sort-by calls its keyfn on every comparison, which would mean several
+  times more atan2 calls than there are points."
+  [cuts normal]
   (let [pts (distinct-points cuts)]
     (when (>= (count pts) 3)
       (let [c (centroid pts)
             u (normalize (v- (first pts) c))
-            v (cross (normalize n) u)]
-        (vec (sort-by #(math/atan2 (dot (v- % c) v) (dot (v- % c) u)) pts))))))
+            v (cross (normalize normal) u)]
+        (->> pts
+             (mapv (fn [p] (let [w (v- p c)] [(math/atan2 (dot w v) (dot w u)) p])))
+             (sort-by first)
+             (mapv second))))))
 
 ;; A face carries the site whose bisector created it (nil for the bounding
 ;; box), so the surviving faces name the cell's true Voronoi neighbours.
@@ -91,13 +103,14 @@
 (defn- clip-cell
   "Cut convex polyhedron `faces` by `plane`. Returns nil when the plane does
   not reach the cell, so callers can tell a real cut from a no-op."
-  [faces plane owner]
-  (let [clipped (mapv (fn [f] [(clip-face (:pts f) plane) f]) faces)
-        cuts    (into [] (mapcat (comp second first)) clipped)]
-    (when-let [cap (cap-loop cuts plane)]
-      (-> (into [] (comp (keep (fn [[[loop* _] f]]
-                                 (when (>= (count loop*) 3) (assoc f :pts loop*)))))
-                clipped)
+  [faces {[nx ny nz] :n d :d} owner]
+  (let [results (mapv (fn [f] (clip-face (:pts f) nx ny nz d)) faces)
+        cuts    (into [] (mapcat second) results)]
+    (when-let [cap (cap-loop cuts [nx ny nz])]
+      (-> (into [] (keep-indexed (fn [i [loop* _]]
+                                   (when (>= (count loop*) 3)
+                                     (assoc (nth faces i) :pts loop*))))
+                results)
           (conj {:pts cap :site owner})))))
 
 (defn box-faces
@@ -110,9 +123,14 @@
    [[x0 y0 z0] [x1 y0 z0] [x1 y1 z0] [x0 y1 z0]]
    [[x0 y0 z1] [x0 y1 z1] [x1 y1 z1] [x1 y0 z1]]])
 
-(defn- farthest-sq [site faces]
-  (reduce (fn [m f] (reduce (fn [m p] (max m (norm-sq (v- p site)))) m (:pts f)))
-          0.0 faces))
+(defn- farthest-sq [[sx sy sz] faces]
+  (reduce (fn [m f]
+            (reduce (fn [m [x y z]]
+                      (let [dx (- x sx) dy (- y sy) dz (- z sz)]
+                        (max m (+ (* dx dx) (* dy dy) (* dz dz)))))
+                    m (:pts f)))
+          0.0
+          faces))
 
 (defn cell
   "The Voronoi cell of `site` against `others`, clipped to `bounds`.
