@@ -61,7 +61,7 @@
     {:C {[2 0] 0.0 [2 1] 0.0 [2 2] 0.0} :S {[2 1] 0.0 [2 2] 0.0}}
     bodies)))
 
-(defn apply-to
+(defn perturb
   "Add tidal corrections to a normalised gravity field."
   [field bodies]
   (let [{:keys [C S]} (corrections bodies)]

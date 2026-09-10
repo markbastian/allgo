@@ -11,6 +11,7 @@
             [procedurals.boids-voronoi-3d :as boids-voronoi-3d]
             [procedurals.kepler :as kepler]
             [procedurals.lorenz :as lorenz]
+            [procedurals.satellite :as satellite]
             [procedurals.terrain-webgl :as terrain]
             [reagent.core :as r]
             [reagent.dom.client :as rdom]))
@@ -24,7 +25,8 @@
    "boids-voronoi-3d" {:start boids-voronoi-3d/start! :stop boids-voronoi-3d/stop!}
    "boids-3d" {:start boids-3d/start! :stop boids-3d/stop!}
    "lorenz"   {:start lorenz/start! :stop lorenz/stop!}
-   "kepler"   {:start kepler/start! :stop kepler/stop!}})
+   "kepler"   {:start kepler/start! :stop kepler/stop!}
+   "satellite" {:start satellite/start! :stop satellite/stop!}})
 
 (defn- demos
   "The page itself is the source of truth for which demos exist."

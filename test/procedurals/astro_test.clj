@@ -510,7 +510,7 @@
 (deftest tidal-perturbation-is-the-expected-size
   (let [j2    {:GM c/GM-earth :R c/R-earth :normalised? true
                :C {[0 0] 1.0 [2 0] -4.841654e-4} :S {}}
-        tided (tid/apply-to j2 [[c/GM-moon moon-at] [c/GM-sun [c/AU 0.0 0.0]]])
+        tided (tid/perturb j2 [[c/GM-moon moon-at] [c/GM-sun [c/AU 0.0 0.0]]])
         r     [7000.0 0.0 0.0]
         a     (* 1000.0 (mag (mapv - (geo/acceleration tided r 2) (geo/acceleration j2 r 2))))]
     (testing "around 1e-7 m/s^2, this being the geometry that maximises it"
@@ -525,7 +525,7 @@
     (is (every? zero? (vals (:C corr))))
     (is (every? zero? (vals (:S corr)))))
   (testing "and applying an empty correction leaves a field alone"
-    (let [f (tid/apply-to geo/earth [])
+    (let [f (tid/perturb geo/earth [])
           r [7000.0 1000.0 2000.0]]
       (is (close? 0.0 (mag (mapv - (geo/acceleration f r 4) (geo/acceleration geo/earth r 4))) 1e-30)))))
 

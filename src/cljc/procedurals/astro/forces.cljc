@@ -63,9 +63,9 @@
         ;; The tidal bulge is fixed to the Earth, so the bodies raising it
         ;; must be given in Earth-fixed coordinates like the field itself.
         fld   (if tides?
-                (tides/apply-to base (cond-> []
-                                       moon? (conj [c/GM-moon (eci->ecef r-moon gst)])
-                                       sun?  (conj [c/GM-sun (eci->ecef r-sun gst)])))
+                (tides/perturb base (cond-> []
+                                      moon? (conj [c/GM-moon (eci->ecef r-moon gst)])
+                                      sun?  (conj [c/GM-sun (eci->ecef r-sun gst)])))
                 base)
         grav  (ecef->eci (geo/acceleration fld (eci->ecef r gst) degree) gst)]
     (cond-> grav
