@@ -82,16 +82,23 @@
   (voronoi-cells (triangulate points)))
 
 (defn- sentinel-ring
-  "Eight sites ringing `[[x0 y0] [x1 y1]]` at one box-width's remove -- the
-  neighbours of the centre cell in a 3x3 tiling of the box."
+  "Eight sites ringing `[[x0 y0] [x1 y1]]`, far enough out that none of their
+  bisectors can reach inside it.
+
+  A bisector lies half-way to its site, so a sentinel at distance r from a
+  site puts a cut r/2 away. To leave the box untouched that has to exceed
+  the box diagonal -- not merely its half-width, or the cut clears the edges
+  but still shaves the corners. Three diagonals from the centre clears it
+  for any site in the box."
   [[[x0 y0] [x1 y1]]]
-  (let [w  (- x1 x0)
+  (let [cx (/ (+ x0 x1) 2.0)
+        cy (/ (+ y0 y1) 2.0)
+        w  (- x1 x0)
         h  (- y1 y0)
-        xs [(- x0 w) (+ x0 (/ w 2.0)) (+ x1 w)]
-        ys [(- y0 h) (+ y0 (/ h 2.0)) (+ y1 h)]]
-    (for [x xs y ys
-          :when (not (and (== x (second xs)) (== y (second ys))))]
-      [x y])))
+        r  (* 3.0 (math/sqrt (+ (* w w) (* h h))))]
+    (for [k (range 8)
+          :let [a (* k (/ math/PI 4.0))]]
+      [(+ cx (* r (math/cos a))) (+ cy (* r (math/sin a)))])))
 
 (defn- intersect-x [[ax ay] [bx by] k]
   (let [t (/ (- k ax) (- bx ax))] [k (+ ay (* t (- by ay)))]))
