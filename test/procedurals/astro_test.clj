@@ -1647,3 +1647,81 @@
       (is (>= (:stations strong) 3))
       (is (< (:error strong) 0.1) "tens of metres")
       (is (< (/ (:formal strong) (:rms strong)) 20.0) "and no longer flagged"))))
+
+;; -------------------------------------------------- orthogonal least squares
+
+(defn- lauchli
+  "A matrix of full rank for any eps > 0, whose square is singular once
+  eps^2 falls below machine epsilon. The standard demonstration that
+  forming A^T A destroys information the problem never lacked."
+  [eps]
+  [[1.0 1.0 1.0] [eps 0.0 0.0] [0.0 eps 0.0] [0.0 0.0 eps]])
+
+(defn- lauchli-rows [eps]
+  (let [A (lauchli eps)
+        b (est/mat-vec A [1.0 1.0 1.0])]
+    (mapv (fn [a bi] {:H a :residual bi :weight 1.0}) A b)))
+
+(deftest normal-equations-square-the-condition-number
+  ;; Not a criticism of the implementation but of the method. cond(A^T A) is
+  ;; cond(A) squared, so a problem comfortably solvable in double precision
+  ;; becomes singular purely from being written down that way.
+  (testing "fine while the square is still conditioned"
+    (is (some? (est/solve (lauchli-rows 1e-6) 3 {:method :normal}))))
+  (testing "losing digits as the square approaches machine epsilon"
+    (let [x (:correction (est/solve (lauchli-rows 1e-7) 3 {:method :normal}))]
+      (is (some? x))
+      (is (> (apply max (map (fn [a] (abs (- a 1.0))) x)) 1e-4)
+          "two digits gone, with nothing to indicate it")))
+  (testing "and failing outright beyond it"
+    (is (nil? (est/solve (lauchli-rows 1e-8) 3 {:method :normal})))))
+
+(deftest orthogonal-reduction-does-not
+  ;; Householder never forms A^T A, so it works wherever A itself is
+  ;; solvable -- which at eps = 1e-10 means cond(A) = 1e10, unremarkable.
+  (doseq [eps [1e-6 1e-7 1e-8 1e-10]]
+    (let [x (:correction (est/solve (lauchli-rows eps) 3 {:method :qr}))]
+      (is (some? x) (str "eps " eps))
+      (doseq [xi x]
+        (is (close? 1.0 xi 1e-12) (str "eps " eps " gave " x))))))
+
+(deftest both-methods-agree-where-both-work
+  ;; The point of having two: on a well-conditioned problem they must be
+  ;; interchangeable, in the solution and in the covariance.
+  (let [g (java.util.Random. 3)
+        rows (mapv (fn [_] {:H (mapv (fn [_] (.nextGaussian g)) (range 4))
+                            :residual (.nextGaussian g)
+                            :weight (+ 0.5 (abs (.nextGaussian g)))})
+                   (range 40))
+        n (est/solve rows 4 {:method :normal})
+        q (est/solve rows 4 {:method :qr})]
+    (doseq [[a b] (map vector (:correction n) (:correction q))]
+      (is (close? a b 1e-12) "same solution"))
+    (doseq [i (range 4) j (range 4)]
+      (is (close? (nth (nth (:covariance n) i) j) (nth (nth (:covariance q) i) j) 1e-12)
+          "and the same covariance, computed without the normal matrix"))))
+
+(deftest qr-refuses-what-it-cannot-determine
+  (testing "rank deficiency is judged against the size of the factor"
+    ;; An absolute floor would pass a diagonal of 1e-15 beside a norm of 1,
+    ;; and return a covariance of 1e30 with a straight face.
+    (is (nil? (est/solve [{:H [1.0 1.0] :residual 1.0}
+                          {:H [2.0 2.0] :residual 2.0}
+                          {:H [3.0 3.0] :residual 3.0}] 2))
+        "duplicate columns determine nothing"))
+  (testing "and there must be at least as many observations as unknowns"
+    (is (nil? (est/solve [{:H [1.0 0.0] :residual 1.0}] 2)))))
+
+(deftest qr-honours-weights
+  (let [rows [{:H [1.0] :residual 10.0 :weight 100.0}
+              {:H [1.0] :residual 0.0 :weight 1.0}]]
+    (is (close? (first (:correction (est/solve rows 1 {:method :normal})))
+                (first (:correction (est/solve rows 1 {:method :qr})))
+                1e-12)
+        "weights enter as a row scaling by their square root")))
+
+(deftest solve-defaults-to-the-safe-method
+  ;; Because the cost of the cheaper one is silent: an ill-conditioned
+  ;; problem does not announce itself.
+  (is (some? (est/solve (lauchli-rows 1e-9) 3)) "the default copes")
+  (is (nil? (est/solve (lauchli-rows 1e-9) 3 {:method :normal})) "the alternative does not"))

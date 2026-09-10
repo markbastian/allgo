@@ -126,7 +126,7 @@
         rms  (est/rms rows)
         err  (Math/sqrt (reduce + (map (fn [a b] (let [d (- a b)] (* d d)))
                                        (subvec (:x state) 0 3) (subvec (:truth state) 0 3))))
-        sol  (est/solve-batch rows 6)
+        sol  (est/solve rows 6)
         hist (conj (:history state) {:rms rms :error err})]
     (if-not sol
       (assoc state :history hist :singular? true)
