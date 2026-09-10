@@ -7,6 +7,7 @@
             [procedurals.astro.geodesy :as gd]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.kepler :as kep]
+            [procedurals.astro.observation :as obs]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
             [procedurals.astro.tides :as tid]
@@ -1178,3 +1179,125 @@
     (let [eq (kep/equinoctial {:a 7000.0 :e 0.0 :i 0.9 :raan 1.2 :argp 0.0 :nu 0.7})]
       (is (close? 0.0 (:h eq) 1e-15))
       (is (close? 0.0 (:k eq) 1e-15)))))
+
+;; ------------------------------------------------------------ observations
+
+(def ^:private equator-station (gd/geodetic->cartesian 0.0 0.0 0.0))
+
+(deftest tropospheric-delay-matches-published-magnitudes
+  (testing "2.4 metres straight up"
+    (is (close? 2.4 (* 1000.0 (obs/tropospheric-delay (/ Math/PI 2.0))) 0.01)))
+  (testing "and about twenty-five at five degrees"
+    (is (< 20.0 (* 1000.0 (obs/tropospheric-delay (* 5.0 c/degrees))) 30.0)))
+  (testing "growing monotonically as the ray flattens"
+    (let [ds (map #(obs/tropospheric-delay (* % c/degrees)) [90 60 30 15 10 5 3])]
+      (is (apply < ds))))
+  (testing "and staying finite at the horizon, where 1/sin would not"
+    (is (< (obs/tropospheric-delay (* 0.5 c/degrees)) 1.0)
+        "a real ray bends rather than grazing forever")))
+
+(deftest ionospheric-delay-scales-as-one-over-frequency-squared
+  (testing "about 0.16 m per TEC unit at L1"
+    (is (close? 0.162 (* 1000.0 (obs/ionospheric-delay 1 obs/L1)) 0.002)))
+  (testing "linear in electron content"
+    (is (close? 10.0 (/ (obs/ionospheric-delay 100 obs/L1) (obs/ionospheric-delay 10 obs/L1)) 1e-12)))
+  (testing "and the two GPS frequencies differ by exactly (f1/f2)^2"
+    (let [want (let [r (/ obs/L1 obs/L2)] (* r r))]
+      (doseq [tec [1 10 100]]
+        (is (close? want (/ (obs/ionospheric-delay tec obs/L2)
+                            (obs/ionospheric-delay tec obs/L1))
+                    1e-12))))))
+
+(deftest the-ionosphere-free-combination-cancels-it
+  ;; The reason navigation uses two frequencies. An effect that depends on
+  ;; frequency can be measured and removed; one that does not cannot.
+  (doseq [tec [10 50 100 200]]
+    (let [truth 20000.0
+          m1 (+ truth (obs/ionospheric-delay tec obs/L1))
+          m2 (+ truth (obs/ionospheric-delay tec obs/L2))]
+      (is (> (* 1000.0 (- m1 truth)) 1.0) "L1 alone is metres out")
+      (is (< (abs (* 1000.0 (- (obs/ionosphere-free m1 obs/L1 m2 obs/L2) truth))) 1e-6)
+          (str tec " TECU: the combination removes it")))))
+
+(deftest range-rate-is-the-derivative-of-range
+  ;; Checked against a numerical derivative with the station held still,
+  ;; since the analytic form includes the station's own motion and a
+  ;; derivative taken about a fixed point does not. That difference is the
+  ;; 465 m/s the equator travels, not an error.
+  (let [[r0 v0] (kep/elements->state c/GM-earth
+                                     {:a (+ c/R-earth 800.0) :e 0.0 :i 0.9 :raan 0.0 :argp 0.0 :nu 0.3})]
+    (doseq [t [0.0 100.0 300.0]]
+      (let [[r v] (kep/propagate c/GM-earth r0 v0 t)
+            analytic (:range-rate (obs/range-and-rate equator-station [0.0 0.0 0.0] r v))
+            h 0.01
+            numerical (/ (- (mag (mapv - (first (kep/propagate c/GM-earth r0 v0 (+ t h))) equator-station))
+                            (mag (mapv - (first (kep/propagate c/GM-earth r0 v0 (- t h))) equator-station)))
+                         (* 2.0 h))]
+        (is (close? numerical analytic 1e-6) (str "at t=" t))))))
+
+(deftest a-rotating-station-changes-the-range-rate
+  (let [[r v] (kep/elements->state c/GM-earth
+                                   {:a (+ c/R-earth 800.0) :e 0.0 :i 0.9 :raan 0.0 :argp 0.0 :nu 0.3})
+        fixed   (:range-rate (obs/range-and-rate equator-station [0.0 0.0 0.0] r v))
+        rotating (:range-rate (obs/range-and-rate equator-station (obs/station-velocity equator-station) r v))]
+    (is (not (close? fixed rotating 0.01)) "worth hundreds of metres per second")
+    (is (close? 0.4651 (mag (obs/station-velocity equator-station)) 1e-3)
+        "the equator travels 465 m/s")))
+
+(deftest light-time-shows-up-along-the-beam-not-across-it
+  ;; A satellite overhead moves perpendicular to the line of sight, so the
+  ;; range barely changes during the light travel time and the correction
+  ;; nearly vanishes. Low on the horizon it moves along the beam and the
+  ;; correction is tens of metres.
+  (let [orbit (fn [nu] (kep/elements->state c/GM-earth
+                                            {:a (+ c/R-earth 800.0) :e 0.0 :i 0.9
+                                             :raan 0.0 :argp 0.0 :nu nu}))
+        correction (fn [nu]
+                     (let [[r1 v1] (orbit nu)
+                           sat-at (fn [t] (first (kep/propagate c/GM-earth r1 v1 t)))
+                           lt (obs/light-time equator-station sat-at 0.0)]
+                       (* 1000.0 (abs (- (mag (mapv - (sat-at 0.0) equator-station)) (:range lt))))))]
+    (is (< (correction 0.0) 1.0) "overhead: nothing to see")
+    (is (> (correction 0.45) 10.0) "low: tens of metres")
+    (is (> (correction 0.72) (correction 0.45)) "and more the lower it goes")))
+
+(deftest light-time-is-a-few-milliseconds
+  (doseq [[label alt want-ms] [["LEO" 800.0 2.67] ["GPS" 20200.0 67.4] ["GEO" 35786.0 119.4]]]
+    (is (close? want-ms (* 1000.0 (/ alt c/c-light)) 0.1) label)))
+
+(deftest doppler-reverses-sign-through-a-pass
+  ;; The signature that identifies one. Approaching crowds the waves, so the
+  ;; shift is positive; receding stretches them.
+  (is (pos? (obs/doppler-shift -7.0 obs/L1)) "closing")
+  (is (neg? (obs/doppler-shift 7.0 obs/L1)) "receding")
+  (is (close? 0.0 (obs/doppler-shift 0.0 obs/L1) 1e-12) "and zero at closest approach")
+  (testing "reaching tens of kilohertz at L-band for a low orbit"
+    (is (< 30000.0 (abs (obs/doppler-shift -7.0 obs/L1)) 45000.0)))
+  (testing "proportional to both speed and frequency"
+    (is (close? 2.0 (/ (obs/doppler-shift -6.0 obs/L1) (obs/doppler-shift -3.0 obs/L1)) 1e-12))
+    (is (close? (/ obs/L1 obs/L2) (/ (obs/doppler-shift -3.0 obs/L1) (obs/doppler-shift -3.0 obs/L2)) 1e-12))))
+
+(deftest a-clock-error-looks-exactly-like-a-range-error
+  ;; Which is why a navigation receiver solves for four unknowns and not
+  ;; three: a microsecond of clock offset is 300 m on every satellite at once.
+  (let [m (obs/modelled-range {:geometric 20000.0 :station-clock 1e-6})]
+    (is (close? 0.2998 (:clock m) 1e-3) "a microsecond is about 300 metres")
+    (is (close? (+ 20000.0 (:clock m)) (:range m) 1e-9)))
+  (testing "and a satellite clock offset works the other way"
+    (let [m (obs/modelled-range {:geometric 20000.0 :satellite-clock 1e-6})]
+      (is (neg? (:clock m))))))
+
+(deftest the-modelled-range-adds-up
+  (let [m (obs/modelled-range {:geometric 20000.0
+                               :elevation (* 10.0 c/degrees)
+                               :tec 50 :frequency obs/L1})]
+    (is (close? (+ 20000.0 (:troposphere m) (:ionosphere m) (:clock m)) (:range m) 1e-12))
+    (is (close? 0.01334 (:troposphere m) 1e-4) "13 m of troposphere at ten degrees")
+    (is (close? 0.00812 (:ionosphere m) 1e-4) "8 m of ionosphere at 50 TECU")))
+
+(deftest right-ascension-and-declination-agree-with-the-geometry
+  (let [station [0.0 0.0 0.0]]
+    (is (close? 0.0 (:declination (obs/right-ascension-declination station [1000.0 0.0 0.0])) 1e-12))
+    (is (close? 90.0 (/ (:declination (obs/right-ascension-declination station [0.0 0.0 1000.0])) c/degrees) 1e-12))
+    (is (close? 90.0 (/ (:right-ascension (obs/right-ascension-declination station [0.0 1000.0 0.0])) c/degrees) 1e-12))
+    (is (close? 1000.0 (:range (obs/right-ascension-declination station [0.0 1000.0 0.0])) 1e-12))))
