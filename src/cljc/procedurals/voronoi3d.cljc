@@ -149,44 +149,95 @@
           0.0
           faces))
 
+(defn- finish [faces]
+  {:faces (mapv :pts faces) :neighbours (into #{} (keep :site) faces)})
+
 (defn cell
   "The Voronoi cell of `site` against `others`, clipped to `bounds`.
 
   `others` is walked nearest-first so the loop can stop early: a bisector
   sits half-way to its site, so once that half-distance exceeds the cell's
-  farthest vertex, neither it nor anything beyond it can cut the cell. This
-  is what keeps the cost per cell near-constant rather than O(n)."
-  [site others bounds]
-  ;; Keys precomputed: sort-by calls its keyfn on every comparison, and each
-  ;; call here would allocate a difference vector.
-  (let [ordered (->> others
-                     (mapv (fn [o] [(norm-sq (v- o site)) o]))
-                     (sort-by first)
-                     (mapv second))]
-    (loop [faces     (mapv (fn [pts] {:pts pts :site nil}) (box-faces bounds))
-           r2        (farthest-sq site (mapv (fn [pts] {:pts pts}) (box-faces bounds)))
-           remaining ordered]
-      (if-let [other (first remaining)]
-        (if (> (norm-sq (v- other site)) (* 4.0 r2))
-          {:faces (mapv :pts faces) :neighbours (into #{} (keep :site) faces)}
-          (if-let [cut (clip-cell faces (bisector site other) other)]
-            (recur cut (farthest-sq site cut) (rest remaining))
-            (recur faces r2 (rest remaining))))
-        {:faces (mapv :pts faces) :neighbours (into #{} (keep :site) faces)}))))
+  farthest vertex, neither it nor anything beyond can cut the cell.
+
+  `seed` is an optional collection of sites believed to be neighbours -- the
+  previous frame's, typically. Clipping those first collapses the radius
+  bound immediately, so the walk terminates far sooner. A wrong seed costs
+  a little work but cannot give a wrong answer: the ordered walk still
+  considers every site the bound does not exclude."
+  ([site others bounds] (cell site others bounds nil))
+  ([site others bounds seed]
+   (let [start  (mapv (fn [pts] {:pts pts :site nil}) (box-faces bounds))
+         seeded (reduce (fn [fs o]
+                          (or (clip-cell fs (bisector site o) o) fs))
+                        start
+                        seed)
+         known   (set seed)
+         ordered (->> others
+                      (mapv (fn [o] [(norm-sq (v- o site)) o]))
+                      (sort-by first)
+                      (mapv second))]
+     (loop [faces     seeded
+            r2        (farthest-sq site seeded)
+            remaining ordered]
+       (if-let [other (first remaining)]
+         (if (> (norm-sq (v- other site)) (* 4.0 r2))
+           (finish faces)
+           (if (contains? known other)
+             (recur faces r2 (rest remaining))
+             (if-let [cut (clip-cell faces (bisector site other) other)]
+               (recur cut (farthest-sq site cut) (rest remaining))
+               (recur faces r2 (rest remaining)))))
+         (finish faces))))))
+
+(defn- build
+  [sites bounds hints indexed?]
+  (let [sites (vec sites)
+        n     (count sites)
+        index (when indexed?
+                (persistent! (reduce (fn [m i] (assoc! m (nth sites i) i))
+                                     (transient {}) (range n))))]
+    (persistent!
+     (reduce (fn [acc i]
+               (let [site (nth sites i)
+                     seed (when hints
+                            (into [] (comp (keep #(nth sites % nil)) (remove #{site}))
+                                  (get hints i)))
+                     c    (cell site
+                                (concat (subvec sites 0 i) (subvec sites (inc i)))
+                                bounds
+                                seed)]
+                 (assoc! acc site
+                         (cond-> c
+                           indexed? (assoc :neighbour-idx
+                                           (into #{} (keep index) (:neighbours c)))))))
+             (transient {})
+             (range n)))))
 
 (defn diagram
   "Voronoi diagram of `sites` clipped to `bounds` (`[[x0 y0 z0] [x1 y1 z1]]`):
-  a map from each site to its cell. The cells tile `bounds` exactly."
-  [sites bounds]
-  (let [sites (vec sites)]
-    (persistent!
-     (reduce (fn [acc i]
-               (assoc! acc (nth sites i)
-                       (cell (nth sites i)
-                             (concat (subvec sites 0 i) (subvec sites (inc i)))
-                             bounds)))
-             (transient {})
-             (range (count sites))))))
+  a map from each site to its cell. The cells tile `bounds` exactly.
+
+  The three-argument form additionally tags each cell with `:neighbour-idx`,
+  its neighbours as indices into `sites`, and accepts the previous frame's
+  indices (see `neighbour-hints`, and pass nil on the first frame) so each
+  cell starts from its likely neighbours instead of rediscovering them.
+  Positions move every frame, so an index is the only stable handle.
+
+  Seeding is measured as a wash below a few hundred sites and is off in the
+  two-argument form for that reason. The early exit has to clear every site
+  within twice a cell's reach, which is around 58 sites whatever the total
+  -- so under a few hundred there is no locality for a seed to exploit, and
+  clipping known neighbours first only reorders work rather than avoiding
+  it. Past that point the constant stops dominating and seeding pays."
+  ([sites bounds] (build sites bounds nil false))
+  ([sites bounds hints] (build sites bounds hints true)))
+
+(defn neighbour-hints
+  "Per-site neighbour indices from `diagram`, in `sites` order, ready to pass
+  back as the `hints` argument on the next frame. Requires a diagram built
+  with the three-argument form."
+  [diagram sites]
+  (mapv #(:neighbour-idx (get diagram %)) sites))
 
 (defn edges
   "Delaunay edges implied by `diagram`: the unordered site pairs whose cells
