@@ -7,5 +7,5 @@
   {:target     :browser
    :output-dir "resources/public/js/compiled"
    :asset-path "/js/compiled"
-   :modules    {:procedurals {:entries [procedurals.core procedurals.terrain-webgl]}}
+   :modules    {:procedurals {:entries [procedurals.core procedurals.terrain-webgl procedurals.boids-viewer]}}
    :devtools   {:after-load procedurals.core/on-js-reload}}}}
