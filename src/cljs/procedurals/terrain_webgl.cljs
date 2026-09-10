@@ -1,12 +1,17 @@
 (ns procedurals.terrain-webgl
   (:require [procedurals.mesh :as mesh]
             [procedurals.terrain :as terrain]
+            [procedurals.tin :as tin]
+            ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
 
 (def config
-  {:iterations   8
+  {:generator    :diamond-square
+   :iterations   8
    :width        1.0
+   :tin-points   500
+   :dim          129
    :height-scale 200
    :cell-scale   8
    :noise-scale  180.0})
@@ -17,12 +22,26 @@
     (aset arr (+ base 1) y)
     (aset arr (+ base 2) z)))
 
-(defn build-terrain-data [{:keys [iterations width]}]
+(defn- diamond-square-grid [{:keys [iterations width]}]
   (let [grid-data (terrain/generate {:width width :iterations iterations
-                                     :corners [0.0 (rand) (rand) (rand)]})
-        hs        (terrain/heights grid-data)]
-    {:grid (terrain/cells->grid grid-data)
-     :dim  (:dim grid-data)
+                                     :corners [0.0 (rand) (rand) (rand)]})]
+    {:grid (terrain/cells->grid grid-data) :dim (:dim grid-data)}))
+
+(defn- tin-grid [{:keys [tin-points dim smooth-passes] :or {tin-points 500 dim 129 smooth-passes 3}}]
+  {:grid (-> (tin/generate {:n tin-points :size 1.0}) (tin/sample-grid dim) (tin/smooth-grid smooth-passes))
+   :dim  dim})
+
+(defn build-terrain-data
+  "Builds a heightmap via `:generator` (`:diamond-square`, the default
+  regular-grid midpoint-displacement fractal, or `:tin`, a Delaunay-
+  triangulated irregular network per `procedurals.tin`)."
+  [{:keys [generator] :or {generator :diamond-square} :as config}]
+  (let [{:keys [grid dim]} (case generator
+                             :diamond-square (diamond-square-grid config)
+                             :tin (tin-grid config))
+        hs (flatten grid)]
+    {:grid grid
+     :dim  dim
      :lo   (apply min hs)
      :hi   (apply max hs)}))
 
@@ -87,7 +106,7 @@
         camera   (THREE/PerspectiveCamera. 55 (/ (.-clientWidth container) (.-clientHeight container)) 1 100000)
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         {:keys [span mesh]} (build-mesh config)
-        state    (atom {:terrain-mesh mesh})]
+        state    (atom {:terrain-mesh mesh :wireframe? false :generator (:generator config) :hovering? false})]
     (set! (.-background scene) (THREE/Color. 0x0f0f19))
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
     (.appendChild container (.-domElement renderer))
@@ -100,14 +119,17 @@
     (let [controls (OrbitControls. camera (.-domElement renderer))]
       (set! (.-enableDamping controls) true)
       (.set (.-target controls) 0 0 0)
-      (letfn [(regenerate! []
+      (letfn [(apply-wireframe! [^js m]
+                (set! (.-wireframe (.-material m)) (:wireframe? @state)))
+              (regenerate! []
                 (dispose-mesh! (:terrain-mesh @state))
                 (.remove scene (:terrain-mesh @state))
-                (let [{:keys [mesh]} (build-mesh config)]
+                (let [{:keys [mesh]} (build-mesh (assoc config :generator (:generator @state)))]
+                  (apply-wireframe! mesh)
                   (.add scene mesh)
                   (swap! state assoc :terrain-mesh mesh)))
               (on-key-down [^js e]
-                (when (= (.-key e) "r") (regenerate!)))
+                (when (and (:hovering? @state) (= (.-key e) "r")) (regenerate!)))
               (on-resize []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (set! (.-aspect camera) (/ w h))
@@ -117,12 +139,25 @@
                 (js/requestAnimationFrame animate)
                 (.update controls)
                 (.render renderer scene camera))]
+        (.addEventListener container "mouseenter" #(swap! state assoc :hovering? true))
+        (.addEventListener container "mouseleave" #(swap! state assoc :hovering? false))
         (.addEventListener js/window "keydown" on-key-down)
-        (.addEventListener js/window "resize" on-resize)
+        (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
+        (let [gui       (GUI. #js {:container container})
+              gui-state #js {:generator (name (:generator @state)) :wireframe false :regenerate regenerate!}]
+          (-> (.add gui gui-state "generator" #js ["tin" "diamond-square"])
+              (.onChange (fn [v]
+                           (swap! state assoc :generator (keyword v))
+                           (regenerate!))))
+          (-> (.add gui gui-state "wireframe")
+              (.onChange (fn [v]
+                           (swap! state assoc :wireframe? v)
+                           (apply-wireframe! (:terrain-mesh @state)))))
+          (.add gui gui-state "regenerate"))
         (animate)))))
 
 (defn main []
-  (when-let [container (js/document.getElementById "terrain-app")]
+  (when-let [container (js/document.getElementById "terrain")]
     (init! container config)))
 
 (main)
