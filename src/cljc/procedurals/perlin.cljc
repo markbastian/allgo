@@ -1,4 +1,5 @@
-(ns procedurals.perlin)
+(ns procedurals.perlin
+  (:require #?(:clj [clojure.math :as math] :cljs [cljs.math :as math])))
 
 ;I can't remember where I originally coded this from but here are some resources:
 ;  * https://mrl.nyu.edu/~perlin/noise/
@@ -39,7 +40,7 @@
     0xE (- y x)
     0xF (- y (- x))))
 
-(defn- floor [x] #?(:clj (Math/floor x) :cljs (js/Math.floor x)))
+(defn- floor [x] (math/floor x))
 
 (defn- mask-idx [x0] #?(:clj (bit-and (long x0) 0xFF) :cljs (bit-and x0 0xFF)))
 
