@@ -7,5 +7,5 @@
   {:target     :browser
    :output-dir "resources/public/js/compiled"
    :asset-path "/js/compiled"
-   :modules    {:procedurals {:entries [procedurals.core procedurals.shell]}}
-   :devtools   {:after-load procedurals.core/on-js-reload}}}}
+   :modules    {:allgo {:entries [allgo.demo.core allgo.demo.shell]}}
+   :devtools   {:after-load allgo.demo.core/on-js-reload}}}}

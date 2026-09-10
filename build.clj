@@ -2,8 +2,8 @@
   (:require [clojure.tools.build.api :as b]))
 
 (def class-dir "target/classes")
-(def uber-file "target/procedurals.jar")
-(def main-ns 'procedurals.swingui)
+(def uber-file "target/allgo.jar")
+(def main-ns 'allgo.desktop.swingui)
 
 (defn- basis [] (b/create-basis {:project "deps.edn"}))
 
