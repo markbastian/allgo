@@ -3,6 +3,7 @@
             [procedurals.astro.drag :as drag]
             [procedurals.astro.ephemeris :as eph]
             [procedurals.astro.forces :as forces]
+            [procedurals.astro.frames :as fr]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
@@ -702,3 +703,92 @@
     (testing "and the offset is always under a second, by construction"
       ;; leap seconds exist precisely to keep |UT1 - UTC| below 0.9 s
       (is (< (abs (* 86400.0 (- (t/utc->ut1 utc 0.9) utc))) 1.0)))))
+
+;; ------------------------------------------------- precession and nutation
+
+(defn- det3 [[[a b cc] [d e f] [g h i]]]
+  (- (+ (* a e i) (* b f g) (* cc d h)) (+ (* cc e g) (* b d i) (* a f h))))
+
+(defn- orthogonality-error [m]
+  (let [p (fr/mul m (fr/transpose m))]
+    (apply max (for [i (range 3) j (range 3)]
+                 (abs (- (nth (nth p i) j) (if (= i j) 1.0 0.0)))))))
+
+(deftest frame-rotations-are-proper-rotations
+  ;; Determinant one and orthogonal: they must preserve lengths and angles
+  ;; and not turn the frame inside out. A matrix that drifts off this is
+  ;; stretching space.
+  (doseq [yr [1900 1950 2000 2050 2200]]
+    (let [mjd (t/calendar->mjd yr 1 1)]
+      (doseq [[label m] [["precession" (fr/precession mjd)] ["nutation" (fr/nutation mjd)]]]
+        (is (close? 1.0 (det3 m) 1e-12) (str label " " yr))
+        (is (< (orthogonality-error m) 1e-12) (str label " " yr))))))
+
+(deftest precession-is-the-identity-at-its-own-epoch
+  ;; It is defined as the rotation from J2000, so at J2000 there is nothing
+  ;; to rotate.
+  (let [p (fr/precession c/mjd-J2000)]
+    (doseq [i (range 3) j (range 3)]
+      (is (close? (if (= i j) 1.0 0.0) (nth (nth p i) j) 1e-14)))))
+
+(deftest general-precession-is-fifty-arcseconds-a-year
+  ;; The equinox slides along the ecliptic, completing a circuit in about
+  ;; 26,000 years. It is why the pole star changes over history.
+  (let [v [1.0 0.0 0.0]
+        a (fr/apply-m (fr/precession (t/calendar->mjd 2000 1 1)) v)
+        b (fr/apply-m (fr/precession (t/calendar->mjd 2100 1 1)) v)
+        arcsec-per-year (/ (Math/acos (max -1.0 (min 1.0 (reduce + (map * a b))))) c/arcsec 100.0)]
+    (is (close? 50.29 arcsec-per-year 0.05) (str "got " arcsec-per-year))
+    (testing "which comes to a full circuit in about 26 millennia"
+      (is (close? 25800.0 (/ (* 360.0 3600.0) arcsec-per-year) 200.0)))))
+
+(deftest mean-obliquity-matches-its-defining-value
+  (is (close? 84381.448 (/ (fr/mean-obliquity c/mjd-J2000) c/arcsec) 1e-3)
+      "23 deg 26 min 21.448 sec at J2000")
+  (testing "and decreases by about 47 arcseconds a century"
+    (let [drop (/ (- (fr/mean-obliquity (t/calendar->mjd 2000 1 1))
+                     (fr/mean-obliquity (t/calendar->mjd 2100 1 1)))
+                  c/arcsec)]
+      (is (close? 46.815 drop 0.01)))))
+
+(deftest nutation-swings-by-the-right-amount
+  ;; Almost entirely the Moon's node circling in 18.6 years. The largest
+  ;; single term is 17.2 arcseconds in longitude and 9.2 in obliquity; the
+  ;; totals run a little beyond that once the rest of the series is added.
+  (let [epochs (map #(+ c/mjd-J2000 (* 20.0 %)) (range 0 400))
+        dpsi   (map #(/ (first (fr/nutation-angles %)) c/arcsec) epochs)
+        deps   (map #(/ (second (fr/nutation-angles %)) c/arcsec) epochs)]
+    (is (< 17.0 (apply max dpsi) 20.0))
+    (is (< -20.0 (apply min dpsi) -17.0))
+    (is (< 9.0 (apply max deps) 11.0))
+    (is (< -11.0 (apply min deps) -9.0))
+    (testing "and it is periodic, not secular -- it must not accumulate"
+      (is (close? 0.0 (/ (reduce + dpsi) (count dpsi)) 3.0)
+          "mean over twenty years is near zero"))))
+
+(deftest nutation-repeats-on-the-lunar-node-cycle
+  ;; 18.6 years is the period of the Moon's node, and the dominant term
+  ;; tracks it exactly.
+  (let [a (first (fr/nutation-angles c/mjd-J2000))
+        b (first (fr/nutation-angles (+ c/mjd-J2000 (* 18.613 365.25))))]
+    (is (close? a b (* 2.0 c/arcsec)) "back to nearly the same value one cycle on")))
+
+(deftest the-equation-of-the-equinoxes-stays-within-a-second
+  ;; Apparent sidereal time runs on the true equinox, which nutation moves,
+  ;; so a clock keeping it wanders against the mean by up to about a second.
+  (let [seconds (map #(/ (fr/equation-of-equinoxes (+ c/mjd-J2000 (* 20.0 %))) c/arcsec 15.0)
+                     (range 0 400))]
+    (is (< (apply max (map abs seconds)) 1.3))
+    (is (> (apply max (map abs seconds)) 0.9) "and it really does reach about a second")))
+
+(deftest rotations-compose-and-invert
+  (let [mjd (t/calendar->mjd 2024 6 1)
+        p   (fr/precession mjd)
+        n   (fr/nutation mjd)
+        both (fr/mul n p)
+        v   [0.3 -0.5 0.81]]
+    (is (close? 1.0 (det3 both) 1e-12))
+    (testing "the transpose undoes the rotation, orthogonality being the point"
+      (is (< (mag (mapv - v (fr/apply-m (fr/transpose both) (fr/apply-m both v)))) 1e-14)))
+    (testing "and a rotation preserves length"
+      (is (close? (mag v) (mag (fr/apply-m both v)) 1e-14)))))
