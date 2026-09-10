@@ -15,6 +15,7 @@
 (def ^:private world [100 100 100])
 (def ^:private box [[0 0 0] [100 100 100]])
 (def ^:private max-verts 60000)
+(def ^:private capacity 64)
 
 (def ^:private controls
   #js {:boids         28
@@ -42,6 +43,10 @@
       (= have n) flock
       (< n have) (subvec flock 0 n)
       :else      (into flock (repeatedly (- n have) #(boids/random-boid world max-speed))))))
+
+(defn- normalize [[x y z]]
+  (let [m (js/Math.sqrt (+ (* x x) (* y y) (* z z)))]
+    (if (zero? m) [0 0 1] [(/ x m) (/ y m) (/ z m)])))
 
 (defn- heading-rgb
   "Hue from compass bearing, brightness from climb -- the tint used by the
@@ -110,20 +115,29 @@
                      i (range 1 (dec (count face)))))
                   i faces)))))))
 
-(defn- write-sites!
-  "One vertex per boid, so the sites themselves stay visible inside the mesh."
-  [^js positions ^js colors flock ^js color]
+(defn- boid-geometry
+  "A cone nose-up rotated onto +Z, the axis `Object3D.lookAt` aligns."
+  []
+  (doto (THREE/ConeGeometry. 0.7 2.2 6)
+    (.rotateX (/ js/Math.PI 2))))
+
+(defn- write-boids!
+  "Place and orient one cone per boid. Points would draw as flat squares
+  carrying no heading; a cone shows which way each boid is travelling."
+  [^js mesh ^js scratch ^js color flock]
   (let [[ox oy oz] (mapv #(/ % 2.0) world)]
-    (reduce (fn [i {[x y z] :pos vel :vel}]
-              (heading-rgb color vel)
-              (aset positions (* i 3) (- x ox))
-              (aset positions (+ (* i 3) 1) (- y oy))
-              (aset positions (+ (* i 3) 2) (- z oz))
-              (aset colors (* i 3) (.-r color))
-              (aset colors (+ (* i 3) 1) (.-g color))
-              (aset colors (+ (* i 3) 2) (.-b color))
-              (inc i))
-            0 flock)))
+    (doseq [[i {:keys [pos vel]}] (map-indexed vector flock)]
+      (let [[x y z] pos
+            [nx ny nz] (normalize vel)]
+        (.set (.-position scratch) (- x ox) (- y oy) (- z oz))
+        (.lookAt scratch (+ (- x ox) nx) (+ (- y oy) ny) (+ (- z oz) nz))
+        (.updateMatrix scratch)
+        (.setMatrixAt mesh i (.-matrix scratch))
+        (heading-rgb color vel)
+        (.setColorAt mesh i color)))
+    (set! (.-count mesh) (count flock))
+    (set! (.-needsUpdate (.-instanceMatrix mesh)) true)
+    (when-let [ic (.-instanceColor mesh)] (set! (.-needsUpdate ic) true))))
 
 (defn- buffers []
   (let [geo (THREE/BufferGeometry.)]
@@ -151,9 +165,8 @@
         shells    (THREE/Mesh. face-geo (THREE/MeshBasicMaterial.
                                          #js {:vertexColors true :transparent true :opacity 0.09
                                               :depthWrite false :side THREE/DoubleSide}))
-        site-geo  (buffers)
-        dots      (THREE/Points. site-geo (THREE/PointsMaterial.
-                                           #js {:vertexColors true :size 2.4 :sizeAttenuation true}))
+        dots      (THREE/InstancedMesh. (boid-geometry) (THREE/MeshLambertMaterial.) capacity)
+        scratch   (THREE/Object3D.)
         color     (THREE/Color.)
         running?  (atom false)
         tick-fps! (fps/meter! container)
@@ -169,6 +182,10 @@
     (.add scene (THREE/LineSegments.
                  (THREE/EdgesGeometry. (let [[w h d] world] (THREE/BoxGeometry. w h d)))
                  (THREE/LineBasicMaterial. #js {:color 0x2c3a5c})))
+    (.add scene (THREE/AmbientLight. 0xffffff 0.7))
+    (let [sun (THREE/DirectionalLight. 0xfff4e0 0.85)]
+      (.set (.-position sun) 80 120 60)
+      (.add scene sun))
     (.set (.-position camera) 118 78 118)
     (let [orbit (OrbitControls. camera (.-domElement renderer))]
       (set! (.-enableDamping orbit) true)
@@ -203,16 +220,13 @@
                        face-geo (write-faces! (.-array (.getAttribute face-geo "position"))
                                               (.-array (.getAttribute face-geo "color"))
                                               diagram flock color)))
-                    (flush-geometry!
-                     site-geo (write-sites! (.-array (.getAttribute site-geo "position"))
-                                            (.-array (.getAttribute site-geo "color"))
-                                            flock color))
+                    (write-boids! dots scratch color flock)
                     (.update orbit)
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (let [gui (GUI. #js {:container container})]
-          (.add gui controls "boids" 8 60 2)
+          (.add gui controls "boids" 8 capacity 4)
           (.add gui controls "separation" 0 3 0.1)
           (.add gui controls "alignment" 0 3 0.1)
           (.add gui controls "cohesion" 0 3 0.1)
