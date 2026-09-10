@@ -2,6 +2,7 @@
   (:require [procedurals.astro.constants :as c]
             [procedurals.astro.drag :as drag]
             [procedurals.astro.ephemeris :as eph]
+            [procedurals.astro.estimation :as est]
             [procedurals.astro.forces :as forces]
             [procedurals.astro.frames :as fr]
             [procedurals.astro.geodesy :as gd]
@@ -1411,3 +1412,159 @@
     (doseq [i (range 3) j (range 6)]
       (is (close? (if (= j (+ i 3)) 1.0 0.0) (nth (nth A i) j) 1e-15)
           (str "row " i " column " j)))))
+
+;; ------------------------------------------------------- orbit determination
+
+(deftest cholesky-solves-and-refuses
+  (testing "an exact solve on a known system"
+    (let [A [[4.0 2.0 0.6] [2.0 5.0 1.0] [0.6 1.0 3.0]]
+          x [1.0 -2.0 3.0]]
+      (doseq [[a b] (map vector x (est/cholesky-solve A (est/mat-vec A x)))]
+        (is (close? a b 1e-12)))))
+  (testing "and an inverse that really is one"
+    (let [A [[4.0 2.0 0.6] [2.0 5.0 1.0] [0.6 1.0 3.0]]
+          I (est/mat-mul A (est/inverse A))]
+      (doseq [i (range 3) j (range 3)]
+        (is (close? (if (= i j) 1.0 0.0) (nth (nth I i) j) 1e-12)))))
+  (testing "a system the data does not determine is refused, not fudged"
+    ;; For a normal matrix this is not a numerical mishap but a statement
+    ;; about the observations: some direction of the state is unobservable.
+    (is (nil? (est/cholesky-solve [[1.0 1.0] [1.0 1.0]] [1.0 1.0])) "singular")
+    (is (nil? (est/cholesky-solve [[-1.0 0.0] [0.0 1.0]] [1.0 1.0])) "not positive definite")
+    (is (nil? (est/solve-batch [{:H [1.0 0.0] :residual 1.0}] 2))
+        "one observation cannot fix two unknowns")))
+
+(deftest weighted-least-squares-recovers-a-linear-fit
+  ;; Before trusting it on an orbit, check it on something with an answer
+  ;; that can be written down.
+  (let [truth [2.0 -3.0]
+        rows  (mapv (fn [t] {:H [1.0 t]
+                             :residual (- (+ (* 2.0 1.0) (* -3.0 t)) 0.0)
+                             :weight 1.0})
+                    [0.0 1.0 2.0 3.0 4.0])
+        {:keys [correction]} (est/solve-batch rows 2)]
+    (doseq [[a b] (map vector truth correction)]
+      (is (close? a b 1e-10)))))
+
+(deftest weighting-does-what-weighting-should
+  ;; Two contradictory observations; the answer must land nearer the one
+  ;; trusted more.
+  (let [heavy (:correction (est/solve-batch [{:H [1.0] :residual 10.0 :weight 100.0}
+                                             {:H [1.0] :residual 0.0 :weight 1.0}] 1))
+        even  (:correction (est/solve-batch [{:H [1.0] :residual 10.0 :weight 1.0}
+                                             {:H [1.0] :residual 0.0 :weight 1.0}] 1))]
+    (is (close? 5.0 (first even) 1e-12) "equal weights split the difference")
+    (is (> (first heavy) 9.0) "a hundredfold weight nearly wins outright")))
+
+(deftest the-kalman-update-shrinks-the-covariance
+  (let [P0 [[100.0 0.0] [0.0 100.0]]
+        {:keys [x P]} (est/kalman-update [0.0 0.0] P0 [1.0 0.0] 10.0 1.0)]
+    (is (> (first x) 9.0) "a precise measurement moves the state most of the way")
+    (is (< (nth (nth P 0) 0) (nth (nth P0 0) 0)) "and shrinks the variance it informs")
+    (is (close? 100.0 (nth (nth P 1) 1) 1e-9) "leaving the unobserved one alone")))
+
+(deftest the-covariance-stays-symmetric-and-positive
+  ;; The Joseph form exists for this. A covariance that loses positive
+  ;; definiteness gives a negative variance, and the filter is finished.
+  (let [rng (java.util.Random. 11)]
+    (loop [x [0.0 0.0] P [[10.0 1.0] [1.0 10.0]] n 0]
+      (when (< n 200)
+        (let [{x' :x P' :P} (est/kalman-update x P [1.0 0.3] (.nextGaussian rng) 0.01)]
+          (is (close? (nth (nth P' 0) 1) (nth (nth P' 1) 0) 1e-12) "symmetric")
+          (is (pos? (nth (nth P' 0) 0)) "positive variance")
+          (is (pos? (nth (nth P' 1) 1)))
+          (is (some? (est/cholesky P')) "and still positive definite")
+          (recur x' P' (inc n)))))))
+
+(deftest process-noise-keeps-a-filter-listening
+  ;; Without it the covariance shrinks forever and the filter stops learning,
+  ;; which is the classic way to make one diverge.
+  (let [phi (est/eye 2)
+        P   [[1.0 0.0] [0.0 1.0]]
+        no-q  (:P (est/kalman-predict [0.0 0.0] P phi (est/mat-scale (est/eye 2) 0.0)))
+        with-q (:P (est/kalman-predict [0.0 0.0] P phi (est/mat-scale (est/eye 2) 0.5)))]
+    (is (close? 1.0 (nth (nth no-q 0) 0) 1e-12) "no noise, no growth")
+    (is (close? 1.5 (nth (nth with-q 0) 0) 1e-12) "noise adds uncertainty back")))
+
+(deftest an-orbit-is-recovered-from-noisy-ranges
+  ;; The capstone, and the point of the whole package: chapter 2's elements
+  ;; set the truth, chapter 3's J2 perturbs it, chapter 4 propagates it,
+  ;; chapter 5 places the stations, chapter 6 models the measurement,
+  ;; chapter 7 supplies the partials and chapter 8 solves.
+  (let [mu c/GM-earth
+        j2 geo/J2
+        accel (fn [_ r _]
+                (let [[x y z] r d (mag r) d2 (* d d)
+                      k0 (- (/ mu (* d2 d)))
+                      sq (/ (* 5.0 z z) d2)
+                      kj (/ (* -1.5 j2 mu c/R-earth c/R-earth) (Math/pow d 5))]
+                  [(+ (* k0 x) (* kj x (- 1.0 sq)))
+                   (+ (* k0 y) (* kj y (- 1.0 sq)))
+                   (+ (* k0 z) (* kj z (- 3.0 sq)))]))
+        dopri (first (filter #(= "DOPRI5(4)" (:name %)) num/first-order))
+        arc   (fn [x0 times]
+                (loop [integ (num/integrator dopri (var/rhs accel) 0.0
+                                             (var/initial (subvec (vec x0) 0 3) (subvec (vec x0) 3 6))
+                                             10.0 {:tol-abs 1e-11 :tol-rel 1e-11})
+                       ts times out []]
+                  (if (empty? ts)
+                    out
+                    (let [s (num/step-until integ (first ts))]
+                      (recur s (rest ts) (conj out (var/unpack (:y s))))))))
+        stations (mapv (fn [[la lo]] (gd/geodetic->cartesian (* la c/degrees) (* lo c/degrees) 0.0))
+                       [[35.0 -117.0] [-25.0 28.0] [40.0 140.0]])
+        st-eci (fn [s secs]
+                 (let [mjd (+ c/mjd-J2000 (/ secs 86400.0))]
+                   (fr/apply-m (fr/terrestrial->celestial (t/utc->tt mjd) mjd) s)))
+        truth  (let [[r v] (kep/elements->state mu {:a 7500.0 :e 0.02 :i 0.95
+                                                    :raan 1.1 :argp 2.0 :nu 0.4})]
+                 (vec (concat r v)))
+        sigma  0.010
+        ;; A longer arc, and it matters: range alone is weakly observable,
+        ;; so a couple of hours from three stations leaves the geometry so
+        ;; poorly conditioned that Gauss-Newton walks away from the answer
+        ;; rather than toward it. Three hours and 37 observations converge.
+        times  (vec (range 60 12060 60))
+        t-arc  (arc truth times)
+        rng    (java.util.Random. 20260910)
+        obs    (vec (for [[i secs] (map-indexed vector times)
+                          [idx s] (map-indexed vector stations)
+                          :let [r-sat (:r (nth t-arc i))
+                                se (st-eci s secs)]
+                          :when (> (:elevation (gd/look-angles se r-sat)) (* 10.0 c/degrees))]
+                      {:i i :t secs :station idx
+                       :measured (+ (mag (mapv - r-sat se)) (* sigma (.nextGaussian rng)))}))
+        guess  (mapv + truth [2.0 -1.5 1.0 0.002 0.001 -0.0015])
+        step   (fn [x]
+                 (let [a (arc x times)]
+                   (mapv (fn [{:keys [i t station measured]}]
+                           (let [{:keys [r phi]} (nth a i)
+                                 d   (mapv - r (st-eci (nth stations station) t))
+                                 rho (mag d)
+                                 los (mapv #(/ % rho) d)]
+                             {:H (mapv (fn [j] (reduce + (map-indexed
+                                                          (fn [ii u] (* u (nth (nth phi ii) j))) los)))
+                                       (range 6))
+                              :residual (- measured rho)
+                              :weight (/ 1.0 (* sigma sigma))}))
+                         obs)))]
+    (is (> (count obs) 30) "enough passes, well enough spread, to determine six unknowns")
+    (let [rows0 (step guess)
+          final (loop [x (vec guess) n 0]
+                  (if (>= n 3)
+                    x
+                    (recur (mapv + x (:correction (est/solve-batch (step x) 6))) (inc n))))
+          rows1 (step final)
+          pos-err (mag (mapv - (subvec final 0 3) (subvec truth 0 3)))
+          cov (:covariance (est/solve-batch rows1 6))
+          formal (Math/sqrt (+ (nth (nth cov 0) 0) (nth (nth cov 1) 1) (nth (nth cov 2) 2)))]
+      (is (> (est/rms rows0) 1.0) "starts kilometres out")
+      (is (< (est/rms rows1) (* 2.0 sigma)) "and ends at the noise floor")
+      (is (< pos-err 0.1)
+          (str "recovered to " (* 1000.0 pos-err) " m from a 2.7 km initial error"))
+      (testing "and the formal uncertainty is honest, not merely small"
+        ;; A covariance that claims more precision than the estimate actually
+        ;; has is worse than no covariance at all.
+        (is (< 0.2 (/ pos-err formal) 5.0)
+            (str "actual error " (* 1000 pos-err) " m against a formal "
+                 (* 1000 formal) " m"))))))
