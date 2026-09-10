@@ -1568,3 +1568,82 @@
         (is (< 0.2 (/ pos-err formal) 5.0)
             (str "actual error " (* 1000 pos-err) " m against a formal "
                  (* 1000 formal) " m"))))))
+
+(deftest a-good-fit-is-not-a-good-orbit
+  ;; The failure mode that matters in practice, and the reason a covariance
+  ;; is not optional. With too short an arc only two stations ever see the
+  ;; satellite, giving eleven ranges for six unknowns. Gauss-Newton drives
+  ;; the residuals to the noise floor -- the fit is excellent -- while the
+  ;; orbit walks kilometres away from the truth. Nothing in the residuals
+  ;; says so; the formal uncertainty does.
+  (let [mu c/GM-earth
+        accel (fn [_ r _] (let [d (mag r)] (mapv #(* (- (/ mu (* d d d))) %) r)))
+        rk4   (first (filter #(= "RK4" (:name %)) num/first-order))
+        arc   (fn [x0 times]
+                (loop [integ (num/integrator rk4 (var/rhs accel) 0.0
+                                             (var/initial (subvec (vec x0) 0 3) (subvec (vec x0) 3 6))
+                                             20.0 {:adaptive? false})
+                       ts times out []]
+                  (if (empty? ts) out
+                      (let [s (num/step-until integ (first ts))]
+                        (recur s (rest ts) (conj out (var/unpack (:y s))))))))
+        sites (mapv (fn [[la lo]] (gd/geodetic->cartesian (* la c/degrees) (* lo c/degrees) 0.0))
+                    [[35.0 -117.0] [-25.0 28.0] [40.0 140.0] [-33.0 151.0] [51.0 0.0]])
+        st-eci (fn [s secs] (let [mjd (+ c/mjd-J2000 (/ secs 86400.0))]
+                              (fr/apply-m (fr/terrestrial->celestial (t/utc->tt mjd) mjd) s)))
+        truth (let [[r v] (kep/elements->state mu {:a 7500.0 :e 0.02 :i 0.95
+                                                   :raan 1.1 :argp 2.0 :nu 0.4})]
+                (vec (concat r v)))
+        sigma 0.010
+        solve (fn [hours sample seed]
+                (let [times (vec (range 60.0 (* 3600.0 hours) sample))
+                      ta    (arc truth times)
+                      rng   (java.util.Random. seed)
+                      obs   (vec (for [[i secs] (map-indexed vector times)
+                                       [idx s] (map-indexed vector sites)
+                                       :let [rs (:r (nth ta i)) se (st-eci s secs)]
+                                       :when (> (:elevation (gd/look-angles se rs)) (* 10.0 c/degrees))]
+                                   {:i i :t secs :station idx
+                                    :measured (+ (mag (mapv - rs se)) (* sigma (.nextGaussian rng)))}))
+                      e 2.7
+                      guess (mapv + truth [(* e 0.74) (* e -0.56) (* e 0.37)
+                                           (* e 7.4e-4) (* e 3.7e-4) (* e -5.6e-4)])
+                      rows  (fn [x] (let [a (arc x times)]
+                                      (mapv (fn [{:keys [i t station measured]}]
+                                              (let [{:keys [r phi]} (nth a i)
+                                                    d (mapv - r (st-eci (nth sites station) t))
+                                                    rho (mag d) los (mapv #(/ % rho) d)]
+                                                {:H (mapv (fn [j] (reduce + (map-indexed
+                                                                             (fn [ii u] (* u (nth (nth phi ii) j))) los)))
+                                                          (range 6))
+                                                 :residual (- measured rho)
+                                                 :weight (/ 1.0 (* sigma sigma))}))
+                                            obs)))
+                      final (loop [x (vec guess) k 0]
+                              (if (>= k 4) x
+                                  (recur (mapv + x (:correction (est/solve-batch (rows x) 6))) (inc k))))
+                      rs*   (rows final)
+                      cov   (:covariance (est/solve-batch rs* 6))]
+                  {:n (count obs)
+                   :stations (count (distinct (map :station obs)))
+                   :rms (est/rms rs*)
+                   :error (mag (mapv - (subvec final 0 3) (subvec truth 0 3)))
+                   :formal (Math/sqrt (+ (nth (nth cov 0) 0) (nth (nth cov 1) 1) (nth (nth cov 2) 2)))}))
+        weak   (solve 3.0 120.0 5)
+        strong (solve 6.0 150.0 5)]
+    (testing "the short arc barely sees the satellite"
+      (is (< (:n weak) 15))
+      (is (<= (:stations weak) 2) "only two stations get a pass"))
+    (testing "yet it fits the data beautifully"
+      (is (< (:rms weak) (* 2.0 sigma)) "residuals at the noise floor"))
+    (testing "while being kilometres wrong"
+      (is (> (:error weak) 1.0)))
+    (testing "and the covariance is what says so"
+      (is (> (:formal weak) 1.0) "formal uncertainty is kilometres too")
+      (is (> (/ (:formal weak) (:rms weak)) 20.0)
+          "formal uncertainty enormous next to the residual: the tell"))
+    (testing "a longer arc determines the orbit and the covariance agrees"
+      (is (> (:n strong) 25))
+      (is (>= (:stations strong) 3))
+      (is (< (:error strong) 0.1) "tens of metres")
+      (is (< (/ (:formal strong) (:rms strong)) 20.0) "and no longer flagged"))))
