@@ -35,6 +35,7 @@
                                0.0 r0 v0 (/ (period) (.-stepsPerOrbit controls)))
      :energy (num/specific-energy mu r0 v0)
      :n      0
+     :steps  0
      :chart  []}))
 
 ;; ------------------------------------------------------------- strip chart
@@ -123,7 +124,7 @@
                   (aset arr (* i 3) (* view-scale x))
                   (aset arr (+ (* i 3) 1) (* view-scale z))
                   (aset arr (+ (* i 3) 2) (* view-scale y))
-                  (assoc st :n (inc i)
+                  (assoc st :n (inc i) :steps (inc (:steps st 0))
                          :chart (let [v (Math/log10 (max 1e-16 rel))]
                                   (if (>= (count chart) chart-w)
                                     (conj (subvec chart 1) v)
@@ -136,7 +137,7 @@
                                  st
                                  (range (.-stepsPerFrame controls))))))
               (publish! []
-                (let [{:keys [integ n rel chart]} @state
+                (let [{:keys [integ n rel chart steps]} @state
                       [x y z] (:y integ)]
                   (set! (.-visible trail) (.-trail controls))
                   (.setDrawRange geo 0 n)
@@ -144,10 +145,15 @@
                   (.set (.-position body) (* view-scale x) (* view-scale z) (* view-scale y))
                   (draw-chart! ctx chart)
                   (set! (.-textContent readout)
-                        (str (.-method controls)
-                             "   orbits=" (.toFixed (/ (:t integ) (period)) 2)
-                             "   h=" (.toExponential (:h integ) 2)
-                             "   |dE/E|=" (.toExponential (or rel 0) 2)))))
+                        ;; Evaluations, not steps: GBS8-2 holds its energy far
+                        ;; better than Verlet but spends ten times the force
+                        ;; calls doing it, and the chart alone hides that.
+                        (let [stages (:stages (:method integ))]
+                          (str (.-method controls)
+                               "   orbits=" (.toFixed (/ (:t integ) (period)) 2)
+                               "   |dE/E|=" (.toExponential (or rel 0) 2)
+                               "\n" stages " f-evals/step"
+                               "   " (.toLocaleString (* stages steps)) " total")))))
               (animate []
                 (when @running?
                   (js/requestAnimationFrame animate)

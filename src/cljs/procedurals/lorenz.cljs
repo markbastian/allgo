@@ -84,7 +84,7 @@
         readout  (js/document.createElement "div")
         running? (atom false)
         tick-fps! (fps/meter! container)
-        state    (atom {:integ (make-integrator) :n 0})]
+        state    (atom {:integ (make-integrator) :n 0 :steps 0})]
     (set! (.-className readout) "numeric-readout")
     (.appendChild container readout)
     (set! (.-background scene) (THREE/Color. 0x05070d))
@@ -109,11 +109,12 @@
                     (.updateProjectionMatrix camera)
                     (.setSize renderer w h))))
               (integrate! []
-                (let [{:keys [integ n]} @state
+                (let [{:keys [integ n steps]} @state
                       f (:f integ)]
                   (loop [s integ i 0 n n]
                     (if (= i (.-stepsPerFrame controls))
-                      (swap! state assoc :integ s :n n)
+                      (swap! state assoc :integ s :n n
+                             :steps (+ steps (.-stepsPerFrame controls)))
                       (let [s'  (num/step s)
                             n'  (if (>= n max-points) (compact! geo n) n)]
                         (if (:accepted s')
@@ -132,10 +133,14 @@
                     (let [[x y z] (:y integ)]
                       (.set (.-position head) (* view-scale x) (* view-scale (- z view-shift)) (* view-scale y))))
                   (set! (.-textContent readout)
-                        (str (.-method controls)
-                             "   t=" (.toFixed (:t integ) 2)
-                             "   h=" (.toExponential (:h integ) 2)
-                             (when-let [e (:error integ)] (str "   err=" (.toExponential e 2)))))))
+                        (let [stages (:stages (:method integ))
+                              evals  (* stages (:steps @state))]
+                          (str (.-method controls)
+                               "   t=" (.toFixed (:t integ) 2)
+                               "   h=" (.toExponential (:h integ) 2)
+                               (when-let [e (:error integ)] (str "   err=" (.toExponential e 2)))
+                               "\n" stages " f-evals/step"
+                               "   " (.toLocaleString evals) " total")))))
               (animate []
                 (when @running?
                   (js/requestAnimationFrame animate)
