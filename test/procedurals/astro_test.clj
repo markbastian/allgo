@@ -1,5 +1,6 @@
 (ns procedurals.astro-test
   (:require [procedurals.astro.constants :as c]
+            [procedurals.astro.geopotential :as geo]
             [procedurals.astro.time :as t]
             [clojure.test :refer [deftest is testing]]))
 
@@ -58,3 +59,100 @@
     (is (close? 332946.0 (/ c/GM-sun c/GM-earth) 20.0)))
   (testing "the Moon is about 1/81 of the Earth"
     (is (close? 81.30 (/ c/GM-earth c/GM-moon) 0.02))))
+
+;; ------------------------------------------------------------ geopotential
+
+(def ^:private test-field
+  "A field with terms at every shape the recursion has to handle: zonal
+  (m=0), sectorial (m=n) and tesseral (0<m<n)."
+  {:GM c/GM-earth :R c/R-earth :normalised? true
+   :C {[0 0] 1.0 [2 0] -4.841654e-4 [2 2] 2.43926e-6
+       [3 0] 9.5717e-7 [3 1] 2.02929e-6 [3 3] 7.2114e-7 [4 0] 5.3997e-7}
+   :S {[2 2] -1.40027e-6 [3 1] 2.4892e-7 [3 3] 1.41437e-6}})
+
+(defn- mag [v] (Math/sqrt (reduce + (map * v v))))
+(defn- sub [a b] (mapv - a b))
+
+(def ^:private sample-points
+  [[7000.0 0.0 0.0] [5000.0 3000.0 4000.0] [100.0 200.0 7000.0]
+   [0.0 0.0 7500.0] [20000.0 5000.0 9000.0] [-6000.0 -3000.0 1500.0]])
+
+(deftest degree-zero-is-a-point-mass
+  (let [pm (geo/point-mass c/GM-earth c/R-earth)]
+    (doseq [r sample-points]
+      (let [d (mag r)
+            want (mapv #(* (- (/ c/GM-earth (* d d d))) %) r)]
+        (is (< (/ (mag (sub (geo/acceleration pm r 0) want)) (mag want)) 1e-14)
+            (str "at " r))))))
+
+(deftest j2-matches-its-closed-form
+  ;; The one term with a standard closed form, so it pins the recursion,
+  ;; the normalisation and the acceleration formula together.
+  (let [only {:GM c/GM-earth :R c/R-earth :normalised? true
+              :C {[0 0] 1.0 [2 0] (- (/ geo/J2 (Math/sqrt 5.0)))} :S {}}
+        pm   (geo/point-mass c/GM-earth c/R-earth)]
+    (doseq [r sample-points]
+      (let [d (mag r) [x y z] r
+            k (/ (* -1.5 geo/J2 c/GM-earth c/R-earth c/R-earth) (Math/pow d 5))
+            s (/ (* 5.0 z z) (* d d))
+            want [(* k x (- 1.0 s)) (* k y (- 1.0 s)) (* k z (- 3.0 s))]
+            got  (sub (geo/acceleration only r 2) (geo/acceleration pm r 0))]
+        (is (< (/ (mag (sub got want)) (mag want)) 1e-12) (str "at " r))))))
+
+(deftest acceleration-is-the-gradient-of-the-potential
+  ;; The two are derived independently -- the acceleration is not
+  ;; differentiated from the potential -- so agreement checks both. The
+  ;; residual must fall as h^2; a mismatch that plateaus instead is a real
+  ;; error hiding under finite-difference noise, which is exactly how the
+  ;; sign slip in the m>0 branch was found.
+  (doseq [r sample-points]
+    (let [a  (geo/acceleration test-field r 4)
+          at (fn [h] (mapv (fn [i]
+                             (/ (- (geo/potential test-field (update r i + h) 4)
+                                   (geo/potential test-field (update r i - h) 4))
+                                (* 2.0 h)))
+                           (range 3)))
+          e1 (/ (mag (sub a (at 2.0))) (mag a))
+          e2 (/ (mag (sub a (at 1.0))) (mag a))]
+      (is (< e2 1e-7) (str "at " r " residual " e2))
+      (is (< 3.0 (/ e1 e2) 5.0)
+          (str "at " r " the residual must fall as h^2, got ratio " (/ e1 e2))))))
+
+(deftest every-harmonic-shape-is-exercised
+  ;; Regression: the sectorial and tesseral terms went through a branch that
+  ;; J2 never touches, and were wrong there while every zonal test passed.
+  (doseq [[label C S] [["sectorial C22" {[2 2] 2.43926e-6} {}]
+                       ["sectorial S22" {} {[2 2] -1.40027e-6}]
+                       ["tesseral C31"  {[3 1] 2.0e-6} {}]
+                       ["sectorial C33" {[3 3] 7.0e-7} {}]]]
+    (testing label
+      (let [m  {:GM c/GM-earth :R c/R-earth :normalised? true :C (assoc C [0 0] 1.0) :S S}
+            pm (geo/point-mass c/GM-earth c/R-earth)
+            r  [5000.0 3000.0 4000.0]
+            a  (sub (geo/acceleration m r 4) (geo/acceleration pm r 0))
+            n  (mapv (fn [i]
+                       (/ (- (- (geo/potential m (update r i + 0.5) 4)
+                                (geo/potential pm (update r i + 0.5) 0))
+                             (- (geo/potential m (update r i - 0.5) 4)
+                                (geo/potential pm (update r i - 0.5) 0)))
+                          1.0))
+                     (range 3))]
+        (is (pos? (mag a)) "the term must actually contribute")
+        (is (< (/ (mag (sub a n)) (mag a)) 1e-5) label)))))
+
+(deftest higher-degrees-contribute-and-diminish
+  (let [r [5000.0 3000.0 4000.0]
+        step (fn [d] (mag (sub (geo/acceleration test-field r d)
+                               (geo/acceleration test-field r (dec d)))))]
+    (is (pos? (step 2)))
+    (is (pos? (step 3)))
+    (is (pos? (step 4)))
+    (is (> (step 2) (* 100 (step 3))) "J2 dominates everything above it")))
+
+(deftest normalisation-factors-are-right
+  (is (close? 1.0 (geo/normalisation-factor 0 0) 1e-14))
+  (is (close? (Math/sqrt 5.0) (geo/normalisation-factor 2 0) 1e-14))
+  (is (close? (Math/sqrt 7.0) (geo/normalisation-factor 3 0) 1e-14))
+  (is (close? 3.0 (geo/normalisation-factor 4 0) 1e-14))
+  ;; N_22 = sqrt(2 * 5 * (0!/4!)) = sqrt(10/24)
+  (is (close? (Math/sqrt (/ 10.0 24.0)) (geo/normalisation-factor 2 2) 1e-14)))
