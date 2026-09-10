@@ -1,5 +1,6 @@
 (ns procedurals.boids-test
   (:require [procedurals.boids :as b]
+            [procedurals.gjk :as gjk]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- seeded-flock
@@ -67,3 +68,75 @@
       (doseq [[x y] (map vector forward reverse*)]
         (is (< (b/mag (b/v- (:pos x) (:pos y))) 1e-9) "same positions")
         (is (< (b/mag (b/v- (:vel x) (:vel y))) 1e-9) "same velocities")))))
+
+(defn- lift [pos]
+  (if (= 3 (count pos)) (vec pos) [(nth pos 0) (nth pos 1) 0.0]))
+
+(defn- penetrating?
+  "Allow a hair of slack: contact resolution puts a boid exactly on the
+  surface, and asking whether a sphere of its full radius touches would then
+  be true by construction."
+  [{:keys [pos]} obstacle radius]
+  (gjk/intersects? (gjk/sphere (lift pos) (* 0.98 radius)) (:support obstacle)))
+
+(deftest boids-do-not-enter-obstacles
+  (testing "in the plane"
+    (let [bounds  [400 400]
+          radius  3.0
+          obs     [(b/sphere-obstacle [200 200] 55)
+                   (b/box-obstacle [40 300] [140 360])
+                   (b/sphere-obstacle [320 90] 40)]
+          params  {:edges :bounce :obstacles obs :boid-radius radius}
+          run     (iterate #(b/step % bounds params)
+                           (seeded-flock 101 60 bounds (:max-speed b/defaults)))]
+      (doseq [t [50 200 600]]
+        (doseq [boid (nth run t), o obs]
+          (is (not (penetrating? boid o radius)) (str "tick " t))))))
+  (testing "in three dimensions"
+    (let [world  [100 100 100]
+          radius 1.5
+          obs    [(b/sphere-obstacle [50 50 50] 18)
+                  (b/box-obstacle [10 10 60] [40 40 90])]
+          params {:edges :bounce :obstacles obs :boid-radius radius
+                  :perception-radius 30 :separation-radius 12
+                  :max-speed 0.7 :max-force 0.02 :avoid-radius 14 :avoid-weight 3.0}
+          run    (iterate #(b/step % world params)
+                          (seeded-flock 202 40 world 0.7))]
+      (doseq [t [50 200 600]]
+        (doseq [boid (nth run t), o obs]
+          (is (not (penetrating? boid o radius)) (str "tick " t)))))))
+
+(deftest bouncing-keeps-the-flock-inside-without-wrapping
+  (let [bounds [400 400]
+        params {:edges :bounce}
+        run    (iterate #(b/step % bounds params)
+                        (seeded-flock 7 40 bounds (:max-speed b/defaults)))]
+    (doseq [t [10 100 400]]
+      (doseq [{[x y] :pos} (nth run t)]
+        (is (and (<= 0 x 400) (<= 0 y 400)) (str "tick " t))))
+    (testing "a bounced boid reverses rather than teleporting across"
+      (let [[p v] (b/bounce [-3.0 200.0] [-2.0 1.0] [400 400])]
+        (is (= [3.0 200.0] p) "mirrored back inside, not wrapped to the far edge")
+        (is (= [2.0 1.0] v) "and heading back in")))))
+
+(deftest wrapping-remains-the-default
+  (let [bounds [400 400]
+        far    (b/step [{:pos [399.0 200.0] :vel [5.0 0.0]}] bounds)]
+    (is (< (first (:pos (first far))) 100)
+        "with no :edges given a boid leaving the right edge reappears on the left")))
+
+(deftest obstacle-constructors
+  (testing "a planar box becomes a prism with depth, since GJK needs volume"
+    (let [{:keys [support radius]} (b/box-obstacle [0 0] [10 10])]
+      (is (pos? radius))
+      (is (not (gjk/intersects? (gjk/sphere [20.0 5.0 0.0] 1.0) support)) "clear of it")
+      (is (gjk/intersects? (gjk/sphere [5.0 5.0 0.0] 1.0) support) "inside it")))
+  (testing "a sphere obstacle meets the plane as its equator"
+    (let [{:keys [support]} (b/sphere-obstacle [0 0] 10)]
+      (is (gjk/intersects? (gjk/sphere [9.0 0.0 0.0] 0.5) support))
+      (is (not (gjk/intersects? (gjk/sphere [11.0 0.0 0.0] 0.5) support)))))
+  (testing "the bounding sphere used for broad phase really encloses the body"
+    (doseq [{:keys [support centre radius]} [(b/sphere-obstacle [1 2 3] 5)
+                                             (b/box-obstacle [0 0 0] [4 6 8])]]
+      (is (not (gjk/intersects? (gjk/sphere centre (* 0.999 radius))
+                                (gjk/translate support [(* 3 radius) 0.0 0.0])))))))

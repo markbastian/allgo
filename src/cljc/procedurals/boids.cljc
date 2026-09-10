@@ -4,8 +4,13 @@
   A boid is `{:pos [..] :vel [..]}`; positions and velocities are vectors of
   any arity, so the same rules drive 2D and 3D flocks. Steering follows
   Reynolds' formulation -- each rule proposes a desired velocity, and the
-  force applied is the (clamped) difference between desired and current."
-  (:require [clojure.math :as math]))
+  force applied is the (clamped) difference between desired and current.
+
+  A flock may also be given `:obstacles` to steer around. Those are convex
+  bodies queried through `procedurals.gjk`, so anything with a support
+  mapping serves."
+  (:require [procedurals.gjk :as gjk]
+            [clojure.math :as math]))
 
 (def defaults
   {:separation-radius 24.0
@@ -14,7 +19,13 @@
    :alignment-weight  1.0
    :cohesion-weight   0.9
    :max-speed         2.4
-   :max-force         0.06})
+   :max-force         0.06
+   :edges             :wrap
+   :obstacles         []
+   :boid-radius       1.0
+   :avoid-radius      26.0
+   :avoid-weight      2.2
+   :restitution       0.85})
 
 ;; Vector math, arity-generic.
 
@@ -22,6 +33,7 @@
 (defn v- [a b] (mapv - a b))
 (defn v* [v s] (mapv #(* % s) v))
 
+(defn dot [a b] (reduce + (map * a b)))
 (defn mag-sq [v] (reduce (fn [acc x] (+ acc (* x x))) 0 v))
 (defn mag [v] (math/sqrt (mag-sq v)))
 
@@ -126,10 +138,113 @@
   (mapv (fn [x hi] (cond (neg? x) (+ x hi) (>= x hi) (- x hi) :else x))
         pos bounds))
 
-(defn step-boid [boid index bounds {:keys [max-speed] :as params}]
-  (let [vel (limit (v+ (:vel boid) (acceleration boid (neighbours boid index params) params))
-                   max-speed)]
-    (assoc boid :pos (wrap (v+ (:pos boid) vel) bounds) :vel vel)))
+(defn bounce
+  "Reflect a boid off the walls of the world instead of wrapping through
+  them, mirroring both the offending coordinate and its velocity."
+  [pos vel bounds]
+  (let [pairs (mapv (fn [x v hi]
+                      (cond (neg? x)  [(- x) (- v)]
+                            (> x hi)  [(- (* 2.0 hi) x) (- v)]
+                            :else     [x v]))
+                    pos vel bounds)]
+    [(mapv first pairs) (mapv second pairs)]))
+
+;; Obstacles. GJK is three-dimensional, so a planar flock is lifted onto
+;; z = 0 for the query and the answer projected back. Obstacles must be
+;; solid rather than flat -- a body with no volume drives GJK's simplex
+;; degenerate -- which is what the constructors below take care of.
+
+(defn- lift [v]
+  (if (= 3 (count v)) (vec v) [(nth v 0) (nth v 1) 0.0]))
+
+(defn- project [v n]
+  (if (= n 3) (vec v) (subvec (vec v) 0 2)))
+
+(defn sphere-obstacle
+  "A ball obstacle. Its equator is the circle a planar flock meets."
+  [centre radius]
+  (let [c (lift centre)]
+    {:support (gjk/sphere c radius) :centre c :radius radius}))
+
+(defn box-obstacle
+  "A box obstacle. Two-dimensional corners become a prism deep enough that
+  the flock's plane cuts it squarely rather than grazing a flat face."
+  [lo hi]
+  (let [flat? (= 2 (count lo))
+        depth (if flat? (max 1.0 (mag (v- (vec hi) (vec lo)))) 0.0)
+        lo3   (if flat? [(nth lo 0) (nth lo 1) (- depth)] (vec lo))
+        hi3   (if flat? [(nth hi 0) (nth hi 1) depth] (vec hi))]
+    {:support (gjk/box lo3 hi3)
+     :centre  (v* (v+ lo3 hi3) 0.5)
+     :radius  (* 0.5 (mag (v- hi3 lo3)))}))
+
+(defn- near-obstacles
+  "Obstacles whose bounding sphere is within reach, so the GJK query is only
+  run against the few that could matter."
+  [p3 obstacles reach]
+  (filter (fn [{:keys [centre radius]}]
+            (< (dist p3 centre) (+ radius reach)))
+          obstacles))
+
+(defn avoidance
+  "Steering away from nearby obstacles. GJK gives the gap to each convex
+  body and the direction across it; the force ramps up as the gap closes,
+  so a boid curves around an obstacle rather than jolting at contact."
+  [{:keys [pos vel]} {:keys [obstacles avoid-radius boid-radius max-speed max-force]}]
+  (if (empty? obstacles)
+    (zero-like pos)
+    (let [n     (count pos)
+          p3    (lift pos)
+          me    (gjk/sphere p3 boid-radius)
+          v3    (lift vel)]
+      (project
+       (reduce (fn [acc {:keys [support]}]
+                 (let [{:keys [distance direction]} (gjk/distance me support)]
+                   (if (>= distance avoid-radius)
+                     acc
+                     (let [away   (v* direction -1.0)
+                           urgency (- 1.0 (/ distance avoid-radius))
+                           steer  (limit (v- (with-magnitude away max-speed) v3) max-force)]
+                       (v+ acc (v* steer urgency))))))
+               [0.0 0.0 0.0]
+               (near-obstacles p3 obstacles (+ avoid-radius boid-radius)))
+       n))))
+
+(defn resolve-contacts
+  "Push a boid clear of anything it has ended up inside and reflect it off
+  the surface. Steering alone cannot guarantee separation -- a boid boxed in
+  by its flock can be carried into an obstacle -- so EPA supplies the
+  shortest way out as a backstop."
+  [pos vel {:keys [obstacles boid-radius restitution]}]
+  (if (empty? obstacles)
+    [pos vel]
+    (let [n (count pos)]
+      (loop [p3 (lift pos), v3 (lift vel), [o & more] (near-obstacles (lift pos) obstacles boid-radius)]
+        (if (nil? o)
+          [(project p3 n) (project v3 n)]
+          (let [me (gjk/sphere p3 boid-radius)]
+            (if-let [{:keys [depth normal]} (and (gjk/intersects? me (:support o))
+                                                 (gjk/penetration me (:support o)))]
+              ;; EPA reports the shift that moves the obstacle clear, so the
+              ;; boid takes the opposite; the surface normal it bounces off
+              ;; points the same way.
+              (let [out (v* normal -1.0)
+                    vn  (dot v3 out)]
+                (recur (v+ p3 (v* out depth))
+                       (if (neg? vn) (v- v3 (v* out (* (+ 1.0 restitution) vn))) v3)
+                       more))
+              (recur p3 v3 more))))))))
+
+(defn step-boid [boid index bounds {:keys [max-speed edges avoid-weight] :as params}]
+  (let [acc       (v+ (acceleration boid (neighbours boid index params) params)
+                      (v* (avoidance boid params) avoid-weight))
+        vel       (limit (v+ (:vel boid) acc) max-speed)
+        moved     (v+ (:pos boid) vel)
+        [pos vel] (if (= :bounce edges)
+                    (bounce moved vel bounds)
+                    [(wrap moved bounds) vel])
+        [pos vel] (resolve-contacts pos vel params)]
+    (assoc boid :pos pos :vel vel)))
 
 (defn step
   "Advance the whole flock one tick. Every boid sees the same previous state,

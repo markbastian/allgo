@@ -13,6 +13,20 @@
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
 
 (def ^:private world [100 100 100])
+
+;; Obstacle geometry declared once: it builds both the convex bodies GJK is
+;; queried against and the meshes drawn for them.
+
+(def ^:private shapes
+  [{:kind :sphere :c [50 50 50] :r 17}
+   {:kind :box    :lo [8 8 62] :hi [38 38 92]}])
+
+(def ^:private obstacles
+  (mapv (fn [{:keys [kind c r lo hi]}]
+          (case kind
+            :sphere (boids/sphere-obstacle c r)
+            :box    (boids/box-obstacle lo hi)))
+        shapes))
 (def ^:private capacity 400)
 
 (def ^:private controls
@@ -22,7 +36,9 @@
        :cohesion      0.9
        :perception    22
        :personalSpace 9
-       :speed         0.8})
+       :speed         0.8
+       :avoidance     3.0
+       :obstacles     true})
 
 (defn- params []
   {:separation-weight (.-separation controls)
@@ -31,13 +47,35 @@
    :perception-radius (.-perception controls)
    :separation-radius (.-personalSpace controls)
    :max-speed         (.-speed controls)
-   :max-force         0.02})
+   :max-force         0.02
+   :edges             :bounce
+   :boid-radius       1.4
+   :avoid-radius      15.0
+   :avoid-weight      (.-avoidance controls)
+   :obstacles         (if (.-obstacles controls) obstacles [])})
 
 (defn- boid-geometry
   "A cone nose-up rotated onto +Z, the axis `Object3D.lookAt` aligns."
   []
   (doto (THREE/ConeGeometry. 0.9 2.8 6)
     (.rotateX (/ js/Math.PI 2))))
+
+(defn- obstacle-meshes
+  "Meshes for the obstacles, shifted from boid space into the centred world."
+  [[w h d]]
+  (let [material (THREE/MeshLambertMaterial. #js {:color 0x39456b})
+        offset   [(/ w 2.0) (/ h 2.0) (/ d 2.0)]]
+    (for [{:keys [kind c r lo hi]} shapes
+          :let [geo (case kind
+                      :sphere (THREE/SphereGeometry. r 24 16)
+                      :box    (let [[x0 y0 z0] lo [x1 y1 z1] hi]
+                                (THREE/BoxGeometry. (- x1 x0) (- y1 y0) (- z1 z0))))
+                [cx cy cz] (boids/v- (case kind
+                                       :sphere c
+                                       :box    (boids/v* (boids/v+ (vec lo) (vec hi)) 0.5))
+                                     offset)]]
+      (doto (THREE/Mesh. geo material)
+        (-> .-position (.set cx cy cz))))))
 
 (defn- bounds-box [[w h d]]
   (THREE/LineSegments.
@@ -80,6 +118,8 @@
                                        (THREE/MeshLambertMaterial.)
                                        capacity)
         scratch  (THREE/Object3D.)
+        obstacle-group (reduce (fn [^js g m] (.add g m) g)
+                               (THREE/Group.) (obstacle-meshes world))
         color    (THREE/Color.)
         running? (atom false)
         tick-fps! (fps/meter! container)
@@ -91,6 +131,8 @@
     (.appendChild container (.-domElement renderer))
     (.add scene mesh)
     (.add scene (bounds-box world))
+    (set! (.-visible obstacle-group) (.-obstacles controls))
+    (.add scene obstacle-group)
     (.add scene (THREE/AmbientLight. 0xffffff 0.65))
     (let [sun (THREE/DirectionalLight. 0xfff4e0 0.9)]
       (.set (.-position sun) 80 120 60)
@@ -130,6 +172,9 @@
           (.add gui controls "perception" 8 50 1)
           (.add gui controls "personalSpace" 2 30 1)
           (.add gui controls "speed" 0.2 2.5 0.1)
+          (.add gui controls "avoidance" 0 6 0.1)
+          (-> (.add gui controls "obstacles")
+              (.onChange (fn [v] (set! (.-visible obstacle-group) v))))
           (.add gui #js {:reset reset-flock!} "reset"))
         {:start (fn [] (when-not @running? (reset! running? true) (on-resize) (animate)))
          :stop  (fn [] (reset! running? false))}))))

@@ -1,7 +1,10 @@
 (ns procedurals.boids-viewer
   "Canvas demo for `procedurals.boids`. Each boid is drawn as a dart pointing
   along its heading and tinted by it, so alignment emerging out of a random
-  start reads as the flock converging on a single colour."
+  start reads as the flock converging on a single colour.
+
+  The flock is contained rather than toroidal: it bounces off the walls and
+  steers around obstacles, whose clearances come from GJK."
   (:require [procedurals.boids :as boids]
             [procedurals.fps :as fps]
             ["lil-gui" :default GUI]
@@ -17,10 +20,29 @@
        :perception     60
        :personalSpace  24
        :speed          2.4
-       :trails         true})
+       :avoidance      2.2
+       :trails         true
+       :obstacles      true})
 
-(defn- params []
-  {:separation-weight (.-separation controls)
+;; Obstacle geometry is declared once and used twice: to build the convex
+;; bodies GJK is queried against, and to draw them.
+
+(defn- shapes [[w h]]
+  [{:kind :circle :c [(* 0.50 w) (* 0.52 h)] :r (* 0.145 w)}
+   {:kind :rect   :lo [(* 0.08 w) (* 0.70 h)] :hi [(* 0.30 w) (* 0.88 h)]}
+   {:kind :circle :c [(* 0.80 w) (* 0.22 h)] :r (* 0.095 w)}])
+
+(defn- ->obstacle [{:keys [kind c r lo hi]}]
+  (case kind
+    :circle (boids/sphere-obstacle c r)
+    :rect   (boids/box-obstacle lo hi)))
+
+(defn- params [obstacles]
+  {:edges             :bounce
+   :obstacles         (if (.-obstacles controls) obstacles [])
+   :boid-radius       4.0
+   :avoid-weight      (.-avoidance controls)
+   :separation-weight (.-separation controls)
    :alignment-weight  (.-alignment controls)
    :cohesion-weight   (.-cohesion controls)
    :perception-radius (.-perception controls)
@@ -52,9 +74,22 @@
     (.fill ctx)
     (.restore ctx)))
 
-(defn- draw! [^js ctx flock [w h]]
+(defn- draw-obstacle! [^js ctx {:keys [kind c r lo hi]}]
+  (set! (.-fillStyle ctx) "#161d2e")
+  (set! (.-strokeStyle ctx) "#3d4a6b")
+  (set! (.-lineWidth ctx) 1.5)
+  (.beginPath ctx)
+  (case kind
+    :circle (.arc ctx (nth c 0) (nth c 1) r 0 (* 2 js/Math.PI))
+    :rect   (let [[x0 y0] lo [x1 y1] hi] (.rect ctx x0 y0 (- x1 x0) (- y1 y0))))
+  (.fill ctx)
+  (.stroke ctx))
+
+(defn- draw! [^js ctx flock shapes* [w h]]
   (set! (.-fillStyle ctx) (if (.-trails controls) "rgba(5, 7, 13, 0.22)" background))
   (.fillRect ctx 0 0 w h)
+  (when (.-obstacles controls)
+    (doseq [o shapes*] (draw-obstacle! ctx o)))
   (doseq [boid flock] (draw-boid! ctx boid)))
 
 (defn init! [^js container]
@@ -62,7 +97,7 @@
         ctx    (.getContext canvas "2d")
         running? (atom false)
         tick-fps! (fps/meter! container)
-        state  (atom {:bounds [0 0] :flock []})]
+        state  (atom {:bounds [0 0] :flock [] :shapes [] :obstacles []})]
     (set! (.-style canvas) "display:block;border-radius:8px")
     (.appendChild container canvas)
     (letfn [(resize! []
@@ -77,20 +112,26 @@
                   (.setTransform ctx dpr 0 0 dpr 0 0)
                   (set! (.-fillStyle ctx) background)
                   (.fillRect ctx 0 0 w h)
-                  (swap! state assoc :bounds [w h]))))
+                  ;; Obstacles are sized to the viewport, so they are rebuilt
+                  ;; whenever it changes rather than pinned to fixed pixels.
+                  (let [sh (shapes [w h])]
+                    (swap! state assoc :bounds [w h] :shapes sh
+                           :obstacles (mapv ->obstacle sh))))))
             (reset-flock! []
-              (swap! state assoc :flock (boids/flock (.-boids controls) (:bounds @state) (params))))
+              (swap! state assoc :flock
+                     (boids/flock (.-boids controls) (:bounds @state)
+                                  (params (:obstacles @state)))))
             (tick []
               (when @running?
                 (js/requestAnimationFrame tick)
                 (let [t0    (js/performance.now)
-                      {:keys [bounds]} @state
-                      p     (params)
+                      {:keys [bounds shapes obstacles]} @state
+                      p     (params obstacles)
                       flock (-> (:flock @state)
                                 (resize-to-flock (.-boids controls) bounds (:max-speed p))
                                 (boids/step bounds p))]
                   (swap! state assoc :flock flock)
-                  (draw! ctx flock bounds)
+                  (draw! ctx flock shapes bounds)
                   (tick-fps! (- (js/performance.now) t0)))))]
       (.observe (js/ResizeObserver. resize!) container)
       (resize!)
@@ -103,6 +144,8 @@
         (.add gui controls "perception" 20 140 5)
         (.add gui controls "personalSpace" 5 60 1)
         (.add gui controls "speed" 0.5 6 0.1)
+        (.add gui controls "avoidance" 0 5 0.1)
+        (.add gui controls "obstacles")
         (.add gui controls "trails")
         (.add gui #js {:reset reset-flock!} "reset"))
       {:start (fn [] (when-not @running? (reset! running? true) (resize!) (tick)))
