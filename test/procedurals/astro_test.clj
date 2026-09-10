@@ -2,6 +2,7 @@
   (:require [procedurals.astro.constants :as c]
             [procedurals.astro.ephemeris :as eph]
             [procedurals.astro.geopotential :as geo]
+            [procedurals.astro.srp :as srp]
             [procedurals.astro.time :as t]
             [clojure.test :refer [deftest is testing]]))
 
@@ -241,3 +242,77 @@
         "further is weaker")
     (is (< (mag (eph/third-body c/GM-sun r [0.0 1e14 0.0])) 1e-20)
         "and far enough away is nothing at all")))
+
+;; ------------------------------------------------- solar radiation pressure
+
+(def ^:private sun-at [c/AU 0.0 0.0])
+
+(deftest sunlit-satellites-are-sunlit
+  (doseq [r [[7000.0 0.0 0.0] [42164.0 0.0 0.0] [7000.0 7000.0 0.0] [0.0 42164.0 0.0]]]
+    (is (close? 1.0 (srp/shadow r sun-at) 1e-12) (str "at " r))))
+
+(deftest the-umbra-blocks-everything
+  (doseq [d [6500.0 7000.0 42164.0 200000.0 1.0e6 1.3e6]]
+    (is (close? 0.0 (srp/shadow [(- d) 0.0 0.0] sun-at) 1e-12)
+        (str d " km behind the Earth"))))
+
+(deftest the-umbra-closes-to-a-point
+  ;; The Sun is bigger than the Earth, so the shadow is a cone, not a
+  ;; cylinder. Past its tip only an annular eclipse is possible.
+  (let [tip (srp/umbra-length c/AU)]
+    (is (close? 1.383e6 tip 2e3) "about 1.38 million km")
+    (is (> tip 384400.0) "the Moon orbits inside it, which is why total lunar eclipses happen")
+    (is (close? 0.0 (srp/shadow [(- (* 0.9 tip)) 0.0 0.0] sun-at) 1e-12) "inside the tip, total")
+    (is (pos? (srp/shadow [(- (* 1.2 tip)) 0.0 0.0] sun-at)) "past the tip, some Sun always shows")))
+
+(deftest the-penumbra-is-a-ramp-not-a-step
+  ;; The whole reason for a conical model: a satellite crossing the terminator
+  ;; sees the force ease off over several hundred kilometres rather than
+  ;; switch. At GEO the ramp is about 400 km wide.
+  (let [nus (mapv #(srp/shadow [-42164.0 % 0.0] sun-at) (range 5800.0 7200.0 25.0))]
+    (is (apply <= nus) "monotonic across the terminator")
+    (is (close? 0.0 (first nus) 1e-12))
+    (is (close? 1.0 (last nus) 1e-12))
+    (testing "and it passes through half-light at the geometric limb"
+      (is (close? 0.5 (srp/shadow [-42164.0 6378.0 0.0] sun-at) 0.02)))
+    (testing "no step: no two neighbouring samples jump far"
+      (is (< (apply max (map (fn [[a b]] (abs (- b a))) (partition 2 1 nus))) 0.15)))))
+
+(deftest annular-eclipse-beyond-the-tip
+  ;; Far enough back the Earth is the smaller disc and can only ever cover a
+  ;; fraction (b/a)^2 of the Sun.
+  (let [d      2.0e6
+        d-sun  (+ c/AU d)
+        a      (Math/asin (/ c/R-sun d-sun))
+        b      (Math/asin (/ c/R-earth d))
+        want   (- 1.0 (/ (* b b) (* a a)))]
+    (is (close? want (srp/shadow [(- d) 0.0 0.0] sun-at) 1e-9))))
+
+(deftest radiation-pressure-has-the-right-size-and-sense
+  (let [r [7000.0 0.0 0.0]
+        a (srp/acceleration r sun-at 0.02 1.3)]
+    (testing "magnitude is pressure times area-over-mass times reflectivity"
+      ;; Scaled by (AU/d)^2, and d is not quite an AU: a satellite 7000 km
+      ;; sunward of the Earth's centre catches light 1e-4 brighter. Small,
+      ;; but it is the inverse-square law doing its job, not rounding.
+      (let [d (- c/AU 7000.0)
+            want (* c/solar-pressure 1.3 0.02 1e-3 (/ (* c/AU c/AU) (* d d)))]
+        (is (close? want (mag a) 1e-20))
+        (is (close? 1.0000936 (/ (mag a) (* c/solar-pressure 1.3 0.02 1e-3)) 1e-6)
+            "the brightening is (AU/d)^2")))
+    (testing "and it pushes away from the Sun, never toward it"
+      (is (neg? (first a)) "Sun is at +x, so the push is -x"))))
+
+(deftest radiation-pressure-scales-as-advertised
+  (let [r [7000.0 0.0 0.0]
+        at (fn [am cr] (mag (srp/acceleration r sun-at am cr)))]
+    (is (close? (* 2.0 (at 0.01 1.3)) (at 0.02 1.3) 1e-18) "linear in area over mass")
+    (is (close? (* 2.0 (at 0.02 1.0)) (at 0.02 2.0) 1e-18) "linear in reflectivity")
+    (testing "a mirror takes twice the momentum of a black body"
+      (is (close? 2.0 (/ (at 0.02 2.0) (at 0.02 1.0)) 1e-12)))))
+
+(deftest no-sunlight-no-pressure
+  (let [r [-7000.0 0.0 0.0]]
+    (is (close? 0.0 (srp/shadow r sun-at) 1e-12))
+    (is (close? 0.0 (mag (srp/acceleration r sun-at 0.02 1.3)) 1e-30)
+        "eclipsed satellites feel nothing, which is what makes the force periodic")))
