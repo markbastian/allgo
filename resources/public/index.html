@@ -7,15 +7,24 @@
     <title>Procedurals</title>
 </head>
 <body>
-<div id="app">
-    <h2>Figwheel template</h2>
-    <p>Checkout your developer console.</p>
-</div>
-<p><a href="terrain.html">Fractal Terrain (WebGL)</a></p>
-<div id="delaunay">
-    <h2>Delaunay / Voronoi</h2>
-</div>
+<header class="page-header">
+    <h1>Procedurals</h1>
+    <p>A playground of procedural generation techniques.</p>
+</header>
+<main class="demo-grid">
+    <section class="demo-card">
+        <h2>Cellular Caves</h2>
+        <div id="app"></div>
+    </section>
+    <section class="demo-card">
+        <h2>Delaunay / Voronoi</h2>
+        <div id="delaunay"></div>
+    </section>
+    <section class="demo-card">
+        <h2>Fractal Terrain (WebGL)</h2>
+        <div id="terrain" class="demo-viewport"></div>
+    </section>
+</main>
 <script src="js/compiled/procedurals.js" type="text/javascript"></script>
-<!--<script type="text/javascript">tetris.core.launch_tetris("app");</script>-->
 </body>
 </html>
