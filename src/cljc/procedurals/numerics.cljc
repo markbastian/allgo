@@ -69,3 +69,35 @@
      (let [d2 (reduce + (map * r r))
            d3 (* d2 (Math/sqrt d2))]
        (core/v* r (- (/ mu d3)))))))
+
+;; Kepler motion has conserved quantities, and watching them decay is a
+;; sharper test of an integrator than watching the position: a trajectory
+;; can look perfectly elliptical while its energy walks steadily away.
+
+(defn specific-energy
+  "v^2/2 - mu/r. Constant on an exact orbit, and equal to -mu/(2a)."
+  [mu r v]
+  (- (* 0.5 (reduce + (map * v v)))
+     (/ mu (Math/sqrt (reduce + (map * r r))))))
+
+(defn angular-momentum
+  "r x v, conserved in any central field."
+  [[rx ry rz] [vx vy vz]]
+  [(- (* ry vz) (* rz vy))
+   (- (* rz vx) (* rx vz))
+   (- (* rx vy) (* ry vx))])
+
+(defn orbital-period
+  "2*pi*sqrt(a^3/mu)."
+  [mu a]
+  (* 2.0 Math/PI (Math/sqrt (/ (* a a a) mu))))
+
+(defn periapsis-state
+  "Position and velocity at closest approach of an ellipse of semi-major
+  axis `a` and eccentricity `e`, in the xy plane. Starting at periapsis puts
+  the fastest, most sharply curving part of the orbit first, which is where
+  a fixed step is most exposed."
+  [mu a e]
+  (let [rp (* a (- 1.0 e))
+        vp (Math/sqrt (/ (* mu (+ 1.0 e)) rp))]
+    [[rp 0.0 0.0] [0.0 vp 0.0]]))

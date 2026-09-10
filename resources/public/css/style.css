@@ -239,6 +239,16 @@ html, body {
   white-space: pre;
 }
 
+.numeric-chart {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  pointer-events: none;
+}
+
 .demo-controls {
   margin-top: 0.75rem;
   display: flex;

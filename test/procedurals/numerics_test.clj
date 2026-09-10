@@ -1,5 +1,6 @@
 (ns procedurals.numerics-test
-  (:require [procedurals.numerics.core :as core]
+  (:require [procedurals.numerics :as num]
+            [procedurals.numerics.core :as core]
             [procedurals.numerics.extrapolation :as ex]
             [procedurals.numerics.multistep :as ms]
             [procedurals.numerics.rk :as rk]
@@ -304,3 +305,64 @@
     (let [s (core/step-until (ex/integrator (ex/gbs 4) exponential 0.0 [1.0] 0.25
                                             {:adaptive? true :tol-abs tol :tol-rel tol}) 1.0)]
       (is (< (abs (- (first (:y s)) target)) (* 500 tol)) (str "tol " tol)))))
+
+;; ------------------------------------------------------------------ Kepler
+
+(def ^:private mu 1.0)
+
+(defn- energy-error [a e steps-per-orbit orbits method]
+  (let [[r0 v0] (num/periapsis-state mu a e)
+        period  (num/orbital-period mu a)
+        e0      (num/specific-energy mu r0 v0)
+        s       (core/step-until (num/integrator-2 method (num/kepler mu) 0.0 r0 v0
+                                                   (/ period steps-per-orbit))
+                                 (* orbits period))]
+    (abs (/ (- (num/specific-energy mu (:y s) (:dy s)) e0) e0))))
+
+(deftest orbital-elements-agree-with-the-closed-forms
+  (doseq [a [0.5 1.0 3.0], e [0.0 0.3 0.7]]
+    (let [[r v] (num/periapsis-state mu a e)]
+      (is (< (abs (- (num/specific-energy mu r v) (/ (- mu) (* 2.0 a)))) 1e-12)
+          "specific energy is -mu/2a")
+      (is (< (abs (- (Math/sqrt (reduce + (map * (num/angular-momentum r v)
+                                               (num/angular-momentum r v))))
+                     (Math/sqrt (* mu a (- 1.0 (* e e))))))
+             1e-12)
+          "angular momentum is sqrt(mu a (1-e^2))"))))
+
+(deftest an-orbit-closes-on-itself
+  (doseq [e [0.0 0.3 0.7]]
+    (let [[r0 v0] (num/periapsis-state mu 1.0 e)
+          period  (num/orbital-period mu 1.0)
+          s       (core/step-until (num/integrator-2 rkn/rkn4 (num/kepler mu) 0.0 r0 v0
+                                                     (/ period 2000))
+                                   period)
+          drift   (Math/sqrt (reduce + (map (fn [x y] (let [d (- x y)] (* d d))) (:y s) r0)))]
+      (is (< drift 1e-5) (str "e=" e " returned " drift " from where it started")))))
+
+(deftest conserved-quantities-are-conserved
+  (doseq [method num/second-order]
+    (testing (:name method)
+      (is (< (energy-error 1.0 0.3 400 1 method) 1e-4)
+          (str (:name method) " loses energy over a single orbit")))))
+
+(deftest symplectic-methods-hold-their-energy-over-long-runs
+  ;; The reason a second-order method can beat a fourth over a long
+  ;; propagation, and the whole argument for Verlet in orbit work: its
+  ;; energy error oscillates within a bound instead of accumulating, while
+  ;; a more accurate but non-symplectic method walks steadily away.
+  (let [drift (fn [method orbits] (energy-error 1.0 0.5 400 orbits method))]
+    (testing "Verlet's energy error stops growing"
+      (let [at-100 (drift rkn/verlet 100)
+            at-400 (drift rkn/verlet 400)]
+        (is (< at-400 (* 1.5 at-100))
+            (str "bounded: " at-100 " at 100 orbits, " at-400 " at 400"))))
+    (testing "RKN4 is far more accurate early but drifts linearly"
+      (let [at-10  (drift rkn/rkn4 10)
+            at-100 (drift rkn/rkn4 100)
+            at-400 (drift rkn/rkn4 400)]
+        (is (< at-10 (drift rkn/verlet 10)) "more accurate over ten orbits")
+        (is (> (/ at-100 at-10) 5.0) "and grows roughly in proportion to time")
+        (is (> (/ at-400 at-100) 2.0))))
+    (testing "so over four hundred orbits the gap has closed to under two decades"
+      (is (< (/ (drift rkn/verlet 400) (drift rkn/rkn4 400)) 200.0)))))
