@@ -627,3 +627,78 @@
     (is (= 6 (count out)))
     (is (= v (subvec (vec out) 0 3)) "first three are the velocity, unchanged")
     (is (< 8.0 (* 1000.0 (mag (subvec (vec out) 3 6))) 9.5) "last three are gravity")))
+
+;; -------------------------------------------------------------- time scales
+
+(deftest leap-seconds-match-the-record
+  (doseq [[y m d want] [[1971 6 1 0]    ; before UTC stepped at all
+                        [1972 1 1 10] [1972 7 1 11] [1980 1 1 19]
+                        [1999 1 1 32] [2000 1 1 32] [2005 12 31 32]
+                        [2006 1 1 33] [2012 7 1 35] [2015 7 1 36]
+                        [2017 1 1 37] [2026 9 10 37]]]
+    (is (= want (t/tai-utc (t/calendar->mjd y m d)))
+        (str y "-" m "-" d))))
+
+(deftest leap-seconds-only-ever-increase
+  ;; They are inserted to keep UTC tracking a slowing Earth; a negative leap
+  ;; second is permitted in principle and has never been needed.
+  (is (apply < (map second t/leap-seconds)))
+  (is (apply < (map first t/leap-seconds)) "and the table is in date order"))
+
+(deftest the-scales-differ-by-what-they-should
+  (let [utc (t/calendar->mjd 2000 1 1 12.0)
+        secs (fn [a b] (* 86400.0 (- a b)))]
+    (is (close? 32.0 (secs (t/utc->tai utc) utc) 1e-6) "TAI - UTC is the leap count")
+    (is (close? 64.184 (secs (t/utc->tt utc) utc) 1e-6) "TT - UTC adds 32.184")
+    (is (close? 32.184 (secs (t/tai->tt (t/utc->tai utc)) (t/utc->tai utc)) 1e-6)
+        "TT - TAI is fixed by definition, not measured")
+    (is (close? 13.0 (secs (t/utc->gps utc) utc) 1e-6)
+        "GPS - UTC was 13 s in 2000; it is 18 today, because GPS ignores leaps")))
+
+(deftest gps-time-drifts-from-utc-but-never-from-tai
+  (doseq [[y m d] [[1990 1 1] [2000 1 1] [2010 1 1] [2020 1 1]]]
+    (let [utc (t/calendar->mjd y m d)
+          gps-tai (* 86400.0 (- (t/utc->gps utc) (t/utc->tai utc)))]
+      (is (close? -19.0 gps-tai 1e-6)
+          (str "constant offset from atomic time at " y)))))
+
+(deftest tt-and-utc-round-trip
+  (doseq [[y m d h] [[1985 3 4 0.0] [2000 1 1 12.0] [2015 8 20 6.5] [2026 1 1 18.25]]]
+    (let [utc (t/calendar->mjd y m d h)]
+      (is (close? utc (t/tt->utc (t/utc->tt utc)) 1e-12) (str y "-" m "-" d)))))
+
+(deftest tdb-stays-within-two-milliseconds-of-tt
+  ;; A relativistic effect: a clock on Earth beats at a varying rate against
+  ;; one at the barycentre, because Earth's distance from the Sun and its
+  ;; speed both vary annually. It cannot accumulate -- it is periodic.
+  (let [diffs (map (fn [d] (* 86400.0 1000.0
+                              (- (t/tt->tdb (+ c/mjd-J2000 d)) (+ c/mjd-J2000 d))))
+                   (range 0 400 3))]
+    (is (< (apply max (map abs diffs)) 1.8) "bounded below two milliseconds")
+    (is (> (apply max diffs) 1.5) "and it really does swing that far")
+    (is (< (apply min diffs) -1.5))
+    (testing "the swing is annual, so a year apart the offsets nearly agree"
+      (is (close? (* 86400.0 1000.0 (- (t/tt->tdb c/mjd-J2000) c/mjd-J2000))
+                  (* 86400.0 1000.0 (- (t/tt->tdb (+ c/mjd-J2000 365.25))
+                                       (+ c/mjd-J2000 365.25)))
+                  0.05)))))
+
+(deftest a-single-double-mjd-resolves-about-a-microsecond
+  ;; Worth knowing where the floor is: every conversion above adds and
+  ;; subtracts seconds from a number of order 6e4 days.
+  (let [mjd 59000.0
+        back (fn [s] (* 86400.0 (- (+ mjd (/ s 86400.0)) mjd)))]
+    (is (close? 1.0 (back 1.0) 1e-6) "a second survives")
+    (is (< (abs (- 1e-3 (back 1e-3))) 1e-6) "a millisecond survives")
+    (is (> (abs (- 1e-9 (back 1e-9))) 1e-11) "a nanosecond does not")))
+
+(deftest ut1-defaults-to-utc-but-accepts-the-observed-offset
+  (let [utc (t/calendar->mjd 2020 6 1)]
+    (is (= utc (t/utc->ut1 utc)) "no offset given, no offset applied")
+    ;; Only to a microsecond: an MJD near 59000 held in one double resolves
+    ;; about 1e-11 of a day. Ample for orbit work at the metre level, and the
+    ;; reason precise systems carry a two-part Julian date instead.
+    (is (close? 0.3 (* 86400.0 (- (t/utc->ut1 utc 0.3) utc)) 1e-5))
+    (testing "and the offset is always under a second, by construction"
+      ;; leap seconds exist precisely to keep |UT1 - UTC| below 0.9 s
+      (is (< (abs (* 86400.0 (- (t/utc->ut1 utc 0.9) utc))) 1.0)))))
