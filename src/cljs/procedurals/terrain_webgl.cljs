@@ -106,6 +106,7 @@
         camera   (THREE/PerspectiveCamera. 55 (/ (.-clientWidth container) (.-clientHeight container)) 1 100000)
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         {:keys [span mesh]} (build-mesh config)
+        running? (atom false)
         state    (atom {:terrain-mesh mesh :wireframe? false :generator (:generator config) :hovering? false})]
     (set! (.-background scene) (THREE/Color. 0x0f0f19))
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
@@ -131,14 +132,17 @@
               (on-key-down [^js e]
                 (when (and (:hovering? @state) (= (.-key e) "r")) (regenerate!)))
               (on-resize []
+                ;; A hidden card measures 0x0, which would make the aspect NaN.
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
-                  (set! (.-aspect camera) (/ w h))
-                  (.updateProjectionMatrix camera)
-                  (.setSize renderer w h)))
+                  (when (and (pos? w) (pos? h))
+                    (set! (.-aspect camera) (/ w h))
+                    (.updateProjectionMatrix camera)
+                    (.setSize renderer w h))))
               (animate []
-                (js/requestAnimationFrame animate)
-                (.update controls)
-                (.render renderer scene camera))]
+                (when @running?
+                  (js/requestAnimationFrame animate)
+                  (.update controls)
+                  (.render renderer scene camera)))]
         (.addEventListener container "mouseenter" #(swap! state assoc :hovering? true))
         (.addEventListener container "mouseleave" #(swap! state assoc :hovering? false))
         (.addEventListener js/window "keydown" on-key-down)
@@ -154,10 +158,21 @@
                            (swap! state assoc :wireframe? v)
                            (apply-wireframe! (:terrain-mesh @state)))))
           (.add gui gui-state "regenerate"))
-        (animate)))))
+        {:start (fn [] (when-not @running? (reset! running? true) (on-resize) (animate)))
+         :stop  (fn [] (reset! running? false))}))))
 
-(defn main []
-  (when-let [container (js/document.getElementById "terrain")]
-    (init! container config)))
+(defonce ^:private controller (atom nil))
 
-(main)
+(defn start!
+  "Build the scene on first selection, then resume the render loop."
+  []
+  (when-let [c (or @controller
+                   (when-let [container (js/document.getElementById "terrain")]
+                     (reset! controller (init! container config))))]
+    ((:start c))))
+
+(defn stop!
+  "Halt the render loop. The WebGL context is kept -- it costs nothing idle,
+  and rebuilding it would throw away the camera the user has framed."
+  []
+  (when-let [c @controller] ((:stop c))))

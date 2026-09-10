@@ -80,6 +80,7 @@
                                        capacity)
         scratch  (THREE/Object3D.)
         color    (THREE/Color.)
+        running? (atom false)
         state    (atom {:flock (boids/flock (.-boids controls) world (params))})]
     (set! (.-background scene) (THREE/Color. 0x05070d))
     (.setPixelRatio renderer (or js/window.devicePixelRatio 1))
@@ -99,20 +100,23 @@
       (letfn [(reset-flock! []
                 (swap! state assoc :flock (boids/flock (.-boids controls) world (params))))
               (on-resize []
+                ;; A hidden card measures 0x0, which would make the aspect NaN.
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
-                  (set! (.-aspect camera) (/ w h))
-                  (.updateProjectionMatrix camera)
-                  (.setSize renderer w h)))
+                  (when (and (pos? w) (pos? h))
+                    (set! (.-aspect camera) (/ w h))
+                    (.updateProjectionMatrix camera)
+                    (.setSize renderer w h))))
               (animate []
-                (js/requestAnimationFrame animate)
-                (let [p     (params)
-                      flock (-> (:flock @state)
-                                (resize-to-flock (.-boids controls) (:max-speed p))
-                                (boids/step world p))]
-                  (swap! state assoc :flock flock)
-                  (write-instances! mesh scratch color flock world))
-                (.update orbit)
-                (.render renderer scene camera))]
+                (when @running?
+                  (js/requestAnimationFrame animate)
+                  (let [p     (params)
+                        flock (-> (:flock @state)
+                                  (resize-to-flock (.-boids controls) (:max-speed p))
+                                  (boids/step world p))]
+                    (swap! state assoc :flock flock)
+                    (write-instances! mesh scratch color flock world))
+                  (.update orbit)
+                  (.render renderer scene camera)))]
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (let [gui (GUI. #js {:container container})]
           (.add gui controls "boids" 10 capacity 10)
@@ -123,10 +127,16 @@
           (.add gui controls "personalSpace" 2 30 1)
           (.add gui controls "speed" 0.2 2.5 0.1)
           (.add gui #js {:reset reset-flock!} "reset"))
-        (animate)))))
+        {:start (fn [] (when-not @running? (reset! running? true) (on-resize) (animate)))
+         :stop  (fn [] (reset! running? false))}))))
 
-(defn main []
-  (when-let [container (js/document.getElementById "boids-3d")]
-    (init! container)))
+(defonce ^:private controller (atom nil))
 
-(main)
+(defn start! []
+  (when-let [c (or @controller
+                   (when-let [container (js/document.getElementById "boids-3d")]
+                     (reset! controller (init! container))))]
+    ((:start c))))
+
+(defn stop! []
+  (when-let [c @controller] ((:stop c))))

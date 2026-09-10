@@ -10,26 +10,32 @@
 <header class="page-header">
     <h1>Procedurals</h1>
     <p>A playground of procedural generation techniques.</p>
+    <div id="demo-picker"></div>
 </header>
 <main class="demo-grid">
-    <section class="demo-card">
-        <h2>Cellular Caves</h2>
+    <section class="demo-card" data-demo="caves"
+             data-label="Cellular Caves"
+             data-blurb="Cellular automata carving connected caverns">
         <div id="app"></div>
     </section>
-    <section class="demo-card">
-        <h2>Delaunay / Voronoi</h2>
+    <section class="demo-card" data-demo="delaunay"
+             data-label="Delaunay / Voronoi"
+             data-blurb="Bowyer&ndash;Watson triangulation and its dual">
         <div id="delaunay"></div>
     </section>
-    <section class="demo-card">
-        <h2>Fractal Terrain (WebGL)</h2>
+    <section class="demo-card" data-demo="terrain"
+             data-label="Fractal Terrain"
+             data-blurb="Diamond-square and TIN heightmaps in WebGL">
         <div id="terrain" class="demo-viewport"></div>
     </section>
-    <section class="demo-card">
-        <h2>Flocking (Boids, 2D)</h2>
+    <section class="demo-card" data-demo="boids"
+             data-label="Flocking &mdash; 2D"
+             data-blurb="Reynolds' boids on a canvas">
         <div id="boids" class="demo-viewport"></div>
     </section>
-    <section class="demo-card">
-        <h2>Flocking (Boids, 3D)</h2>
+    <section class="demo-card" data-demo="boids-3d"
+             data-label="Flocking &mdash; 3D"
+             data-blurb="The same rules in three dimensions">
         <div id="boids-3d" class="demo-viewport"></div>
     </section>
 </main>

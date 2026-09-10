@@ -59,6 +59,7 @@
 (defn init! [^js container]
   (let [canvas (js/document.createElement "canvas")
         ctx    (.getContext canvas "2d")
+        running? (atom false)
         state  (atom {:bounds [0 0] :flock []})]
     (set! (.-style canvas) "display:block;border-radius:8px")
     (.appendChild container canvas)
@@ -66,25 +67,27 @@
               (let [dpr (or js/window.devicePixelRatio 1)
                     w   (.-clientWidth container)
                     h   (.-clientHeight container)]
-                (set! (.-width canvas) (* w dpr))
-                (set! (.-height canvas) (* h dpr))
-                (set! (.-width (.-style canvas)) (str w "px"))
-                (set! (.-height (.-style canvas)) (str h "px"))
-                (.setTransform ctx dpr 0 0 dpr 0 0)
-                (set! (.-fillStyle ctx) background)
-                (.fillRect ctx 0 0 w h)
-                (swap! state assoc :bounds [w h])))
+                (when (and (pos? w) (pos? h))
+                  (set! (.-width canvas) (* w dpr))
+                  (set! (.-height canvas) (* h dpr))
+                  (set! (.-width (.-style canvas)) (str w "px"))
+                  (set! (.-height (.-style canvas)) (str h "px"))
+                  (.setTransform ctx dpr 0 0 dpr 0 0)
+                  (set! (.-fillStyle ctx) background)
+                  (.fillRect ctx 0 0 w h)
+                  (swap! state assoc :bounds [w h]))))
             (reset-flock! []
               (swap! state assoc :flock (boids/flock (.-boids controls) (:bounds @state) (params))))
             (tick []
-              (js/requestAnimationFrame tick)
-              (let [{:keys [bounds]} @state
-                    p     (params)
-                    flock (-> (:flock @state)
-                              (resize-to-flock (.-boids controls) bounds (:max-speed p))
-                              (boids/step bounds p))]
-                (swap! state assoc :flock flock)
-                (draw! ctx flock bounds)))]
+              (when @running?
+                (js/requestAnimationFrame tick)
+                (let [{:keys [bounds]} @state
+                      p     (params)
+                      flock (-> (:flock @state)
+                                (resize-to-flock (.-boids controls) bounds (:max-speed p))
+                                (boids/step bounds p))]
+                  (swap! state assoc :flock flock)
+                  (draw! ctx flock bounds))))]
       (.observe (js/ResizeObserver. resize!) container)
       (resize!)
       (reset-flock!)
@@ -98,10 +101,16 @@
         (.add gui controls "speed" 0.5 6 0.1)
         (.add gui controls "trails")
         (.add gui #js {:reset reset-flock!} "reset"))
-      (tick))))
+      {:start (fn [] (when-not @running? (reset! running? true) (resize!) (tick)))
+       :stop  (fn [] (reset! running? false))})))
 
-(defn main []
-  (when-let [container (js/document.getElementById "boids")]
-    (init! container)))
+(defonce ^:private controller (atom nil))
 
-(main)
+(defn start! []
+  (when-let [c (or @controller
+                   (when-let [container (js/document.getElementById "boids")]
+                     (reset! controller (init! container))))]
+    ((:start c))))
+
+(defn stop! []
+  (when-let [c @controller] ((:stop c))))
