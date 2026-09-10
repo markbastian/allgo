@@ -60,4 +60,13 @@
     :height-scale 200
     :cell-scale   8
     :width-px     900
+    :height-px    700})
+
+  (launch-sketch
+   {:generator    :tin
+    :tin-points   500
+    :dim          129
+    :height-scale 200
+    :cell-scale   8
+    :width-px     900
     :height-px    700}))

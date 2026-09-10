@@ -1,6 +1,7 @@
 (ns procedurals.terrain-shape
   (:require [procedurals.mesh :as mesh]
             [procedurals.terrain :as terrain]
+            [procedurals.tin :as tin]
             [quil.applet :as applet]
             [quil.core :as q])
   (:import [processing.core PApplet PConstants PShape]))
@@ -36,13 +37,26 @@
     (.endShape sh)
     sh))
 
-(defn build-terrain [{:keys [iterations width height-scale cell-scale noise-scale] :or {noise-scale 180.0}}]
+(defn- diamond-square-grid [{:keys [iterations width]}]
   (let [grid-data (terrain/generate {:width width :iterations iterations
-                                     :corners [0.0 (rand) (rand) (rand)]})
-        grid       (terrain/cells->grid grid-data)
-        dim        (:dim grid-data)
-        hs         (terrain/heights grid-data)
-        lo         (apply min hs)
-        hi         (apply max hs)]
+                                     :corners [0.0 (rand) (rand) (rand)]})]
+    {:grid (terrain/cells->grid grid-data) :dim (:dim grid-data)}))
+
+(defn- tin-grid [{:keys [tin-points dim smooth-passes] :or {tin-points 500 dim 129 smooth-passes 3}}]
+  {:grid (-> (tin/generate {:n tin-points :size 1.0}) (tin/sample-grid dim) (tin/smooth-grid smooth-passes))
+   :dim  dim})
+
+(defn build-terrain
+  "Builds a heightmap via `:generator` (`:diamond-square`, the default
+  regular-grid midpoint-displacement fractal, or `:tin`, a Delaunay-
+  triangulated irregular network per `procedurals.tin`) and bakes it into
+  a PShape."
+  [{:keys [generator height-scale cell-scale noise-scale] :or {generator :diamond-square noise-scale 180.0} :as config}]
+  (let [{:keys [grid dim]} (case generator
+                             :diamond-square (diamond-square-grid config)
+                             :tin (tin-grid config))
+        hs (flatten grid)
+        lo (apply min hs)
+        hi (apply max hs)]
     {:dim dim
      :terrain-shape (build-mesh-shape grid dim lo hi cell-scale height-scale noise-scale)}))
