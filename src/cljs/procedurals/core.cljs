@@ -1,5 +1,6 @@
 (ns procedurals.core
   (:require [procedurals.cave :as c]
+            [procedurals.delaunay-viewer :as pdv]
             [procedurals.dungeon-generator :as pdg]
             [reagent.core :refer [atom]]
             [reagent.dom.client :as rdom]))
@@ -15,18 +16,24 @@
   (assoc m :caves (gen-grid m)))
 
 (defonce state (atom (update-grid {:w 32 :h 32 :i 18 :p 45})))
+(defonce delaunay-state (atom (pdv/init-state)))
 
 (add-watch state :grid-watch (fn [_ _ o n]
                                (when (not= o n)
                                  (update-grid n))))
 
-(defonce root
-  (when-let [app-context (. js/document (getElementById "app"))]
-    (rdom/create-root app-context)))
+(defn- mount-root [id]
+  (when-let [el (. js/document (getElementById id))]
+    (rdom/create-root el)))
+
+(defonce root (mount-root "app"))
+(defonce delaunay-root (mount-root "delaunay"))
 
 (defn render! []
   (when root
-    (rdom/render root [pdg/render state])))
+    (rdom/render root [pdg/render state]))
+  (when delaunay-root
+    (rdom/render delaunay-root [pdv/render delaunay-state])))
 
 (render!)
 
