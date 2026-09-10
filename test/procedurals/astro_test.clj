@@ -5,6 +5,7 @@
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
+            [procedurals.astro.tides :as tid]
             [procedurals.astro.time :as t]
             [clojure.test :refer [deftest is testing]]))
 
@@ -463,3 +464,65 @@
         a2 (mag (rel/acceleration r v (* 2.0 c/GM-earth)))]
     (is (> (/ a2 a1) 3.0) "GM appears in the prefactor and again in 4GM/r")
     (is (< (/ a2 a1) 5.0))))
+
+;; -------------------------------------------------------------------- tides
+
+(def ^:private moon-at [384400.0 0.0 0.0])
+
+(deftest the-induced-potential-is-k2-times-the-raising-potential
+  ;; The definition of a Love number, and the sharpest check available here:
+  ;; it pins the normalisation, the Legendre functions, the k2/5 factor and
+  ;; every sign convention at once. Anything wrong anywhere moves the ratio
+  ;; off one.
+  (let [corr  (tid/corrections [[c/GM-moon moon-at]])
+        ;; a field of the corrections alone, with no central term
+        field {:GM c/GM-earth :R c/R-earth :normalised? true
+               :C (assoc (:C corr) [0 0] 0.0) :S (:S corr)}]
+    (doseq [[label p] [["sub-lunar" [c/R-earth 0.0 0.0]]
+                       ["quadrature" [0.0 c/R-earth 0.0]]
+                       ["pole" [0.0 0.0 c/R-earth]]
+                       ["oblique" (mapv #(* c/R-earth %) [0.6 0.48 0.64])]]]
+      (let [induced (geo/potential field p 2)
+            raising (* tid/k2 (tid/raising-potential c/GM-moon moon-at p))]
+        (is (close? 1.0 (/ induced raising) 1e-9) (str label))))))
+
+(deftest the-moon-raises-a-bigger-tide-than-the-sun
+  ;; Despite being 27 million times lighter. Tide-raising falls as the cube
+  ;; of distance while weight falls as the square, and the Moon is 400 times
+  ;; closer -- which is what leaves it ahead by rather more than two to one.
+  (let [m (get-in (tid/corrections [[c/GM-moon moon-at]]) [:C [2 0]])
+        s (get-in (tid/corrections [[c/GM-sun [c/AU 0.0 0.0]]]) [:C [2 0]])]
+    (is (close? 2.2 (/ m s) 0.1))))
+
+(deftest the-bulge-follows-the-body
+  ;; C22 and S22 must rotate as cos(2 lon) and sin(2 lon): twice, because a
+  ;; tide has two bulges, one facing the Moon and one away from it.
+  (doseq [[lon want-c want-s] [[0.0 1.0 0.0] [45.0 0.0 1.0] [90.0 -1.0 0.0]]]
+    (let [rad (* lon c/degrees)
+          m   [(* 384400.0 (Math/cos rad)) (* 384400.0 (Math/sin rad)) 0.0]
+          cr  (tid/corrections [[c/GM-moon m]])
+          amp (get-in (tid/corrections [[c/GM-moon moon-at]]) [:C [2 2]])]
+      (is (close? (* want-c amp) (get-in cr [:C [2 2]]) (* 1e-6 amp)) (str "C22 at " lon))
+      (is (close? (* want-s amp) (get-in cr [:S [2 2]]) (* 1e-6 amp)) (str "S22 at " lon)))))
+
+(deftest tidal-perturbation-is-the-expected-size
+  (let [j2    {:GM c/GM-earth :R c/R-earth :normalised? true
+               :C {[0 0] 1.0 [2 0] -4.841654e-4} :S {}}
+        tided (tid/apply-to j2 [[c/GM-moon moon-at] [c/GM-sun [c/AU 0.0 0.0]]])
+        r     [7000.0 0.0 0.0]
+        a     (* 1000.0 (mag (mapv - (geo/acceleration tided r 2) (geo/acceleration j2 r 2))))]
+    (testing "around 1e-7 m/s^2, this being the geometry that maximises it"
+      (is (< 1e-8 a 1e-6) (str a " m/s^2")))
+    (testing "and utterly dwarfed by the static field it perturbs"
+      (let [pm   (geo/point-mass c/GM-earth c/R-earth)
+            a-j2 (* 1000.0 (mag (mapv - (geo/acceleration j2 r 2) (geo/acceleration pm r 0))))]
+        (is (> (/ a-j2 a) 1e4))))))
+
+(deftest no-bodies-no-tide
+  (let [corr (tid/corrections [])]
+    (is (every? zero? (vals (:C corr))))
+    (is (every? zero? (vals (:S corr)))))
+  (testing "and applying an empty correction leaves a field alone"
+    (let [f (tid/apply-to geo/earth [])
+          r [7000.0 1000.0 2000.0]]
+      (is (close? 0.0 (mag (mapv - (geo/acceleration f r 4) (geo/acceleration geo/earth r 4))) 1e-30)))))
