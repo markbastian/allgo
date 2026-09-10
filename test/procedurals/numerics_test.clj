@@ -1,5 +1,6 @@
 (ns procedurals.numerics-test
   (:require [procedurals.numerics.core :as core]
+            [procedurals.numerics.extrapolation :as ex]
             [procedurals.numerics.multistep :as ms]
             [procedurals.numerics.rk :as rk]
             [procedurals.numerics.rkn :as rkn]
@@ -258,3 +259,48 @@
                    [0.05 0.025 0.0125])]
     (doseq [p (ratio-order errs)]
       (is (> p 4.4) (str "order-5 Adams observed " p)))))
+
+;; ---------------------------------------------------------- extrapolation
+
+(deftest modified-midpoint-is-second-order-on-its-own
+  ;; Before extrapolation it is a crude rule; the point is the shape of its
+  ;; error, not its accuracy.
+  (let [errs (mapv (fn [n] (abs (- (first (ex/modified-midpoint exponential 0.0 [1.0] 1.0 n)) target)))
+                   [8 16 32 64])]
+    (doseq [p (ratio-order errs)]
+      (is (< 1.7 p 2.3) (str "observed " p)))))
+
+(deftest extrapolation-reaches-twice-the-levels-in-order
+  ;; The payoff of an error expansion in even powers of h: each level buys
+  ;; two orders, not one.
+  (doseq [[levels expected] [[2 4] [3 6] [4 8]]]
+    (testing (str levels " levels")
+      (let [method (ex/gbs levels)
+            errs   (mapv (fn [h]
+                           (max 1e-16 (abs (- (first (:y (core/step-until
+                                                          (ex/integrator method exponential 0.0 [1.0] h) 1.0)))
+                                              target))))
+                         [0.5 0.25 0.125])]
+        (is (= expected (:order method)))
+        (doseq [p (ratio-order errs)]
+          (is (< (- expected 0.6) p (+ expected 0.6)) (str "observed " p)))))))
+
+(deftest extrapolation-beats-the-rule-it-is-built-from
+  ;; One macro-step across the whole interval, both spending 20 sub-steps.
+  (let [raw (abs (- (first (ex/modified-midpoint exponential 0.0 [1.0] 1.0 20)) target))
+        ext (abs (- (first (:y (core/step-until (ex/integrator (ex/gbs 4) exponential 0.0 [1.0] 1.0) 1.0))) target))]
+    (is (< ext (/ raw 100.0))
+        (str "extrapolated " ext " should be orders better than the raw midpoint " raw))))
+
+(deftest extrapolation-handles-a-system
+  (let [f (fn [_ [x v]] [v (- x)])
+        s (core/step-until (ex/integrator (ex/gbs 4) f 0.0 [1.0 0.0] 0.25) (* 2 Math/PI))
+        [x v] (:y s)]
+    (is (< (abs (- x 1.0)) 1e-9))
+    (is (< (abs v) 1e-9))))
+
+(deftest extrapolation-adapts-its-step
+  (doseq [tol [1e-8 1e-10]]
+    (let [s (core/step-until (ex/integrator (ex/gbs 4) exponential 0.0 [1.0] 0.25
+                                            {:adaptive? true :tol-abs tol :tol-rel tol}) 1.0)]
+      (is (< (abs (- (first (:y s)) target)) (* 500 tol)) (str "tol " tol)))))
