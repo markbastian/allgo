@@ -6,6 +6,7 @@
             [procedurals.astro.frames :as fr]
             [procedurals.astro.geodesy :as gd]
             [procedurals.astro.geopotential :as geo]
+            [procedurals.astro.kepler :as kep]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
             [procedurals.astro.tides :as tid]
@@ -1001,3 +1002,179 @@
     (is (close? 0.0 dr 1e-12) "no radial component")
     (is (close? 12.0 dt 1e-12) "all of it along track")
     (is (close? 0.0 dn 1e-12) "and none out of plane")))
+
+;; ------------------------------------------------------------ Kepler orbits
+
+(def ^:private mu-e c/GM-earth)
+
+(def ^:private orbit-cases
+  ;; Deliberately including every case where an element is undefined, since
+  ;; those are the ones a naive conversion returns NaN for.
+  [["typical LEO"     {:a 7000.0  :e 0.01 :i 0.9 :raan 1.2 :argp 2.3 :nu 0.7}]
+   ["eccentric"       {:a 26000.0 :e 0.7  :i 0.5 :raan 4.0 :argp 1.0 :nu 3.0}]
+   ["circular"        {:a 7000.0  :e 0.0  :i 0.9 :raan 1.2 :argp 0.0 :nu 0.7}]
+   ["equatorial"      {:a 42164.0 :e 0.01 :i 0.0 :raan 0.0 :argp 2.3 :nu 0.7}]
+   ["circ+equatorial" {:a 42164.0 :e 0.0  :i 0.0 :raan 0.0 :argp 0.0 :nu 2.0}]
+   ["retrograde"      {:a 7500.0  :e 0.05 :i 2.6 :raan 0.4 :argp 5.0 :nu 1.1}]
+   ["polar"           {:a 8000.0  :e 0.1  :i 1.5707963 :raan 0.9 :argp 0.2 :nu 4.5}]])
+
+(deftest elements-and-state-round-trip
+  (doseq [[label el] orbit-cases]
+    (testing label
+      (let [[r v]   (kep/elements->state mu-e el)
+            back    (kep/state->elements mu-e r v)
+            [r2 v2] (kep/elements->state mu-e back)]
+        (is (< (mag (mapv - r r2)) 1e-9) "position")
+        (is (< (mag (mapv - v v2)) 1e-12) "velocity")
+        (is (close? (:a el) (:a back) 1e-6) "semi-major axis")
+        (is (close? (:e el) (:e back) 1e-12) "eccentricity")
+        (is (close? (:i el) (:i back) 1e-12) "inclination")))))
+
+(deftest degenerate-orbits-get-a-convention-not-a-nan
+  ;; A circular orbit has no periapsis and an equatorial one has no node.
+  ;; Both are real orbits; the elements fold the missing angle into the next
+  ;; one along rather than failing.
+  (doseq [[label el] orbit-cases]
+    (let [[r v] (kep/elements->state mu-e el)
+          back  (kep/state->elements mu-e r v)]
+      (doseq [[k x] back]
+        (is (or (= k :M) (and (== x x) (not= x ##Inf) (not= x ##-Inf)))
+            (str label " element " k " came out " x))))))
+
+(deftest keplers-equation-solves-to-machine-precision
+  ;; M = E - e sin E, checked by residual rather than against a table.
+  (doseq [e [0.0 0.1 0.5 0.9 0.99]]
+    (doseq [step (range 0 32)]
+      (let [M (* c/two-pi (/ step 32.0))
+            E (kep/kepler-equation M e)]
+        (is (< (abs (- (- E (* e (Math/sin E))) M)) 1e-12)
+            (str "e=" e " M=" M))))))
+
+(deftest anomalies-convert-both-ways
+  (doseq [e [0.0 0.2 0.6 0.95]
+          step (range 0 16)]
+    (let [nu (* c/two-pi (/ step 16.0))
+          E  (kep/true->eccentric nu e)
+          M  (kep/eccentric->mean E e)]
+      (is (close? nu (kep/eccentric->true E e) 1e-10) "true -> eccentric -> true")
+      (is (close? nu (kep/mean->true M e) 1e-9) "true -> mean -> true")
+      (testing "and they agree at the apsides, where all three coincide"
+        (when (zero? step)
+          (is (close? 0.0 E 1e-12))
+          (is (close? 0.0 M 1e-12)))))))
+
+(deftest keplers-third-law
+  (testing "period depends only on the semi-major axis, not the shape"
+    ;; Orbits of the same size but very different shape take exactly as
+    ;; long. Verified by actually propagating each one and finding it back
+    ;; where it started, not by comparing the formula to itself.
+    (let [T (kep/period mu-e 10000.0)]
+      (doseq [e [0.0 0.3 0.7 0.9]]
+        (let [[r0 v0] (kep/elements->state mu-e {:a 10000.0 :e e :i 0.4 :raan 0.2 :argp 0.3 :nu 0.0})
+              [r1 _]  (kep/propagate mu-e r0 v0 T)
+              ;; Relative, because the round trip loses precision as the
+              ;; orbit elongates: the half-angle conversions between true
+              ;; and eccentric anomaly are delicate near periapsis, where a
+              ;; high-eccentricity orbit sweeps fastest. A metre on a
+              ;; 10,000 km orbit is 1e-7 relative, and that is the floor.
+              err (/ (mag (mapv - r1 r0)) 10000.0)]
+          (is (< err 1e-7)
+              (str "e=" e " returned within " (* 1e5 err) " cm of its start"))))))
+  (testing "and T^2 scales as a^3"
+    (let [t1 (kep/period mu-e 7000.0)
+          t2 (kep/period mu-e 14000.0)]
+      (is (close? (Math/pow 2.0 1.5) (/ t2 t1) 1e-12))))
+  (testing "geostationary radius gives exactly one sidereal day"
+    ;; which is the definition of the orbit
+    (is (close? 86164.09 (kep/period mu-e 42164.17) 0.5))))
+
+(deftest vis-viva-agrees-with-the-state
+  (doseq [[label el] orbit-cases]
+    (let [[r v] (kep/elements->state mu-e el)]
+      (is (close? (mag v) (kep/vis-viva mu-e (mag r) (:a el)) 1e-9) label))))
+
+(deftest analytic-propagation-closes-the-orbit
+  (let [el {:a 12000.0 :e 0.3 :i 0.6 :raan 1.0 :argp 2.0 :nu 0.5}
+        [r0 v0] (kep/elements->state mu-e el)
+        T (kep/period mu-e 12000.0)]
+    (doseq [n [1 3 10]]
+      (let [[r v] (kep/propagate mu-e r0 v0 (* n T))]
+        (is (< (mag (mapv - r r0)) 1e-6) (str n " periods, position"))
+        (is (< (mag (mapv - v v0)) 1e-9) (str n " periods, velocity"))))))
+
+(deftest elements-are-constant-under-two-body-motion
+  ;; The property that makes them elements at all.
+  (let [el {:a 12000.0 :e 0.3 :i 0.6 :raan 1.0 :argp 2.0 :nu 0.5}
+        [r0 v0] (kep/elements->state mu-e el)
+        T (kep/period mu-e 12000.0)]
+    (doseq [frac [0.0 0.25 0.5 0.75 1.0 3.7]]
+      (let [[r v] (kep/propagate mu-e r0 v0 (* frac T))
+            e' (kep/state->elements mu-e r v)]
+        (doseq [k [:a :e :i :raan :argp]]
+          (is (close? (get el k) (get e' k) 1e-8) (str k " at " frac " periods")))))))
+
+(deftest analytic-and-numerical-propagation-agree
+  ;; Two wholly independent routes to the same answer: Kepler's equation on
+  ;; one side, an eighth of a million integration steps on the other.
+  (doseq [[label el] [["circular" {:a 7000.0 :e 0.0 :i 0.9 :raan 1.2 :argp 0.0 :nu 0.0}]
+                      ["moderate" {:a 12000.0 :e 0.3 :i 0.6 :raan 1.0 :argp 2.0 :nu 0.5}]
+                      ["eccentric" {:a 26000.0 :e 0.7 :i 0.5 :raan 4.0 :argp 1.0 :nu 0.0}]]]
+    (testing label
+      (let [[r0 v0] (kep/elements->state mu-e el)
+            T   (kep/period mu-e (:a el))
+            f   (fn [_ y] (let [r (subvec (vec y) 0 3) d (mag r)]
+                            (into (subvec (vec y) 3 6)
+                                  (mapv #(* (- (/ mu-e (* d d d))) %) r))))
+            num (:y (num/step-until
+                     (num/integrator (first (filter #(= "DOPRI5(4)" (:name %)) num/first-order))
+                                     f 0.0 (into r0 v0) 10.0 {:tol-abs 1e-13 :tol-rel 1e-13})
+                     (* 3.0 T)))
+            [ra _] (kep/propagate mu-e r0 v0 (* 3.0 T))]
+        (is (< (mag (mapv - ra (subvec (vec num) 0 3))) 1e-4)
+            "agreeing to well under a metre after three orbits")))))
+
+(deftest j2-moves-the-elements-the-way-theory-says
+  ;; Chapter 3 in the language of chapter 2. The whole value of elements is
+  ;; that a perturbation which looks like noise in a state vector reads as a
+  ;; steady drift in two angles and a wobble in the rest.
+  (let [el {:a 7000.0 :e 0.01 :i 0.9 :raan 1.0 :argp 2.0 :nu 0.5}
+        [r0 v0] (kep/elements->state mu-e el)
+        cfg {:degree 2 :sun? false :moon? false :field geo/earth}
+        after (fn [secs]
+                (let [y (:y (num/step-until
+                             (num/integrator (first (filter #(= "DOPRI5(4)" (:name %)) num/first-order))
+                                             (forces/first-order cfg c/mjd-J2000) 0.0 (into r0 v0) 10.0
+                                             {:tol-abs 1e-11 :tol-rel 1e-11}) secs))]
+                  (kep/state->elements mu-e (subvec (vec y) 0 3) (subvec (vec y) 3 6))))
+        d1 (after 86400.0)
+        d2 (after 172800.0)]
+    (testing "size, shape and tilt oscillate but do not march"
+      (is (< (abs (- (:a d1) (:a el))) 20.0) "semi-major axis stays put")
+      (is (< (abs (- (:e d1) (:e el))) 0.01) "so does eccentricity")
+      (is (< (abs (/ (- (:i d1) (:i el)) c/degrees)) 0.1) "and inclination"))
+    (testing "while the node regresses steadily, doubling in twice the time"
+      (let [r1 (/ (- (:raan d1) (:raan el)) c/degrees)
+            r2 (/ (- (:raan d2) (:raan el)) c/degrees)]
+        (is (neg? r1) "westward for a prograde orbit")
+        (is (close? 2.0 (/ r2 r1) 0.02) "linear in time, as a secular rate must be")
+        (testing "at the rate the closed form predicts"
+          (let [want (* -1.5 geo/J2 (let [q (/ c/R-earth 7000.0)] (* q q))
+                        (Math/sqrt (/ mu-e (* 7000.0 7000.0 7000.0)))
+                        (Math/cos 0.9) 86400.0 (/ 180.0 Math/PI))]
+            (is (close? 1.0 (/ r1 want) 0.02))))))))
+
+(deftest equinoctial-elements-have-no-singularity
+  ;; The reason they exist: a filter cannot estimate an angle that does not
+  ;; exist, and a circular orbit's argument of periapsis does not.
+  (doseq [[label el] orbit-cases]
+    (testing label
+      (let [back (kep/from-equinoctial (kep/equinoctial el))]
+        (is (close? (:a el) (:a back) 1e-9))
+        (is (close? (:e el) (:e back) 1e-12))
+        (is (close? (:i el) (:i back) 1e-12))
+        (doseq [[k x] (kep/equinoctial el)]
+          (is (and (== x x) (not= x ##Inf)) (str "equinoctial " k " is finite"))))))
+  (testing "and on a circular orbit the eccentricity vector simply vanishes"
+    (let [eq (kep/equinoctial {:a 7000.0 :e 0.0 :i 0.9 :raan 1.2 :argp 0.0 :nu 0.7})]
+      (is (close? 0.0 (:h eq) 1e-15))
+      (is (close? 0.0 (:k eq) 1e-15)))))
