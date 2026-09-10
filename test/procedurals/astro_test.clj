@@ -3,6 +3,7 @@
             [procedurals.astro.drag :as drag]
             [procedurals.astro.ephemeris :as eph]
             [procedurals.astro.geopotential :as geo]
+            [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
             [procedurals.astro.time :as t]
             [clojure.test :refer [deftest is testing]]))
@@ -409,3 +410,56 @@
   (doseq [h [1001 1200 5000]]
     (is (zero? (drag/density (at-altitude h) sun-at)) (str h " km"))
     (is (close? 0.0 (mag (drag/acceleration (at-altitude h) [0.0 7.0 0.0] sun-at 0.01 2.2)) 1e-30))))
+
+;; --------------------------------------------------------------- relativity
+
+(deftest mercury-perihelion-advance
+  ;; The observation general relativity was invented to explain, and the
+  ;; cleanest available check that the constant in front is right: get it
+  ;; wrong by any factor and this misses by that factor.
+  (let [a 5.7909e7, e 0.2056, period 87.969
+        per-rev (rel/perihelion-advance c/GM-sun a e)
+        per-century (/ (* per-rev (/ 36525.0 period)) c/arcsec)]
+    (is (close? 42.98 per-century 0.05)
+        (str "got " per-century " arcsec/century"))))
+
+(deftest relativistic-correction-is-the-expected-size
+  (doseq [[label alt lo hi] [["400 km"  6778.0  1e-8 3e-8]
+                             ["1000 km" 7378.0  1e-8 2e-8]
+                             ["GPS"    26560.0  1e-10 1e-9]
+                             ["GEO"    42164.0  1e-11 1e-10]]]
+    (let [v (Math/sqrt (/ c/GM-earth alt))
+          a (* 1000.0 (mag (rel/acceleration [alt 0.0 0.0] [0.0 v 0.0])))]
+      (is (< lo a hi) (str label ": " a " m/s^2")))))
+
+(deftest the-correction-weakens-with-distance
+  (let [at (fn [alt] (let [v (Math/sqrt (/ c/GM-earth alt))]
+                       (mag (rel/acceleration [alt 0.0 0.0] [0.0 v 0.0]))))]
+    (is (apply > (map at [6778.0 10000.0 26560.0 42164.0])))))
+
+(deftest the-cross-term-tracks-eccentricity
+  ;; r.v is zero only at apsis and on a circular orbit; away from those it
+  ;; grows with eccentricity, which is why the effect is strongest on an
+  ;; elongated orbit.
+  (let [circular (let [alt 10000.0 v (Math/sqrt (/ c/GM-earth alt))]
+                   (rel/acceleration [alt 0.0 0.0] [0.0 v 0.0]))]
+    (testing "on a circular orbit the correction is purely radial"
+      (is (close? 0.0 (second circular) 1e-30))
+      (is (close? 0.0 (nth circular 2) 1e-30)))
+    (testing "and points outward, weakening gravity rather than adding to it"
+      ;; On a circular orbit v^2 = GM/r, so the radial coefficient
+      ;; 4GM/r - v^2 comes to +3GM/r. The sign is not incidental: an
+      ;; inward correction would close the orbit faster than Newton and
+      ;; precess the perihelion backwards, which is the opposite of what
+      ;; Mercury does.
+      (is (pos? (first circular))))))
+
+(deftest the-correction-vanishes-as-light-gets-faster
+  ;; It is a 1/c^2 effect, so it must scale that way -- doubling GM at fixed
+  ;; geometry should roughly quadruple it, since GM enters twice.
+  (let [r [10000.0 0.0 0.0]
+        v [0.0 6.0 0.0]
+        a1 (mag (rel/acceleration r v c/GM-earth))
+        a2 (mag (rel/acceleration r v (* 2.0 c/GM-earth)))]
+    (is (> (/ a2 a1) 3.0) "GM appears in the prefactor and again in 4GM/r")
+    (is (< (/ a2 a1) 5.0))))
