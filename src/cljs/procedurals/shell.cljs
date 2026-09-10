@@ -8,6 +8,7 @@
   (:require [procedurals.boids-3d :as boids-3d]
             [procedurals.boids-viewer :as boids-2d]
             [procedurals.boids-voronoi :as boids-voronoi]
+            [procedurals.boids-voronoi-3d :as boids-voronoi-3d]
             [procedurals.terrain-webgl :as terrain]
             [reagent.core :as r]
             [reagent.dom.client :as rdom]))
@@ -18,6 +19,7 @@
   {"terrain"  {:start terrain/start!  :stop terrain/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
    "boids-voronoi" {:start boids-voronoi/start! :stop boids-voronoi/stop!}
+   "boids-voronoi-3d" {:start boids-voronoi-3d/start! :stop boids-voronoi-3d/stop!}
    "boids-3d" {:start boids-3d/start! :stop boids-3d/stop!}})
 
 (defn- demos
