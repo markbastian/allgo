@@ -81,6 +81,63 @@
   [points]
   (voronoi-cells (triangulate points)))
 
+(defn- sentinel-ring
+  "Eight sites ringing `[[x0 y0] [x1 y1]]` at one box-width's remove -- the
+  neighbours of the centre cell in a 3x3 tiling of the box."
+  [[[x0 y0] [x1 y1]]]
+  (let [w  (- x1 x0)
+        h  (- y1 y0)
+        xs [(- x0 w) (+ x0 (/ w 2.0)) (+ x1 w)]
+        ys [(- y0 h) (+ y0 (/ h 2.0)) (+ y1 h)]]
+    (for [x xs y ys
+          :when (not (and (== x (second xs)) (== y (second ys))))]
+      [x y])))
+
+(defn- intersect-x [[ax ay] [bx by] k]
+  (let [t (/ (- k ax) (- bx ax))] [k (+ ay (* t (- by ay)))]))
+
+(defn- intersect-y [[ax ay] [bx by] k]
+  (let [t (/ (- k ay) (- by ay))] [(+ ax (* t (- bx ax))) k]))
+
+(defn- clip-halfplane [ring inside? cut]
+  (->> (partition 2 1 (conj (vec ring) (first ring)))
+       (into [] (mapcat (fn [[a b]]
+                          (case [(boolean (inside? a)) (boolean (inside? b))]
+                            [true true]   [b]
+                            [true false]  [(cut a b)]
+                            [false true]  [(cut a b) b]
+                            []))))))
+
+(defn clip-polygon
+  "Sutherland-Hodgman clip of convex `poly` to the axis-aligned rectangle
+  `[[x0 y0] [x1 y1]]`, returning the clipped ring (empty when the polygon
+  lies wholly outside). Voronoi cells are always convex, so the result is
+  exact for them."
+  [poly [[x0 y0] [x1 y1]]]
+  (reduce (fn [ring [inside? cut]]
+            (if (seq ring) (clip-halfplane ring inside? cut) ring))
+          (vec poly)
+          [[#(>= (first %) x0)  #(intersect-x %1 %2 x0)]
+           [#(<= (first %) x1)  #(intersect-x %1 %2 x1)]
+           [#(>= (second %) y0) #(intersect-y %1 %2 y0)]
+           [#(<= (second %) y1) #(intersect-y %1 %2 y1)]]))
+
+(defn bounded-cells
+  "Voronoi cells for `points`, each a closed polygon clipped to `bounds`
+  (`[[x0 y0] [x1 y1]]`). Together they tile the rectangle exactly.
+
+  `voronoi-cells` leaves hull sites open, since their true regions really are
+  unbounded. Ringing the input with sentinel sites outside `bounds` makes
+  every real site interior, so each gets a finite cell; the sentinels are
+  dropped and what remains is clipped back to `bounds`."
+  [points bounds]
+  (let [ring (sentinel-ring bounds)]
+    (reduce-kv (fn [cells site cell]
+                 (let [clipped (clip-polygon cell bounds)]
+                   (cond-> cells (>= (count clipped) 3) (assoc site clipped))))
+               {}
+               (apply dissoc (voronoi-diagram (into (vec points) ring)) ring))))
+
 (comment
   (def pts (repeatedly 12 #(vector (rand-int 100) (rand-int 100))))
   (def tris (triangulate pts))

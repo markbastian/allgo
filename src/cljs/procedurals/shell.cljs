@@ -7,6 +7,7 @@
   0x0, so a renderer built while hidden would get a degenerate viewport."
   (:require [procedurals.boids-3d :as boids-3d]
             [procedurals.boids-viewer :as boids-2d]
+            [procedurals.boids-voronoi :as boids-voronoi]
             [procedurals.terrain-webgl :as terrain]
             [reagent.core :as r]
             [reagent.dom.client :as rdom]))
@@ -16,6 +17,7 @@
 (def ^:private lifecycles
   {"terrain"  {:start terrain/start!  :stop terrain/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
+   "boids-voronoi" {:start boids-voronoi/start! :stop boids-voronoi/stop!}
    "boids-3d" {:start boids-3d/start! :stop boids-3d/stop!}})
 
 (defn- demos
