@@ -1,5 +1,6 @@
 (ns procedurals.astro-test
   (:require [procedurals.astro.constants :as c]
+            [procedurals.astro.ephemeris :as eph]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.time :as t]
             [clojure.test :refer [deftest is testing]]))
@@ -156,3 +157,87 @@
   (is (close? 3.0 (geo/normalisation-factor 4 0) 1e-14))
   ;; N_22 = sqrt(2 * 5 * (0!/4!)) = sqrt(10/24)
   (is (close? (Math/sqrt (/ 10.0 24.0)) (geo/normalisation-factor 2 2) 1e-14)))
+
+;; ---------------------------------------------------------------- ephemeris
+
+(defn- declination [v] (/ (Math/asin (/ (nth v 2) (mag v))) c/degrees))
+
+(defn- ecliptic-longitude [v mjd]
+  (let [[x y z] v
+        eps (eph/obliquity mjd)]
+    (mod (/ (Math/atan2 (+ (* (Math/cos eps) y) (* (Math/sin eps) z)) x) c/degrees) 360.0)))
+
+(deftest the-sun-goes-where-the-sun-goes
+  (let [days (map #(+ c/mjd-J2000 %) (range 0 366))
+        rs   (map #(mag (eph/sun %)) days)]
+    (testing "Earth's orbit is slightly eccentric"
+      ;; perihelion 147.10e6 km in early January, aphelion 152.10e6 in July
+      (is (close? 147.10e6 (apply min rs) 5e3))
+      (is (close? 152.10e6 (apply max rs) 5e3)))
+    (testing "declination swings by the obliquity"
+      (is (close? 23.44 (apply max (map #(declination (eph/sun %)) days)) 0.02))
+      (is (close? -23.44 (apply min (map #(declination (eph/sun %)) days)) 0.02)))
+    (testing "and it is where it should be at J2000"
+      (is (close? 280.38 (ecliptic-longitude (eph/sun c/mjd-J2000) c/mjd-J2000) 0.05)))))
+
+(deftest the-moon-goes-where-the-moon-goes
+  (testing "the mean rate is one sidereal month"
+    (is (close? 27.32158 (/ 36525.0 1336.851344) 1e-3)))
+  (testing "distance spans perigee to apogee, sampled over four years"
+    ;; a shorter window misses the extremes: perigee distance itself varies
+    ;; through the month, so a single lunation does not reach 356400
+    (let [rs (map #(mag (eph/moon (+ c/mjd-J2000 (* 0.5 %)))) (range 0 2920))]
+      (is (close? 356400.0 (apply min rs) 1500.0))
+      (is (close? 406700.0 (apply max rs) 1500.0))))
+  (testing "declination reaches the major standstill over a nodal cycle"
+    ;; +/-28.6 deg, the obliquity plus the Moon's 5.15 deg inclination, and
+    ;; only reached when the nodes line up -- once every 18.6 years
+    (let [dl (map #(declination (eph/moon (+ c/mjd-J2000 (* 2.0 %)))) (range 0 3470))]
+      (is (< 28.0 (apply max dl) 29.5))
+      (is (< -29.5 (apply min dl) -28.0)))))
+
+(deftest third-body-perturbations-are-the-expected-size
+  (let [r [7000.0 0.0 0.0]
+        sun-a  (mag (eph/third-body c/GM-sun r (eph/sun c/mjd-J2000)))
+        moon-a (mag (eph/third-body c/GM-moon r (eph/moon c/mjd-J2000)))
+        earth  (/ c/GM-earth (* 7000.0 7000.0))]
+    (testing "both land in the published range for low Earth orbit"
+      (is (< 1e-10 sun-a 1e-9) (str "Sun " sun-a))
+      (is (< 1e-10 moon-a 3e-9) (str "Moon " moon-a)))
+    (testing "the Moon outweighs the Sun despite being negligible by mass"
+      ;; tidal forcing falls as the cube of distance, not the square
+      (is (> moon-a sun-a)))
+    (testing "and both are utterly dominated by the Earth"
+      (is (> (/ earth moon-a) 1e6)))))
+
+(deftest the-indirect-term-is-the-whole-effect
+  ;; The direct pull of the Sun on a satellite is enormous; almost all of it
+  ;; is shared with the Earth and so does not perturb the orbit at all.
+  (let [r [7000.0 0.0 0.0]
+        s (eph/sun c/mjd-J2000)
+        d (mapv - r s)
+        direct (/ c/GM-sun (reduce + (map * d d)))
+        pert   (mag (eph/third-body c/GM-sun r s))]
+    (is (> (/ direct pert) 1e4)
+        "the differenced perturbation is four orders below the raw pull")))
+
+(deftest the-perturbation-is-tidal-and-falls-as-the-cube
+  ;; The signature of a differenced force. A direct pull falls as 1/s^2, but
+  ;; what survives the difference is the *gradient* of that pull across the
+  ;; orbit, which falls as 1/s^3. Doubling the distance to the body should
+  ;; therefore cut the perturbation by eight, not four -- and it is why the
+  ;; Moon outweighs the Sun here despite being trivial by mass.
+  (let [r [7000.0 0.0 0.0]
+        at (fn [dist] (mag (eph/third-body c/GM-sun r [0.0 dist 0.0])))]
+    (doseq [d [1e7 2e7 4e7]]
+      (let [ratio (/ (at d) (at (* 2.0 d)))]
+        (is (< 7.5 ratio 8.5)
+            (str "doubling from " d " km changed it by " ratio "x, expected 8"))))))
+
+(deftest a-distant-body-perturbs-nothing
+  (let [r [7000.0 0.0 0.0]]
+    (is (> (mag (eph/third-body c/GM-sun r [0.0 1e8 0.0]))
+           (mag (eph/third-body c/GM-sun r [0.0 1e12 0.0])))
+        "further is weaker")
+    (is (< (mag (eph/third-body c/GM-sun r [0.0 1e14 0.0])) 1e-20)
+        "and far enough away is nothing at all")))
