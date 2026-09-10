@@ -2,11 +2,13 @@
   (:require [procedurals.astro.constants :as c]
             [procedurals.astro.drag :as drag]
             [procedurals.astro.ephemeris :as eph]
+            [procedurals.astro.forces :as forces]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
             [procedurals.astro.tides :as tid]
             [procedurals.astro.time :as t]
+            [procedurals.numerics :as num]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- close? [a b tol] (< (abs (double (- a b))) tol))
@@ -526,3 +528,102 @@
     (let [f (tid/apply-to geo/earth [])
           r [7000.0 1000.0 2000.0]]
       (is (close? 0.0 (mag (mapv - (geo/acceleration f r 4) (geo/acceleration geo/earth r 4))) 1e-30)))))
+
+;; ------------------------------------------------------- the assembled model
+
+(defn- cross [[a b cc] [d e g]]
+  [(- (* b g) (* cc e)) (- (* cc d) (* a g)) (- (* a e) (* b d))])
+
+(defn- raan
+  "Right ascension of the ascending node, from the angular momentum vector.
+  Undefined for an equatorial orbit, where there is no node to speak of."
+  [r v]
+  (let [[hx hy _] (cross r v)]
+    (Math/atan2 hx (- hy))))
+
+(def ^:private j2-only
+  {:degree 2 :sun? false :moon? false
+   :field {:GM c/GM-earth :R c/R-earth :normalised? true
+           :C {[0 0] 1.0 [2 0] (- (/ geo/J2 (Math/sqrt 5.0)))} :S {}}})
+
+(deftest j2-precesses-the-node-at-the-textbook-rate
+  ;; The end-to-end check that chapter 3 feeds chapter 4 correctly: integrate
+  ;; the force model and recover a closed-form perturbation result.
+  ;;
+  ;;   dOmega/dt = -3/2 J2 (R/p)^2 n cos i
+  (doseq [[label alt incl] [["ISS-like" 400.0 51.6] ["polar-ish" 800.0 98.6]]]
+    (testing label
+      (let [a-orb   (+ c/R-earth alt)
+            i       (* incl c/degrees)
+            [r0 v0] (forces/circular-state a-orb i)
+            n-mean  (Math/sqrt (/ c/GM-earth (* a-orb a-orb a-orb)))
+            want    (* -1.5 geo/J2 (let [q (/ c/R-earth a-orb)] (* q q)) n-mean (Math/cos i))
+            span    (* 2.0 86400.0)
+            end     (num/step-until
+                     (num/integrator (first (filter #(= "DOPRI5(4)" (:name %)) num/first-order))
+                                     (forces/first-order j2-only c/mjd-J2000)
+                                     0.0 (into r0 v0) 10.0 {:tol-abs 1e-10 :tol-rel 1e-10})
+                     span)
+            y       (:y end)
+            got     (/ (- (raan (subvec y 0 3) (subvec y 3 6)) (raan r0 v0)) span)]
+        (is (close? 1.0 (/ got want) 0.01)
+            (str label " precessed at " (* got 86400.0 (/ 1.0 c/degrees)) " deg/day, closed form "
+                 (* want 86400.0 (/ 1.0 c/degrees))))))))
+
+(deftest a-retrograde-orbit-precesses-forward-and-can-be-sun-synchronous
+  ;; cos(i) changes sign past 90 degrees, so the node drifts east instead of
+  ;; west. At 98.6 degrees and 800 km the rate matches the Earth's own motion
+  ;; about the Sun, which is what keeps such an orbit at a fixed local time.
+  (let [a-orb (+ c/R-earth 800.0)
+        i     (* 98.6 c/degrees)
+        n-mean (Math/sqrt (/ c/GM-earth (* a-orb a-orb a-orb)))
+        rate  (* -1.5 geo/J2 (let [q (/ c/R-earth a-orb)] (* q q)) n-mean (Math/cos i))
+        deg-per-day (* rate 86400.0 (/ 1.0 c/degrees))]
+    (is (pos? deg-per-day) "eastward, unlike a prograde orbit")
+    (is (close? (/ 360.0 365.25) deg-per-day 0.02)
+        (str "sun-synchronous needs " (/ 360.0 365.25) " deg/day, got " deg-per-day))))
+
+(deftest the-perturbation-budget-has-the-expected-hierarchy
+  (let [cfg   {:degree 8 :sun? true :moon? true :relativity? true
+               :srp {:area-to-mass 0.02 :cr 1.3} :drag {:area-to-mass 0.01 :cd 2.2}}
+        [r v] (forces/circular-state (+ c/R-earth 400.0) (* 51.6 c/degrees))
+        b     (forces/breakdown cfg c/mjd-J2000 r v)
+        m     (fn [k] (* 1000.0 (mag (get b k))))]
+    (is (close? 8.7 (m :two-body) 0.2) "central term near 8.7 m/s^2 in low orbit")
+    (is (> (m :two-body) (* 100 (m :harmonics))) "J2 is a small correction, not a rival")
+    (is (> (m :harmonics) (* 100 (m :drag))))
+    (is (> (m :moon) (m :sun)) "the Moon raises the larger tide")
+    (is (> (m :srp) (m :relativity)))
+    (testing "each lands in its published decade"
+      (is (< 1e-3 (m :harmonics) 1e-1))
+      (is (< 1e-7 (m :drag) 1e-4))
+      (is (< 1e-7 (m :moon) 1e-5))
+      (is (< 1e-8 (m :srp) 1e-6))
+      (is (< 1e-9 (m :relativity) 1e-7)))))
+
+(deftest earth-fixed-and-inertial-round-trip
+  (doseq [r [[7000.0 0.0 0.0] [3000.0 -5000.0 2000.0]]
+          gst [0.0 1.0 3.5 6.0]]
+    (is (< (mag (mapv - r (forces/ecef->eci (forces/eci->ecef r gst) gst))) 1e-10))))
+
+(deftest nystrom-is-refused-when-the-model-needs-velocity
+  ;; Drag and the relativistic correction depend on velocity, so the system
+  ;; is not y'' = f(t, y) and a Nystrom method cannot represent it. Dropping
+  ;; those terms to fit would give a plausible wrong answer, so it throws.
+  (is (not (forces/velocity-dependent? {:degree 4 :sun? true})))
+  (is (forces/velocity-dependent? {:drag {:area-to-mass 0.01 :cd 2.2}}))
+  (is (forces/velocity-dependent? {:relativity? true}))
+  (is (fn? (forces/second-order {:degree 4} c/mjd-J2000))
+      "a conservative model is fine")
+  (is (thrown? clojure.lang.ExceptionInfo
+               (forces/second-order {:drag {:area-to-mass 0.01 :cd 2.2}} c/mjd-J2000)))
+  (is (thrown? clojure.lang.ExceptionInfo
+               (forces/second-order {:relativity? true} c/mjd-J2000))))
+
+(deftest the-first-order-adapter-returns-velocity-then-acceleration
+  (let [[r v] (forces/circular-state (+ c/R-earth 500.0) 0.5)
+        f     (forces/first-order {:degree 2 :sun? false :moon? false} c/mjd-J2000)
+        out   (f 0.0 (into r v))]
+    (is (= 6 (count out)))
+    (is (= v (subvec (vec out) 0 3)) "first three are the velocity, unchanged")
+    (is (< 8.0 (* 1000.0 (mag (subvec (vec out) 3 6))) 9.5) "last three are gravity")))
