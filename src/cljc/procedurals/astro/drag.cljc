@@ -9,6 +9,7 @@
   activity -- which is why Harris-Priester tabulates a minimum and a maximum
   and interpolates between them rather than pretending to a single value."
   (:require [procedurals.astro.constants :as c]
+            [procedurals.astro.geodesy :as geodesy]
             [clojure.math :as math]))
 
 (def table
@@ -46,21 +47,10 @@
 
   Not r - R: the Earth is 21 km narrower through the poles, and against an
   atmospheric scale height of some 50 km that is a factor of about 1.5 in
-  density. Solved by the standard iteration, which converges in a few passes
-  at orbital altitudes."
-  [[x y z]]
-  (let [a  c/R-earth
-        e2 (- (* 2.0 c/flattening) (* c/flattening c/flattening))
-        p  (math/sqrt (+ (* x x) (* y y)))]
-    (if (< p 1e-9)
-      (- (abs z) (* a (math/sqrt (- 1.0 e2))))
-      (loop [lat (math/atan2 z (* p (- 1.0 e2))) n 0]
-        (let [sl (math/sin lat)
-              N  (/ a (math/sqrt (- 1.0 (* e2 sl sl))))
-              h  (- (/ p (math/cos lat)) N)]
-          (if (>= n 5)
-            h
-            (recur (math/atan2 z (* p (- 1.0 (* e2 (/ N (+ N h)))))) (inc n))))))))
+  density. Delegated to `procedurals.astro.geodesy`, which solves the same
+  ellipsoid problem for coordinates."
+  [r]
+  (nth (geodesy/cartesian->geodetic r) 2))
 
 (defn- interpolate
   "Exponential interpolation between table rows, which is what an atmosphere

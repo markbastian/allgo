@@ -4,6 +4,7 @@
             [procedurals.astro.ephemeris :as eph]
             [procedurals.astro.forces :as forces]
             [procedurals.astro.frames :as fr]
+            [procedurals.astro.geodesy :as gd]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
@@ -890,3 +891,113 @@
           diff (- (fr/gast utc tt) (t/gmst utc))]
       (is (close? (fr/equation-of-equinoxes tt) diff 1e-14) (str yr))
       (is (< (abs (/ diff c/arcsec 15.0)) 1.3) "under about a second of time"))))
+
+;; ------------------------------------------------------ geodetic coordinates
+
+(deftest geodetic-and-cartesian-round-trip
+  (doseq [[lat lon h] [[0.0 0.0 0.0] [45.0 30.0 0.0] [89.9 0.0 0.0]
+                       [-33.9 151.2 0.058] [51.5 -0.1 400.0]
+                       [0.0 0.0 35786.0] [-60.0 -170.0 1200.0]]]
+    (let [r (gd/geodetic->cartesian (* lat c/degrees) (* lon c/degrees) h)
+          [la lo hh] (gd/cartesian->geodetic r)]
+      (is (close? lat (/ la c/degrees) 1e-9) (str "latitude at " lat))
+      (is (close? lon (/ lo c/degrees) 1e-9) (str "longitude at " lon))
+      (is (close? h hh 1e-6) (str "height at " h)))))
+
+(deftest geodetic-latitude-differs-from-geocentric
+  ;; The distinction the ellipsoid forces. Geodetic latitude is measured
+  ;; from the local vertical, geocentric from the centre, and a plumb line
+  ;; on an ellipsoid does not point at the middle of the Earth.
+  (doseq [[lat expect-arcmin] [[0.0 0.0] [15.0 5.76] [30.0 9.98]
+                               [45.0 11.55] [60.0 10.02] [90.0 0.0]]]
+    (let [r  (gd/geodetic->cartesian (* lat c/degrees) 0.0 0.0)
+          gc (/ (gd/geocentric-latitude r) c/degrees)]
+      (is (close? expect-arcmin (* 60.0 (- lat gc)) 0.01) (str "at " lat))))
+  (testing "the gap is largest near 45 degrees and vanishes at the equator and poles"
+    (let [gap (fn [lat] (let [r (gd/geodetic->cartesian (* lat c/degrees) 0.0 0.0)]
+                          (abs (- lat (/ (gd/geocentric-latitude r) c/degrees)))))]
+      (is (> (gap 45.0) (gap 20.0)))
+      (is (> (gap 45.0) (gap 70.0)))
+      (is (close? 0.0 (gap 0.0) 1e-12))
+      (is (close? 0.0 (gap 90.0) 1e-9)))))
+
+(deftest the-ellipsoid-is-flattened-by-the-right-amount
+  (let [equator (gd/geodetic->cartesian 0.0 0.0 0.0)
+        pole    (gd/geodetic->cartesian (/ Math/PI 2.0) 0.0 0.0)]
+    (is (close? c/R-earth (mag equator) 1e-9) "equatorial radius is a")
+    (is (close? 6356.75 (mag pole) 0.01) "polar radius is b = a(1-f)")
+    (is (close? 21.38 (- (mag equator) (mag pole)) 0.01)
+        "and the difference is the 21 km that drag has to account for")))
+
+(deftest the-local-horizon-frame-is-orthonormal
+  (doseq [lat [0.0 40.0 -70.0] lon [0.0 120.0 -45.0]]
+    (let [m (gd/east-north-up (* lat c/degrees) (* lon c/degrees))]
+      (doseq [row m] (is (close? 1.0 (mag row) 1e-14)))
+      (is (close? 0.0 (reduce + (map * (nth m 0) (nth m 1))) 1e-14))
+      (is (close? 0.0 (reduce + (map * (nth m 0) (nth m 2))) 1e-14))
+      (is (close? 0.0 (reduce + (map * (nth m 1) (nth m 2))) 1e-14)))))
+
+(deftest look-angles-point-where-they-should
+  (let [station (gd/geodetic->cartesian 0.0 0.0 0.0)
+        alt     (+ c/R-earth 800.0)]
+    (testing "straight overhead"
+      (let [{:keys [elevation range]} (gd/look-angles station [alt 0.0 0.0])]
+        (is (close? 90.0 (/ elevation c/degrees) 1e-9))
+        (is (close? 800.0 range 1e-6))))
+    (testing "north is azimuth zero, east is ninety"
+      (let [north [(* alt (Math/cos 0.3)) 0.0 (* alt (Math/sin 0.3))]
+            east  [(* alt (Math/cos 0.3)) (* alt (Math/sin 0.3)) 0.0]]
+        (is (close? 0.0 (/ (:azimuth (gd/look-angles station north)) c/degrees) 1e-9))
+        (is (close? 90.0 (/ (:azimuth (gd/look-angles station east)) c/degrees) 1e-9))
+        (is (close? (:elevation (gd/look-angles station north))
+                    (:elevation (gd/look-angles station east)) 1e-12)
+            "symmetric directions give the same elevation")))
+    (testing "the far side of the Earth is below the horizon"
+      (let [{:keys [elevation]} (gd/look-angles station [(- alt) 0.0 0.0])]
+        (is (close? -90.0 (/ elevation c/degrees) 1e-9))
+        (is (not (gd/visible? station [(- alt) 0.0 0.0])))))
+    (testing "and an elevation mask hides low passes"
+      ;; 0.25 rad of geocentric angle, well inside the horizon: for a
+      ;; satellite at 800 km that limit is only 27.3 degrees away, since
+      ;; cos(theta) = R/(R+h). A pass is a narrow window.
+      (let [low [(* alt (Math/cos 0.25)) 0.0 (* alt (Math/sin 0.25))]
+            {:keys [elevation]} (gd/look-angles station low)]
+        (is (< 10.0 (/ elevation c/degrees) 25.0) "a genuinely low pass")
+        (is (gd/visible? station low 0.0))
+        (is (not (gd/visible? station low (* 30.0 c/degrees))) "but under a 30 degree mask")))
+    (testing "the horizon is closer than intuition suggests"
+      ;; cos(theta) = R/(R+h) puts the geometric limit at 27.3 degrees of
+      ;; geocentric angle for 800 km -- which is why tracking networks need
+      ;; many stations.
+      (let [limit (Math/acos (/ c/R-earth alt))]
+        (is (close? 27.3 (/ limit c/degrees) 0.2))
+        (is (close? 0.0 (/ (:elevation (gd/look-angles station
+                                                       [(* alt (Math/cos limit)) 0.0 (* alt (Math/sin limit))]))
+                           c/degrees)
+                    0.01)
+            "and at exactly that angle the target sits on the horizon")))))
+
+(deftest the-rtn-frame-is-orthonormal-and-oriented
+  (doseq [[r v] [[[7000.0 0.0 0.0] [0.0 7.5 0.0]]
+                 [[3000.0 -5000.0 2000.0] [4.0 3.0 -1.0]]]]
+    (let [[R T N] (gd/rtn-frame r v)]
+      (doseq [row [R T N]] (is (close? 1.0 (mag row) 1e-14)))
+      (is (close? 0.0 (reduce + (map * R T)) 1e-14))
+      (is (close? 0.0 (reduce + (map * R N)) 1e-14))
+      (is (close? 0.0 (reduce + (map * T N)) 1e-14))
+      (testing "radial points outward and normal along the angular momentum"
+        (is (pos? (reduce + (map * R r))))
+        (is (pos? (reduce + (map * N (let [[a b cc] r [d e f] v]
+                                       [(- (* b f) (* cc e)) (- (* cc d) (* a f)) (- (* a e) (* b d))])))))))))
+
+(deftest orbit-errors-resolve-along-track
+  ;; Why RTN exists. A small error in speed barely moves the radius but
+  ;; accumulates along the track, so after a while a prediction is wrong by
+  ;; far more in one direction than the others.
+  (let [r  [7000.0 0.0 0.0]
+        v  [0.0 7.546 0.0]
+        ahead [0.0 12.0 0.0]                    ; 12 km further along the orbit
+        [dr dt dn] (gd/to-rtn r v ahead)]
+    (is (close? 0.0 dr 1e-12) "no radial component")
+    (is (close? 12.0 dt 1e-12) "all of it along track")
+    (is (close? 0.0 dn 1e-12) "and none out of plane")))
