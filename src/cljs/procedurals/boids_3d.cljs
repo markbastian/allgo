@@ -7,6 +7,7 @@
   (hue from compass bearing, brightness from climb), so a flock settling into
   alignment reads as the swarm converging on a single colour."
   (:require [procedurals.boids :as boids]
+            [procedurals.fps :as fps]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
@@ -81,6 +82,7 @@
         scratch  (THREE/Object3D.)
         color    (THREE/Color.)
         running? (atom false)
+        tick-fps! (fps/meter! container)
         state    (atom {:flock (boids/flock (.-boids controls) world (params))})]
     (set! (.-background scene) (THREE/Color. 0x05070d))
     (.setPixelRatio renderer (or js/window.devicePixelRatio 1))
@@ -109,14 +111,16 @@
               (animate []
                 (when @running?
                   (js/requestAnimationFrame animate)
-                  (let [p     (params)
+                  (let [t0    (js/performance.now)
+                        p     (params)
                         flock (-> (:flock @state)
                                   (resize-to-flock (.-boids controls) (:max-speed p))
                                   (boids/step world p))]
                     (swap! state assoc :flock flock)
-                    (write-instances! mesh scratch color flock world))
-                  (.update orbit)
-                  (.render renderer scene camera)))]
+                    (write-instances! mesh scratch color flock world)
+                    (.update orbit)
+                    (.render renderer scene camera)
+                    (tick-fps! (- (js/performance.now) t0)))))]
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (let [gui (GUI. #js {:container container})]
           (.add gui controls "boids" 10 capacity 10)

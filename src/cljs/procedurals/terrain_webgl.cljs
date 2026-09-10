@@ -1,5 +1,6 @@
 (ns procedurals.terrain-webgl
-  (:require [procedurals.mesh :as mesh]
+  (:require [procedurals.fps :as fps]
+            [procedurals.mesh :as mesh]
             [procedurals.terrain :as terrain]
             [procedurals.tin :as tin]
             ["lil-gui" :default GUI]
@@ -107,6 +108,7 @@
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         {:keys [span mesh]} (build-mesh config)
         running? (atom false)
+        tick-fps! (fps/meter! container)
         state    (atom {:terrain-mesh mesh :wireframe? false :generator (:generator config) :hovering? false})]
     (set! (.-background scene) (THREE/Color. 0x0f0f19))
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
@@ -141,8 +143,10 @@
               (animate []
                 (when @running?
                   (js/requestAnimationFrame animate)
-                  (.update controls)
-                  (.render renderer scene camera)))]
+                  (let [t0 (js/performance.now)]
+                    (.update controls)
+                    (.render renderer scene camera)
+                    (tick-fps! (- (js/performance.now) t0)))))]
         (.addEventListener container "mouseenter" #(swap! state assoc :hovering? true))
         (.addEventListener container "mouseleave" #(swap! state assoc :hovering? false))
         (.addEventListener js/window "keydown" on-key-down)

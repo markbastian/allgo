@@ -3,6 +3,7 @@
   along its heading and tinted by it, so alignment emerging out of a random
   start reads as the flock converging on a single colour."
   (:require [procedurals.boids :as boids]
+            [procedurals.fps :as fps]
             ["lil-gui" :default GUI]
             [clojure.math :as math]))
 
@@ -60,6 +61,7 @@
   (let [canvas (js/document.createElement "canvas")
         ctx    (.getContext canvas "2d")
         running? (atom false)
+        tick-fps! (fps/meter! container)
         state  (atom {:bounds [0 0] :flock []})]
     (set! (.-style canvas) "display:block;border-radius:8px")
     (.appendChild container canvas)
@@ -81,13 +83,15 @@
             (tick []
               (when @running?
                 (js/requestAnimationFrame tick)
-                (let [{:keys [bounds]} @state
+                (let [t0    (js/performance.now)
+                      {:keys [bounds]} @state
                       p     (params)
                       flock (-> (:flock @state)
                                 (resize-to-flock (.-boids controls) bounds (:max-speed p))
                                 (boids/step bounds p))]
                   (swap! state assoc :flock flock)
-                  (draw! ctx flock bounds))))]
+                  (draw! ctx flock bounds)
+                  (tick-fps! (- (js/performance.now) t0)))))]
       (.observe (js/ResizeObserver. resize!) container)
       (resize!)
       (reset-flock!)

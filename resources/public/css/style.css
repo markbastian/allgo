@@ -202,6 +202,24 @@ html, body {
   border-radius: 8px;
 }
 
+.fps-meter {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(5, 7, 13, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
 .demo-controls {
   margin-top: 0.75rem;
   display: flex;
