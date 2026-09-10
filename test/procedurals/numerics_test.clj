@@ -7,6 +7,8 @@
             [procedurals.numerics.rkn :as rkn]
             [clojure.test :refer [deftest is testing]]))
 
+(defn- close? [a b tol] (< (abs (double (- a b))) tol))
+
 ;; y' = y, y(0) = 1  =>  y(1) = e. A closed form to measure against.
 (defn- exponential [_ y] y)
 (def ^:private target (Math/exp 1.0))
@@ -410,3 +412,83 @@
   (let [[y dy] (ex/stoermer-midpoint (num/harmonic 1.0) 0.0 [1.0] [0.0] 1.0 64)]
     (is (< (abs (- (first y) (Math/cos 1.0))) 1e-4))
     (is (< (abs (- (first dy) (- (Math/sin 1.0)))) 1e-4))))
+
+;; -------------------------------------------------- variable-step multistep
+
+(deftest variable-coefficients-reduce-to-the-fixed-tables
+  ;; The generalisation must contain the special case exactly, not
+  ;; approximately: evenly spaced offsets are just particular node values.
+  (doseq [k [2 3 4 5 6]]
+    (testing (str "order " k)
+      (doseq [[a b] (map vector (ms/adams-bashforth-coefficients k)
+                         (ms/variable-coefficients (mapv #(- (double %)) (range k))))]
+        (is (close? a b 1e-14) "explicit"))
+      (doseq [[a b] (map vector (ms/adams-moulton-coefficients k)
+                         (ms/variable-coefficients
+                          (vec (cons 1.0 (mapv #(- (double %)) (range (dec k)))))))]
+        (is (close? a b 1e-14) "implicit")))))
+
+(deftest variable-coefficients-integrate-a-constant-exactly
+  ;; Whatever the spacing, a constant derivative must be integrated exactly,
+  ;; which means the weights sum to one. It is the one condition that holds
+  ;; for every node arrangement.
+  (doseq [offs [[0.0 -1.0 -2.5] [0.0 -0.3 -0.9 -2.2] [0.0 -1.7 -1.9 -4.0 -7.1]
+                [1.0 0.0 -0.4] [0.0 -5.0] [0.0 -0.01 -0.02]]]
+    (is (close? 1.0 (reduce + (ms/variable-coefficients offs)) 1e-11) (str offs))))
+
+(deftest variable-step-adams-honours-its-tolerance
+  (doseq [method ms/catalog-variable
+          tol [1e-6 1e-9 1e-12]]
+    (let [s (core/step-until (ms/variable-integrator method exponential 0.0 [1.0] 0.05
+                                                     {:tol-abs tol :tol-rel tol})
+                             1.0)]
+      (is (< (abs (- (first (:y s)) target)) (* 500 tol))
+          (str (:name method) " at tol " tol)))))
+
+(deftest the-step-follows-the-problem
+  ;; The reason for the machinery. On an eccentric orbit the satellite races
+  ;; through periapsis and loafs at apoapsis, and a step sized for the former
+  ;; is wasted on the latter.
+  (let [mu 398600.4415
+        a  26000.0
+        ecc 0.72
+        rp (* a (- 1.0 ecc))
+        vp (Math/sqrt (/ (* mu (+ 1.0 ecc)) rp))
+        f  (fn [_ y] (let [r (subvec (vec y) 0 3)
+                           d (Math/sqrt (reduce + (map * r r)))]
+                       (into (subvec (vec y) 3 6)
+                             (mapv #(* (- (/ mu (* d d d))) %) r))))
+        period (* 2.0 Math/PI (Math/sqrt (/ (* a a a) mu)))
+        integ  (ms/variable-integrator (ms/adams-variable 5) f 0.0
+                                       [rp 0.0 0.0 0.0 vp 0.0] 5.0
+                                       {:tol-abs 1e-10 :tol-rel 1e-10})
+        traj   (vec (take-while #(< (:t %) period) (core/trajectory integ)))
+        radius (fn [s] (Math/sqrt (reduce + (map * (subvec (vec (:y s)) 0 3)
+                                                 (subvec (vec (:y s)) 0 3)))))]
+    (is (seq traj))
+    (testing "the step varies by a large factor over one revolution"
+      (is (> (/ (apply max (map :h traj)) (apply min (map :h traj))) 10.0)))
+    (testing "and it is small where the motion is fast"
+      (is (< (radius (apply min-key :h traj)) (* 0.5 (radius (apply max-key :h traj))))
+          "tightest step near periapsis, loosest near apoapsis"))))
+
+(deftest variable-step-beats-fixed-at-equal-work
+  ;; Same number of steps, spent where they matter.
+  (let [mu 398600.4415, a 26000.0, ecc 0.72
+        rp (* a (- 1.0 ecc))
+        vp (Math/sqrt (/ (* mu (+ 1.0 ecc)) rp))
+        y0 [rp 0.0 0.0 0.0 vp 0.0]
+        f  (fn [_ y] (let [r (subvec (vec y) 0 3)
+                           d (Math/sqrt (reduce + (map * r r)))]
+                       (into (subvec (vec y) 3 6)
+                             (mapv #(* (- (/ mu (* d d d))) %) r))))
+        period (* 2.0 Math/PI (Math/sqrt (/ (* a a a) mu)))
+        err (fn [s] (Math/sqrt (reduce + (map (fn [p q] (let [d (- p q)] (* d d)))
+                                              (subvec (vec (:y s)) 0 3) (subvec y0 0 3)))))
+        variable (core/step-until (ms/variable-integrator (ms/adams-variable 5) f 0.0 y0 5.0
+                                                          {:tol-abs 1e-10 :tol-rel 1e-10})
+                                  period)
+        fixed    (core/step-until (ms/integrator (ms/adams-pece 5) f 0.0 y0 (/ period 800)) period)]
+    (is (< (err variable) (err fixed))
+        (str "variable " (err variable) " km vs fixed " (err fixed) " km at comparable step counts"))
+    (is (< (err variable) (* 0.1 (err fixed))) "and by a wide margin")))

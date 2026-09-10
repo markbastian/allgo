@@ -252,3 +252,86 @@
       :control  (merge core/control-defaults opts)
       :accepted true
       :error    nil})))
+
+;; ------------------------------------------------------- variable step size
+
+(defn variable-coefficients
+  "Adams weights for a history at arbitrary spacing.
+
+  `offsets` are the past sample times measured from the current point in
+  units of the coming step: `[0 -1 -2 ...]` for an evenly spaced history,
+  and anything at all after the step has changed. Include `1` at the front
+  for an implicit formula.
+
+  This is the same integral as the fixed-step case -- a Lagrange basis
+  through the sample points, integrated across the step -- which is why
+  deriving the coefficients rather than tabulating them was worth doing.
+  A tabulated method cannot change its step without discarding its history
+  and starting again."
+  [offsets]
+  (weights (vec offsets) #(poly-integrate % 0.0 1.0)))
+
+(defn- advance-variable
+  "One step of variable-step Adams in PECE form.
+
+  The step is chosen from the gap between predictor and corrector, which
+  estimates the local error without a second method. A rejected step is
+  retried immediately at the smaller size; because the coefficients are
+  computed from the actual sample times, nothing about the history has to
+  be thrown away to do it."
+  [{:keys [f t y h history times method control] :as integ}]
+  (let [k (:steps method)]
+    (if (< (count history) k)
+      ;; Startup, at fixed step, exactly as the even-spacing methods do.
+      (let [y' (bootstrap f t y h)
+            t' (+ t h)]
+        (assoc integ :t t' :y y'
+               :history (push history (f t' y') k)
+               :times (vec (take k (cons t' times)))
+               :accepted true :starting? true))
+      (let [offsets   (mapv #(/ (- % t) h) times)
+            predictor (variable-coefficients offsets)
+            corrector (variable-coefficients (vec (cons 1.0 (butlast offsets))))
+            t'        (+ t h)
+            p         (core/v+ y (core/v* (core/combine predictor history) h))
+            fp        (f t' p)
+            y'        (core/v+ y (core/v* (core/combine corrector (push history fp k)) h))
+            err       (core/norm (core/v- y' p) y' (:tol-abs control) (:tol-rel control))
+            [ok? h']  (core/adapt err (:order method) control h)]
+        (if ok?
+          (assoc integ :t t' :y y' :h h'
+                 :history (push history (f t' y') k)
+                 :times (vec (take k (cons t' times)))
+                 :accepted true :starting? false :error err)
+          ;; Rejected: the history stands, only the step shrinks.
+          (assoc integ :h h' :accepted false :error err))))))
+
+(defn adams-variable
+  "Adams predictor-corrector of order `k` with automatic step size.
+
+  The fixed-step methods above are cheaper per step and simpler to reason
+  about; this one earns its keep where the solution changes character --
+  an eccentric orbit racing through periapsis, a system that stiffens --
+  and a step chosen for the worst part of the trajectory would be wasted
+  everywhere else."
+  [k]
+  {:name (str "ABM" k "v") :order k :steps k :stages 2 :kind :multistep-variable
+   :advance advance-variable})
+
+(def catalog-variable (mapv adams-variable [3 4 5]))
+
+(defn variable-integrator
+  "An integrator for `y' = (f t y)` with automatic step size."
+  ([method f t0 y0 h] (variable-integrator method f t0 y0 h {}))
+  ([method f t0 y0 h opts]
+   (let [y (mapv double y0) t (double t0)]
+     {:method   method
+      :f        f
+      :t        t
+      :y        y
+      :h        (double h)
+      :history  [(f t y)]
+      :times    [t]
+      :control  (merge core/control-defaults opts)
+      :accepted true
+      :error    nil})))
