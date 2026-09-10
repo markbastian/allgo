@@ -100,6 +100,23 @@
 ;; A face carries the site whose bisector created it (nil for the bounding
 ;; box), so the surviving faces name the cell's true Voronoi neighbours.
 
+(defn separating-plane?
+  "True when the plane `n.x = d` is a separating axis for the convex
+  polyhedron `faces`: every vertex lies inside it, so it cannot cut.
+
+  Exact, and tighter than a radius bound, which being omnidirectional has to
+  assume the worst direction. Offered because that is a genuinely useful
+  predicate, but deliberately not used by `cell`: measured in the clip loop
+  it is a wash, because the radius bound already rejects distant sites, so
+  almost everything that reaches a clip really does cut and the pre-test
+  only adds a pass. Worth reaching for when testing planes against a cell
+  you are *not* about to clip anyway."
+  [faces nx ny nz d]
+  (every? (fn [f]
+            (every? (fn [[x y z]] (<= (- (+ (* nx x) (* ny y) (* nz z)) d) eps))
+                    (:pts f)))
+          faces))
+
 (defn- clip-cell
   "Cut convex polyhedron `faces` by `plane`. Returns nil when the plane does
   not reach the cell, so callers can tell a real cut from a no-op."
