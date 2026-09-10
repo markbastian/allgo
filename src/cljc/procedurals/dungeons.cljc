@@ -1,7 +1,8 @@
 (ns procedurals.dungeons
   (:require [clojure.math :as math]))
 
-;http://www.gamasutra.com/blogs/AAdonaac/20150903/252889/Procedural_Dungeon_Generation_Algorithm.php
+; http://www.gamasutra.com/blogs/AAdonaac/20150903/252889/Procedural_Dungeon_Generation_Algorithm.php
+; https://web.archive.org/web/20210823235922/https://gamasutra.com/blogs/AAdonaac/20150903/252889/Procedural_Dungeon_Generation_Algorithm.php
 
 (defn random-point [radius]
   (let [t (* 2.0 math/PI (rand))

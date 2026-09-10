@@ -7,6 +7,7 @@ pom.xml.asc
 /.nrepl-port
 /.cpcache
 /.shadow-cljs
+/.cljs_node_repl
 /node_modules
 *.iml
 /.idea
