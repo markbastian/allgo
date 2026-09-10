@@ -29,7 +29,7 @@
               wx           (- (* jj cell-scale) offset)
               wz           (- (* ii cell-scale) offset)
               noise-t      (mesh/noise-at wx wz noise-scale)
-              [nx ny nz]   (mesh/normal-at grid dim ii jj cell-scale height-scale)]
+              [nx ny nz]   (mesh/normal-at grid dim ii jj cell-scale height-scale -1.0)]
           (.fill sh (unchecked-int (terrain-color height-t slope-t noise-t)))
           (.normal sh (float nx) (float ny) (float nz))
           (.vertex sh (float wx) (float (- (* h height-scale))) (float wz)))))

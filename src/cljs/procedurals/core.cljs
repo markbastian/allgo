@@ -2,7 +2,7 @@
   (:require [procedurals.cave :as c]
             [procedurals.dungeon-generator :as pdg]
             [reagent.core :refer [atom]]
-            [reagent.dom :as rdom]))
+            [reagent.dom.client :as rdom]))
 
 (enable-console-print!)
 
@@ -14,17 +14,21 @@
 (defn update-grid [m]
   (assoc m :caves (gen-grid m)))
 
-(when-let [app-context (. js/document (getElementById "app"))]
-  (let [state (atom (update-grid {:w 32 :h 32 :i 18 :p 45}))]
-    (add-watch state :grid-watch (fn [_ _ o n]
-                                   (when (not= o n)
-                                     (update-grid n))))
-    (rdom/render
-     [pdg/render state]
-     app-context)))
+(defonce state (atom (update-grid {:w 32 :h 32 :i 18 :p 45})))
+
+(add-watch state :grid-watch (fn [_ _ o n]
+                               (when (not= o n)
+                                 (update-grid n))))
+
+(defonce root
+  (when-let [app-context (. js/document (getElementById "app"))]
+    (rdom/create-root app-context)))
+
+(defn render! []
+  (when root
+    (rdom/render root [pdg/render state])))
+
+(render!)
 
 (defn on-js-reload []
-  ;; optionally touch your app-state to force rerendering depending on
-  ;; your application
-  ;; (swap! app-state update-in [:__figwheel_counter] inc)
-  )
+  (render!))

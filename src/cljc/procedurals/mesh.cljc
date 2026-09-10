@@ -62,10 +62,12 @@
 
 (defn normal-at
   "Unit surface normal of the heightmap at grid cell [i j], derived from the
-  same central-difference gradient as `slope-at`. Vertex y is `(- h)` in the
-  renderer, so a flat cell's normal is [0 -1 0] rather than [0 1 0]."
-  [grid dim i j cell-scale height-scale]
+  same central-difference gradient as `slope-at`. `y-sign` is the sign a
+  renderer applies to height when building vertex y (+1.0 for a standard
+  y-up world, -1.0 if a renderer negates height like `terrain-shape` does);
+  a flat cell's normal is [0 y-sign 0]."
+  [grid dim i j cell-scale height-scale y-sign]
   (let [[dzdx dzdz] (gradient-at grid dim i j cell-scale height-scale)
-        n           [(- dzdx) -1.0 (- dzdz)]
+        n           [(- dzdx) y-sign (- dzdz)]
         len         (math/sqrt (reduce + (map * n n)))]
     (mapv #(/ % len) n)))
