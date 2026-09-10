@@ -101,3 +101,69 @@
     :control  (merge core/control-defaults (dissoc opts :adaptive?))
     :accepted true
     :error    nil}))
+
+;; ------------------------------------------------ second-order extrapolation
+
+(defn stoermer-midpoint
+  "The second-order counterpart of Gragg's rule, for y'' = f(t, y): cross `H`
+  in `n` sub-steps by the Stoermer central difference.
+
+  Its error expansion is in even powers of h for the same reason Gragg's is,
+  so it extrapolates just as well -- and it never forms a velocity along the
+  way, taking one at the end from the last difference plus a half-step
+  correction. Returns `[y y']` at t + H."
+  [f t y dy H n]
+  (let [h  (/ H n)
+        h2 (* h h)
+        f0 (f t y)]
+    (loop [m    1
+           prev y
+           cur  (core/v+ (core/v+ y (core/v* dy h)) (core/v* f0 (* 0.5 h2)))]
+      (if (= m n)
+        (let [fn* (f (+ t H) cur)]
+          [cur (core/v+ (core/v* (core/v- cur prev) (/ 1.0 h))
+                        (core/v* fn* (* 0.5 h)))])
+        (recur (inc m)
+               cur
+               (core/v+ (core/v- (core/v* cur 2.0) prev)
+                        (core/v* (f (+ t (* m h)) cur) h2)))))))
+
+(defn- gbs2-step [f t y dy H levels]
+  (let [ns   (subvec step-sequence 0 levels)
+        runs (mapv #(stoermer-midpoint f t y dy H %) ns)
+        [y' dy-diff] (extrapolate (mapv first runs) ns)
+        [v' _]       (extrapolate (mapv second runs) ns)]
+    [y' v' dy-diff]))
+
+(defn- advance-2
+  [{:keys [f t y dy h method control] :as integ}]
+  (let [[y' v' diff] (gbs2-step f t y dy h (:levels method))]
+    (if-not (:adaptive? method)
+      (assoc integ :t (+ t h) :y y' :dy v' :accepted true :error nil)
+      (let [err      (core/norm diff y' (:tol-abs control) (:tol-rel control))
+            [ok? h'] (core/adapt err (:order method) control h)]
+        (if ok?
+          (assoc integ :t (+ t h) :y y' :dy v' :h h' :accepted true :error err)
+          (assoc integ :h h' :accepted false :error err))))))
+
+(defn gbs-2
+  "Gragg-Bulirsch-Stoer for y'' = f(t, y), of order 2*levels."
+  [levels]
+  {:name (str "GBS" (* 2 levels) "-2") :order (* 2 levels) :levels levels
+   :stages (reduce + (subvec step-sequence 0 levels)) :kind :extrapolation-2
+   :advance advance-2})
+
+(def catalog-2 (mapv gbs-2 [2 3 4 6]))
+
+(defn integrator-2
+  ([method f t0 y0 dy0 h] (integrator-2 method f t0 y0 dy0 h {}))
+  ([method f t0 y0 dy0 h opts]
+   {:method   (cond-> method (:adaptive? opts) (assoc :adaptive? true))
+    :f        f
+    :t        (double t0)
+    :y        (mapv double y0)
+    :dy       (mapv double dy0)
+    :h        (double h)
+    :control  (merge core/control-defaults (dissoc opts :adaptive?))
+    :accepted true
+    :error    nil}))

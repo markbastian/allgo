@@ -366,3 +366,47 @@
         (is (> (/ at-400 at-100) 2.0))))
     (testing "so over four hundred orbits the gap has closed to under two decades"
       (is (< (/ (drift rkn/verlet 400) (drift rkn/rkn4 400)) 200.0)))))
+
+;; ------------------------------------------- second-order extrapolation
+
+(deftest stoermer-extrapolation-reaches-twice-the-levels-in-order
+  ;; Checked on Kepler rather than an oscillator, and against the exact
+  ;; answer rather than a fine-stepped reference: after exactly one period
+  ;; the orbit closes on its starting state, so the truth is known to the
+  ;; last bit. A reference produced by the same family plateaus at its own
+  ;; error and makes every high-order method look like it stopped
+  ;; converging around 1e-8.
+  (let [[r0 v0] (num/periapsis-state mu 1.0 0.6)
+        period  (num/orbital-period mu 1.0)
+        f       (num/kepler mu)
+        err     (fn [method steps]
+                  (max 1e-16
+                       (Math/sqrt (reduce + (map (fn [x y] (let [d (- x y)] (* d d)))
+                                                 (:y (core/step-until
+                                                      (num/integrator-2 method f 0.0 r0 v0 (/ period steps))
+                                                      period))
+                                                 r0)))))]
+    (doseq [[levels expected] [[2 4] [3 6] [4 8]]]
+      (testing (str levels " levels")
+        (let [method (ex/gbs-2 levels)
+              orders (ratio-order (mapv #(err method %) [12 24 48 96]))]
+          (is (= expected (:order method)))
+          ;; The coarsest ratio is pre-asymptotic and the finest can touch
+          ;; the roundoff floor, so it is the middle that must land.
+          (is (< (- expected 1.0) (second orders) (+ expected 1.0))
+              (str (:name method) " observed " orders)))))))
+
+(deftest second-order-extrapolation-is-offered-for-kepler
+  (is (some #(= :extrapolation-2 (:kind %)) num/second-order)
+      "the Kepler demo draws its menu from this list")
+  (doseq [method num/second-order]
+    (testing (:name method)
+      (is (< (energy-error 1.0 0.3 400 1 method) 1e-4)
+          "every offered method holds its energy over an orbit"))))
+
+(deftest extrapolation-integrates-second-order-systems-natively
+  ;; Not by doubling the system: the Stoermer rule never forms a velocity
+  ;; along the way, taking one at the end from the last difference.
+  (let [[y dy] (ex/stoermer-midpoint (num/harmonic 1.0) 0.0 [1.0] [0.0] 1.0 64)]
+    (is (< (abs (- (first y) (Math/cos 1.0))) 1e-4))
+    (is (< (abs (- (first dy) (- (Math/sin 1.0)))) 1e-4))))

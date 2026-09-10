@@ -17,8 +17,9 @@
   (vec (concat rk/catalog ms/catalog ex/catalog)))
 
 (def second-order
-  "Everything that integrates y'' = f(t, y) directly."
-  (vec (concat rkn/catalog ms/catalog-2)))
+  "Everything that integrates y'' = f(t, y) directly, without first turning
+  it into twice as many first-order equations."
+  (vec (concat rkn/catalog ms/catalog-2 ex/catalog-2)))
 
 (defn integrator
   "An integrator for `y' = (f t y)`, whichever family `method` belongs to."
@@ -34,8 +35,9 @@
   ([method f t0 y0 dy0 h] (integrator-2 method f t0 y0 dy0 h {}))
   ([method f t0 y0 dy0 h opts]
    (case (:kind method)
-     :nystrom      (rkn/integrator method f t0 y0 dy0 h opts)
-     :multistep-2  (ms/integrator-2 method f t0 y0 dy0 h opts))))
+     :nystrom          (rkn/integrator method f t0 y0 dy0 h opts)
+     :multistep-2      (ms/integrator-2 method f t0 y0 dy0 h opts)
+     :extrapolation-2  (ex/integrator-2 method f t0 y0 dy0 h opts))))
 
 (def step core/step)
 (def step-until core/step-until)
