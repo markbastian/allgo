@@ -12,6 +12,7 @@
             [procedurals.astro.srp :as srp]
             [procedurals.astro.tides :as tid]
             [procedurals.astro.time :as t]
+            [procedurals.astro.variational :as var]
             [procedurals.numerics :as num]
             [clojure.test :refer [deftest is testing]]))
 
@@ -1301,3 +1302,112 @@
     (is (close? 90.0 (/ (:declination (obs/right-ascension-declination station [0.0 0.0 1000.0])) c/degrees) 1e-12))
     (is (close? 90.0 (/ (:right-ascension (obs/right-ascension-declination station [0.0 1000.0 0.0])) c/degrees) 1e-12))
     (is (close? 1000.0 (:range (obs/right-ascension-declination station [0.0 1000.0 0.0])) 1e-12))))
+
+;; --------------------------------------------------- variational equations
+
+(defn- two-body-accel [_ r _]
+  (let [d (mag r)] (mapv #(* (- (/ c/GM-earth (* d d d))) %) r)))
+
+(defn- det-n [m]
+  (let [n (count m)]
+    (if (= n 1)
+      (ffirst m)
+      (reduce + (map-indexed
+                 (fn [j x] (* (if (even? j) 1.0 -1.0) x
+                              (det-n (mapv (fn [row] (vec (concat (subvec row 0 j) (subvec row (inc j)))))
+                                           (rest m)))))
+                 (first m))))))
+
+(defn- propagate-variational [y0 t]
+  (:y (num/step-until
+       (num/integrator (first (filter #(= "DOPRI5(4)" (:name %)) num/first-order))
+                       (var/rhs two-body-accel) 0.0 y0 5.0 {:tol-abs 1e-12 :tol-rel 1e-12})
+       t)))
+
+(deftest the-numerical-gradient-matches-the-closed-form
+  ;; Everything but two-body has to be differentiated numerically, and a
+  ;; wrong Jacobian degrades convergence rather than breaking anything, so
+  ;; it would go unnoticed. Two-body is the one case with a closed form, and
+  ;; therefore the only check on that machinery.
+  (doseq [r [[7000.0 0.0 0.0] [5000.0 3000.0 4000.0] [42164.0 100.0 -50.0]]]
+    (let [exact (var/two-body-gradient c/GM-earth r)
+          got   (:d-dr (var/acceleration-gradients two-body-accel 0.0 r [0.0 7.5 0.0]))
+          scale (apply max (for [i (range 3) j (range 3)] (abs (nth (nth exact i) j))))]
+      (doseq [i (range 3) j (range 3)]
+        (is (< (/ (abs (- (nth (nth exact i) j) (nth (nth got i) j))) scale) 1e-7)
+            (str "at " r " element " i "," j))))))
+
+(deftest two-body-gradient-is-symmetric-and-traceless
+  ;; Both follow from the acceleration being the gradient of a potential.
+  ;; Trace zero is Laplace's equation: gravity has no source in empty space.
+  (doseq [r [[7000.0 0.0 0.0] [5000.0 3000.0 4000.0]]]
+    (let [g (var/two-body-gradient c/GM-earth r)]
+      (doseq [i (range 3) j (range 3)]
+        (is (close? (nth (nth g i) j) (nth (nth g j) i) 1e-18) "symmetric"))
+      (is (close? 0.0 (reduce + (map-indexed (fn [i row] (nth row i)) g)) 1e-15)
+          "traceless, since div(a) = 0 away from the mass"))))
+
+(deftest phi-starts-as-the-identity
+  (let [{:keys [phi]} (var/unpack (var/initial [7000.0 0.0 0.0] [0.0 7.5 0.0]))]
+    (doseq [i (range 6) j (range 6)]
+      (is (close? (if (= i j) 1.0 0.0) (nth (nth phi i) j) 1e-15)))))
+
+(deftest phi-is-what-it-claims-to-be
+  ;; The definitive test: compare the integrated transition matrix against
+  ;; finite differences of the actual propagated trajectory. Nudge each
+  ;; initial component, re-propagate, see how the final state moved.
+  (let [[r0 v0] (kep/elements->state c/GM-earth
+                                     {:a 8000.0 :e 0.1 :i 0.6 :raan 1.0 :argp 2.0 :nu 0.5})
+        T (kep/period c/GM-earth 8000.0)]
+    (doseq [frac [0.1 0.5 1.0]]
+      (let [t   (* frac T)
+            phi (:phi (var/unpack (propagate-variational (var/initial r0 v0) t)))
+            fd  (mapv (fn [j]
+                        (let [h  (if (< j 3) 0.01 1e-5)
+                              at (fn [sign]
+                                   (propagate-variational
+                                    (var/initial (if (< j 3) (update (vec r0) j + (* sign h)) r0)
+                                                 (if (>= j 3) (update (vec v0) (- j 3) + (* sign h)) v0))
+                                    t))]
+                          (mapv (fn [a b] (/ (- a b) (* 2.0 h)))
+                                (subvec (vec (at 1.0)) 0 6) (subvec (vec (at -1.0)) 0 6))))
+                      (range 6))
+            scale (apply max (for [i (range 6) j (range 6)] (abs (nth (nth phi i) j))))]
+        (doseq [i (range 6) j (range 6)]
+          (is (< (/ (abs (- (nth (nth phi i) j) (nth (nth fd j) i))) scale) 1e-6)
+              (str "after " frac " orbits, element " i "," j)))))))
+
+(deftest phase-space-volume-is-conserved
+  ;; Liouville's theorem. A conservative system cannot compress phase space,
+  ;; so the determinant of the transition matrix is one for all time. It is
+  ;; a deep structural property and fails loudly if the variational
+  ;; equations are wrong anywhere.
+  (let [[r0 v0] (kep/elements->state c/GM-earth
+                                     {:a 8000.0 :e 0.1 :i 0.6 :raan 1.0 :argp 2.0 :nu 0.5})
+        T (kep/period c/GM-earth 8000.0)]
+    (doseq [frac [0.25 1.0 3.0]]
+      (is (close? 1.0 (det-n (:phi (var/unpack (propagate-variational (var/initial r0 v0) (* frac T))))) 1e-8)
+          (str "after " frac " orbits")))))
+
+(deftest transition-matrices-compose
+  ;; Phi(t2, t0) = Phi(t2, t1) Phi(t1, t0). The property that lets an
+  ;; estimator accumulate sensitivity across an arc rather than re-deriving
+  ;; it from the epoch every time.
+  (let [[r0 v0] (kep/elements->state c/GM-earth
+                                     {:a 9000.0 :e 0.05 :i 0.7 :raan 0.5 :argp 1.0 :nu 0.2})
+        t1 900.0 t2 2400.0
+        whole (:phi (var/unpack (propagate-variational (var/initial r0 v0) t2)))
+        step1 (var/unpack (propagate-variational (var/initial r0 v0) t1))
+        step2 (:phi (var/unpack (propagate-variational (var/initial (:r step1) (:v step1)) (- t2 t1))))
+        composed (var/mat-mul step2 (:phi step1))
+        scale (apply max (for [i (range 6) j (range 6)] (abs (nth (nth whole i) j))))]
+    (doseq [i (range 6) j (range 6)]
+      (is (< (/ (abs (- (nth (nth whole i) j) (nth (nth composed i) j))) scale) 1e-7)
+          (str "element " i "," j)))))
+
+(deftest position-rate-is-velocity-exactly
+  ;; The top half of the Jacobian is not physics and must be exact.
+  (let [A (var/jacobian two-body-accel 0.0 [7000.0 100.0 -50.0] [0.1 7.5 0.3])]
+    (doseq [i (range 3) j (range 6)]
+      (is (close? (if (= j (+ i 3)) 1.0 0.0) (nth (nth A i) j) 1e-15)
+          (str "row " i " column " j)))))
