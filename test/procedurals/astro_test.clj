@@ -1,5 +1,6 @@
 (ns procedurals.astro-test
   (:require [procedurals.astro.constants :as c]
+            [procedurals.astro.drag :as drag]
             [procedurals.astro.ephemeris :as eph]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.srp :as srp]
@@ -316,3 +317,95 @@
     (is (close? 0.0 (srp/shadow r sun-at) 1e-12))
     (is (close? 0.0 (mag (srp/acceleration r sun-at 0.02 1.3)) 1e-30)
         "eclipsed satellites feel nothing, which is what makes the force periodic")))
+
+;; --------------------------------------------------------------------- drag
+
+(defn- at-altitude [h] [(+ c/R-earth h) 0.0 0.0])
+
+(deftest densities-match-the-published-atmosphere
+  ;; Checked on the night side, which is the table's minimum column. Real
+  ;; densities vary by an order of magnitude with solar activity, so these
+  ;; are compared within a factor rather than to a figure.
+  (doseq [[h published] [[100 5.0e-7] [200 2.5e-10] [300 2.0e-11]
+                         [400 2.8e-12] [500 5.0e-13] [800 1.0e-14]]]
+    (let [rho (drag/density [(- (+ c/R-earth h)) 0.0 0.0] sun-at)]
+      (is (< 0.5 (/ rho published) 2.0)
+          (str h " km: got " rho ", published about " published)))))
+
+(deftest density-falls-monotonically-and-exponentially
+  (let [hs   (range 150 1000 25)
+        rhos (mapv #(drag/density (at-altitude %) sun-at) hs)]
+    (is (apply > rhos) "thinner the higher you go")
+    (testing "falling by a factor per fixed step, as hydrostatic equilibrium requires"
+      ;; This is why the table is interpolated exponentially rather than
+      ;; linearly: across a 20 km gap a straight line is badly wrong.
+      (let [ratios (mapv (fn [[a b]] (/ a b)) (partition 2 1 rhos))]
+        (is (every? #(< 1.0 % 3.5) ratios))
+        (testing "and that factor shrinks with height, because scale height grows"
+          ;; The upper atmosphere is hotter and lighter, so it thins out more
+          ;; gradually: 3.1x per 25 km down at 150, only 1.2x up at 950.
+          (is (apply > ratios))
+          (is (> (first ratios) 2.5))
+          (is (< (last ratios) 1.5)))))))
+
+(deftest the-atmosphere-bulges-toward-the-sun
+  ;; Heated on the daylit side, and lagging the Sun by 30 degrees because it
+  ;; takes hours to warm.
+  (doseq [h [200 400 600 800]]
+    (let [day   (drag/density (at-altitude h) sun-at)
+          night (drag/density [(- (+ c/R-earth h)) 0.0 0.0] sun-at)]
+      (is (> day night) (str h " km"))))
+  (testing "the day/night contrast grows with altitude"
+    (let [ratio (fn [h] (/ (drag/density (at-altitude h) sun-at)
+                           (drag/density [(- (+ c/R-earth h)) 0.0 0.0] sun-at)))]
+      (is (< (ratio 200) (ratio 800))))))
+
+(deftest geodetic-height-accounts-for-the-flattening
+  (testing "at the equator it is just r - R"
+    (is (close? 400.0 (drag/geodetic-height (at-altitude 400)) 1e-6)))
+  (testing "over the pole the ellipsoid is 21 km closer in"
+    ;; Against a scale height near 50 km that is a factor of about 1.5 in
+    ;; density, so it is not a refinement that can be skipped.
+    (is (close? 421.4 (drag/geodetic-height [0.0 0.0 (+ c/R-earth 400.0)]) 0.1)))
+  (testing "which makes the polar atmosphere thinner at the same radius"
+    (is (< (drag/density [0.0 0.0 (+ c/R-earth 400.0)] sun-at)
+           (drag/density [0.0 (+ c/R-earth 400.0) 0.0] sun-at)))))
+
+(deftest the-atmosphere-co-rotates
+  (let [alt (+ c/R-earth 400.0)
+        v   (Math/sqrt (/ c/GM-earth alt))]
+    (testing "a prograde satellite meets slower air than its inertial speed"
+      (let [rel (mag (drag/relative-velocity [alt 0.0 0.0] [0.0 v 0.0]))]
+        (is (close? (- v (* c/omega-earth alt)) rel 1e-9))
+        (is (< rel v))
+        (is (> (/ (- v rel) v) 0.05) "worth 6% of orbital speed, not a detail")))
+    (testing "a retrograde one meets faster air"
+      (is (> (mag (drag/relative-velocity [alt 0.0 0.0] [0.0 (- v) 0.0])) v)))
+    (testing "and a polar pass is deflected rather than slowed"
+      (let [rel (drag/relative-velocity [alt 0.0 0.0] [0.0 0.0 v])]
+        (is (pos? (abs (second rel))) "picks up an east-west component")))))
+
+(deftest drag-opposes-the-airflow
+  (let [alt (+ c/R-earth 300.0)
+        v   (Math/sqrt (/ c/GM-earth alt))
+        r   [alt 0.0 0.0]
+        vel [0.0 v 0.0]
+        a   (drag/acceleration r vel sun-at 0.01 2.2)
+        rel (drag/relative-velocity r vel)]
+    (testing "exactly anti-parallel to the relative velocity"
+      (let [cos (/ (reduce + (map * a rel)) (* (mag a) (mag rel)))]
+        (is (close? -1.0 cos 1e-12))))
+    (testing "and of the published size for low Earth orbit"
+      (is (< 1e-6 (* 1000 (mag a)) 1e-4) (str (* 1000 (mag a)) " m/s^2")))))
+
+(deftest drag-scales-with-its-parameters
+  (let [alt (+ c/R-earth 400.0)
+        v   (Math/sqrt (/ c/GM-earth alt))
+        at  (fn [am cd] (mag (drag/acceleration [alt 0.0 0.0] [0.0 v 0.0] sun-at am cd)))]
+    (is (close? 2.0 (/ (at 0.02 2.2) (at 0.01 2.2)) 1e-12) "linear in area over mass")
+    (is (close? 2.0 (/ (at 0.01 4.4) (at 0.01 2.2)) 1e-12) "linear in drag coefficient")))
+
+(deftest above-the-atmosphere-there-is-no-drag
+  (doseq [h [1001 1200 5000]]
+    (is (zero? (drag/density (at-altitude h) sun-at)) (str h " km"))
+    (is (close? 0.0 (mag (drag/acceleration (at-altitude h) [0.0 7.0 0.0] sun-at 0.01 2.2)) 1e-30))))
