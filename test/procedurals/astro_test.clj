@@ -603,9 +603,40 @@
       (is (< 1e-9 (m :relativity) 1e-7)))))
 
 (deftest earth-fixed-and-inertial-round-trip
+  ;; The force model now rotates through the full chapter 5 chain rather than
+  ;; sidereal time alone, so this takes a matrix rather than an angle.
   (doseq [r [[7000.0 0.0 0.0] [3000.0 -5000.0 2000.0]]
-          gst [0.0 1.0 3.5 6.0]]
-    (is (< (mag (mapv - r (forces/ecef->eci (forces/eci->ecef r gst) gst))) 1e-10))))
+          mjd [c/mjd-J2000 (t/calendar->mjd 2025 6 1) (t/calendar->mjd 1995 2 14)]]
+    (let [u (forces/earth-fixed mjd)]
+      (is (< (mag (mapv - r (forces/ecef->eci (forces/eci->ecef r u) u))) 1e-10)
+          (str "at mjd " mjd))
+      (is (close? (mag r) (mag (forces/eci->ecef r u)) 1e-10)
+          "a frame rotation cannot change an altitude"))))
+
+(deftest confusing-tt-with-ut1-costs-thirty-kilometres
+  ;; The larger of the two mistakes available here, and the easier to make:
+  ;; the rotation angle is a UT1 quantity while the dynamics run on TT, and
+  ;; the two differ by 64 s at J2000. The Earth turns 465 m/s at the equator.
+  (let [tt  c/mjd-J2000
+        r   [c/R-earth 0.0 0.0]
+        turn (fn [mjd] (let [g (t/gmst mjd) ca (Math/cos g) sa (Math/sin g) [x y z] r]
+                         [(+ (* ca x) (* sa y)) (+ (* (- sa) x) (* ca y)) z]))
+        gap (mag (mapv - (turn tt) (turn (t/tt->utc tt))))]
+    (is (< 25.0 gap 35.0) (str "got " gap " km"))))
+
+(deftest precession-costs-less-at-the-epoch-and-more-later
+  ;; With the time scale handled correctly, what remains is precession and
+  ;; nutation. Nil at J2000 by construction, growing at 50 arcseconds a year.
+  (let [gap (fn [mjd-tt]
+              (let [ut1 (t/tt->utc mjd-tt)
+                    r   [c/R-earth 0.0 0.0]
+                    full (forces/eci->ecef r (forces/earth-fixed mjd-tt))
+                    sidereal-only (let [g (t/gmst ut1) ca (Math/cos g) sa (Math/sin g) [x y z] r]
+                                    [(+ (* ca x) (* sa y)) (+ (* (- sa) x) (* ca y)) z])]
+                (mag (mapv - full sidereal-only))))]
+    (is (< (gap c/mjd-J2000) 1.0) "under a kilometre at the epoch")
+    (is (> (gap (t/calendar->mjd 2030 1 1)) 20.0) "tens of kilometres a generation later")
+    (is (> (gap (t/calendar->mjd 2050 1 1)) (gap (t/calendar->mjd 2030 1 1))))))
 
 (deftest nystrom-is-refused-when-the-model-needs-velocity
   ;; Drag and the relativistic correction depend on velocity, so the system
@@ -792,3 +823,70 @@
       (is (< (mag (mapv - v (fr/apply-m (fr/transpose both) (fr/apply-m both v)))) 1e-14)))
     (testing "and a rotation preserves length"
       (is (close? (mag v) (mag (fr/apply-m both v)) 1e-14)))))
+
+;; ------------------------------------ the full celestial-terrestrial chain
+
+(deftest the-full-transform-is-a-proper-rotation-and-inverts
+  (doseq [yr [1990 2000 2025 2100]]
+    (let [utc (t/calendar->mjd yr 3 15 7.25)
+          tt  (t/utc->tt utc)
+          u   (fr/celestial->terrestrial tt utc)
+          v   [0.4 -0.6 0.6928]]
+      (is (close? 1.0 (det3 u) 1e-12) (str yr))
+      (is (< (orthogonality-error u) 1e-12) (str yr))
+      (is (< (mag (mapv - v (fr/apply-m (fr/terrestrial->celestial tt utc) (fr/apply-m u v)))) 1e-13)
+          (str yr " round trip"))
+      (is (close? (mag v) (mag (fr/apply-m u v)) 1e-14) (str yr " length")))))
+
+(deftest a-ground-station-traces-a-circle-in-inertial-space
+  (let [ground [c/R-earth 0.0 0.0]
+        over-a-day (map (fn [k]
+                          (let [utc (+ (t/calendar->mjd 2024 1 1) (/ k 24.0))]
+                            (fr/apply-m (fr/terrestrial->celestial (t/utc->tt utc) utc) ground)))
+                        (range 25))]
+    (testing "at constant radius, since a rotation cannot change length"
+      (is (< (- (apply max (map mag over-a-day)) (apply min (map mag over-a-day))) 1e-9)))
+    (testing "and after 24 hours it has overshot a full turn by a degree"
+      ;; The Earth turns 360.9856 degrees per solar day: one turn relative to
+      ;; the stars, plus the degree it has moved around the Sun. That excess
+      ;; is exactly 360/365.25.
+      (let [a (first over-a-day) b (last over-a-day)
+            deg (/ (Math/acos (max -1.0 (min 1.0 (/ (reduce + (map * a b)) (* (mag a) (mag b))))))
+                   c/degrees)]
+        (is (close? (/ 360.0 365.25) deg 0.01) (str "got " deg " degrees"))))))
+
+(deftest precession-makes-a-gmst-only-rotation-obsolete
+  ;; Worth being explicit about: rotating by sidereal time alone ignores that
+  ;; the pole and equinox have moved since J2000. The error is nil at the
+  ;; epoch and grows at 50 arcseconds a year, which is tens of kilometres at
+  ;; the Earth's surface within a couple of decades.
+  (let [err (fn [yr]
+              (let [utc (t/calendar->mjd yr 1 1)
+                    tt  (t/utc->tt utc)
+                    full (fr/apply-m (fr/celestial->terrestrial tt utc) [c/R-earth 0.0 0.0])
+                    gmst-only (let [g (t/gmst utc)]
+                                [(* c/R-earth (Math/cos g)) (* c/R-earth (- (Math/sin g))) 0.0])]
+                (mag (mapv - full gmst-only))))]
+    (is (< (err 2000) 1.0) "agree to under a kilometre at the epoch itself")
+    (is (> (err 2025) 20.0) "but tens of kilometres apart a generation later")
+    (is (> (err 2050) (err 2025)) "and it only grows")))
+
+(deftest polar-motion-moves-the-ground-by-metres
+  ;; The rotation pole wanders within the crust by about 0.3 arcseconds in a
+  ;; 435-day Chandler wobble. Negligible for an orbit, decisive for geodesy.
+  (let [utc (t/calendar->mjd 2024 1 1)
+        tt  (t/utc->tt utc)
+        p   (fn [xp yp] (fr/apply-m (fr/celestial->terrestrial tt utc xp yp) [c/R-earth 0.0 0.0]))
+        shift (* 1000.0 (mag (mapv - (p 0.0 0.0) (p (* 0.3 c/arcsec) (* 0.3 c/arcsec)))))]
+    (is (< 1.0 shift 20.0) (str "moved " shift " m"))
+    (testing "and zero polar motion is exactly no rotation"
+      (is (< (orthogonality-error (fr/polar-motion 0.0 0.0)) 1e-15))
+      (is (close? 1.0 (nth (nth (fr/polar-motion 0.0 0.0) 0) 0) 1e-15)))))
+
+(deftest apparent-sidereal-time-differs-from-mean-by-the-equinox-equation
+  (doseq [yr [2000 2015 2030]]
+    (let [utc (t/calendar->mjd yr 5 5 3.0)
+          tt  (t/utc->tt utc)
+          diff (- (fr/gast utc tt) (t/gmst utc))]
+      (is (close? (fr/equation-of-equinoxes tt) diff 1e-14) (str yr))
+      (is (< (abs (/ diff c/arcsec 15.0)) 1.3) "under about a second of time"))))

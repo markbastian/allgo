@@ -13,6 +13,7 @@
   (:require [procedurals.astro.constants :as c]
             [procedurals.astro.drag :as drag]
             [procedurals.astro.ephemeris :as eph]
+            [procedurals.astro.frames :as frames]
             [procedurals.astro.geopotential :as geo]
             [procedurals.astro.relativity :as rel]
             [procedurals.astro.srp :as srp]
@@ -20,14 +21,23 @@
             [procedurals.astro.time :as time]
             [clojure.math :as math]))
 
-(defn- rot-z [[x y z] angle]
-  (let [ca (math/cos angle) sa (math/sin angle)]
-    [(+ (* ca x) (* sa y))
-     (+ (* (- sa) x) (* ca y))
-     z]))
+(defn earth-fixed
+  "The rotation from the celestial frame of J2000 to the Earth-fixed frame
+  at `mjd-tt`, as a matrix.
 
-(defn eci->ecef [r gst] (rot-z r gst))
-(defn ecef->eci [r gst] (rot-z r (- gst)))
+  The full chain of chapter 5, not sidereal time alone. Rotating by GMST
+  only would ignore that the pole and equinox have moved since J2000, which
+  is nil at the epoch and tens of kilometres at the surface two decades on.
+
+  UT1 is taken as UTC unless `dut1` is given: the difference is under a
+  second by construction, and cannot be computed, only looked up."
+  ([mjd-tt] (earth-fixed mjd-tt 0.0))
+  ([mjd-tt dut1]
+   (frames/celestial->terrestrial-cached
+    mjd-tt (time/utc->ut1 (time/tt->utc mjd-tt) dut1))))
+
+(defn eci->ecef [r m] (frames/apply-m m r))
+(defn ecef->eci [r m] (frames/apply-m (frames/transpose m) r))
 
 (def defaults
   {:degree       4
@@ -56,7 +66,7 @@
   [config mjd r v]
   (let [{:keys [degree sun? moon? tides? relativity? field]
          srp-cfg :srp drag-cfg :drag} (merge defaults config)
-        gst   (time/gmst mjd)
+        u     (earth-fixed mjd)
         r-sun (eph/sun mjd)
         r-moon (eph/moon mjd)
         base  (or field geo/earth)
@@ -64,10 +74,10 @@
         ;; must be given in Earth-fixed coordinates like the field itself.
         fld   (if tides?
                 (tides/perturb base (cond-> []
-                                      moon? (conj [c/GM-moon (eci->ecef r-moon gst)])
-                                      sun?  (conj [c/GM-sun (eci->ecef r-sun gst)])))
+                                      moon? (conj [c/GM-moon (eci->ecef r-moon u)])
+                                      sun?  (conj [c/GM-sun (eci->ecef r-sun u)])))
                 base)
-        grav  (ecef->eci (geo/acceleration fld (eci->ecef r gst) degree) gst)]
+        grav  (ecef->eci (geo/acceleration fld (eci->ecef r u) degree) u)]
     (cond-> grav
       sun?     (as-> a (mapv + a (eph/third-body c/GM-sun r r-sun)))
       moon?    (as-> a (mapv + a (eph/third-body c/GM-moon r r-moon)))
@@ -87,15 +97,15 @@
   [config mjd r v]
   (let [{:keys [degree sun? moon? relativity? field] srp-cfg :srp drag-cfg :drag}
         (merge defaults config)
-        gst    (time/gmst mjd)
+        u      (earth-fixed mjd)
         r-sun  (eph/sun mjd)
         r-moon (eph/moon mjd)
         base   (or field geo/earth)
-        ecef   (eci->ecef r gst)
+        ecef   (eci->ecef r u)
         pm     (geo/point-mass c/GM-earth c/R-earth)]
-    (cond-> {:two-body   (ecef->eci (geo/acceleration pm ecef 0) gst)
+    (cond-> {:two-body   (ecef->eci (geo/acceleration pm ecef 0) u)
              :harmonics  (ecef->eci (mapv - (geo/acceleration base ecef degree)
-                                          (geo/acceleration pm ecef 0)) gst)}
+                                          (geo/acceleration pm ecef 0)) u)}
       sun?        (assoc :sun (eph/third-body c/GM-sun r r-sun))
       moon?       (assoc :moon (eph/third-body c/GM-moon r r-moon))
       srp-cfg     (assoc :srp (srp/acceleration r r-sun (:area-to-mass srp-cfg) (:cr srp-cfg)))

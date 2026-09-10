@@ -144,3 +144,113 @@
   [mjd-tt]
   (let [[dpsi deps] (nutation-angles mjd-tt)]
     (* dpsi (math/cos (+ (mean-obliquity mjd-tt) deps)))))
+
+;; ------------------------------------------------------------ Earth rotation
+
+(defn gast
+  "Greenwich Apparent Sidereal Time, radians.
+
+  Mean sidereal time reckons from the mean equinox; apparent sidereal time
+  from the true one, which nutation displaces. The gap between them is the
+  equation of the equinoxes, up to about a second of time.
+
+  Note the two arguments. The rotation angle is a UT1 quantity -- it is
+  where the Earth actually is -- while nutation is a TT quantity, being
+  dynamics. They differ by 69 seconds today, and the Earth turns 465 m/s at
+  the equator, so passing one where the other belongs puts a ground station
+  30 km from where it is. That is larger than the entire precession
+  correction over the first two decades of this century."
+  [mjd-ut1 mjd-tt]
+  (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt)))
+
+(defn earth-rotation
+  "Rotation from the true equator and equinox of date to the Earth-fixed
+  frame: the daily spin, and by far the largest of the four."
+  [mjd-ut1 mjd-tt]
+  (rz (gast mjd-ut1 mjd-tt)))
+
+;; ------------------------------------------------------------- polar motion
+
+(defn polar-motion
+  "Rotation for the wander of the rotation pole within the Earth itself,
+  `xp` and `yp` in radians.
+
+  The pole is not fixed in the crust: it circles by some 0.3 arcseconds --
+  around 9 metres at the surface -- in a 435-day Chandler wobble beating
+  against an annual term. Like dUT1 this can only be measured and published,
+  never predicted, and zero is the honest default when it is unknown."
+  [xp yp]
+  (mul (ry (- xp)) (rx (- yp))))
+
+;; --------------------------------------------------- the complete transform
+
+(defn celestial->terrestrial
+  "The full rotation from the celestial frame of J2000 to the Earth-fixed
+  frame (M&G eq. 5.71):
+
+    U = polar motion * Earth rotation * nutation * precession
+
+  read right to left. Precession and nutation carry J2000 to the true
+  equator and equinox of date, Earth rotation spins that into the meridian
+  of Greenwich, and polar motion accounts for the axis wandering in the
+  crust. Each is nearly the identity except the third, which turns a full
+  circle a day."
+  ([mjd-tt mjd-ut1] (celestial->terrestrial mjd-tt mjd-ut1 0.0 0.0))
+  ([mjd-tt mjd-ut1 xp yp]
+   (chain (polar-motion xp yp)
+          (earth-rotation mjd-ut1 mjd-tt)
+          (nutation mjd-tt)
+          (precession mjd-tt))))
+
+(defn terrestrial->celestial
+  "The inverse, which for a rotation is simply the transpose."
+  ([mjd-tt mjd-ut1] (transpose (celestial->terrestrial mjd-tt mjd-ut1)))
+  ([mjd-tt mjd-ut1 xp yp] (transpose (celestial->terrestrial mjd-tt mjd-ut1 xp yp))))
+
+;; ------------------------------------------------------------------ caching
+
+(def ^:private frame-cache (atom nil))
+
+(def pn-bucket
+  "How coarsely the slowly varying parts may be held, in days.
+
+  A quarter of an hour, which costs at most about 4 centimetres at the
+  Earth's surface -- far below the truncation of the nutation series itself,
+  and below anything an orbit model cares about. The daily rotation is never
+  cached and keeps its full resolution."
+  0.01)
+
+(defn- slow-parts
+  "The precession-nutation product and the equation of the equinoxes, held
+  together on a coarse grid.
+
+  Both must be cached, not just the matrix. Apparent sidereal time needs the
+  equation of the equinoxes, which runs the same expensive series -- cache
+  one without the other and the saving is largely undone."
+  [mjd-tt]
+  (let [k (math/round (/ mjd-tt pn-bucket))]
+    (or (when-let [[ck v] @frame-cache] (when (= ck k) v))
+        (let [v [(mul (nutation mjd-tt) (precession mjd-tt))
+                 (equation-of-equinoxes mjd-tt)]]
+          (reset! frame-cache [k v])
+          v))))
+
+(defn precession-nutation
+  "Nutation composed with precession, on the coarse grid.
+
+  Worth caching because it is the expensive part and the slow part at once:
+  the series behind it costs a hundred times a sidereal-time evaluation and
+  changes a hundred thousand times more slowly. One entry suffices, since an
+  integrator walks forward and asks for the same bucket repeatedly."
+  [mjd-tt]
+  (first (slow-parts mjd-tt)))
+
+(defn celestial->terrestrial-cached
+  "As `celestial->terrestrial`, but reusing the slowly varying parts across
+  nearby epochs. The rotation angle itself is always recomputed."
+  ([mjd-tt mjd-ut1] (celestial->terrestrial-cached mjd-tt mjd-ut1 0.0 0.0))
+  ([mjd-tt mjd-ut1 xp yp]
+   (let [[pn eqeq] (slow-parts mjd-tt)]
+     (chain (polar-motion xp yp)
+            (rz (+ (time/gmst mjd-ut1) eqeq))
+            pn))))
