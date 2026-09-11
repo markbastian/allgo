@@ -43,7 +43,7 @@ html, body {
 .demo-picker {
   position: relative;
   display: inline-block;
-  width: min(360px, calc(100vw - 3rem));
+  width: min(380px, calc(100vw - 3rem));
   margin-top: 1.5rem;
   text-align: left;
 }
@@ -90,6 +90,19 @@ html, body {
   font-weight: 600;
 }
 
+/* Which group the current demo belongs to, above its name on the trigger.
+   Cheap orientation: the menu is grouped, so the closed state says where
+   in that grouping you are without having to open it. */
+.demo-picker__group {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--text-dim);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
 .demo-picker__blurb {
   display: block;
   margin-top: 0.1rem;
@@ -116,12 +129,80 @@ html, body {
   top: calc(100% + 0.4rem);
   left: 0;
   right: 0;
-  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  /* The list is the only part that scrolls, so the search box stays put
+     while the options move under it. Without a cap the panel grew with the
+     number of demos until it ran off the bottom of the window. */
+  max-height: min(62vh, 30rem);
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.6);
   animation: picker-in 0.15s ease;
+  overflow: hidden;
+}
+
+.demo-picker__searchbar {
+  flex-shrink: 0;
+  padding: 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.demo-picker__search {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: #14141f;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.demo-picker__search::placeholder {
+  color: var(--text-dim);
+}
+
+.demo-picker__search:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.28);
+}
+
+.demo-picker__list {
+  flex: 1;
+  min-height: 0;
+  padding: 0.35rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.demo-picker__group-block + .demo-picker__group-block {
+  margin-top: 0.15rem;
+}
+
+/* Sticky, so the heading of the group you are scrolled into stays
+   readable -- which is the whole value of grouping a list this long. */
+.demo-picker__heading {
+  position: sticky;
+  top: -0.35rem;
+  z-index: 1;
+  padding: 0.45rem 0.55rem 0.3rem;
+  background: var(--card-bg);
+  color: var(--text-dim);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.demo-picker__empty {
+  margin: 0;
+  padding: 1rem 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 @keyframes picker-in {

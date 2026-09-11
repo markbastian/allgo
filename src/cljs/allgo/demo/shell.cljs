@@ -65,13 +65,35 @@
    "solar-system" {:start solar/start! :stop solar/stop!}})
 
 (defn- demos
-  "The page itself is the source of truth for which demos exist."
+  "The page itself is the source of truth for which demos exist.
+
+  Order and grouping come from the document too, so adding a demo is
+  adding a card -- there is no list here to keep in step with it."
   []
   (vec (for [^js el (array-seq (js/document.querySelectorAll "section.demo-card[data-demo]"))]
          {:id    (.. el -dataset -demo)
+          :group (or (.. el -dataset -group) "Other")
           :label (.. el -dataset -label)
           :blurb (.. el -dataset -blurb)
           :el    el})))
+
+(defn- grouped
+  "`[[group items] ...]`, in the order the cards appear."
+  [items]
+  (->> items
+       (partition-by :group)
+       (mapv (fn [run] [(:group (first run)) (vec run)]))))
+
+(defn- matches?
+  "Whether a demo answers to what has been typed.
+
+  Matched against the group as well as the name, so that typing \"fluid\"
+  finds the fluids and typing \"flock\" finds all five flocking demos
+  whatever they are called."
+  [q {:keys [label blurb group]}]
+  (let [q (.toLowerCase (.trim (or q "")))]
+    (or (empty? q)
+        (some #(.includes (.toLowerCase (str %)) q) [label blurb group]))))
 
 (defn- remember! [id]
   (try (.setItem js/localStorage storage-key id) (catch :default _ nil)))
@@ -101,17 +123,14 @@
          :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden true}
    [:polyline {:points d}]])
 
-(defn- entry [{:keys [label blurb]}]
-  [:span.demo-picker__text
-   [:span.demo-picker__name label]
-   [:span.demo-picker__blurb blurb]])
-
 (defn picker [items]
-  (let [state    (r/atom {:open? false :selected (or (some #{(recall)} (map :id items))
-                                                     (:id (first items)))})
+  (let [state    (r/atom {:open? false
+                          :query ""
+                          :selected (or (some #{(recall)} (map :id items))
+                                        (:id (first items)))})
         nodes    (atom {})
         root     (atom nil)
-        close!   #(swap! state assoc :open? false)
+        close!   #(swap! state assoc :open? false :query "")
         outside! (fn [e] (when (and (:open? @state) @root
                                     (not (.contains @root (.-target e))))
                            (close!)))]
@@ -126,47 +145,94 @@
 
       :reagent-render
       (fn [items]
-        (let [{:keys [open? selected]} @state
-              idx     (fn [id] (first (keep-indexed #(when (= (:id %2) id) %1) items)))
-              current (nth items (idx selected))
+        (let [{:keys [open? selected query]} @state
+              by-id   (into {} (map (juxt :id identity)) items)
+              current (get by-id selected (first items))
+              ;; Arrow keys walk what is on screen, not what exists, or
+              ;; they step into rows the filter has taken away.
+              visible (filterv #(matches? query %) items)
+              idx     (fn [id] (or (first (keep-indexed #(when (= (:id %2) id) %1) visible)) 0))
+              focus!  (fn [i] (when (seq visible)
+                                (some-> (@nodes (mod i (count visible))) .focus)))
+              trigger! #(some-> @root (.querySelector ".demo-picker__trigger") .focus)
               choose! (fn [id]
-                        (swap! state assoc :selected id :open? false)
+                        (swap! state assoc :selected id :open? false :query "")
                         (activate! items id)
-                        (some-> @root (.querySelector ".demo-picker__trigger") .focus))
-              focus!  (fn [i] (some-> (@nodes (mod i (count items))) .focus))]
+                        (trigger!))
+              open!   (fn []
+                        (swap! state assoc :open? true)
+                        ;; The panel does not exist until this render lands.
+                        (js/setTimeout
+                         #(some-> @root (.querySelector ".demo-picker__search") .focus)
+                         0))]
           [:div.demo-picker {:data-open (str open?) :ref #(reset! root %)}
            [:button.demo-picker__trigger
             {:type          :button
              :aria-haspopup "listbox"
              :aria-expanded (str open?)
-             :on-click      #(swap! state update :open? not)
+             :on-click      #(if open? (close!) (open!))
              :on-key-down   (fn [e]
                               (when (contains? #{"ArrowDown" "ArrowUp"} (.-key e))
                                 (.preventDefault e)
-                                (swap! state assoc :open? true)
-                                (js/setTimeout #(focus! (idx selected)) 0)))}
-            [entry current]
+                                (open!)))}
+            [:span.demo-picker__text
+             [:span.demo-picker__group (:group current)]
+             [:span.demo-picker__name (:label current)]
+             [:span.demo-picker__blurb (:blurb current)]]
             [icon "demo-picker__chevron" "6 9 12 15 18 9"]]
            (when open?
-             [:div.demo-picker__panel {:role "listbox"}
-              (doall
-               (for [[i {:keys [id] :as item}] (map-indexed vector items)]
-                 ^{:key id}
-                 [:button.demo-picker__option
-                  {:type          :button
-                   :role          "option"
-                   :aria-selected (= id selected)
-                   :ref           #(swap! nodes assoc i %)
-                   :on-click      #(choose! id)
-                   :on-key-down   (fn [e]
-                                    (case (.-key e)
-                                      "ArrowDown" (do (.preventDefault e) (focus! (inc i)))
-                                      "ArrowUp"   (do (.preventDefault e) (focus! (dec i)))
-                                      "Escape"    (do (close!)
-                                                      (some-> @root (.querySelector ".demo-picker__trigger") .focus))
-                                      nil))}
-                  [icon "demo-picker__check" "20 6 9 17 4 12"]
-                  [entry item]]))])]))})))
+             [:div.demo-picker__panel
+              [:div.demo-picker__searchbar
+               [:input.demo-picker__search
+                {:type        "text"
+                 :value       query
+                 :placeholder (str "Search " (count items) " demos")
+                 :aria-label  "Search demos"
+                 :on-change   #(swap! state assoc :query (.. % -target -value))
+                 :on-key-down (fn [e]
+                                (case (.-key e)
+                                  "ArrowDown" (do (.preventDefault e) (focus! 0))
+                                  "ArrowUp"   (do (.preventDefault e) (focus! (dec (count visible))))
+                                  ;; Enter takes the only thing left, which
+                                  ;; is what a search box that narrows to
+                                  ;; one result ought to do.
+                                  "Enter"     (when (= 1 (count visible))
+                                                (.preventDefault e)
+                                                (choose! (:id (first visible))))
+                                  "Escape"    (do (close!) (trigger!))
+                                  nil))}]]
+              [:div.demo-picker__list {:role "listbox"}
+               (if (empty? visible)
+                 [:p.demo-picker__empty "Nothing matches that."]
+                 (doall
+                  (for [[group run] (grouped visible)]
+                    ^{:key group}
+                    ;; A listbox may only contain options and groups, so
+                    ;; the block carries the role and the heading is left
+                    ;; out of the tree -- otherwise a screen reader either
+                    ;; loses the options or reads every heading twice.
+                    [:div.demo-picker__group-block {:role "group" :aria-label group}
+                     [:div.demo-picker__heading {:aria-hidden true} group]
+                     (doall
+                      (for [{:keys [id] :as item} run
+                            :let [i (idx id)]]
+                        ^{:key id}
+                        [:button.demo-picker__option
+                         {:type          :button
+                          :role          "option"
+                          :aria-selected (= id selected)
+                          :ref           #(swap! nodes assoc i %)
+                          :on-click      #(choose! id)
+                          :on-key-down   (fn [e]
+                                           (case (.-key e)
+                                             "ArrowDown" (do (.preventDefault e) (focus! (inc i)))
+                                             "ArrowUp"   (do (.preventDefault e) (focus! (dec i)))
+                                             "Escape"    (do (close!) (trigger!))
+                                             nil))}
+                         [icon "demo-picker__check" "20 6 9 17 4 12"]
+                         [:span.demo-picker__text
+                          [:span.demo-picker__name (:label item)]
+                          [:span.demo-picker__blurb (:blurb item)]]]))])))]])]))})))
 
 (defonce ^:private picker-root
   (some-> (js/document.getElementById "demo-picker") rdom/create-root))
