@@ -70,16 +70,25 @@
         vals (mapv #(modified-midpoint f t y H %) ns)]
     (extrapolate vals ns)))
 
+(defn- resolve-step
+  "Accept a Gragg-Bulirsch-Stoer step, or judge it by the gap between the
+  last two extrapolations.
+
+  Shared by both orders: the two differ in what they integrate and in
+  whether a velocity rides along, and not at all in how a step is
+  accepted."
+  [{:keys [method control] :as integ} updates diff reference]
+  (if-not (:adaptive? method)
+    (core/accept integ updates)
+    (core/settle integ
+                 (core/norm diff reference (:tol-abs control) (:tol-rel control))
+                 (:order method)
+                 updates)))
+
 (defn- advance
-  [{:keys [f t y h method control] :as integ}]
+  [{:keys [f t y h method] :as integ}]
   (let [[y' diff] (gbs-step f t y h (:levels method))]
-    (if-not (:adaptive? method)
-      (assoc integ :t (+ t h) :y y' :accepted true :error nil)
-      (let [err      (core/norm diff y' (:tol-abs control) (:tol-rel control))
-            [ok? h'] (core/adapt err (:order method) control h)]
-        (if ok?
-          (assoc integ :t (+ t h) :y y' :h h' :accepted true :error err)
-          (assoc integ :h h' :accepted false :error err))))))
+    (resolve-step integ {:t (+ t h) :y y'} diff y')))
 
 (defn gbs
   "Gragg-Bulirsch-Stoer with `levels` extrapolation levels, of order 2*levels."
@@ -93,14 +102,8 @@
 (defn integrator
   ([method f t0 y0 h] (integrator method f t0 y0 h {}))
   ([method f t0 y0 h opts]
-   {:method   (cond-> method (:adaptive? opts) (assoc :adaptive? true))
-    :f        f
-    :t        (double t0)
-    :y        (mapv double y0)
-    :h        (double h)
-    :control  (merge core/control-defaults (dissoc opts :adaptive?))
-    :accepted true
-    :error    nil}))
+   (core/integrator {:method (cond-> method (:adaptive? opts) (assoc :adaptive? true))
+                     :f f :t t0 :y y0 :h h :opts opts})))
 
 ;; ------------------------------------------------ second-order extrapolation
 
@@ -136,15 +139,9 @@
     [y' v' dy-diff]))
 
 (defn- advance-2
-  [{:keys [f t y dy h method control] :as integ}]
+  [{:keys [f t y dy h method] :as integ}]
   (let [[y' v' diff] (gbs2-step f t y dy h (:levels method))]
-    (if-not (:adaptive? method)
-      (assoc integ :t (+ t h) :y y' :dy v' :accepted true :error nil)
-      (let [err      (core/norm diff y' (:tol-abs control) (:tol-rel control))
-            [ok? h'] (core/adapt err (:order method) control h)]
-        (if ok?
-          (assoc integ :t (+ t h) :y y' :dy v' :h h' :accepted true :error err)
-          (assoc integ :h h' :accepted false :error err))))))
+    (resolve-step integ {:t (+ t h) :y y' :dy v'} diff y')))
 
 (defn gbs-2
   "Gragg-Bulirsch-Stoer for y'' = f(t, y), of order 2*levels."
@@ -158,12 +155,6 @@
 (defn integrator-2
   ([method f t0 y0 dy0 h] (integrator-2 method f t0 y0 dy0 h {}))
   ([method f t0 y0 dy0 h opts]
-   {:method   (cond-> method (:adaptive? opts) (assoc :adaptive? true))
-    :f        f
-    :t        (double t0)
-    :y        (mapv double y0)
-    :dy       (mapv double dy0)
-    :h        (double h)
-    :control  (merge core/control-defaults (dissoc opts :adaptive?))
-    :accepted true
-    :error    nil}))
+   (core/integrator {:method (cond-> method (:adaptive? opts) (assoc :adaptive? true))
+                     :f f :t t0 :y y0 :h h :opts opts}
+                    {:dy (mapv double dy0)})))

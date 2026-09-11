@@ -89,15 +89,14 @@
 ;; ----------------------------------------------------------- the integrator
 
 (defn- advance [{:keys [method f t y h control] :as integ}]
-  (let [[y' e] (tableau-step method (:c method) f t y h)]
+  (let [[y' e] (tableau-step method (:c method) f t y h)
+        done   {:t (+ t h) :y y'}]
     (if-not (:adaptive? method)
-      (assoc integ :t (+ t h) :y y' :accepted true :error nil)
-      (let [err      (core/norm e y' (:tol-abs control) (:tol-rel control))
-            [ok? h'] (core/adapt err (:error-order method) control h)]
-        (if ok?
-          (assoc integ :t (+ t h) :y y' :h h' :accepted true :error err)
-          ;; Rejected: time and state stand, only the step shrinks.
-          (assoc integ :h h' :accepted false :error err))))))
+      (core/accept integ done)
+      (core/settle integ
+                   (core/norm e y' (:tol-abs control) (:tol-rel control))
+                   (:error-order method)
+                   done))))
 
 (defn integrator
   "An integrator for `y' = (f t y)` starting from `y0` at `t0` with step `h`.
@@ -106,12 +105,6 @@
   hold an embedded method to a fixed step."
   ([method f t0 y0 h] (integrator method f t0 y0 h {}))
   ([method f t0 y0 h opts]
-   {:method   (cond-> (assoc method :advance advance)
-                (false? (:adaptive? opts)) (assoc :adaptive? false))
-    :f        f
-    :t        (double t0)
-    :y        (mapv double y0)
-    :h        (double h)
-    :control  (merge core/control-defaults (dissoc opts :adaptive?))
-    :accepted true
-    :error    nil}))
+   (core/integrator {:method (cond-> (assoc method :advance advance)
+                               (false? (:adaptive? opts)) (assoc :adaptive? false))
+                     :f f :t t0 :y y0 :h h :opts opts})))

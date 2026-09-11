@@ -167,15 +167,8 @@
   ([method f t0 y0 h] (integrator method f t0 y0 h {}))
   ([method f t0 y0 h opts]
    (let [y (mapv double y0) t (double t0)]
-     {:method   method
-      :f        f
-      :t        t
-      :y        y
-      :h        (double h)
-      :history  [(f t y)]
-      :control  (merge core/control-defaults opts)
-      :accepted true
-      :error    nil})))
+     (core/integrator {:method method :f f :t t :y y :h h :opts opts}
+                      {:history [(f t y)]}))))
 
 ;; ---------------------------------------------------- Stoermer and Cowell
 
@@ -241,17 +234,10 @@
   ([method f t0 y0 dy0 h] (integrator-2 method f t0 y0 dy0 h {}))
   ([method f t0 y0 dy0 h opts]
    (let [y (mapv double y0) t (double t0)]
-     {:method   method
-      :f        f
-      :t        t
-      :y        y
-      :dy       (mapv double dy0)
-      :y-prev   y
-      :h        (double h)
-      :history  [(f t y)]
-      :control  (merge core/control-defaults opts)
-      :accepted true
-      :error    nil})))
+     (core/integrator {:method method :f f :t t :y y :h h :opts opts}
+                      {:dy (mapv double dy0)
+                       :y-prev y
+                       :history [(f t y)]}))))
 
 ;; ------------------------------------------------------- variable step size
 
@@ -296,15 +282,14 @@
             p         (core/v+ y (core/v* (core/combine predictor history) h))
             fp        (f t' p)
             y'        (core/v+ y (core/v* (core/combine corrector (push history fp k)) h))
-            err       (core/norm (core/v- y' p) y' (:tol-abs control) (:tol-rel control))
-            [ok? h']  (core/adapt err (:order method) control h)]
-        (if ok?
-          (assoc integ :t t' :y y' :h h'
-                 :history (push history (f t' y') k)
-                 :times (vec (take k (cons t' times)))
-                 :accepted true :starting? false :error err)
-          ;; Rejected: the history stands, only the step shrinks.
-          (assoc integ :h h' :accepted false :error err))))))
+            err       (core/norm (core/v- y' p) y' (:tol-abs control) (:tol-rel control))]
+        ;; Rejected, the history stands and only the step shrinks, which is
+        ;; what makes a variable-coefficient method able to retry at once.
+        (core/settle integ err (:order method)
+                     {:t t' :y y'
+                      :history (push history (f t' y') k)
+                      :times (vec (take k (cons t' times)))
+                      :starting? false})))))
 
 (defn adams-variable
   "Adams predictor-corrector of order `k` with automatic step size.
@@ -325,13 +310,5 @@
   ([method f t0 y0 h] (variable-integrator method f t0 y0 h {}))
   ([method f t0 y0 h opts]
    (let [y (mapv double y0) t (double t0)]
-     {:method   method
-      :f        f
-      :t        t
-      :y        y
-      :h        (double h)
-      :history  [(f t y)]
-      :times    [t]
-      :control  (merge core/control-defaults opts)
-      :accepted true
-      :error    nil})))
+     (core/integrator {:method method :f f :t t :y y :h h :opts opts}
+                      {:history [(f t y)] :times [t]}))))

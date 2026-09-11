@@ -82,15 +82,12 @@
         denom  (- (Math/pow 2.0 p) 1.0)
         diff   (core/v- (:y fine) (:y coarse))
         e      (core/v* diff (/ 1.0 denom))
-        err    (core/norm e (:y fine) (:tol-abs control) (:tol-rel control))
-        [ok? h'] (core/adapt err p control h)]
-    (if ok?
-      (assoc integ :t (+ t h)
-             :y  (core/v+ (:y fine) e)
-             :dy (core/v+ (:dy fine)
-                          (core/v* (core/v- (:dy fine) (:dy coarse)) (/ 1.0 denom)))
-             :h h' :accepted true :error err)
-      (assoc integ :h h' :accepted false :error err))))
+        err    (core/norm e (:y fine) (:tol-abs control) (:tol-rel control))]
+    (core/settle integ err p
+                 {:t  (+ t h)
+                  :y  (core/v+ (:y fine) e)
+                  :dy (core/v+ (:dy fine)
+                               (core/v* (core/v- (:dy fine) (:dy coarse)) (/ 1.0 denom)))})))
 
 (defn integrator
   "An integrator for `y'' = (f t y)` from `y0`, `dy0` at `t0` with step `h`.
@@ -98,13 +95,8 @@
   ([method f t0 y0 dy0 h] (integrator method f t0 y0 dy0 h {}))
   ([method f t0 y0 dy0 h opts]
    (let [adaptive? (boolean (:adaptive? opts))]
-     {:method   (assoc method :advance (if adaptive? advance-doubled advance-fixed)
-                       :adaptive? adaptive?)
-      :f        f
-      :t        (double t0)
-      :y        (mapv double y0)
-      :dy       (mapv double dy0)
-      :h        (double h)
-      :control  (merge core/control-defaults (dissoc opts :adaptive?))
-      :accepted true
-      :error    nil})))
+     (core/integrator {:method (assoc method
+                                      :advance (if adaptive? advance-doubled advance-fixed)
+                                      :adaptive? adaptive?)
+                       :f f :t t0 :y y0 :h h :opts opts}
+                      {:dy (mapv double dy0)}))))

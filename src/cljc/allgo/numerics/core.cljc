@@ -90,6 +90,34 @@
    :h-min     1e-12
    :h-max     ##Inf})
 
+(defn integrator
+  "The state every integrator here carries.
+
+  Seven constructors were building this same map -- the method, the system,
+  where and how big a step, the control parameters, and whether the last
+  step was accepted -- and differing only in what they added to it: a
+  velocity for the second-order methods, a history for the multistep ones.
+  `extra` is that difference and this is the rest.
+
+  `:adaptive?` is dropped from the control parameters because it selects a
+  method rather than tuning one, and each constructor has already read it."
+  ([base] (integrator base {}))
+  ([{:keys [method f t y h opts]} extra]
+   (merge {:method   method
+           :f        f
+           :t        (double t)
+           :y        (mapv double y)
+           :h        (double h)
+           :control  (merge control-defaults (dissoc opts :adaptive?))
+           :accepted true
+           :error    nil}
+          extra)))
+
+(defn accept
+  "A step taken at a fixed size, with nothing to judge it by."
+  [integ updates]
+  (merge integ updates {:accepted true :error nil}))
+
 (defn adapt
   "The classic step-size law: scale by (tol/err)^(1/(p+1)), clamped so a
   freak error estimate cannot collapse or explode the step in one move.
@@ -103,3 +131,18 @@
                     (min max-scale)))
         h'    (-> (* h scale) (max h-min) (min h-max))]
     [(<= err 1.0) h']))
+
+(defn settle
+  "Accept or reject a step by the size of its error estimate.
+
+  Every adaptive method here ends the same way, and the rejected branch is
+  the same in all of them: time and state stand, only the step shrinks. It
+  is short enough to have been written out five times and important enough
+  that five copies would have to stay in agreement -- a method that
+  advanced time on a rejected step would take a wrong answer and never
+  revisit it."
+  [integ err order updates]
+  (let [[ok? h'] (adapt err order (:control integ) (:h integ))]
+    (if ok?
+      (merge integ updates {:h h' :accepted true :error err})
+      (assoc integ :h h' :accepted false :error err))))
