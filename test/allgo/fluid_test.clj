@@ -153,3 +153,67 @@
           (is (every? (fn [[i j]] (<= -1e-4 (fl/smoke-at f i j) 1.0001))
                       (for [i (range 1 (dec (:nx f))) j (range 1 (dec (:ny f)))] [i j]))
               "and none goes out of range"))))))
+
+(deftest staggering-test
+  ;; Each velocity component lives on a different face -- u on vertical
+  ;; faces, v on horizontal ones -- so advecting either needs the other
+  ;; averaged from the four faces that straddle it. Take the wrong four
+  ;; and the average is read from a cell diagonally away, which biases
+  ;; every step along that diagonal. Nothing else here catches it: a
+  ;; uniform field averages to the same value whichever four you pick.
+  (let [nx 20 ny 20 h 0.1 dt 0.01
+        ;; A field linear in position interpolates exactly, so whatever
+        ;; comes back out names the point it was read from.
+        linear-u! (fn [f fx]
+                    (dotimes [i (:nx f)]
+                      (dotimes [j (:ny f)]
+                        (aset ^floats (:u f) (fl/idx f i j)
+                              (float (fx (* i h) (* (+ j 0.5) h)))))))
+        linear-v! (fn [f fx]
+                    (dotimes [i (:nx f)]
+                      (dotimes [j (:ny f)]
+                        (aset ^floats (:v f) (fl/idx f i j)
+                              (float (fx (* (+ i 0.5) h) (* j h)))))))]
+
+    (testing "sampling a field reads it at the point asked for"
+      (let [f (fl/fluid nx ny h)]
+        (linear-u! f (fn [_ y] y))
+        (linear-v! f (fn [x _] x))
+        (is (< (abs (- (fl/sample f :u 0.97 1.04) 1.04)) 1e-5))
+        (is (< (abs (- (fl/sample f :v 0.97 1.04) 0.97)) 1e-5))))
+
+    (testing "advecting u averages v from the faces straddling it"
+      ;; The u face at (i*h, (j+1/2)*h) is straddled by the v faces at
+      ;; columns i-1 and i, rows j and j+1, whose centroid is the u face
+      ;; itself. So with v = x, the average must be i*h -- and with the
+      ;; neighbouring four it would be (i+1)*h instead.
+      (doseq [[label vf expected]
+              [["v = x" (fn [x _] x) (fn [i _] (* i h))]
+               ["v = y" (fn [_ y] y) (fn [_ j] (* (+ j 0.5) h))]]]
+        (let [f (-> (fl/fluid nx ny h) (fl/close-border!))]
+          (linear-u! f (fn [_ y] y))
+          (linear-v! f vf)
+          (fl/advect-velocity! f dt)
+          (doseq [[i j] [[10 10] [7 13] [14 6]]]
+            (let [u' (aget ^floats (:u f) (fl/idx f i j))
+                  ;; u came back as the y it was traced to, so the
+                  ;; transverse velocity used is recoverable exactly.
+                  avg-v (/ (- (* (+ j 0.5) h) u') dt)]
+              (is (< (abs (- avg-v (expected i j))) 1e-3)
+                  (str label " at " [i j] ": averaged " avg-v
+                       " instead of " (expected i j))))))))
+
+    (testing "advecting v averages u from the faces straddling it"
+      (doseq [[label uf expected]
+              [["u = x" (fn [x _] x) (fn [i _] (* (+ i 0.5) h))]
+               ["u = y" (fn [_ y] y) (fn [_ j] (* j h))]]]
+        (let [f (-> (fl/fluid nx ny h) (fl/close-border!))]
+          (linear-u! f uf)
+          (linear-v! f (fn [x _] x))
+          (fl/advect-velocity! f dt)
+          (doseq [[i j] [[10 10] [7 13] [14 6]]]
+            (let [v' (aget ^floats (:v f) (fl/idx f i j))
+                  avg-u (/ (- (* (+ i 0.5) h) v') dt)]
+              (is (< (abs (- avg-u (expected i j))) 1e-3)
+                  (str label " at " [i j] ": averaged " avg-u
+                       " instead of " (expected i j))))))))))

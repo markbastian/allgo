@@ -90,7 +90,7 @@
 
 ;; ---------------------------------------------------------------------------
 
-(defn- integrate!
+(defn integrate!
   "Gravity, applied only to the vertical faces between two open cells."
   [{:keys [nx ny ^floats v ^floats s]} dt gravity]
   (let [ny (long ny)]
@@ -103,7 +103,7 @@
                 (aset v k (float (+ (aget v k) (* gravity dt))))))
             (recur (inc j))))))))
 
-(defn- project!
+(defn project!
   "Gauss-Seidel pressure projection: the heart of it.
 
   For each cell, measure how much more is flowing out than in -- the
@@ -143,7 +143,7 @@
               (recur (inc j))))
           (recur (inc i)))))))
 
-(defn- extrapolate!
+(defn extrapolate!
   "Copies velocities into the border, so sampling near an edge has
   something to read."
   [{:keys [nx ny ^floats u ^floats v]}]
@@ -186,7 +186,7 @@
        (* tx ty (aget f (+ (* x1 ny) y1)))
        (* sx ty (aget f (+ (* x0 ny) y1))))))
 
-(defn- advect-velocity!
+(defn advect-velocity!
   "Semi-Lagrangian advection: for each face, ask where the material
   arriving there came from a step ago, and take its velocity.
 
@@ -207,21 +207,30 @@
                       uu (aget u k)
                       ;; The other component is not stored here, so it is
                       ;; averaged from the four faces around this one.
-                      vv (* 0.25 (+ (aget v (dec k)) (aget v k)
-                                    (aget v (+ (dec k) ny)) (aget v (+ k ny))))]
+                      ;; This face is at (i*h, (j+1/2)*h); the four v
+                      ;; faces nearest it are the ones at columns i-1 and
+                      ;; i, rows j and j+1. Taking the other four -- the
+                      ;; stencil the v branch below wants -- reads the
+                      ;; velocity from a cell diagonally away, and the
+                      ;; whole fluid drifts along that diagonal.
+                      vv (* 0.25 (+ (aget v (- k ny)) (aget v k)
+                                    (aget v (inc (- k ny))) (aget v (inc k))))]
                   (aset u' k (float (sample f :u (- x (* dt uu)) (- y (* dt vv)))))))
               (when (and (pos? (aget s k)) (pos? (aget s (dec k))) (< i (dec nx)))
                 (let [x (+ (* i h) h2)
                       y (* j h)
-                      uu (* 0.25 (+ (aget u (- k ny)) (aget u k)
-                                    (aget u (inc (- k ny))) (aget u (inc k))))
+                      ;; And this face is at ((i+1/2)*h, j*h), so the
+                      ;; four u faces nearest it are at columns i and
+                      ;; i+1, rows j-1 and j.
+                      uu (* 0.25 (+ (aget u (dec k)) (aget u k)
+                                    (aget u (+ (dec k) ny)) (aget u (+ k ny))))
                       vv (aget v k)]
                   (aset v' k (float (sample f :v (- x (* dt uu)) (- y (* dt vv))))))))
             (recur (inc j))))
         (recur (inc i))))
     (dotimes [i (* nx ny)] (aset u i (aget u' i)) (aset v i (aget v' i)))))
 
-(defn- advect-smoke!
+(defn advect-smoke!
   "The same backward trace, carrying the dye."
   [{:keys [nx ny h ^floats u ^floats v ^floats s ^floats smoke ^floats smoke'] :as f} dt]
   (let [nx (long nx) ny (long ny) h (double h) h2 (* 0.5 h)]
@@ -250,7 +259,14 @@
    :over-relaxation 1.9})
 
 (defn step!
-  "Advance the fluid one frame."
+  "Advance the fluid one frame.
+
+  The stages are public and run in this order because each depends on the
+  last: the projection needs the forces already applied, advection needs a
+  divergence-free field to carry things along, and the smoke has to be
+  carried by the same velocities the fluid was left with. Compose them
+  yourself when a simulation needs a pass of its own in between --
+  `allgo.physics.fire` adds buoyancy, cooling and vortices that way."
   ([f] (step! f default-world))
   ([{:keys [^floats p] :as f} world]
    (let [{:keys [dt gravity iterations over-relaxation]} (merge default-world world)]

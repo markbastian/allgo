@@ -14,6 +14,7 @@
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dungeon :as dungeon]
             [allgo.demo.dungeon-boids :as dungeon-boids]
+            [allgo.demo.fire :as fire]
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
             [allgo.demo.hex :as hex]
@@ -41,6 +42,7 @@
    "cloth"    {:start cloth/start!    :stop cloth/stop!}
    "fluid"    {:start fluid/start!    :stop fluid/stop!}
    "flip"     {:start flip/start!     :stop flip/stop!}
+   "fire"     {:start fire/start!     :stop fire/stop!}
    "water"    {:start water/start!    :stop water/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
