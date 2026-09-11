@@ -14,6 +14,7 @@
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dungeon :as dungeon]
             [allgo.demo.dungeon-boids :as dungeon-boids]
+            [allgo.demo.fluid :as fluid]
             [allgo.demo.hex :as hex]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
@@ -36,6 +37,7 @@
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}
+   "fluid"    {:start fluid/start!    :stop fluid/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
