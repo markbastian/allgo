@@ -19,6 +19,7 @@
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
             [allgo.demo.hex :as hex]
+            [allgo.demo.joints :as joints]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
@@ -48,6 +49,7 @@
    "fire"     {:start fire/start!     :stop fire/stop!}
    "water"    {:start water/start!    :stop water/stop!}
    "rigid"    {:start rigid/start!    :stop rigid/stop!}
+   "joints"   {:start joints/start!   :stop joints/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
