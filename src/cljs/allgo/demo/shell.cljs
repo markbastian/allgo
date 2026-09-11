@@ -18,6 +18,7 @@
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.satellite :as satellite]
+            [allgo.demo.soft-body :as soft-body]
             [allgo.demo.solar-system :as solar]
             [allgo.demo.terrain-webgl :as terrain]
             [reagent.core :as r]
@@ -29,6 +30,7 @@
   {"caves"    {:start cave/start!    :stop cave/stop!}
    "delaunay" {:start delaunay/start! :stop delaunay/stop!}
    "hex"      {:start hex/start!      :stop hex/stop!}
+   "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
