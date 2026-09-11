@@ -9,6 +9,7 @@
             [allgo.demo.boids-viewer :as boids-2d]
             [allgo.demo.boids-voronoi :as boids-voronoi]
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
+            [allgo.demo.broad-phase :as broad-phase]
             [allgo.demo.cave :as cave]
             [allgo.demo.cloth :as cloth]
             [allgo.demo.delaunay-viewer :as delaunay]
@@ -40,6 +41,7 @@
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}
+   "broad-phase" {:start broad-phase/start! :stop broad-phase/stop!}
    "fluid"    {:start fluid/start!    :stop fluid/stop!}
    "flip"     {:start flip/start!     :stop flip/stop!}
    "fire"     {:start fire/start!     :stop fire/stop!}
