@@ -12,7 +12,7 @@
 
 (def ^:private background "#05070d")
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:boids          30
        :separation     1.6
        :alignment      1.0

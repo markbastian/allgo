@@ -21,7 +21,7 @@
 
 (def ^:private generations 25)
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:width      64
        :height     48
        :fill       45

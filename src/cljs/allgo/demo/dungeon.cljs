@@ -21,7 +21,7 @@
    :ghost    "rgba(120, 140, 180, 0.16)"
    :text     "#7d8aa3"})
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:rooms         120
        :spread        150
        :sizeMean      24

@@ -36,7 +36,7 @@
 (def ^:private mu c/GM-earth)
 (def ^:private elevation-mask (* 10.0 c/degrees))
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:noiseMetres   10.0
        :arcHours      6.0
        :sampleSeconds 150.0

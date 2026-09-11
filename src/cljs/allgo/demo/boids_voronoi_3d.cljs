@@ -17,7 +17,7 @@
 (def ^:private max-verts 60000)
 (def ^:private capacity 64)
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:boids         28
        :separation    1.6
        :alignment     1.0

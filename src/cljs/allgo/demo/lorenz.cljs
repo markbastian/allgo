@@ -16,7 +16,7 @@
 (def ^:private max-points 120000)
 (def ^:private by-name (into {} (map (juxt :name identity)) num/first-order))
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:method         "DOPRI5(4)"
        :dt             0.004
        :stepsPerFrame  6

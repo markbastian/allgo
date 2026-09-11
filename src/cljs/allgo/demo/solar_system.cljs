@@ -42,7 +42,7 @@
   {:mercury 0.16 :venus 0.24 :earth 0.26 :mars 0.19
    :jupiter 0.62 :saturn 0.54 :uranus 0.38 :neptune 0.37})
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:scale         "logarithmic"
        :daysPerSecond 12.0
        :moonZoom      400.0

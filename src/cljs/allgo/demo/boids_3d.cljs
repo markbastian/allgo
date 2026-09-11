@@ -29,7 +29,7 @@
         shapes))
 (def ^:private capacity 400)
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:boids         60
        :separation    1.6
        :alignment     1.0

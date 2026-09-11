@@ -19,7 +19,7 @@
 (def ^:private view-scale 34.0)
 (def ^:private by-name (into {} (map (juxt :name identity)) num/second-order))
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:method         "RKN4"
        :eccentricity   0.6
        :stepsPerOrbit  300

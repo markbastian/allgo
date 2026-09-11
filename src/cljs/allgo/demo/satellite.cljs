@@ -21,7 +21,7 @@
 (def ^:private max-points 90000)
 (def ^:private by-name (into {} (map (juxt :name identity)) num/first-order))
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:altitude        400.0
        :inclination     51.6
        :degree          4

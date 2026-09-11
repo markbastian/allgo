@@ -20,7 +20,7 @@
 
 (def ^:private background "#05070d")
 
-(def ^:private controls
+(def ^:private ^js controls
   #js {:boids       50
        :rooms       45
        :separation  1.4
