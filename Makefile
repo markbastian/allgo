@@ -22,7 +22,7 @@ SHADOW  := $(JAVA) npx shadow-cljs
 BUNDLE  := resources/public/js/compiled/allgo.js
 
 .DEFAULT_GOAL := help
-.PHONY: help test lint check dev serve compile release repl clean
+.PHONY: help test lint check dev serve bundle compress release repl clean
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -42,11 +42,30 @@ dev: ## Build the demo page once, unminified, with source maps
 serve: ## Watch and serve the demo page on http://localhost:3000
 	@$(SHADOW) watch app
 
-release: ## Build the minified demo bundle (advanced optimisations)
-	@$(SHADOW) release app
-	@printf '\nMinified bundle: %s (%s)\n' "$(BUNDLE)" "$$(ls -lh $(BUNDLE) | awk '{print $$5}')"
+release: compress ## Build the minified bundle, pre-compressed
 	@echo 'Serve resources/public as-is. Run "make dev" to get the'
 	@echo 'readable build with source maps back -- release overwrites it.'
+
+compress: bundle ## Pre-compress the bundle as .gz and .br
+	@gzip -9 -c $(BUNDLE) > $(BUNDLE).gz
+	@if command -v brotli >/dev/null 2>&1; then brotli -q 11 -c $(BUNDLE) > $(BUNDLE).br; \
+	 else echo 'note: brotli not installed, skipping .br (brew install brotli)'; fi
+	@printf '\n%-12s %10s\n' ENCODING SIZE
+	@printf '%-12s %10s\n' identity "$$(ls -lh $(BUNDLE) | awk '{print $$5}')"
+	@printf '%-12s %10s\n' gzip "$$(ls -lh $(BUNDLE).gz | awk '{print $$5}')"
+	@[ -f $(BUNDLE).br ] && printf '%-12s %10s\n' br "$$(ls -lh $(BUNDLE).br | awk '{print $$5}')" || true
+	@echo
+	@echo 'These are only used if the server is told to. See the README:'
+	@echo 'nginx gzip_static/brotli_static, Caddy precompressed. Most'
+	@echo 'managed hosts compress on the fly and ignore them.'
+
+bundle: ## Build the minified bundle without compressing it
+	@# The release build emits one self-contained file, but it writes into
+	@# the same directory the development build fills with ~15MB of
+	@# per-namespace cljs-runtime files. Those are stale the moment a
+	@# release is built and get deployed with it unless cleared first.
+	@rm -rf $(dir $(BUNDLE))
+	@$(SHADOW) release app
 
 repl: ## Start an nREPL with CIDER middleware
 	@$(JAVA) clojure -M:nrepl

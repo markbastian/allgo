@@ -41,11 +41,45 @@ watching.
 
 `make release` produces the deployable artifact: the whole page compiled
 through Closure's advanced optimisations into a single minified
-`resources/public/js/compiled/allgo.js`, about a fifth the size of the
-development build. Deploy `resources/public` as it stands -- the page is
-static and the bundle is the only script it loads. Release overwrites the
-same file the development build writes, so run `make dev` afterwards to
-get readable names and source maps back.
+`resources/public/js/compiled/allgo.js`, plus `.gz` and `.br` copies.
+Deploy `resources/public` as it stands -- eight files, the page is static
+and the bundle is the only script it loads. Release overwrites the same
+file the development build writes, so run `make dev` afterwards to get
+readable names and source maps back.
+
+    encoding      size
+    identity      1.1M
+    gzip          312K
+    br            256K
+
+`.br` is Brotli, which every current browser accepts and which beats gzip
+by about 18% here. Both files are *hints to the server* -- nothing
+requests them by name, so they are ignored unless the server is
+configured to serve them in place of the `.js` with the matching
+`Content-Encoding`:
+
+    nginx   gzip_static on; brotli_static on;
+    Caddy   file_server { precompressed br gzip }
+    S3      upload with Content-Encoding metadata set
+
+Netlify, Vercel, Cloudflare, GitHub Pages and the like compress on the
+fly and ignore the pre-built copies; they cost nothing but are no help
+there either.
+
+Release builds delete the output directory first, which matters more than
+it sounds: the development build writes ~15MB of per-namespace files into
+it under `cljs-runtime/`, and those are stale the instant a release is
+built but would still be deployed alongside it. Clearing first takes the
+deployed tree from about 17MB to 1.8MB.
+
+Size is dominated by three.js, at 630KB of the 1.1MB bundle -- using
+`WebGLRenderer` reaches most of the library, so it does not tree-shake
+usefully (`:js-provider :shadow` makes no difference). React, ReactDOM
+and Reagent account for another 147KB, and are needed only by the demo
+picker and the Delaunay tile. The two levers left, if the bundle ever
+needs to be smaller, are splitting the WebGL demos into a lazily loaded
+module so the first paint does not pay for three.js, and dropping Reagent
+for plain DOM.
 
 Two things to know about that build:
 
