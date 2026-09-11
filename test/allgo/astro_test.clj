@@ -1994,3 +1994,54 @@
       (is (close? (* n (obs/wavelength obs/L1)) (:ambiguity p) 1e-12))
       (is (close? (+ 20000.0 (* n (obs/wavelength obs/L1))) (:phase p) 1e-9)
           "and it enters the phase range directly"))))
+
+(deftest force-model-registry-test
+  (let [mjd 58000.0
+        r [7000.0 1000.0 200.0]
+        v [1.0 7.0 0.5]
+        mag (fn [x] (Math/sqrt (reduce + (map * x x))))]
+
+    (testing "a breakdown sums to the acceleration it breaks down"
+      ;; `acceleration` and `breakdown` used to carry separate lists of the
+      ;; forces and had drifted: tides were applied by one and missing from
+      ;; the other, so with tides on the parts did not add up to the whole.
+      (doseq [config [{}
+                      {:tides? true}
+                      {:sun? false :moon? false}
+                      {:drag {:area-to-mass 0.01 :cd 2.2}}
+                      {:relativity? true}
+                      {:srp {:area-to-mass 0.02 :cr 1.3}}
+                      {:tides? true :relativity? true
+                       :srp {:area-to-mass 0.02 :cr 1.3}
+                       :drag {:area-to-mass 0.01 :cd 2.2}}]]
+        (let [total (forces/acceleration config mjd r v)
+              parts (forces/breakdown config mjd r v)
+              summed (reduce (fn [acc [_ a]] (mapv + acc a)) [0.0 0.0 0.0] parts)]
+          (is (< (mag (mapv - total summed)) 1e-18)
+              (str "parts do not sum to the whole for " config)))))
+
+    (testing "tides change the acceleration, and are visible in the breakdown"
+      ;; Folded into the harmonics, because a tide is a perturbation of the
+      ;; geopotential. What matters is that they are not lost.
+      (let [plain (forces/acceleration {} mjd r v)
+            tidal (forces/acceleration {:tides? true} mjd r v)]
+        (is (pos? (mag (mapv - plain tidal))))
+        (is (pos? (mag (mapv - (:harmonics (forces/breakdown {} mjd r v))
+                             (:harmonics (forces/breakdown {:tides? true} mjd r v))))))))
+
+    (testing "a config switches models on and off"
+      (is (= #{:two-body :harmonics :sun :moon}
+             (set (keys (forces/breakdown {} mjd r v)))))
+      (is (= #{:two-body :harmonics}
+             (set (keys (forces/breakdown {:sun? false :moon? false} mjd r v)))))
+      (is (contains? (forces/breakdown {:drag {:area-to-mass 0.01 :cd 2.2}} mjd r v)
+                     :drag)))
+
+    (testing "whether velocity is needed comes from the same list"
+      ;; Not from a second hand-kept list of which forces those are.
+      (is (not (forces/velocity-dependent? {})))
+      (is (not (forces/velocity-dependent? {:srp {:area-to-mass 0.02 :cr 1.3}})))
+      (is (forces/velocity-dependent? {:drag {:area-to-mass 0.01 :cd 2.2}}))
+      (is (forces/velocity-dependent? {:relativity? true}))
+      (is (= (set (map :name (filter :needs-velocity? forces/force-models)))
+             #{:drag :relativity})))))

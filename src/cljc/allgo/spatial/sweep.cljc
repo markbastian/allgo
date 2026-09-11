@@ -27,9 +27,8 @@
   running an insertion pass costs about the number of things that actually
   changed places, not n log n. And it always sweeps x, where sweeping the
   axis the boxes are most spread along is what decides how many candidates
-  survive the prune; on a tall thin scene, x is the worst of the three.")
-
-(defn- i32 [n] #?(:clj (int-array n) :cljs (js/Int32Array. n)))
+  survive the prune; on a tall thin scene, x is the worst of the three."
+  (:require [allgo.array :as a]))
 
 (defn sweep
   "Room for `max-objects` boxes.
@@ -37,7 +36,7 @@
   The order is kept between calls; that is the whole point."
   [max-objects]
   {:max-objects (long max-objects)
-   :order       (i32 max-objects)
+   :order       (a/i32 max-objects)
    ;; Which axis was swept last, and over how many objects, so that a
    ;; change in either is known to invalidate the kept order.
    :axis        (volatile! -1)
@@ -151,13 +150,13 @@
   [s mins maxs ^long n]
   (let [pairs (overlapping-pairs s mins maxs n)
         by-hi (reduce (fn [m [i j]] (update m j (fnil conj []) i)) {} pairs)
-        ^ints starts (i32 (inc n))]
+        ^ints starts (a/i32 (inc n))]
     (loop [i 0 acc (transient []) total 0]
       (if (= i n)
         (do (aset starts n (int total))
             {:starts starts
              :ids    (let [v (persistent! acc)
-                           ^ints out (i32 (count v))]
+                           ^ints out (a/i32 (count v))]
                        (dotimes [k (count v)] (aset out k (int (v k))))
                        out)
              :pairs  total})

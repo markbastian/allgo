@@ -49,12 +49,104 @@
    :drag         nil        ; {:area-to-mass m^2/kg :cd coefficient}
    :field        nil})      ; defaults to geopotential/earth
 
+(defn- context
+  "Everything the force models share, worked out once per evaluation.
+
+  The Earth-fixed rotation and the Sun and Moon positions are each wanted
+  by several of the forces and are not cheap, so they are computed here
+  rather than by whichever model happens to ask first."
+  [config mjd r v]
+  (let [{:keys [degree sun? moon? tides? field] :as cfg} (merge defaults config)
+        u      (earth-fixed mjd)
+        r-sun  (eph/sun mjd)
+        r-moon (eph/moon mjd)
+        base   (or field geo/earth)
+        ;; The tidal bulge is fixed to the Earth, so the bodies raising it
+        ;; must be given in Earth-fixed coordinates like the field itself.
+        fld    (if tides?
+                 (tides/perturb base (cond-> []
+                                       moon? (conj [c/GM-moon (eci->ecef r-moon u)])
+                                       sun?  (conj [c/GM-sun (eci->ecef r-sun u)])))
+                 base)]
+    {:config cfg :mjd mjd :r r :v v :u u
+     :r-sun r-sun :r-moon r-moon
+     :degree degree :field fld
+     :ecef (eci->ecef r u)
+     :point-mass (geo/point-mass c/GM-earth c/R-earth)}))
+
+(def force-models
+  "Every perturbation in the model, each defined once.
+
+  `acceleration`, `breakdown` and `velocity-dependent?` all read this list.
+  They used to carry a parallel copy of it apiece, and had already drifted:
+  tides were applied by the first and silently missing from the second, so
+  the breakdown of a model with tides on did not add up to the
+  acceleration it was breaking down.
+
+  This is a list of values rather than a protocol on purpose. A protocol
+  earns its keep when the set of implementations is open and the dispatch
+  is on type -- `allgo.physics.xpbd`'s constraints, say, where a caller
+  brings their own. These forces are a closed set chosen by flags in a
+  config map, and the thing that varies is data, not type.
+
+    :name            what `breakdown` calls it
+    :active?         whether a config switches it on
+    :needs-velocity? whether it takes the model out of y'' = f(t, y)
+    :acceleration    the contribution, given the shared context"
+  [{:name :two-body
+    :active? (constantly true)
+    :acceleration (fn [{:keys [ecef u point-mass]}]
+                    (ecef->eci (geo/acceleration point-mass ecef 0) u))}
+
+   {:name :harmonics
+    :active? (constantly true)
+    ;; Everything the field does beyond a point mass. When tides are on
+    ;; they are in here, because a tide is precisely a perturbation of the
+    ;; geopotential -- and folding them in costs nothing, where itemising
+    ;; them separately would mean evaluating the field twice on the hot
+    ;; path that integrates the orbit.
+    :acceleration (fn [{:keys [ecef u field degree point-mass]}]
+                    (ecef->eci (mapv - (geo/acceleration field ecef degree)
+                                     (geo/acceleration point-mass ecef 0))
+                               u))}
+
+   {:name :sun
+    :active? :sun?
+    :acceleration (fn [{:keys [r r-sun]}] (eph/third-body c/GM-sun r r-sun))}
+
+   {:name :moon
+    :active? :moon?
+    :acceleration (fn [{:keys [r r-moon]}] (eph/third-body c/GM-moon r r-moon))}
+
+   {:name :srp
+    :active? :srp
+    :acceleration (fn [{:keys [r r-sun config]}]
+                    (let [{:keys [area-to-mass cr]} (:srp config)]
+                      (srp/acceleration r r-sun area-to-mass cr)))}
+
+   {:name :drag
+    :active? :drag
+    :needs-velocity? true
+    :acceleration (fn [{:keys [r v r-sun config]}]
+                    (let [{:keys [area-to-mass cd]} (:drag config)]
+                      (drag/acceleration r v r-sun area-to-mass cd)))}
+
+   {:name :relativity
+    :active? :relativity?
+    :needs-velocity? true
+    :acceleration (fn [{:keys [r v]}] (rel/acceleration r v))}])
+
+(defn active-models
+  "The models a config switches on, in order."
+  [config]
+  (let [cfg (merge defaults config)]
+    (filterv #((:active? %) cfg) force-models)))
+
 (defn velocity-dependent?
   "Whether the configured model needs velocity, and so cannot be integrated
   by a Nystrom or Stoermer-Cowell method."
   [config]
-  (let [{:keys [drag relativity?]} (merge defaults config)]
-    (boolean (or drag relativity?))))
+  (boolean (some :needs-velocity? (active-models config))))
 
 (defn acceleration
   "Total inertial acceleration on a spacecraft, km/s^2.
@@ -64,53 +156,22 @@
   rotated back, since that is the frame the harmonic coefficients are tied
   to -- the field turns with the planet."
   [config mjd r v]
-  (let [{:keys [degree sun? moon? tides? relativity? field]
-         srp-cfg :srp drag-cfg :drag} (merge defaults config)
-        u     (earth-fixed mjd)
-        r-sun (eph/sun mjd)
-        r-moon (eph/moon mjd)
-        base  (or field geo/earth)
-        ;; The tidal bulge is fixed to the Earth, so the bodies raising it
-        ;; must be given in Earth-fixed coordinates like the field itself.
-        fld   (if tides?
-                (tides/perturb base (cond-> []
-                                      moon? (conj [c/GM-moon (eci->ecef r-moon u)])
-                                      sun?  (conj [c/GM-sun (eci->ecef r-sun u)])))
-                base)
-        grav  (ecef->eci (geo/acceleration fld (eci->ecef r u) degree) u)]
-    (cond-> grav
-      sun?     (as-> a (mapv + a (eph/third-body c/GM-sun r r-sun)))
-      moon?    (as-> a (mapv + a (eph/third-body c/GM-moon r r-moon)))
-      srp-cfg  (as-> a (mapv + a (srp/acceleration r r-sun
-                                                   (:area-to-mass srp-cfg)
-                                                   (:cr srp-cfg))))
-      drag-cfg (as-> a (mapv + a (drag/acceleration r v r-sun
-                                                    (:area-to-mass drag-cfg)
-                                                    (:cd drag-cfg))))
-      relativity? (as-> a (mapv + a (rel/acceleration r v))))))
+  (let [ctx (context config mjd r v)]
+    (reduce (fn [acc m] (mapv + acc ((:acceleration m) ctx)))
+            [0.0 0.0 0.0]
+            (active-models config))))
 
 (defn breakdown
   "Each contribution separately, for inspection: a map from force to its
   acceleration vector. Useful for seeing which terms actually matter at a
   given altitude, which varies enormously between low orbit and
-  geostationary."
+  geostationary.
+
+  The vectors sum to `acceleration` exactly, which is the property that
+  makes the breakdown worth reading."
   [config mjd r v]
-  (let [{:keys [degree sun? moon? relativity? field] srp-cfg :srp drag-cfg :drag}
-        (merge defaults config)
-        u      (earth-fixed mjd)
-        r-sun  (eph/sun mjd)
-        r-moon (eph/moon mjd)
-        base   (or field geo/earth)
-        ecef   (eci->ecef r u)
-        pm     (geo/point-mass c/GM-earth c/R-earth)]
-    (cond-> {:two-body   (ecef->eci (geo/acceleration pm ecef 0) u)
-             :harmonics  (ecef->eci (mapv - (geo/acceleration base ecef degree)
-                                          (geo/acceleration pm ecef 0)) u)}
-      sun?        (assoc :sun (eph/third-body c/GM-sun r r-sun))
-      moon?       (assoc :moon (eph/third-body c/GM-moon r r-moon))
-      srp-cfg     (assoc :srp (srp/acceleration r r-sun (:area-to-mass srp-cfg) (:cr srp-cfg)))
-      drag-cfg    (assoc :drag (drag/acceleration r v r-sun (:area-to-mass drag-cfg) (:cd drag-cfg)))
-      relativity? (assoc :relativity (rel/acceleration r v)))))
+  (let [ctx (context config mjd r v)]
+    (into {} (map (juxt :name #((:acceleration %) ctx))) (active-models config))))
 
 ;; ------------------------------------------- adapters for the integrators
 

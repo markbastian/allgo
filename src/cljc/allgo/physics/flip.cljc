@@ -31,17 +31,12 @@
   surface, and what separates this from a fluid that fills its container.
   And drift compensation pushes back when a cell holds more particles than
   it should, which is what stops the whole body slowly compressing."
-  (:require [clojure.math :as math]))
+  (:require [allgo.array :as a]
+            [clojure.math :as math]))
 
 (def ^:private fluid-cell 0)
 (def ^:private air-cell 1)
 (def ^:private solid-cell 2)
-
-(defn- f32 [n] #?(:clj (float-array n) :cljs (js/Float32Array. n)))
-(defn- i32 [n] #?(:clj (int-array n) :cljs (js/Int32Array. n)))
-
-(defn- fill! [^floats a v] (dotimes [i (alength a)] (aset a i (float v))) a)
-(defn- ifill! [^ints a v] (dotimes [i (alength a)] (aset a i (int v))) a)
 
 (defn flip-fluid
   "A grid of `nx` by `ny` cells of size `h`, and room for `max-particles`.
@@ -61,19 +56,19 @@
      :max-particles max-particles
      :count (volatile! 0)
      ;; Grid
-     :u (f32 n) :v (f32 n) :u0 (f32 n) :v0 (f32 n)
-     :du (f32 n) :dv (f32 n) :p (f32 n)
-     :s (fill! (f32 n) 1.0)
-     :cell-type (i32 n)
-     :particle-density (f32 n)
+     :u (a/f32 n) :v (a/f32 n) :u0 (a/f32 n) :v0 (a/f32 n)
+     :du (a/f32 n) :dv (a/f32 n) :p (a/f32 n)
+     :s (a/fill! (a/f32 n) 1.0)
+     :cell-type (a/i32 n)
+     :particle-density (a/f32 n)
      :rest-density (volatile! 0.0)
      ;; Particles
-     :pos (f32 (* 2 max-particles))
-     :vel (f32 (* 2 max-particles))
+     :pos (a/f32 (* 2 max-particles))
+     :vel (a/f32 (* 2 max-particles))
      ;; The counting-sort bins used to push particles apart
      :p-nx p-nx :p-ny p-ny :p-spacing p-spacing
-     :cell-count (i32 (inc (* p-nx p-ny)))
-     :cell-ids (i32 max-particles)}))
+     :cell-count (a/i32 (inc (* p-nx p-ny)))
+     :cell-ids (a/i32 max-particles)}))
 
 (defn particle-count [f] @(:count f))
 
@@ -142,7 +137,7 @@
                  (+ (* xi p-ny) yi)))
         min-d  (* 2.0 particle-radius)
         min-d2 (* min-d min-d)]
-    (ifill! cell-count 0)
+    (a/ifill! cell-count 0)
     (dotimes [i n] (let [c (bin i)] (aset cell-count c (inc (aget cell-count c)))))
     (loop [i 0 first 0]
       (when (<= i (* p-nx p-ny))
@@ -249,7 +244,7 @@
            ^ints cell-type rest-density]}]
   (let [nx (long nx) ny (long ny) h (double h)
         h1 (/ 1.0 h) h2 (* 0.5 h)]
-    (fill! particle-density 0.0)
+    (a/fill! particle-density 0.0)
     (dotimes [i @count]
       (let [b (* 2 i)
             x (min (max (aget pos b) h) (* (dec nx) h))
@@ -298,7 +293,7 @@
         n  @count]
     (when to-grid?
       (dotimes [i (alength u)] (aset u0 i (aget u i)) (aset v0 i (aget v i)))
-      (fill! du 0.0) (fill! dv 0.0) (fill! u 0.0) (fill! v 0.0)
+      (a/fill! du 0.0) (a/fill! dv 0.0) (a/fill! u 0.0) (a/fill! v 0.0)
       ;; Classify: solid where the mask says so, fluid where a particle
       ;; is, air everywhere else. Only fluid cells get solved, and that is
       ;; what gives the fluid a free surface.
@@ -385,7 +380,7 @@
   (let [nx (long nx) ny (long ny)
         cp (/ (* density h) dt)
         rest-d (double @rest-density)]
-    (fill! p 0.0)
+    (a/fill! p 0.0)
     ;; The FLIP correction read back in `transfer!` is the change the
     ;; *projection* made, so the reference it is measured against has to be
     ;; taken here -- after the particles have been splatted onto the grid.

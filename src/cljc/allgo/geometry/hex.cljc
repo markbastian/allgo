@@ -20,7 +20,8 @@
   `layout` connects hexes to the screen: it holds the orientation, the
   size of a hex and where the origin sits, and `->pixel` / `pixel->hex`
   move between the two. Nothing above that layer knows about pixels."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.vec3 :as v]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Coordinates
@@ -330,14 +331,6 @@
 ;; brings a point back. They differ between orientations only by a 30
 ;; degree turn, which `start-angle` also applies to the corners.
 
-(defn- cross3 [[a b c] [d e f]]
-  [(- (* b f) (* c e)) (- (* c d) (* a f)) (- (* a e) (* b d))])
-
-(defn- dot3 [a b] (reduce + (map * a b)))
-
-(defn- normalize3 [v]
-  (let [m (math/sqrt (dot3 v v))] (mapv #(/ % m) v)))
-
 (def ^:private pointy-forward
   "The pointy-top forward matrix, derived rather than tabulated.
 
@@ -353,10 +346,10 @@
   projection measures a hex by its projected axis length where the guide
   measures it by its circumradius. `layout-matrices-are-the-published-ones`
   pins that equality."
-  (let [oz    (normalize3 [1.0 1.0 1.0])
-        ox    (normalize3 (cross3 [0.0 1.0 0.0] oz))
-        oy    (normalize3 (cross3 oz ox))
-        project (fn [axis] [(dot3 axis ox) (dot3 axis oy)])
+  (let [oz    (v/normalize [1.0 1.0 1.0])
+        ox    (v/normalize (v/cross [0.0 1.0 0.0] oz))
+        oy    (v/normalize (v/cross oz ox))
+        project (fn [axis] [(v/dot axis ox) (v/dot axis oy)])
         [hq hr hs] (map project [[1.0 0.0 0.0] [0.0 1.0 0.0] [0.0 0.0 1.0]])
         [q-x q-y]  (mapv - hq hs)
         [r-x r-y]  (mapv - hr hs)

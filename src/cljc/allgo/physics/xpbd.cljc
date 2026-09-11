@@ -36,7 +36,8 @@
   constraints projected ten times a frame, and persistent vectors lose
   that by more than an order of magnitude. The mutation is confined to
   this namespace: a body is opaque, and `positions` copies out."
-  (:require [allgo.spatial.hash :as spatial]
+  (:require [allgo.array :as a]
+            [allgo.spatial.hash :as spatial]
             [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
@@ -46,9 +47,6 @@
   ([n] #?(:clj (double-array n) :cljs (js/Float64Array. n)))
   ([_n coll] #?(:clj (double-array (map double coll))
                 :cljs (js/Float64Array. (into-array (map double coll))))))
-
-(defn- i32 [coll]
-  #?(:clj (int-array coll) :cljs (js/Int32Array. (into-array coll))))
 
 ;; ---------------------------------------------------------------------------
 ;; Bodies
@@ -472,7 +470,7 @@
                              dy (- (v (+ a 1)) (v (+ b 1)))
                              dz (- (v (+ a 2)) (v (+ b 2)))]
                          (math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))))]
-     (->DistanceConstraints (i32 ids) rest (f64 n) compliance))))
+     (->DistanceConstraints (a/i32 ids) rest (f64 n) compliance))))
 
 (defn volume-constraint
   "Holds every tetrahedron at the volume it starts with. This is what
@@ -486,7 +484,7 @@
                        (let [b (* 4 t)]
                          (tet-volume-at pos (nth tet-ids b) (nth tet-ids (+ b 1))
                                         (nth tet-ids (+ b 2)) (nth tet-ids (+ b 3))))))]
-     (->VolumeConstraints (i32 tet-ids) rest (f64 n) compliance))))
+     (->VolumeConstraints (a/i32 tet-ids) rest (f64 n) compliance))))
 
 ;; ---------------------------------------------------------------------------
 ;; The step

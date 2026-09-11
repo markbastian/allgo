@@ -15,7 +15,8 @@
   Only `:verts` and `:tet-ids` carry information: `edges` and
   `surface-triangles` derive the rest, so any source of tetrahedra gets
   the edges its distance constraints need and the skin to draw for free."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.vec3 :as v]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Geometry
@@ -26,15 +27,6 @@
   (let [b (* 3 i)]
     [(nth verts b) (nth verts (+ b 1)) (nth verts (+ b 2))]))
 
-(defn- v- [[ax ay az] [bx by bz]] [(- ax bx) (- ay by) (- az bz)])
-
-(defn- cross [[ax ay az] [bx by bz]]
-  [(- (* ay bz) (* az by))
-   (- (* az bx) (* ax bz))
-   (- (* ax by) (* ay bx))])
-
-(defn- dot [[ax ay az] [bx by bz]] (+ (* ax bx) (* ay by) (* az bz)))
-
 (defn tet-volume
   "Signed volume of the tetrahedron on vertices `a b c d`.
 
@@ -43,8 +35,8 @@
   used to fix up a tetrahedron built the wrong way round."
   [verts a b c d]
   (let [p0 (vertex verts a)]
-    (/ (dot (cross (v- (vertex verts b) p0) (v- (vertex verts c) p0))
-            (v- (vertex verts d) p0))
+    (/ (v/dot (v/cross (v/sub (vertex verts b) p0) (v/sub (vertex verts c) p0))
+              (v/sub (vertex verts d) p0))
        6.0)))
 
 (defn- oriented
@@ -68,9 +60,9 @@
   whose matrix has no inverse."
   [verts a b c d [px py pz]]
   (let [[dx dy dz] (vertex verts d)
-        [a11 a21 a31] (v- (vertex verts a) [dx dy dz])
-        [a12 a22 a32] (v- (vertex verts b) [dx dy dz])
-        [a13 a23 a33] (v- (vertex verts c) [dx dy dz])
+        [a11 a21 a31] (v/sub (vertex verts a) [dx dy dz])
+        [a12 a22 a32] (v/sub (vertex verts b) [dx dy dz])
+        [a13 a23 a33] (v/sub (vertex verts c) [dx dy dz])
         det (+ (* a11 (- (* a22 a33) (* a23 a32)))
                (- (* a12 (- (* a21 a33) (* a23 a31))))
                (* a13 (- (* a21 a32) (* a22 a31))))]

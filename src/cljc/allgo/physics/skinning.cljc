@@ -29,7 +29,8 @@
   tetrahedron's own extent -- so keeping the tetrahedron that minimises it
   attaches every vertex to the element it is least outside of, and the
   extrapolation carries it along just as well."
-  (:require [allgo.geometry.tet-mesh :as tet]
+  (:require [allgo.array :as a]
+            [allgo.geometry.tet-mesh :as tet]
             [allgo.spatial.hash :as spatial]
             [clojure.math :as math]))
 
@@ -37,8 +38,6 @@
   ([n] #?(:clj (double-array n) :cljs (js/Float64Array. n)))
   ([_n coll] #?(:clj (double-array (map double coll))
                 :cljs (js/Float64Array. (into-array (map double coll))))))
-
-(defn- i32 [n] #?(:clj (int-array n) :cljs (js/Int32Array. n)))
 
 ;; ---------------------------------------------------------------------------
 
@@ -82,7 +81,7 @@
          ;; sweeps a couple of cells rather than hundreds or one.
          spacing  (max 1e-9 (/ (reduce + (map peek radii)) (max 1 n-tets)))
          hash     (spatial/spatial-hash spacing (max 1 n-vis))
-         ^ints tet-of (i32 n-vis)
+         ^ints tet-of (a/i32 n-vis)
          ^doubles bary (f64 (* 3 n-vis))
          ;; How far outside its tetrahedron each vertex is, in barycentric
          ;; units. Zero means inside, and once a vertex is inside one

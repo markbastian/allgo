@@ -14,20 +14,16 @@
   the right ascension is undefined. Both cases are real orbits and both are
   handled here by convention rather than by returning a NaN."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
 
-(defn- dot [a b] (reduce + (map * a b)))
-(defn- mag [v] (math/sqrt (dot v v)))
-(defn- cross [[a b cc] [d e f]]
-  [(- (* b f) (* cc e)) (- (* cc d) (* a f)) (- (* a e) (* b d))])
-(defn- scale [v s] (mapv #(* % s) v))
 (defn- wrap-2pi [x] (let [r (rem x c/two-pi)] (if (neg? r) (+ r c/two-pi) r)))
 
 ;; ------------------------------------------------------------ scalar results
 
 (defn specific-energy
   "v^2/2 - mu/r. Negative for a bound orbit, zero for escape."
-  [mu r v] (- (* 0.5 (dot v v)) (/ mu (mag r))))
+  [mu r v] (- (* 0.5 (v3/dot v v)) (/ mu (v3/length r))))
 
 (defn vis-viva
   "Speed at radius `r` on an orbit of semi-major axis `a`:
@@ -94,15 +90,15 @@
   measures the anomaly from the node, an equatorial one gets raan = 0 and
   measures from the x axis."
   [mu r v]
-  (let [rm   (mag r)
-        h    (cross r v)
-        hm   (mag h)
-        node (cross [0.0 0.0 1.0] h)
-        nm   (mag node)
-        evec (scale (mapv - (scale r (- (dot v v) (/ mu rm)))
-                          (scale v (dot r v)))
-                    (/ 1.0 mu))
-        e    (mag evec)
+  (let [rm   (v3/length r)
+        h    (v3/cross r v)
+        hm   (v3/length h)
+        node (v3/cross [0.0 0.0 1.0] h)
+        nm   (v3/length node)
+        evec (v3/scale (mapv - (v3/scale r (- (v3/dot v v) (/ mu rm)))
+                             (v3/scale v (v3/dot r v)))
+                       (/ 1.0 mu))
+        e    (v3/length evec)
         en   (specific-energy mu r v)
         a    (if (< (abs en) 1e-15) ##Inf (/ (- mu) (* 2.0 en)))
         i    (math/acos (max -1.0 (min 1.0 (/ (nth h 2) hm))))
@@ -112,7 +108,7 @@
         argp (cond
                circular?   0.0
                equatorial? (wrap-2pi (math/atan2 (nth evec 1) (nth evec 0)))
-               :else       (let [ang (math/acos (max -1.0 (min 1.0 (/ (dot node evec) (* nm e)))))]
+               :else       (let [ang (math/acos (max -1.0 (min 1.0 (/ (v3/dot node evec) (* nm e)))))]
                              (wrap-2pi (if (neg? (nth evec 2)) (- c/two-pi ang) ang))))
         nu   (cond
                ;; circular and equatorial: measure from x, the only reference left
@@ -121,11 +117,11 @@
                            (if (neg? (nth h 2)) (- ang) ang)))
                ;; circular: measure from the node -- argument of latitude
                circular?
-               (let [ang (math/acos (max -1.0 (min 1.0 (/ (dot node r) (* nm rm)))))]
+               (let [ang (math/acos (max -1.0 (min 1.0 (/ (v3/dot node r) (* nm rm)))))]
                  (wrap-2pi (if (neg? (nth r 2)) (- c/two-pi ang) ang)))
                :else
-               (let [ang (math/acos (max -1.0 (min 1.0 (/ (dot evec r) (* e rm)))))]
-                 (wrap-2pi (if (neg? (dot r v)) (- c/two-pi ang) ang))))]
+               (let [ang (math/acos (max -1.0 (min 1.0 (/ (v3/dot evec r) (* e rm)))))]
+                 (wrap-2pi (if (neg? (v3/dot r v)) (- c/two-pi ang) ang))))]
     {:a a :e e :i i :raan raan :argp argp :nu nu
      :M (if (< e 1.0) (true->mean nu e) ##NaN)}))
 
@@ -147,7 +143,7 @@
         m  [[(- (* cO cw) (* sO sw ci)) (- (- (* cO sw)) (* sO cw ci)) (* sO si)]
             [(+ (* sO cw) (* cO sw ci)) (- (* cO cw ci) (* sO sw))     (- (* cO si))]
             [(* sw si)                  (* cw si)                      ci]]
-        apply-m (fn [x] (mapv (fn [row] (dot row x)) m))]
+        apply-m (fn [x] (mapv (fn [row] (v3/dot row x)) m))]
     [(apply-m rp) (apply-m vp)]))
 
 (defn propagate

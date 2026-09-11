@@ -27,9 +27,8 @@
   side of one are far apart in the list however close they are in space.
   That shows up as the occasional stretched node, and is the price of
   building a tree by sorting rather than by searching."
-  (:require [allgo.spatial.morton :as morton]))
-
-(defn- i32 [n] #?(:clj (int-array n) :cljs (js/Int32Array. n)))
+  (:require [allgo.array :as a]
+            [allgo.spatial.morton :as morton]))
 
 (def ^:private ^:const no-box -1)
 
@@ -56,12 +55,12 @@
       ;; The reference divides an empty range and recurses forever. An
       ;; empty tree is a legitimate thing to ask for and a legitimate
       ;; thing to query -- it just never hits.
-      {:n 0 :root -1 :left (i32 0) :right (i32 0) :box (i32 0)
+      {:n 0 :root -1 :left (a/i32 0) :right (a/i32 0) :box (a/i32 0)
        :lo (double-array 0) :hi (double-array 0)}
       (let [nodes (dec (* 2 n))
-            ^ints left  (i32 nodes)
-            ^ints right (i32 nodes)
-            ^ints box   (i32 nodes)
+            ^ints left  (a/i32 nodes)
+            ^ints right (a/i32 nodes)
+            ^ints box   (a/i32 nodes)
             ^doubles lo (double-array (* 3 nodes))
             ^doubles hi (double-array (* 3 nodes))
             ^ints order (morton/sorted-points (centres mins maxs n) n)
@@ -207,13 +206,13 @@
   [t mins maxs ^long n]
   (let [pairs (overlapping-pairs t mins maxs n)
         by-hi (reduce (fn [m [i j]] (update m j (fnil conj []) i)) {} pairs)
-        ^ints starts (i32 (inc n))]
+        ^ints starts (a/i32 (inc n))]
     (loop [i 0 acc (transient []) total 0]
       (if (= i n)
         (do (aset starts n (int total))
             {:starts starts
              :ids (let [v (persistent! acc)
-                        ^ints out (i32 (count v))]
+                        ^ints out (a/i32 (count v))]
                     (dotimes [k (count v)] (aset out k (int (v k))))
                     out)
              :pairs total})

@@ -18,7 +18,8 @@
   constraint type of its own, just a distance constraint over a different
   list. Cloth is then stretching and bending at two different compliances
   over the same solver."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.vec3 :as v]
+            [clojure.math :as math]))
 
 (defn vertex
   "`[x y z]` of vertex `i`."
@@ -26,18 +27,11 @@
   (let [b (* 3 i)]
     [(nth verts b) (nth verts (+ b 1)) (nth verts (+ b 2))]))
 
-(defn- v- [[ax ay az] [bx by bz]] [(- ax bx) (- ay by) (- az bz)])
-
-(defn- cross [[ax ay az] [bx by bz]]
-  [(- (* ay bz) (* az by))
-   (- (* az bx) (* ax bz))
-   (- (* ax by) (* ay bx))])
-
 (defn triangle-area [verts a b c]
   (let [p (vertex verts a)]
     (* 0.5 (math/sqrt (reduce + (map #(* % %)
-                                     (cross (v- (vertex verts b) p)
-                                            (v- (vertex verts c) p))))))))
+                                     (v/cross (v/sub (vertex verts b) p)
+                                              (v/sub (vertex verts c) p))))))))
 
 (defn area
   "Total surface area."

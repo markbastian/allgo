@@ -28,15 +28,8 @@
   more than a cell per step without the grid going unstable, so the
   requested speed is clamped to the CFL limit for the step actually being
   taken."
-  (:require [clojure.math :as math]))
-
-(defn- f32 [n] #?(:clj (float-array n) :cljs (js/Float32Array. n)))
-
-(defn- fill! [^floats a v] (dotimes [i (alength a)] (aset a i (float v))) a)
-
-(defn- copy! [^floats dst ^floats src]
-  (dotimes [i (alength dst)] (aset dst i (aget src i)))
-  dst)
+  (:require [allgo.array :as a]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; The surface
@@ -56,13 +49,13 @@
      :size-x (double size-x) :size-z (double size-z)
      :cx (long (math/floor (/ nx 2.0)))
      :cz (long (math/floor (/ nz 2.0)))
-     :heights     (fill! (f32 n) depth)
-     :velocities  (f32 n)
+     :heights     (a/fill! (a/f32 n) depth)
+     :velocities  (a/f32 n)
      ;; How much body is in each column now, and how much was last step.
      ;; Only the difference matters: water is pushed aside by a body
      ;; *arriving*, not by one that is already there.
-     :body-heights      (f32 n)
-     :prev-body-heights (f32 n)}))
+     :body-heights      (a/f32 n)
+     :prev-body-heights (a/f32 n)}))
 
 (defn index [{:keys [nz]} i j] (+ (* (long i) (long nz)) (long j)))
 
@@ -302,8 +295,8 @@
          dt (double dt)
          g  (double gravity)
          ;; Last step's displacement, kept so only the difference moves water.
-         _ (copy! prev-body-heights body-heights)
-         _ (fill! body-heights 0.0)
+         _ (a/copy! prev-body-heights body-heights)
+         _ (a/fill! body-heights 0.0)
          bodies
          (mapv
           (fn [body]

@@ -35,13 +35,8 @@
       (let [found (query! h positions i 0.05)]
         (dotimes [k found]
           (let [j (neighbour h k)] ...)))"
-  (:require [clojure.math :as math]))
-
-(defn- i32
-  ([n] #?(:clj (int-array n) :cljs (js/Int32Array. n))))
-
-(defn- fill-zero! [^ints arr]
-  (dotimes [i (alength arr)] (aset arr i 0)))
+  (:require [allgo.array :as a]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 
@@ -68,16 +63,16 @@
      ;; One longer than the table: the extra entry is a guard holding the
      ;; total, so the end of the last bucket can be read as `start[h+1]`
      ;; without a special case.
-     :cell-start   (i32 (inc table-size))
-     :cell-entries (i32 max-objects)
-     :query-ids    (i32 max-objects)
-     :query-size   (i32 1)
+     :cell-start   (a/i32 (inc table-size))
+     :cell-entries (a/i32 max-objects)
+     :query-ids    (a/i32 max-objects)
+     :query-size   (a/i32 1)
      ;; Two cells in one query range can hash to the same bucket, and
      ;; reading that bucket twice would report its objects twice. Stamping
      ;; each object with the query that last saw it costs one comparison
      ;; and makes the result a set.
-     :stamp        (i32 max-objects)
-     :generation   (i32 1)}))
+     :stamp        (a/i32 max-objects)
+     :generation   (a/i32 1)}))
 
 (defn- cell-of ^long [coord inv-spacing]
   (long (math/floor (* (double coord) (double inv-spacing)))))
@@ -112,7 +107,7 @@
          table-size (long table-size)
          mask (long mask)
          n (min n (alength cell-entries))]
-     (fill-zero! cell-start)
+     (a/ifill! cell-start 0)
 
      ;; 1. How many objects fall in each bucket.
      (dotimes [i n]
@@ -162,7 +157,7 @@
         ;; than let a stale one read as current.
         gen (let [g (inc (aget generation 0))]
               (if (< g 0)
-                (do (fill-zero! stamp) 1)
+                (do (a/ifill! stamp 0) 1)
                 g))]
     (aset generation 0 gen)
     (aset query-size 0 0)
@@ -250,14 +245,14 @@
   anything could travel in between."
   [h positions n max-dist]
   (let [^doubles positions positions
-        ^ints starts (i32 (inc n))
+        ^ints starts (a/i32 (inc n))
         r2     (* max-dist max-dist)]
     (rebuild! h positions n)
     (loop [i 0 acc (transient []) total 0]
       (if (= i n)
         (do (aset starts n (int total))
             {:starts starts
-             :ids    (i32 (persistent! acc))
+             :ids    (a/i32 (persistent! acc))
              :pairs  total})
         (let [_     (aset starts i (int total))
               found (query! h positions i max-dist)

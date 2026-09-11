@@ -21,20 +21,19 @@
   A vortex is spawned with a lifetime and fades as it ages, because a
   spinner that never expires becomes a permanent feature of the flow and
   reads as a mistake rather than turbulence."
-  (:require [allgo.physics.fluid :as fluid]
+  (:require [allgo.array :as a]
+            [allgo.physics.fluid :as fluid]
             [clojure.math :as math]))
-
-(defn- f32 [n] #?(:clj (float-array n) :cljs (js/Float32Array. n)))
 
 (defn pool
   "Room for `capacity` vortices."
   [capacity]
   {:capacity (long capacity)
    :count (volatile! 0)
-   :x     (f32 capacity)
-   :y     (f32 capacity)
-   :omega (f32 capacity)
-   :life  (f32 capacity)})
+   :x     (a/f32 capacity)
+   :y     (a/f32 capacity)
+   :omega (a/f32 capacity)
+   :life  (a/f32 capacity)})
 
 (defn vortex-count [{:keys [count]}] @count)
 

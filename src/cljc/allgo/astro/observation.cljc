@@ -14,10 +14,8 @@
   metres straight up and twenty-five at five degrees elevation."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.geodesy :as geodesy]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
-
-(defn- dot [a b] (reduce + (map * a b)))
-(defn- mag [v] (math/sqrt (dot v v)))
 
 ;; ------------------------------------------------------------------- range
 
@@ -39,9 +37,9 @@
   [r-station v-station r-sat v-sat]
   (let [d  (mapv - r-sat r-station)
         dv (mapv - v-sat v-station)
-        rho (mag d)]
+        rho (v3/length d)]
     {:range rho
-     :range-rate (/ (dot d dv) rho)}))
+     :range-rate (/ (v3/dot d dv) rho)}))
 
 (defn light-time
   "Seconds for light to cross a range, and the correction that follows.
@@ -56,7 +54,7 @@
   [r-station sat-at t-receive]
   (loop [tau 0.0 n 0]
     (let [r-sat (sat-at (- t-receive tau))
-          tau'  (/ (mag (mapv - r-sat r-station)) c/c-light)]
+          tau'  (/ (v3/length (mapv - r-sat r-station)) c/c-light)]
       (if (or (< (abs (- tau' tau)) 1e-12) (>= n 20))
         {:light-time tau' :position r-sat :range (* tau' c/c-light)}
         (recur tau' (inc n))))))
@@ -130,7 +128,7 @@
   local horizon coordinates."
   [r-station r-sat]
   (let [[x y z] (mapv - r-sat r-station)
-        rho (mag [x y z])]
+        rho (v3/length [x y z])]
     {:right-ascension (let [a (math/atan2 y x)] (if (neg? a) (+ a c/two-pi) a))
      :declination     (math/asin (/ z rho))
      :range           rho}))

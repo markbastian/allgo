@@ -12,6 +12,7 @@
   radial-transverse-normal frame that orbit work uses to describe where a
   satellite is relative to where it was expected."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
 
 (def a-earth c/R-earth)
@@ -74,9 +75,6 @@
   (let [m (math/sqrt (reduce + (map * v v)))]
     (if (zero? m) v (mapv #(/ % m) v))))
 
-(defn- cross [[a b cc] [d e f]]
-  [(- (* b f) (* cc e)) (- (* cc d) (* a f)) (- (* a e) (* b d))])
-
 (defn east-north-up
   "The local horizon frame at a geodetic latitude and longitude: rows are
   the east, north and up directions in Earth-fixed coordinates.
@@ -124,8 +122,8 @@
   one direction and metres in the others."
   [r v]
   (let [R (unit r)
-        N (unit (cross r v))
-        T (cross N R)]
+        N (unit (v3/cross r v))
+        T (v3/cross N R)]
     [R T N]))
 
 (defn to-rtn

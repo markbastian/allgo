@@ -28,11 +28,8 @@
 
   Fields are flat arrays indexed `i*ny + j`, with a one-cell border of
   solid on every side."
-  (:require [clojure.math :as math]))
-
-(defn- f32
-  ([n] #?(:clj (float-array n) :cljs (js/Float32Array. n)))
-  ([n fill] (let [^floats a (f32 n)] (dotimes [i n] (aset a i (float fill))) a)))
+  (:require [allgo.array :as a]
+            [clojure.math :as math]))
 
 (defn fluid
   "A grid of `nx` by `ny` interior cells, each `h` across.
@@ -46,12 +43,12 @@
          ny (+ ny 2)
          n  (* nx ny)]
      {:nx nx :ny ny :n n :h (double h) :density (double density)
-      :u (f32 n) :v (f32 n)
-      :u' (f32 n) :v' (f32 n)
-      :p (f32 n)
+      :u (a/f32 n) :v (a/f32 n)
+      :u' (a/f32 n) :v' (a/f32 n)
+      :p (a/f32 n)
       ;; Everything open by default; the border is closed by `close-border!`.
-      :s (f32 n 1.0)
-      :smoke (f32 n 1.0) :smoke' (f32 n 1.0)})))
+      :s (a/f32 n 1.0)
+      :smoke (a/f32 n 1.0) :smoke' (a/f32 n 1.0)})))
 
 (defn idx ^long [{:keys [ny]} i j] (+ (* (long i) (long ny)) (long j)))
 

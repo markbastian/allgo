@@ -15,30 +15,20 @@
   recovered, since two sites neighbour exactly when their cells share a face.
 
   A cell is `{:faces [[[x y z] ...] ...] :neighbours #{site ...}}`."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.vec3 :as v]
+            [clojure.math :as math]))
 
 (def ^:private eps 1e-9)
-
-(defn- v- [[ax ay az] [bx by bz]] [(- ax bx) (- ay by) (- az bz)])
-(defn- dot [[ax ay az] [bx by bz]] (+ (* ax bx) (* ay by) (* az bz)))
-(defn- cross [[ax ay az] [bx by bz]]
-  [(- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))])
-
-(defn- norm-sq [v] (dot v v))
-
-(defn- normalize [v]
-  (let [m (math/sqrt (norm-sq v))]
-    (if (zero? m) v (mapv #(/ % m) v))))
 
 (defn- centroid [pts]
   (mapv #(/ % (count pts)) (reduce (fn [a b] (mapv + a b)) pts)))
 
-;; A plane is {:n normal :d offset}; a point is inside when (dot n p) <= d.
+;; A plane is {:n normal :d offset}; a point is inside when (v/dot n p) <= d.
 
 (defn- bisector
   "The half-space of points at least as close to `p` as to `q`."
   [p q]
-  {:n (v- q p) :d (/ (- (norm-sq q) (norm-sq p)) 2.0)})
+  {:n (v/sub q p) :d (/ (- (v/length-squared q) (v/length-squared p)) 2.0)})
 
 (defn- crossing [a b sa sb]
   (let [t (/ sa (- sa sb))]
@@ -90,10 +80,10 @@
   (let [pts (distinct-points cuts)]
     (when (>= (count pts) 3)
       (let [c (centroid pts)
-            u (normalize (v- (first pts) c))
-            v (cross (normalize normal) u)]
+            u (v/normalize (v/sub (first pts) c))
+            v (v/cross (v/normalize normal) u)]
         (->> pts
-             (mapv (fn [p] (let [w (v- p c)] [(math/atan2 (dot w v) (dot w u)) p])))
+             (mapv (fn [p] (let [w (v/sub p c)] [(math/atan2 (v/dot w v) (v/dot w u)) p])))
              (sort-by first)
              (mapv second))))))
 
@@ -173,14 +163,14 @@
                         seed)
          known   (set seed)
          ordered (->> others
-                      (mapv (fn [o] [(norm-sq (v- o site)) o]))
+                      (mapv (fn [o] [(v/length-squared (v/sub o site)) o]))
                       (sort-by first)
                       (mapv second))]
      (loop [faces     seeded
             r2        (farthest-sq site seeded)
             remaining ordered]
        (if-let [other (first remaining)]
-         (if (> (norm-sq (v- other site)) (* 4.0 r2))
+         (if (> (v/length-squared (v/sub other site)) (* 4.0 r2))
            (finish faces)
            (if (contains? known other)
              (recur faces r2 (rest remaining))
