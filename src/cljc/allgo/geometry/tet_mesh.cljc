@@ -52,6 +52,50 @@
   [verts [a b c d]]
   (if (neg? (tet-volume verts a b c d)) [b a c d] [a b c d]))
 
+(defn barycentric
+  "Where point `p` sits relative to the tetrahedron `a b c d`, as the four
+  weights that reconstruct it: `p = b0*a + b1*b + b2*c + b3*d`, summing to
+  one.
+
+  All four non-negative means the point is inside. A negative weight says
+  which face it is outside of, and how far in units of the tetrahedron's
+  own size -- which is what lets a point that no tetrahedron contains
+  still be attached to the one it is least outside.
+
+  Taking `d` as the origin, the other three edges form a matrix whose
+  inverse carries `p - d` into the first three weights; the fourth is
+  whatever is left of one. Returns nil for a degenerate tetrahedron,
+  whose matrix has no inverse."
+  [verts a b c d [px py pz]]
+  (let [[dx dy dz] (vertex verts d)
+        [a11 a21 a31] (v- (vertex verts a) [dx dy dz])
+        [a12 a22 a32] (v- (vertex verts b) [dx dy dz])
+        [a13 a23 a33] (v- (vertex verts c) [dx dy dz])
+        det (+ (* a11 (- (* a22 a33) (* a23 a32)))
+               (- (* a12 (- (* a21 a33) (* a23 a31))))
+               (* a13 (- (* a21 a32) (* a22 a31))))]
+    (when-not (zero? det)
+      (let [inv (/ 1.0 det)
+            rx (- px dx) ry (- py dy) rz (- pz dz)
+            b0 (* inv (+ (* (- (* a22 a33) (* a23 a32)) rx)
+                         (* (- (* a13 a32) (* a12 a33)) ry)
+                         (* (- (* a12 a23) (* a13 a22)) rz)))
+            b1 (* inv (+ (* (- (* a23 a31) (* a21 a33)) rx)
+                         (* (- (* a11 a33) (* a13 a31)) ry)
+                         (* (- (* a13 a21) (* a11 a23)) rz)))
+            b2 (* inv (+ (* (- (* a21 a32) (* a22 a31)) rx)
+                         (* (- (* a12 a31) (* a11 a32)) ry)
+                         (* (- (* a11 a22) (* a12 a21)) rz)))]
+        [b0 b1 b2 (- 1.0 b0 b1 b2)]))))
+
+(defn inside?
+  "Whether `p` is within the tetrahedron, to a tolerance in barycentric
+  units."
+  ([verts a b c d p] (inside? verts a b c d p 0.0))
+  ([verts a b c d p tolerance]
+   (when-let [bary (barycentric verts a b c d p)]
+     (every? #(>= % (- tolerance)) bary))))
+
 ;; ---------------------------------------------------------------------------
 ;; Derived topology
 
@@ -150,7 +194,11 @@
   [mesh [dx dy dz]]
   (update mesh :verts
           (fn [verts]
-            (vec (map-indexed (fn [i v] (+ v (case (mod i 3) 0 dx 1 dy 2 dz)))
+            ;; `case` on a boxed index compiles to a hash lookup; the
+            ;; three-way `cond` on longs does not.
+            (vec (map-indexed (fn [i v]
+                                (+ v (let [axis (long (mod i 3))]
+                                       (cond (zero? axis) dx (= 1 axis) dy :else dz))))
                               verts)))))
 
 (defn deform

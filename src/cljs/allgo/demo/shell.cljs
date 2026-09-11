@@ -18,6 +18,7 @@
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.satellite :as satellite]
+            [allgo.demo.skinning :as skinning]
             [allgo.demo.soft-body :as soft-body]
             [allgo.demo.solar-system :as solar]
             [allgo.demo.spatial-hash :as spatial-hash]
@@ -32,6 +33,7 @@
    "delaunay" {:start delaunay/start! :stop delaunay/stop!}
    "hex"      {:start hex/start!      :stop hex/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
+   "skinning" {:start skinning/start! :stop skinning/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
