@@ -248,6 +248,12 @@
               middle (apply min (map #(x/inv-mass body %) (range (:n body))))]
           (is (> corner middle)))))
 
+    (testing "the masses add up to the volume"
+      (doseq [density [1000.0 2.5]]
+        (let [b (x/soft-body mesh {:density density})
+              total (reduce + (map #(/ 1.0 (x/inv-mass b %)) (range (:n b))))]
+          (is (< (abs (- (* density (tm/volume mesh)) total)) 1e-9) (str "density " density)))))
+
     (testing "density scales mass, not geometry"
       (let [heavy (x/soft-body mesh {:density 4000.0})]
         (is (< (abs (- (* 4 (x/inv-mass heavy 0)) (x/inv-mass body 0))) 1e-9))

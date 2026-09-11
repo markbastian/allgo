@@ -10,6 +10,7 @@
             [allgo.demo.boids-voronoi :as boids-voronoi]
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
             [allgo.demo.cave :as cave]
+            [allgo.demo.cloth :as cloth]
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dungeon :as dungeon]
             [allgo.demo.dungeon-boids :as dungeon-boids]
@@ -34,6 +35,7 @@
    "hex"      {:start hex/start!      :stop hex/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
+   "cloth"    {:start cloth/start!    :stop cloth/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}

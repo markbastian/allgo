@@ -137,7 +137,15 @@
 
   Mass follows the mesh rather than being spread evenly over the
   particles, so a body whose elements differ in size still behaves like
-  uniform material: a particle in a dense region is lighter, not heavier."
+  uniform material.
+
+  Masses are summed and inverted at the end, rather than inverse masses
+  being summed as the tutorial does. Summing inverse masses combines them
+  harmonically, which inverts the result: a particle sharing eight
+  elements comes out four times *lighter* than one sharing two, when it
+  owns four times the material and should be four times heavier. It goes
+  unnoticed on a uniform mesh because the interior is then uniform either
+  way and only the boundary differs."
   [body tet-ids density]
   (let [^doubles pos (:pos body)
         ^doubles inv-mass (:inv-mass body)
@@ -147,13 +155,15 @@
     (dotimes [t tets]
       (let [b   (* 4 t)
             vol (tet-volume-at pos (ids b) (ids (+ b 1)) (ids (+ b 2)) (ids (+ b 3)))
-            ;; The quarter share of one tetrahedron's mass, as an inverse;
-            ;; the per-particle inverse masses then add, since inverse mass
-            ;; is what superposes.
-            w   (if (pos? vol) (/ 1.0 (* density (/ vol 4.0))) 0.0)]
+            ;; The quarter share of one tetrahedron's mass. Accumulated as
+            ;; mass, not as its inverse -- see above.
+            m   (if (pos? vol) (* density (/ vol 4.0)) 0.0)]
         (dotimes [j 4]
           (let [id (ids (+ b j))]
-            (aset inv-mass id (+ (aget inv-mass id) w))))))
+            (aset inv-mass id (+ (aget inv-mass id) m))))))
+    (dotimes [i (alength inv-mass)]
+      (let [m (aget inv-mass i)]
+        (aset inv-mass i (if (pos? m) (/ 1.0 m) 0.0))))
     body))
 
 ;; ---------------------------------------------------------------------------
@@ -263,21 +273,92 @@
                   (aset pos (+ p 1) (+ (aget pos (+ p 1)) (* (aget grads (+ g3 1)) dl wi)))
                   (aset pos (+ p 2) (+ (aget pos (+ p 2)) (* (aget grads (+ g3 2)) dl wi))))))))))))
 
+(defrecord SphereCollision [cx cy cz radius friction]
+  Constraint
+  ;; Non-penetration is an inequality: it does nothing until it is
+  ;; violated, and there is no compliance to accumulate against, so there
+  ;; is no multiplier to keep.
+  (reset-multipliers! [_] nil)
+  (project! [_ body _dt]
+    (let [^doubles pos (:pos body)
+          ^doubles prev (:prev body)
+          ^doubles inv-mass (:inv-mass body)
+          n  (long (:n body))
+          r  (double radius)
+          mu (double friction)
+          cx (double cx) cy (double cy) cz (double cz)]
+      (dotimes [i n]
+        (when (pos? (aget inv-mass i))
+          (let [b  (* 3 i)
+                dx (- (aget pos b) cx)
+                dy (- (aget pos (+ b 1)) cy)
+                dz (- (aget pos (+ b 2)) cz)
+                d  (math/sqrt (+ (* dx dx) (* dy dy) (* dz dz)))]
+            (when (and (pos? d) (< d r))
+              ;; Straight out to the surface along the radius, the shortest
+              ;; move that resolves it.
+              (let [s  (/ r d)
+                    px (+ cx (* dx s))
+                    py (+ cy (* dy s))
+                    pz (+ cz (* dz s))
+                    ;; Friction, the position-based way: of the distance
+                    ;; travelled while in contact, undo some of the part
+                    ;; running along the surface, leaving the normal part
+                    ;; alone -- that part is the contact. Without it a sheet
+                    ;; dropped on a ball slides off and pools on the floor,
+                    ;; which is correct for a frictionless ball and useless
+                    ;; as a drape.
+                    nx (/ dx d) ny (/ dy d) nz (/ dz d)
+                    mx (- px (aget prev b))
+                    my (- py (aget prev (+ b 1)))
+                    mz (- pz (aget prev (+ b 2)))
+                    along (+ (* mx nx) (* my ny) (* mz nz))
+                    tx (* mu (- mx (* along nx)))
+                    ty (* mu (- my (* along ny)))
+                    tz (* mu (- mz (* along nz)))]
+                (aset pos b (- px tx))
+                (aset pos (+ b 1) (- py ty))
+                (aset pos (+ b 2) (- pz tz))))))))))
+
+(defn sphere-constraint
+  "Keeps every particle outside a sphere.
+
+  A constraint rather than something applied once a frame, so it is
+  enforced on every substep. Resolved per frame instead, a sheet moving at
+  any speed passes straight through: the solver takes ten steps between
+  checks, and the obstacle is only a few steps thick.
+
+  `friction` from 0 to 1 is how much of the sliding along the surface is
+  undone each step. At 0 a sheet dropped on a ball slides off and pools on
+  the floor, which is right and dull; a little friction is what makes it
+  drape."
+  ([centre radius] (sphere-constraint centre radius 0.0))
+  ([[cx cy cz] radius friction]
+   (->SphereCollision (double cx) (double cy) (double cz) (double radius)
+                      (double friction))))
+
 (defn distance-constraint
-  "Holds every edge of the mesh at the length it starts with. This is what
-  resists stretching and shearing."
+  "Holds pairs of particles at the distance they start out at.
+
+  Given a mesh it uses `:edge-ids`, which resists stretching and shearing.
+  Given an explicit id list it holds whatever pairs you name -- which is
+  all a bending constraint is: the distance between the two vertices
+  opposite a shared edge, at its own compliance. Cloth is this constraint
+  twice over."
   ([mesh] (distance-constraint mesh 0.0))
   ([{:keys [verts edge-ids]} compliance]
-   (let [n    (quot (count edge-ids) 2)
+   (distance-constraint verts edge-ids compliance))
+  ([verts ids compliance]
+   (let [n    (quot (count ids) 2)
          v    (vec verts)
          rest (f64 n (for [i (range n)]
-                       (let [a (* 3 (nth edge-ids (* 2 i)))
-                             b (* 3 (nth edge-ids (inc (* 2 i))))
+                       (let [a (* 3 (nth ids (* 2 i)))
+                             b (* 3 (nth ids (inc (* 2 i))))
                              dx (- (v a) (v b))
                              dy (- (v (+ a 1)) (v (+ b 1)))
                              dz (- (v (+ a 2)) (v (+ b 2)))]
                          (math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))))]
-     (->DistanceConstraints (i32 edge-ids) rest (f64 n) compliance))))
+     (->DistanceConstraints (i32 ids) rest (f64 n) compliance))))
 
 (defn volume-constraint
   "Holds every tetrahedron at the volume it starts with. This is what
@@ -424,6 +505,68 @@
    (dissoc body :grabbed)))
 
 ;; ---------------------------------------------------------------------------
+
+(defn distribute-area-mass!
+  "Gives each particle a third of the area of every triangle it belongs
+  to.
+
+  The surface equivalent of `distribute-mass!`: a sheet has no volume, so
+  its mass follows area instead. Spreading mass evenly over the particles
+  would make a finely tessellated region heavier than a coarse one of the
+  same size, and the sheet would sag wherever it happened to be detailed.
+
+  Masses are summed and inverted at the end, for the reason given on
+  `distribute-mass!`."
+  [body tri-ids density]
+  (let [^doubles pos (:pos body)
+        ^doubles inv-mass (:inv-mass body)
+        ids  (vec tri-ids)
+        tris (quot (count ids) 3)]
+    (dotimes [i (alength inv-mass)] (aset inv-mass i 0.0))
+    (dotimes [t tris]
+      (let [b  (* 3 t)
+            i0 (* 3 (ids b)) i1 (* 3 (ids (+ b 1))) i2 (* 3 (ids (+ b 2)))
+            e1x (- (aget pos i1) (aget pos i0))
+            e1y (- (aget pos (+ i1 1)) (aget pos (+ i0 1)))
+            e1z (- (aget pos (+ i1 2)) (aget pos (+ i0 2)))
+            e2x (- (aget pos i2) (aget pos i0))
+            e2y (- (aget pos (+ i2 1)) (aget pos (+ i0 1)))
+            e2z (- (aget pos (+ i2 2)) (aget pos (+ i0 2)))
+            cx (- (* e1y e2z) (* e1z e2y))
+            cy (- (* e1z e2x) (* e1x e2z))
+            cz (- (* e1x e2y) (* e1y e2x))
+            a  (* 0.5 (math/sqrt (+ (* cx cx) (* cy cy) (* cz cz))))
+            m  (if (pos? a) (* density (/ a 3.0)) 0.0)]
+        (dotimes [j 3]
+          (let [id (ids (+ b j))]
+            (aset inv-mass id (+ (aget inv-mass id) m))))))
+    (dotimes [i (alength inv-mass)]
+      (let [m (aget inv-mass i)]
+        (aset inv-mass i (if (pos? m) (/ 1.0 m) 0.0))))
+    body))
+
+(defn cloth
+  "A body from a triangle mesh, with stretching and bending constraints.
+
+  Both are distance constraints; what separates them is the pairs they
+  hold and the compliance they hold them at. Stretching is usually rigid,
+  since cloth barely stretches, while bending is where the character of a
+  fabric lives: near zero is stiff like card, larger is limp like silk."
+  ([mesh] (cloth mesh {}))
+  ([{:keys [verts tri-ids edge-ids bend-ids]}
+    {:keys [density stretch-compliance bend-compliance]
+     :or   {density 1.0 stretch-compliance 0.0 bend-compliance 1.0}}]
+   (cond-> (-> (body verts)
+               (distribute-area-mass! tri-ids density)
+               (add-constraint (distance-constraint verts edge-ids stretch-compliance)))
+     (seq bend-ids)
+     (add-constraint (distance-constraint verts bend-ids bend-compliance)))))
+
+(defn pin!
+  "Makes particles immovable, which is how a sheet is hung."
+  [body ids]
+  (doseq [i ids] (set-inv-mass! body i 0.0))
+  body)
 
 (defn soft-body
   "A body from a tetrahedral mesh with the two constraints a solid needs.
