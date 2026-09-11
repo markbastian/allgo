@@ -123,7 +123,7 @@
 (defn step-towards [a b]
   (letfn [(signum [x] (cond (pos? x) 1 (neg? x) -1 :else 0))]
     (let [[dx dy] (map - b a)
-          delta (if (> (Math/abs dx) (Math/abs dy)) [(signum dx) 0] [0 (signum dy)])]
+          delta (if (> (abs dx) (abs dy)) [(signum dx) 0] [0 (signum dy)])]
       (mapv + a delta))))
 
 (defn path-to
@@ -138,8 +138,8 @@
   ([start finish]
    (letfn [(signum [x] (cond (pos? x) 1 (neg? x) -1 :else 0))]
      (let [[dx dy] (map - finish start)
-           x-steps (repeat (Math/abs dx) [(signum dx) 0])
-           y-steps (repeat (Math/abs dy) [0 (signum dy)])]
+           x-steps (repeat (abs dx) [(signum dx) 0])
+           y-steps (repeat (abs dy) [0 (signum dy)])]
        (->> (into x-steps y-steps)
             shuffle
             (reductions (partial mapv +) start)))))

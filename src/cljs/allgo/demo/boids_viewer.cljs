@@ -7,6 +7,7 @@
   steers around obstacles, whose clearances come from GJK."
   (:require [allgo.demo.fps :as fps]
             [allgo.simulation.boids :as boids]
+            [allgo.simulation.boids-flat :as flat]
             ["lil-gui" :default GUI]
             [clojure.math :as math]))
 
@@ -22,7 +23,10 @@
        :speed          2.4
        :avoidance      2.2
        :trails         true
-       :obstacles      true})
+       :obstacles      true
+       ;; The same three rules on flat arrays instead of a vector of maps,
+       ;; obstacles included. Several times faster; identical behaviour.
+       :flatArrays     false})
 
 ;; Obstacle geometry is declared once and used twice: to build the convex
 ;; bodies GJK is queried against, and to draw them.
@@ -36,6 +40,8 @@
   (case kind
     :circle (boids/sphere-obstacle c r)
     :rect   (boids/box-obstacle lo hi)))
+
+(defn- flat? [] (.-flatArrays controls))
 
 (defn- params [obstacles]
   {:edges             :bounce
@@ -85,12 +91,40 @@
   (.fill ctx)
   (.stroke ctx))
 
+(defn- draw-flat!
+  "Draws straight from the position and velocity arrays.
+
+  Converting the flat flock back into maps to reuse `draw-boid!` would
+  allocate one map and two vectors per boid per frame, which is most of
+  what the flat representation exists to avoid."
+  [^js ctx {:keys [n ^js pos ^js vel]}]
+  (dotimes [i n]
+    (let [b (* 3 i)
+          x (aget pos b) y (aget pos (+ b 1))
+          vx (aget vel b) vy (aget vel (+ b 1))
+          heading (math/atan2 vy vx)
+          hue     (mod (+ 180 (math/to-degrees heading)) 360)]
+      (set! (.-fillStyle ctx) (str "hsl(" hue " 85% 62%)"))
+      (.save ctx)
+      (.translate ctx x y)
+      (.rotate ctx heading)
+      (.beginPath ctx)
+      (.moveTo ctx 6 0)
+      (.lineTo ctx -4 3)
+      (.lineTo ctx -2 0)
+      (.lineTo ctx -4 -3)
+      (.closePath ctx)
+      (.fill ctx)
+      (.restore ctx))))
+
 (defn- draw! [^js ctx flock shapes* [w h]]
   (set! (.-fillStyle ctx) (if (.-trails controls) "rgba(5, 7, 13, 0.22)" background))
   (.fillRect ctx 0 0 w h)
   (when (.-obstacles controls)
     (doseq [o shapes*] (draw-obstacle! ctx o)))
-  (doseq [boid flock] (draw-boid! ctx boid)))
+  (if (flat?)
+    (draw-flat! ctx flock)
+    (doseq [boid flock] (draw-boid! ctx boid))))
 
 (defn init! [^js container]
   (let [canvas (js/document.createElement "canvas")
@@ -118,18 +152,28 @@
                     (swap! state assoc :bounds [w h] :shapes sh
                            :obstacles (mapv ->obstacle sh))))))
             (reset-flock! []
-              (swap! state assoc :flock
-                     (boids/flock (.-boids controls) (:bounds @state)
-                                  (params (:obstacles @state)))))
+              (let [reference (boids/flock (.-boids controls) (:bounds @state)
+                                           (params (:obstacles @state)))]
+                (swap! state assoc :flock (if (flat?) (flat/from-boids reference) reference))))
             (tick []
               (when @running?
                 (js/requestAnimationFrame tick)
                 (let [t0    (js/performance.now)
                       {:keys [bounds shapes obstacles]} @state
                       p     (params obstacles)
-                      flock (-> (:flock @state)
-                                (resize-to-flock (.-boids controls) bounds (:max-speed p))
-                                (boids/step bounds p))]
+                      flock (if (flat?)
+                              ;; The flat flock has a fixed size, so a
+                              ;; change to the count is a rebuild rather
+                              ;; than a resize.
+                              (let [f (:flock @state)]
+                                (if (= (:n f) (.-boids controls))
+                                  (flat/step f bounds p)
+                                  (flat/step (flat/from-boids
+                                              (boids/flock (.-boids controls) bounds p))
+                                             bounds p)))
+                              (-> (:flock @state)
+                                  (resize-to-flock (.-boids controls) bounds (:max-speed p))
+                                  (boids/step bounds p)))]
                   (swap! state assoc :flock flock)
                   (draw! ctx flock shapes bounds)
                   (tick-fps! (- (js/performance.now) t0)))))]
@@ -137,7 +181,8 @@
       (resize!)
       (reset-flock!)
       (let [gui (GUI. #js {:container container})]
-        (.add gui controls "boids" 10 400 10)
+        (-> (.add gui controls "flatArrays") (.onChange reset-flock!))
+        (.add gui controls "boids" 10 6000 10)
         (.add gui controls "separation" 0 3 0.1)
         (.add gui controls "alignment" 0 3 0.1)
         (.add gui controls "cohesion" 0 3 0.1)

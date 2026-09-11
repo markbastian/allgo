@@ -22,7 +22,7 @@ SHADOW  := $(JAVA) npx shadow-cljs
 BUNDLE  := resources/public/js/compiled/allgo.js
 
 .DEFAULT_GOAL := help
-.PHONY: help test lint check dev serve bundle compress release repl clean
+.PHONY: help test lint reflect check dev serve bundle compress release repl clean
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -34,7 +34,10 @@ test: ## Run the Clojure test suite
 lint: ## Lint every source and test namespace
 	@clj-kondo --lint src test
 
-check: lint test ## Lint and test
+reflect: ## Fail if any namespace uses reflection
+	@$(JAVA) clojure -M script_reflect.clj
+
+check: lint reflect test ## Lint, reflection check, and tests
 
 dev: ## Build the demo page once, unminified, with source maps
 	@$(SHADOW) compile app
