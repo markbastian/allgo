@@ -357,3 +357,20 @@
     (let [walk (map #(h/wrap % 3) (take 60 (h/walk [0 0] 0)))]
       (is (every? some? walk) "nothing falls off the edge")
       (is (every? #(<= (h/hex-length %) 3) walk)))))
+
+(deftest depth-first-needs-a-bounded-space-test
+  ;; Depth-first follows one branch to its end before trying another, so on
+  ;; the open hex grid it walks away from the goal indefinitely -- measured,
+  ;; it exhausts the heap. Bounded, it behaves.
+  (let [board (set (h/hexagon 4))
+        p     (search/depth-first {:start      [0 0]
+                                   :goal       [3 -1]
+                                   :neighbours #(filterv board (h/neighbors %))})]
+    (is (some? p) "it finds a route")
+    (is (= [0 0] (first p)))
+    (is (= [3 -1] (last p)))
+    (is (every? (fn [[a b]] (= 1 (h/distance a b))) (partition 2 1 p))
+        "and it is a real walk, even if a roundabout one")
+    (is (every? board p))
+    (is (>= (count p) (inc (h/distance [0 0] [3 -1])))
+        "no shorter than the shortest path, and usually longer")))

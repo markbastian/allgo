@@ -181,7 +181,9 @@
   (searcher uninformed-step empty-queue))
 
 (def depth-first-seq
-  "Every search state of a depth-first search."
+  "Every search state of a depth-first search.
+
+  Requires a finite state space. See `depth-first`."
   (searcher uninformed-step []))
 
 (def greedy-seq
@@ -218,7 +220,14 @@
   (solver breadth-first-seq))
 
 (def depth-first
-  "*A* route from start to goal. Rarely the shortest; cheap to find."
+  "*A* route from start to goal. Rarely the shortest; cheap to find.
+
+  The one algorithm here that needs a finite state space. It commits to a
+  branch and follows it to the end before considering any alternative, so
+  where the others fan out and meet the goal, this one walks away from it
+  forever: on an unbounded grid it runs to an OutOfMemoryError rather than
+  returning a bad answer. Bound `:neighbours` -- to a board, a depth
+  limit, anything -- or use `breadth-first`."
   (solver depth-first-seq))
 
 (def greedy
