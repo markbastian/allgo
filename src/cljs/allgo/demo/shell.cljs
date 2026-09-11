@@ -5,7 +5,8 @@
   you navigate away, so exactly one loop is ever running. That laziness is also
   load-bearing for correctness -- a card hidden with `display:none` measures
   0x0, so a renderer built while hidden would get a degenerate viewport."
-  (:require [allgo.demo.boids-3d :as boids-3d]
+  (:require [allgo.demo.arm :as arm]
+            [allgo.demo.boids-3d :as boids-3d]
             [allgo.demo.boids-viewer :as boids-2d]
             [allgo.demo.boids-voronoi :as boids-voronoi]
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
@@ -49,6 +50,7 @@
    "fire"     {:start fire/start!     :stop fire/stop!}
    "water"    {:start water/start!    :stop water/stop!}
    "rigid"    {:start rigid/start!    :stop rigid/stop!}
+   "arm"      {:start arm/start!      :stop arm/stop!}
    "joints"   {:start joints/start!   :stop joints/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}

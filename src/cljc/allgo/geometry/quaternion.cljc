@@ -131,6 +131,28 @@
   [q a]
   (rotate q a))
 
+(defn from-vectors
+  "The shortest rotation taking one direction onto another.
+
+  Used wherever something has to be pointed at something else: a cylinder
+  along a link, a gripper at what it is reaching for. Two directions leave
+  the roll about the shared axis undetermined, and this takes the choice
+  that turns least.
+
+  Exactly opposite directions have no shortest rotation -- every half turn
+  about every perpendicular axis does the job -- so one perpendicular is
+  picked, which is as good an answer as any and better than a NaN."
+  [from to]
+  (let [f (v/normalize from)
+        t (v/normalize to)
+        d (v/dot f t)]
+    (cond
+      (> d 0.999999) identity-q
+      (< d -0.999999)
+      (let [axis (v/cross f (if (< (abs (double (nth f 0))) 0.9) [1.0 0.0 0.0] [0.0 1.0 0.0]))]
+        (from-axis-angle axis math/PI))
+      :else (from-axis-angle (v/cross f t) (math/acos (min 1.0 (max -1.0 d)))))))
+
 (defn to-matrix
   "The rotation as three rows, `[[r00 r01 r02] [r10 ...] [r20 ...]]`.
 
