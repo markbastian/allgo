@@ -29,61 +29,13 @@
             [allgo.spatial.hash :as spatial]
             [clojure.math :as math]))
 
-;; `step` and `to-boids` are defined below but referred to by the record's
-;; protocol methods, which are compiled where the record is.
-(declare step to-boids)
-
 (defn- f64
   ([n] #?(:clj (double-array n) :cljs (js/Float64Array. n)))
   ([_n coll] #?(:clj (double-array (map double coll))
                 :cljs (js/Float64Array. (into-array (map double coll))))))
 
 ;; ---------------------------------------------------------------------------
-;; Construction
-
-(defrecord FlatFlock [n dims pos vel pos' vel' hash]
-  ;; Implemented here rather than extended from `allgo.simulation.flock`.
-  ;; Extending it there would mean naming this class from another
-  ;; namespace, and a `defrecord` class only exists once its namespace has
-  ;; been loaded -- which `:import` does not do, making it order-dependent
-  ;; and invisible to static analysis.
-  flock/Flock
-  (advance [this bounds params] (step this bounds params))
-  (as-boids [this] (to-boids this))
-  (flock-size [this] (:n this)))
-
-(defn flat-flock
-  "A flock of `n` boids from flat `[x y z ...]` position and velocity
-  arrays. `dims` is 2 or 3 and decides whether z is simulated.
-
-  A record rather than a map so it can carry the `allgo.simulation.flock`
-  protocol without claiming every map in the program."
-  [n pos vel dims]
-  (map->FlatFlock
-   {:n    n
-    :dims dims
-    :pos  pos
-    :vel  vel
-    ;; The buffers written during a tick, swapped in at the end.
-    :pos' (f64 (* 3 n))
-    :vel' (f64 (* 3 n))
-    :hash (spatial/spatial-hash 1.0 (max n 1))}))
-
-(defn from-boids
-  "A flat flock holding the same state as a `allgo.simulation.boids`
-  flock."
-  [flock]
-  (let [n    (count flock)
-        dims (count (:pos (first flock)))
-        ^doubles pos (f64 (* 3 n))
-        ^doubles vel (f64 (* 3 n))]
-    (dotimes [i n]
-      (let [{p :pos v :vel} (nth flock i)
-            b (* 3 i)]
-        (dotimes [d dims]
-          (aset pos (+ b d) (double (nth p d)))
-          (aset vel (+ b d) (double (nth v d))))))
-    (flat-flock n pos vel dims)))
+;; Reading a flock
 
 (defn to-boids
   "The same state as a vector of `{:pos :vel}`, for comparison or for the
@@ -285,6 +237,56 @@
                  (aset vel' (+ b 2) (double (nth v 2)))))))))
      ;; Swap the buffers: what was written becomes the state.
      (assoc flock :pos pos' :vel vel' :pos' pos :vel' vel :hash hash))))
+
+;; ---------------------------------------------------------------------------
+;; Construction
+;;
+;; After the step, so the record's protocol methods can call `step` and
+;; `to-boids` directly instead of being declared ahead of them.
+
+(defrecord FlatFlock [n dims pos vel pos' vel' hash]
+  ;; Implemented here rather than extended from `allgo.simulation.flock`.
+  ;; Extending it there would mean naming this class from another
+  ;; namespace, and a `defrecord` class only exists once its namespace has
+  ;; been loaded -- which `:import` does not do, making it order-dependent
+  ;; and invisible to static analysis.
+  flock/Flock
+  (advance [this bounds params] (step this bounds params))
+  (as-boids [this] (to-boids this))
+  (flock-size [this] (:n this)))
+
+(defn flat-flock
+  "A flock of `n` boids from flat `[x y z ...]` position and velocity
+  arrays. `dims` is 2 or 3 and decides whether z is simulated.
+
+  A record rather than a map so it can carry the `allgo.simulation.flock`
+  protocol without claiming every map in the program."
+  [n pos vel dims]
+  (map->FlatFlock
+   {:n    n
+    :dims dims
+    :pos  pos
+    :vel  vel
+    ;; The buffers written during a tick, swapped in at the end.
+    :pos' (f64 (* 3 n))
+    :vel' (f64 (* 3 n))
+    :hash (spatial/spatial-hash 1.0 (max n 1))}))
+
+(defn from-boids
+  "A flat flock holding the same state as a `allgo.simulation.boids`
+  flock."
+  [flock]
+  (let [n    (count flock)
+        dims (count (:pos (first flock)))
+        ^doubles pos (f64 (* 3 n))
+        ^doubles vel (f64 (* 3 n))]
+    (dotimes [i n]
+      (let [{p :pos v :vel} (nth flock i)
+            b (* 3 i)]
+        (dotimes [d dims]
+          (aset pos (+ b d) (double (nth p d)))
+          (aset vel (+ b d) (double (nth v d))))))
+    (flat-flock n pos vel dims)))
 
 (defn simulate
   "Run `ticks` steps, returning the flock."
