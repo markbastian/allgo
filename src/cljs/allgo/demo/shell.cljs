@@ -13,6 +13,7 @@
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dungeon :as dungeon]
             [allgo.demo.dungeon-boids :as dungeon-boids]
+            [allgo.demo.hex :as hex]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
@@ -27,6 +28,7 @@
 (def ^:private lifecycles
   {"caves"    {:start cave/start!    :stop cave/stop!}
    "delaunay" {:start delaunay/start! :stop delaunay/stop!}
+   "hex"      {:start hex/start!      :stop hex/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
