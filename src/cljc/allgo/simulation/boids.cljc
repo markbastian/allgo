@@ -176,21 +176,65 @@
         hi3   (if flat? [(nth hi 0) (nth hi 1) depth] (vec hi))]
     {:support (gjk/box lo3 hi3)
      :centre  (v* (v+ lo3 hi3) 0.5)
-     :radius  (* 0.5 (mag (v- hi3 lo3)))}))
+     ;; The bounding sphere measures the body as the flock actually meets
+     ;; it. For a flat box that is the rectangle, not the prism: the depth
+     ;; is invented purely to keep GJK's simplex off a degenerate face, and
+     ;; the prism is centred on the flock's plane, so no boid can be near
+     ;; it in z. Including that depth inflates the radius by more than a
+     ;; factor of two, which defeats the cull that is supposed to keep GJK
+     ;; off obstacles it will never touch.
+     :radius  (* 0.5 (mag (v- (vec hi) (vec lo))))}))
+
+(defn index-obstacles
+  "Bucket obstacles into cells of `cell-size` for reach lookup, the same way
+  `index-flock` buckets boids.
+
+  Bucketing is on x and y only. A planar flock's obstacles are prisms
+  spanning z, so indexing depth would put every one of them in every layer
+  and buy nothing; for a spatial flock it is a coarser cull, but still a
+  sound one, because the bounding-sphere test runs afterwards regardless.
+
+  An obstacle wider than a cell lands in each cell it covers, so lookups
+  have to drop duplicates."
+  [obstacles cell-size]
+  {:cell-size cell-size
+   :cells     (reduce (fn [cells {:keys [centre radius] :as obstacle}]
+                        (let [[cx cy] centre
+                              lo (fn [v] (long (math/floor (/ (- v radius) cell-size))))
+                              hi (fn [v] (long (math/floor (/ (+ v radius) cell-size))))]
+                          (reduce (fn [cells cell] (update cells cell conj obstacle))
+                                  cells
+                                  (for [i (range (lo cx) (inc (hi cx)))
+                                        j (range (lo cy) (inc (hi cy)))]
+                                    [i j]))))
+                      {}
+                      obstacles)})
 
 (defn- near-obstacles
   "Obstacles whose bounding sphere is within reach, so the GJK query is only
-  run against the few that could matter."
-  [p3 obstacles reach]
-  (filter (fn [{:keys [centre radius]}]
-            (< (dist p3 centre) (+ radius reach)))
-          obstacles))
+  run against the few that could matter.
+
+  `step` supplies an index; without one this falls back to a linear scan,
+  which keeps `avoidance` usable on its own. The scan is what makes the
+  tick O(boids x obstacles) -- fine for the handful of bodies in the 2D
+  flocking demo, but a flock loose in a generated dungeon meets a wall
+  segment per floor tile, and at a few hundred of those it dominates the
+  frame."
+  [p3 {:keys [obstacles obstacle-index]} reach]
+  (let [in-reach? (fn [{:keys [centre radius]}] (< (dist p3 centre) (+ radius reach)))]
+    (if-let [{:keys [cell-size cells]} obstacle-index]
+      (let [home (cell-of (subvec p3 0 2) cell-size)]
+        (into [] (comp (mapcat #(cells (mapv + home %)))
+                       (distinct)
+                       (filter in-reach?))
+              (cell-offsets 2)))
+      (filter in-reach? obstacles))))
 
 (defn avoidance
   "Steering away from nearby obstacles. GJK gives the gap to each convex
   body and the direction across it; the force ramps up as the gap closes,
   so a boid curves around an obstacle rather than jolting at contact."
-  [{:keys [pos vel]} {:keys [obstacles avoid-radius boid-radius max-speed max-force]}]
+  [{:keys [pos vel]} {:keys [obstacles avoid-radius boid-radius max-speed max-force] :as params}]
   (if (empty? obstacles)
     (zero-like pos)
     (let [n     (count pos)
@@ -207,7 +251,7 @@
                            steer  (limit (v- (with-magnitude away max-speed) v3) max-force)]
                        (v+ acc (v* steer urgency))))))
                [0.0 0.0 0.0]
-               (near-obstacles p3 obstacles (+ avoid-radius boid-radius)))
+               (near-obstacles p3 params (+ avoid-radius boid-radius)))
        n))))
 
 (defn resolve-contacts
@@ -215,11 +259,11 @@
   the surface. Steering alone cannot guarantee separation -- a boid boxed in
   by its flock can be carried into an obstacle -- so EPA supplies the
   shortest way out as a backstop."
-  [pos vel {:keys [obstacles boid-radius restitution]}]
+  [pos vel {:keys [obstacles boid-radius restitution] :as params}]
   (if (empty? obstacles)
     [pos vel]
     (let [n (count pos)]
-      (loop [p3 (lift pos), v3 (lift vel), [o & more] (near-obstacles (lift pos) obstacles boid-radius)]
+      (loop [p3 (lift pos), v3 (lift vel), [o & more] (near-obstacles (lift pos) params boid-radius)]
         (if (nil? o)
           [(project p3 n) (project v3 n)]
           (let [me (gjk/sphere p3 boid-radius)]
@@ -251,8 +295,15 @@
   so the update order cannot bias the result."
   ([flock bounds] (step flock bounds defaults))
   ([flock bounds params]
-   (let [params (merge defaults params)
-         index  (index-flock flock (:perception-radius params))]
+   (let [{:keys [perception-radius avoid-radius boid-radius obstacles] :as params}
+         (merge defaults params)
+         index  (index-flock flock perception-radius)
+         ;; Built once per tick, not once per boid: the obstacles do not
+         ;; move during a step.
+         params (cond-> params
+                  (seq obstacles)
+                  (assoc :obstacle-index
+                         (index-obstacles obstacles (+ avoid-radius boid-radius))))]
      (mapv #(step-boid % index bounds params) flock))))
 
 (defn random-boid [bounds max-speed]

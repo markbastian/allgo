@@ -12,6 +12,7 @@
             [allgo.demo.cave :as cave]
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dungeon :as dungeon]
+            [allgo.demo.dungeon-boids :as dungeon-boids]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
@@ -29,6 +30,7 @@
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
+   "dungeon-boids" {:start dungeon-boids/start! :stop dungeon-boids/stop!}
    "boids-voronoi" {:start boids-voronoi/start! :stop boids-voronoi/stop!}
    "boids-voronoi-3d" {:start boids-voronoi-3d/start! :stop boids-voronoi-3d/stop!}
    "boids-3d" {:start boids-3d/start! :stop boids-3d/stop!}

@@ -140,3 +140,71 @@
                                              (b/box-obstacle [0 0 0] [4 6 8])]]
       (is (not (gjk/intersects? (gjk/sphere centre (* 0.999 radius))
                                 (gjk/translate support [(* 3 radius) 0.0 0.0])))))))
+
+(deftest flat-box-bounding-sphere-measures-the-rectangle
+  ;; A flat box is extruded into a prism so GJK's simplex never lands on a
+  ;; degenerate face, but that depth is invented and the prism straddles the
+  ;; flock's plane. Letting it into the radius inflates the sphere by more
+  ;; than 2x and the broad-phase cull stops culling.
+  (let [{:keys [centre radius]} (b/box-obstacle [0 0] [6 6])]
+    (is (= 0.0 (nth centre 2)) "the prism is centred on the flock's plane")
+    (is (< (Math/abs (- radius (* 0.5 (Math/hypot 6 6)))) 1e-9)
+        "radius is the half-diagonal of the rectangle, not of the prism"))
+
+  (testing "it still encloses the rectangle the flock actually meets"
+    (let [{:keys [centre radius]} (b/box-obstacle [2 3] [10 9])
+          [cx cy] centre]
+      (doseq [corner [[2 3] [10 3] [2 9] [10 9]]]
+        (is (<= (Math/hypot (- (first corner) cx) (- (second corner) cy))
+                (+ radius 1e-9)))))))
+
+(deftest obstacle-index-agrees-with-the-linear-scan
+  (let [obstacles (vec (for [x (range 0 200 20) y (range 0 200 20)]
+                         (b/box-obstacle [x y] [(+ x 8) (+ y 8)])))
+        base      (merge b/defaults {:obstacles obstacles :avoid-radius 12
+                                     :boid-radius 1.5 :max-speed 2.0})
+        indexed   (assoc base :obstacle-index
+                         (b/index-obstacles obstacles (+ 12 1.5)))]
+    (testing "avoidance is unchanged by the presence of an index"
+      (doseq [boid [{:pos [37.0 41.0] :vel [1.0 0.0]}
+                    {:pos [4.0 4.0] :vel [0.0 1.0]}
+                    {:pos [1000.0 1000.0] :vel [1.0 1.0]}
+                    {:pos [101.0 99.0] :vel [-1.0 0.5]}]]
+        (is (= (b/avoidance boid base) (b/avoidance boid indexed))
+            (str "at " (:pos boid)))))
+
+    (testing "a boid far from everything is steered by nothing either way"
+      (let [far {:pos [5000.0 5000.0] :vel [1.0 0.0]}]
+        (is (= [0.0 0.0] (b/avoidance far indexed)))))
+
+    (testing "an obstacle wider than a cell is filed in each cell it covers"
+      (let [wide (b/box-obstacle [0 0] [100 100])
+            idx  (b/index-obstacles [wide] 5.0)]
+        (is (< 1 (count (:cells idx))) "it spans several cells")
+        (is (every? #(= 1 (count %)) (vals (:cells idx)))
+            "but only once within any one of them")
+        ;; Lookup still has to drop duplicates across the 3x3 it reads, and
+        ;; that it does is what the avoidance comparison above establishes:
+        ;; a doubly-counted obstacle would steer twice as hard.
+        (let [boid {:pos [50.0 50.0] :vel [1.0 0.0]}
+              base (merge b/defaults {:obstacles [wide] :avoid-radius 12 :boid-radius 1.5})]
+          (is (= (b/avoidance boid base)
+                 (b/avoidance boid (assoc base :obstacle-index idx)))))))))
+
+(deftest stepping-with-obstacles-is-index-independent
+  ;; `step` builds an index internally; the flock it produces must match
+  ;; what the unindexed path produces, or the optimisation changed the sim.
+  (let [obstacles (vec (for [x (range 0 300 30)] (b/box-obstacle [x 100] [(+ x 12) 112])))
+        params    {:obstacles obstacles :avoid-radius 15 :boid-radius 2.0
+                   :edges :bounce :perception-radius 40}
+        flock     (vec (for [i (range 25)]
+                         {:pos [(* 11.0 i) (+ 60.0 (* 3.0 (mod i 7)))]
+                          :vel [1.0 0.4]}))
+        indexed   (nth (iterate #(b/step % [300.0 300.0] params) flock) 12)
+        unindexed (nth (iterate (fn [f]
+                                  (let [idx (b/index-flock f 40)
+                                        p   (merge b/defaults params)]
+                                    (mapv #(b/step-boid % idx [300.0 300.0] p) f)))
+                                flock)
+                       12)]
+    (is (= indexed unindexed))))

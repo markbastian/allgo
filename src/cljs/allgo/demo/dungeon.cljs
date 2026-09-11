@@ -13,7 +13,7 @@
 
 (def ^:private background "#05070d")
 
-(def ^:private palette
+(def palette
   {:corridor "#1c2740"
    :hallway  "#33598c"
    :main     "#e0a85c"
@@ -50,7 +50,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Fitting the dungeon to the viewport
 
-(defn- grid-extent
+(defn grid-extent
   "`[min-tx min-ty max-tx max-ty]` over every tile on the map."
   [grid]
   (reduce (fn [[x0 y0 x1 y1] [tx ty]]
@@ -58,7 +58,7 @@
           [##Inf ##Inf ##-Inf ##-Inf]
           (keys grid)))
 
-(defn- fit
+(defn fit
   "A tile -> pixel transform that centres the whole map in `[w h]` with a
   little air around it. Returns `[scale offset-x offset-y]`."
   [grid [w h]]
