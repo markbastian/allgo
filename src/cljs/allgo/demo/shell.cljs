@@ -20,6 +20,7 @@
             [allgo.demo.satellite :as satellite]
             [allgo.demo.soft-body :as soft-body]
             [allgo.demo.solar-system :as solar]
+            [allgo.demo.spatial-hash :as spatial-hash]
             [allgo.demo.terrain-webgl :as terrain]
             [reagent.core :as r]
             [reagent.dom.client :as rdom]))
@@ -31,6 +32,7 @@
    "delaunay" {:start delaunay/start! :stop delaunay/stop!}
    "hex"      {:start hex/start!      :stop hex/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
+   "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
