@@ -8,6 +8,7 @@
   alignment reads as the swarm converging on a single colour."
   (:require [allgo.demo.fps :as fps]
             [allgo.simulation.boids :as boids]
+            [allgo.simulation.boids-flat :as flat]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
@@ -27,7 +28,9 @@
             :sphere (boids/sphere-obstacle c r)
             :box    (boids/box-obstacle lo hi)))
         shapes))
-(def ^:private capacity 400)
+;; The instanced mesh is allocated once at this size and its draw count
+;; set per frame, so this is the ceiling the slider can reach.
+(def ^:private capacity 4000)
 
 (def ^:private ^js controls
   #js {:boids         60
@@ -38,7 +41,13 @@
        :personalSpace 9
        :speed         0.8
        :avoidance     3.0
-       :obstacles     true})
+       :obstacles     true
+       ;; The same rules on flat arrays, obstacles included. Several times
+       ;; faster and identical to within floating-point noise, which is
+       ;; what `allgo.simulation.flock/divergence` checks.
+       :flatArrays    true})
+
+(defn- flat? [] (.-flatArrays controls))
 
 (defn- params []
   {:separation-weight (.-separation controls)
@@ -110,6 +119,36 @@
     (set! (.-needsUpdate (.-instanceMatrix mesh)) true)
     (when-let [ic (.-instanceColor mesh)] (set! (.-needsUpdate ic) true))))
 
+(defn- write-instances-flat!
+  "The same, straight from the position and velocity arrays.
+
+  Going through `to-boids` first would allocate a map and two vectors per
+  boid per frame, which is most of what the flat representation is for."
+  [^js mesh ^js scratch ^js color {:keys [n ^js pos ^js vel]} [w h d]]
+  (let [ox (/ w 2) oy (/ h 2) oz (/ d 2)]
+    (dotimes [i n]
+      (let [b  (* 3 i)
+            x  (- (aget pos b) ox)
+            y  (- (aget pos (+ b 1)) oy)
+            z  (- (aget pos (+ b 2)) oz)
+            vx (aget vel b) vy (aget vel (+ b 1)) vz (aget vel (+ b 2))
+            m  (js/Math.sqrt (+ (* vx vx) (* vy vy) (* vz vz)))
+            nx (if (pos? m) (/ vx m) 0.0)
+            ny (if (pos? m) (/ vy m) 0.0)
+            nz (if (pos? m) (/ vz m) 0.0)]
+        (.set (.-position scratch) x y z)
+        (.lookAt scratch (+ x nx) (+ y ny) (+ z nz))
+        (.updateMatrix scratch)
+        (.setMatrixAt mesh i (.-matrix scratch))
+        (.setHSL color
+                 (+ 0.5 (/ (js/Math.atan2 nz nx) (* 2 js/Math.PI)))
+                 0.8
+                 (+ 0.55 (* 0.18 ny)))
+        (.setColorAt mesh i color)))
+    (set! (.-count mesh) n)
+    (set! (.-needsUpdate (.-instanceMatrix mesh)) true)
+    (when-let [ic (.-instanceColor mesh)] (set! (.-needsUpdate ic) true))))
+
 (defn init! [^js container]
   (let [scene    (THREE/Scene.)
         camera   (THREE/PerspectiveCamera. 55 (/ (.-clientWidth container) (.-clientHeight container)) 0.5 5000)
@@ -123,7 +162,8 @@
         color    (THREE/Color.)
         running? (atom false)
         tick-fps! (fps/meter! container)
-        state    (atom {:flock (boids/flock (.-boids controls) world (params))})]
+        state    (atom {:flock (let [reference (boids/flock (.-boids controls) world (params))]
+                                 (if (flat?) (flat/from-boids reference) reference))})]
     (set! (.-background scene) (THREE/Color. 0x05070d))
     (.setPixelRatio renderer (or js/window.devicePixelRatio 1))
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
@@ -142,7 +182,9 @@
       (set! (.-enableDamping orbit) true)
       (.set (.-target orbit) 0 0 0)
       (letfn [(reset-flock! []
-                (swap! state assoc :flock (boids/flock (.-boids controls) world (params))))
+                (let [reference (boids/flock (.-boids controls) world (params))]
+                  (swap! state assoc :flock
+                         (if (flat?) (flat/from-boids reference) reference))))
               (on-resize []
                 ;; A hidden card measures 0x0, which would make the aspect NaN.
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
@@ -155,16 +197,28 @@
                   (js/requestAnimationFrame animate)
                   (let [t0    (js/performance.now)
                         p     (params)
-                        flock (-> (:flock @state)
-                                  (resize-to-flock (.-boids controls) (:max-speed p))
-                                  (boids/step world p))]
+                        flock (if (flat?)
+                                ;; A flat flock is a fixed size, so changing
+                                ;; the count is a rebuild rather than a resize.
+                                (let [f (:flock @state)]
+                                  (if (= (:n f) (.-boids controls))
+                                    (flat/step f world p)
+                                    (flat/step (flat/from-boids
+                                                (boids/flock (.-boids controls) world p))
+                                               world p)))
+                                (-> (:flock @state)
+                                    (resize-to-flock (.-boids controls) (:max-speed p))
+                                    (boids/step world p)))]
                     (swap! state assoc :flock flock)
-                    (write-instances! mesh scratch color flock world)
+                    (if (flat?)
+                      (write-instances-flat! mesh scratch color flock world)
+                      (write-instances! mesh scratch color flock world))
                     (.update orbit)
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (let [gui (GUI. #js {:container container})]
+          (-> (.add gui controls "flatArrays") (.onChange reset-flock!))
           (.add gui controls "boids" 10 capacity 10)
           (.add gui controls "separation" 0 3 0.1)
           (.add gui controls "alignment" 0 3 0.1)

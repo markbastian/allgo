@@ -26,7 +26,7 @@
        :obstacles      true
        ;; The same three rules on flat arrays instead of a vector of maps,
        ;; obstacles included. Several times faster; identical behaviour.
-       :flatArrays     false})
+       :flatArrays     true})
 
 ;; Obstacle geometry is declared once and used twice: to build the convex
 ;; bodies GJK is queried against, and to draw them.

@@ -95,7 +95,7 @@
 (deftest protocol-test
   (let [params    {:edges :wrap}
         reference (flock/reference 50 [300.0 300.0] params)
-        fast      (flock/fast reference)]
+        fast      (flat/from-boids (flock/as-boids reference))]
     (testing "both answer the same interface"
       (is (= 50 (flock/flock-size reference) (flock/flock-size fast)))
       (is (= 50 (count (flock/as-boids fast))))

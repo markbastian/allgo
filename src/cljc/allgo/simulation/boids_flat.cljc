@@ -25,8 +25,13 @@
   zero, so one code path serves both and the spatial hash can be used
   unchanged."
   (:require [allgo.simulation.boids :as boids]
+            [allgo.simulation.flock :as flock]
             [allgo.spatial.hash :as spatial]
             [clojure.math :as math]))
+
+;; `step` and `to-boids` are defined below but referred to by the record's
+;; protocol methods, which are compiled where the record is.
+(declare step to-boids)
 
 (defn- f64
   ([n] #?(:clj (double-array n) :cljs (js/Float64Array. n)))
@@ -36,14 +41,23 @@
 ;; ---------------------------------------------------------------------------
 ;; Construction
 
-(defrecord FlatFlock [n dims pos vel pos' vel' hash])
+(defrecord FlatFlock [n dims pos vel pos' vel' hash]
+  ;; Implemented here rather than extended from `allgo.simulation.flock`.
+  ;; Extending it there would mean naming this class from another
+  ;; namespace, and a `defrecord` class only exists once its namespace has
+  ;; been loaded -- which `:import` does not do, making it order-dependent
+  ;; and invisible to static analysis.
+  flock/Flock
+  (advance [this bounds params] (step this bounds params))
+  (as-boids [this] (to-boids this))
+  (flock-size [this] (:n this)))
 
 (defn flat-flock
   "A flock of `n` boids from flat `[x y z ...]` position and velocity
   arrays. `dims` is 2 or 3 and decides whether z is simulated.
 
-  A record rather than a map so `allgo.simulation.flock` can dispatch a
-  protocol on it without claiming every map in the program."
+  A record rather than a map so it can carry the `allgo.simulation.flock`
+  protocol without claiming every map in the program."
   [n pos vel dims]
   (map->FlatFlock
    {:n    n
@@ -132,6 +146,17 @@
           :as params}
          (merge boids/defaults params)
          avoiding? (seq obstacles)
+         ;; The same index `boids/step` builds. Not only for speed: it
+         ;; also fixes the order obstacles are summed in, and a different
+         ;; order gives a different rounding, which is enough to make the
+         ;; two implementations disagree in the sixth decimal place from
+         ;; the very first tick.
+         params    (cond-> params
+                     avoiding?
+                     (assoc :obstacle-index
+                            (boids/index-obstacles
+                             obstacles
+                             (+ (:avoid-radius params) (:boid-radius params)))))
          sep-r2  (* separation-radius separation-radius)
          per-r2  (* perception-radius perception-radius)
          hash    (assoc hash :spacing (double perception-radius)

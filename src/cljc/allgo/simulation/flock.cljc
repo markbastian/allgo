@@ -3,16 +3,19 @@
   hold either and a benchmark can run both.
 
   `allgo.simulation.boids` is the reference: a vector of `{:pos :vel}`
-  maps, dimension-generic, and the only one that steers around obstacles.
-  `allgo.simulation.boids-flat` is the same three rules on flat arrays,
-  several times faster and limited to flocking.
+  maps, and the clearer statement of the rules.
+  `allgo.simulation.boids-flat` is the same rules on flat arrays, several
+  times faster.
 
   They agree to floating-point noise -- `boids-flat-test` runs them side
   by side and compares -- so which one a demo holds is a performance
-  decision, not a behavioural one."
-  (:require [allgo.simulation.boids :as boids]
-            [allgo.simulation.boids-flat :as flat #?@(:cljs [:refer [FlatFlock]])])
-  #?(:clj (:import [allgo.simulation.boids_flat FlatFlock])))
+  decision, not a behavioural one.
+
+  This namespace knows only about the reference. The flat implementation
+  implements `Flock` where its record is defined, which is what keeps the
+  dependency pointing one way and means neither type has to be imported."
+  (:require [allgo.simulation.boids :as boids])
+  #?(:clj (:import [clojure.lang PersistentVector])))
 
 (defprotocol Flock
   (advance [flock bounds params] "One tick, returning a flock of the same kind.")
@@ -20,26 +23,15 @@
   (flock-size [flock]))
 
 (extend-protocol Flock
-  #?(:clj clojure.lang.PersistentVector :cljs cljs.core/PersistentVector)
+  PersistentVector
   (advance [flock bounds params] (boids/step flock bounds params))
   (as-boids [flock] flock)
   (flock-size [flock] (count flock)))
-
-(extend-type FlatFlock
-  Flock
-  (advance [flock bounds params] (flat/step flock bounds params))
-  (as-boids [flock] (flat/to-boids flock))
-  (flock-size [flock] (:n flock)))
 
 (defn reference
   "A reference flock of `n` boids, randomly placed."
   ([n bounds] (reference n bounds boids/defaults))
   ([n bounds params] (boids/flock n bounds params)))
-
-(defn fast
-  "A flat-array flock holding the same state as `flock`."
-  [flock]
-  (flat/from-boids (as-boids flock)))
 
 (defn simulate
   "Run `ticks` steps of whichever implementation is passed."
