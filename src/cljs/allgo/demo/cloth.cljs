@@ -11,7 +11,12 @@
   `pinning` decides what the sheet is attached to, and is worth trying
   against `bending`: a hanging sheet is shaped mostly by gravity whatever
   its stiffness, while a sheet held along one edge shows the difference
-  plainly."
+  plainly.
+
+  `selfCollision` is Ten Minute Physics 15, and shows best under `squeeze`,
+  which drags the two pinned edges together until the sheet has nowhere to
+  go but into itself. Without it the folds pass straight through one
+  another; with it they stack."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.tri-mesh :as tri]
             [allgo.physics.xpbd :as xpbd]
@@ -29,6 +34,8 @@
        :substeps          12
        :obstacle          true
        :friction          0.35
+       :selfCollision     true
+       :squeeze           false
        :showWireframe     false})
 
 (def ^:private sheet-size 1.6)
@@ -45,6 +52,7 @@
       "two corners" (take 2 (tri/corner-vertices mesh))
       "four corners" (tri/corner-vertices mesh)
       "one edge"    row
+      "two edges"   (concat row (map #(+ % (* (inc n) n)) (range (inc n))))
       [])))
 
 (defn- build! [^js scene state]
@@ -60,10 +68,17 @@
         _     (xpbd/pin! body (pinned-ids mesh n))
         ;; A constraint, so contact is enforced on every substep. Applied
         ;; once a frame instead, the sheet tunnels straight through.
+        thickness (* 0.7 (/ sheet-size n))
         body  (cond-> body
                 (.-obstacle controls)
                 (xpbd/add-constraint
-                 (xpbd/sphere-constraint ball-centre ball-radius (.-friction controls))))
+                 (xpbd/sphere-constraint ball-centre ball-radius (.-friction controls)))
+                (.-selfCollision controls)
+                ;; Detected once a frame, resolved every substep. Needs the
+                ;; speed limit too, or a fast fold crosses its own thickness
+                ;; between detections.
+                (xpbd/add-constraint
+                 (xpbd/self-collision-constraint (xpbd/cloth mesh {}) thickness 0.15)))
         ;; WebGL has no double-precision attribute, so the solver's array
         ;; is mirrored into a single-precision one each frame.
         render (js/Float32Array. (alength (:pos body)))
@@ -81,7 +96,8 @@
     (.add scene obj)
     (.add scene wire)
     (swap! state assoc :mesh mesh :body body :render render
-           :mesh-obj obj :wire wire :geom geom
+           :mesh-obj obj :wire wire :geom geom :thickness thickness
+           :pinned (vec (pinned-ids mesh n)) :frame 0
            :tris (quot (count (:tri-ids mesh)) 3))))
 
 (defn- refresh! [{:keys [^js geom ^js wire ^js render body]}]
@@ -130,14 +146,33 @@
                       (.setPixelRatio renderer (or js/window.devicePixelRatio 1))
                       (set! (.-aspect camera) (/ w h))
                       (.updateProjectionMatrix camera))))
+                (squeeze! []
+                  ;; Drag the two pinned edges together, which is the only
+                  ;; way to make a sheet meet itself hard enough to see the
+                  ;; difference self-collision makes.
+                  (let [{:keys [body frame]} @state
+                        n (.-resolution controls)
+                        row-a (range (inc n))
+                        row-b (map #(+ % (* (inc n) n)) (range (inc n)))
+                        t (min 1.0 (/ frame 180.0))
+                        z (* 0.5 sheet-size (- 1.0 (* 0.95 t)))]
+                    (doseq [i row-a] (let [[px py _] (xpbd/particle body i)]
+                                       (xpbd/set-particle! body i [px py (- z)])))
+                    (doseq [i row-b] (let [[px py _] (xpbd/particle body i)]
+                                       (xpbd/set-particle! body i [px py z])))
+                    (swap! state update :frame inc)))
                 (tick []
                   (when @running?
                     (js/requestAnimationFrame tick)
                     (let [t0   (js/performance.now)
                           body (:body @state)]
+                      (when (.-squeeze controls) (squeeze!))
                       (xpbd/step! body {:gravity  [0.0 (- (.-gravity controls)) 0.0]
                                         :substeps (.-substeps controls)
                                         :damping  (.-damping controls)
+                                        :max-velocity (when (.-selfCollision controls)
+                                                        (xpbd/speed-limit (:thickness @state)
+                                                                          (/ 1.0 60.0)))
                                         :floor    0.0})
                       (refresh! @state)
                       (.update orbit)
@@ -149,8 +184,8 @@
           (let [gui (GUI. #js {:container container})]
             (doto gui
               (-> (.add controls "resolution" 8 48 2) (.onFinishChange rebuild!))
-              (-> (.add controls "pinning" #js ["two corners" "one edge" "four corners"
-                                                "one corner" "none"])
+              (-> (.add controls "pinning" #js ["none" "two corners" "one edge" "two edges"
+                                                "four corners" "one corner"])
                   (.onChange rebuild!))
               (-> (.add controls "bending" 0 0.5 0.005) (.onChange rebuild!))
               (-> (.add controls "stretch" 0 0.01 0.0005) (.onChange rebuild!))
@@ -159,6 +194,12 @@
               (.add controls "substeps" 1 25 1)
               (-> (.add controls "obstacle") (.onChange rebuild!))
               (-> (.add controls "friction" 0 1 0.05) (.onChange rebuild!))
+              (-> (.add controls "selfCollision") (.onChange rebuild!))
+              (-> (.add controls "squeeze")
+                  (.onChange (fn [on]
+                               ;; Squeezing needs the two edges held.
+                               (when on (set! (.-pinning controls) "two edges"))
+                               (rebuild!))))
               (.add controls "showWireframe")
               (.add #js {:reset rebuild!} "reset")))
           {:start (fn [] (when-not @running? (reset! running? true) (resize!) (tick)))

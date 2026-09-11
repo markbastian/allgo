@@ -232,6 +232,57 @@
                             (<= (+ (* dx dx) (* dy dy) (* dz dz)) r2)))))
           (range found))))
 
+(defn adjacency
+  "Every pair within `max-dist`, as a compressed adjacency list.
+
+  Returns `{:starts :ids :pairs}`: `ids` holds the partners of every
+  object end to end, and `starts` says where each object's run begins, so
+  object `i`'s partners are `ids[starts[i] .. starts[i+1])`. One flat
+  array and one index, which is how a neighbour list is kept when it is
+  read far more often than it is built.
+
+  Each pair is recorded once, under the higher-numbered object, so walking
+  every object's run visits every pair exactly once.
+
+  The point of building it at all, rather than querying as you go, is that
+  a solver taking many small steps between frames can detect once and
+  resolve many times -- provided the radius is widened to cover how far
+  anything could travel in between."
+  [h positions n max-dist]
+  (let [^doubles positions positions
+        ^ints starts (i32 (inc n))
+        r2     (* max-dist max-dist)]
+    (rebuild! h positions n)
+    (loop [i 0 acc (transient []) total 0]
+      (if (= i n)
+        (do (aset starts n (int total))
+            {:starts starts
+             :ids    (i32 (persistent! acc))
+             :pairs  total})
+        (let [_     (aset starts i (int total))
+              found (query! h positions i max-dist)
+              a     (* 3 i)
+              [acc total]
+              (loop [k 0 acc acc total total]
+                (if (= k found)
+                  [acc total]
+                  (let [j (neighbour h k)]
+                    (if (>= j i)
+                      (recur (inc k) acc total)
+                      (let [b  (* 3 j)
+                            dx (- (aget positions a) (aget positions b))
+                            dy (- (aget positions (+ a 1)) (aget positions (+ b 1)))
+                            dz (- (aget positions (+ a 2)) (aget positions (+ b 2)))]
+                        (if (<= (+ (* dx dx) (* dy dy) (* dz dz)) r2)
+                          (recur (inc k) (conj! acc j) (inc total))
+                          (recur (inc k) acc total)))))))]
+          (recur (inc i) acc total))))))
+
+(defn adjacent
+  "The partners of object `i` in an `adjacency`, as a vector."
+  [{:keys [^ints starts ^ints ids]} i]
+  (into [] (map #(aget ids %)) (range (aget starts i) (aget starts (inc i)))))
+
 (defn overlapping-pairs
   "Every pair of objects closer than `max-dist`, each pair once.
 

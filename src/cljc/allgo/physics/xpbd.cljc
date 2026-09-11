@@ -36,7 +36,8 @@
   constraints projected ten times a frame, and persistent vectors lose
   that by more than an order of magnitude. The mutation is confined to
   this namespace: a body is opaque, and `positions` copies out."
-  (:require [clojure.math :as math]))
+  (:require [allgo.spatial.hash :as spatial]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Flat arrays, portably
@@ -170,6 +171,13 @@
 ;; Constraints
 
 (defprotocol Constraint
+  (prepare! [constraint body]
+    "Once per frame, before any substep.
+
+  Where collision detection belongs. Finding which particles are near each
+  other is far more expensive than resolving them, and over a frame they
+  barely move -- so detect once against a radius widened by how far
+  anything could travel, then resolve every substep against that list.")
   (reset-multipliers! [constraint]
     "Clears the accumulated Lagrange multipliers, once per substep.")
   (project! [constraint body dt]
@@ -182,6 +190,7 @@
 
 (defrecord DistanceConstraints [^ints ids ^doubles rest-lengths ^doubles lambda compliance]
   Constraint
+  (prepare! [_ _body] nil)
   (reset-multipliers! [_]
     (dotimes [i (alength lambda)] (aset lambda i 0.0)))
   (project! [_ body dt]
@@ -221,6 +230,7 @@
 
 (defrecord VolumeConstraints [^ints ids ^doubles rest-volumes ^doubles lambda compliance]
   Constraint
+  (prepare! [_ _body] nil)
   (reset-multipliers! [_]
     (dotimes [i (alength lambda)] (aset lambda i 0.0)))
   (project! [_ body dt]
@@ -275,6 +285,7 @@
 
 (defrecord SphereCollision [cx cy cz radius friction]
   Constraint
+  (prepare! [_ _body] nil)
   ;; Non-penetration is an inequality: it does nothing until it is
   ;; violated, and there is no compliance to accumulate against, so there
   ;; is no multiplier to keep.
@@ -337,6 +348,109 @@
    (->SphereCollision (double cx) (double cy) (double cz) (double radius)
                       (double friction))))
 
+(defrecord SelfCollision [^doubles rest-pos thickness friction hash state]
+  Constraint
+  (prepare! [_ body]
+    ;; Detection once a frame, against a radius widened by how far a
+    ;; particle can travel in one frame at the speed limit. Resolving every
+    ;; substep against a list built once is the whole reason this is
+    ;; affordable.
+    (reset! state (spatial/adjacency hash (:pos body) (:n body)
+                                     (* 2.0 (double thickness)))))
+  (reset-multipliers! [_] nil)
+  (project! [_ body _dt]
+    (when-let [{:keys [^ints starts ^ints ids]} @state]
+      (let [^doubles pos (:pos body)
+            ^doubles prev (:prev body)
+            ^doubles inv-mass (:inv-mass body)
+            n  (long (:n body))
+            th (double thickness)
+            th2 (* th th)
+            mu (double friction)]
+        (dotimes [i n]
+          (when (pos? (aget inv-mass i))
+            (let [a (* 3 i)]
+              (loop [k (aget starts i)]
+                (when (< k (aget starts (inc i)))
+                  (let [j (aget ids k)]
+                    (when (pos? (aget inv-mass j))
+                      (let [b  (* 3 j)
+                            dx (- (aget pos b) (aget pos a))
+                            dy (- (aget pos (+ b 1)) (aget pos (+ a 1)))
+                            dz (- (aget pos (+ b 2)) (aget pos (+ a 2)))
+                            d2 (+ (* dx dx) (* dy dy) (* dz dz))]
+                        (when (and (pos? d2) (< d2 th2))
+                          ;; Two particles that were always this close --
+                          ;; neighbours in the sheet -- must not be pushed
+                          ;; apart, or the cloth inflates. Their rest
+                          ;; separation is the floor instead of the
+                          ;; thickness.
+                          (let [rx (- (aget rest-pos b) (aget rest-pos a))
+                                ry (- (aget rest-pos (+ b 1)) (aget rest-pos (+ a 1)))
+                                rz (- (aget rest-pos (+ b 2)) (aget rest-pos (+ a 2)))
+                                r2 (+ (* rx rx) (* ry ry) (* rz rz))]
+                            (when (<= d2 r2)
+                              (let [min-d (if (< r2 th2) (math/sqrt r2) th)
+                                    d     (math/sqrt d2)
+                                    s     (/ (- min-d d) d 2.0)]
+                                (aset pos a (- (aget pos a) (* dx s)))
+                                (aset pos (+ a 1) (- (aget pos (+ a 1)) (* dy s)))
+                                (aset pos (+ a 2) (- (aget pos (+ a 2)) (* dz s)))
+                                (aset pos b (+ (aget pos b) (* dx s)))
+                                (aset pos (+ b 1) (+ (aget pos (+ b 1)) (* dy s)))
+                                (aset pos (+ b 2) (+ (aget pos (+ b 2)) (* dz s)))
+                                (when (pos? mu)
+                                  ;; Friction between the two layers: pull
+                                  ;; both toward their average motion, so
+                                  ;; folds hold instead of sliding apart.
+                                  (let [vax (- (aget pos a) (aget prev a))
+                                        vay (- (aget pos (+ a 1)) (aget prev (+ a 1)))
+                                        vaz (- (aget pos (+ a 2)) (aget prev (+ a 2)))
+                                        vbx (- (aget pos b) (aget prev b))
+                                        vby (- (aget pos (+ b 1)) (aget prev (+ b 1)))
+                                        vbz (- (aget pos (+ b 2)) (aget prev (+ b 2)))
+                                        mx (* 0.5 (+ vax vbx))
+                                        my (* 0.5 (+ vay vby))
+                                        mz (* 0.5 (+ vaz vbz))]
+                                    (aset pos a (+ (aget pos a) (* mu (- mx vax))))
+                                    (aset pos (+ a 1) (+ (aget pos (+ a 1)) (* mu (- my vay))))
+                                    (aset pos (+ a 2) (+ (aget pos (+ a 2)) (* mu (- mz vaz))))
+                                    (aset pos b (+ (aget pos b) (* mu (- mx vbx))))
+                                    (aset pos (+ b 1) (+ (aget pos (+ b 1)) (* mu (- my vby))))
+                                    (aset pos (+ b 2) (+ (aget pos (+ b 2)) (* mu (- mz vbz))))))))))))
+                    (recur (inc k))))))))))))
+
+(defn self-collision-constraint
+  "Keeps a body's own particles `thickness` apart, so cloth cannot pass
+  through itself.
+
+  `thickness` is the cloth's notional thickness, and should be somewhat
+  less than the spacing between particles -- larger and the sheet holds
+  itself rigid, since every neighbour is already inside it.
+
+  Two particles that started out closer than the thickness are held at
+  their *rest* separation rather than pushed to the thickness. Without
+  that the constraint fights the sheet's own structure and inflates it,
+  because a fine mesh's neighbours are closer together than the cloth is
+  thick.
+
+  Pair it with `:max-velocity` on the world -- `speed-limit` gives the
+  right value -- or a fast-moving fold passes through itself between
+  detections."
+  ([body thickness] (self-collision-constraint body thickness 0.0))
+  ([body thickness friction]
+   (->SelfCollision (f64 (alength ^doubles (:pos body)) (seq (:pos body)))
+                    (double thickness)
+                    (double friction)
+                    (spatial/spatial-hash (* 2.0 (double thickness)) (max 1 (:n body)))
+                    (atom nil))))
+
+(defn speed-limit
+  "How fast a particle may travel and still not cross `thickness` in one
+  frame. A fifth of the thickness per step, as the tutorial has it."
+  [thickness dt]
+  (/ (* 0.2 (double thickness)) (double dt)))
+
 (defn distance-constraint
   "Holds pairs of particles at the distance they start out at.
 
@@ -383,7 +497,9 @@
    :substeps  10
    :iterations 1
    :floor     0.0
-   :damping   0.0})
+   :damping   0.0
+   ;; No limit by default; self-collision sets one from the thickness.
+   :max-velocity nil})
 
 (defn- pre-solve!
   "Integrate velocity, guess a new position, and stop anything below the
@@ -392,19 +508,26 @@
   The floor is handled by putting the particle back where it came from and
   only then clamping its height, which cancels the tangential motion as
   well: that is where the friction of a body landing comes from."
-  [body dt [gx gy gz] floor damping]
+  [body dt [gx gy gz] floor damping max-velocity]
   (let [n (:n body)
         ^doubles pos (:pos body)
         ^doubles prev (:prev body)
         ^doubles vel (:vel body)
         ^doubles inv-mass (:inv-mass body)
-        decay (max 0.0 (- 1.0 (* damping dt)))]
+        decay (max 0.0 (- 1.0 (* damping dt)))
+        vmax  (double (or max-velocity ##Inf))]
     (dotimes [i n]
       (when (pos? (aget inv-mass i))
         (let [b (* 3 i)
               vx (* decay (+ (aget vel b) (* gx dt)))
               vy (* decay (+ (aget vel (+ b 1)) (* gy dt)))
-              vz (* decay (+ (aget vel (+ b 2)) (* gz dt)))]
+              vz (* decay (+ (aget vel (+ b 2)) (* gz dt)))
+              ;; A speed limit, so nothing can cross a thin obstacle -- or
+              ;; a sheet's own thickness -- inside one step. Scaled rather
+              ;; than clipped per axis, which would change direction.
+              speed (math/sqrt (+ (* vx vx) (* vy vy) (* vz vz)))
+              k  (if (> speed vmax) (/ vmax speed) 1.0)
+              vx (* vx k) vy (* vy k) vz (* vz k)]
           (aset vel b vx)
           (aset vel (+ b 1) vy)
           (aset vel (+ b 2) vz)
@@ -444,8 +567,8 @@
   Merges `default-world`, so a partial world is enough here as it is for
   `step!`."
   [{:keys [constraints] :as body} world dt]
-  (let [{:keys [gravity floor damping iterations]} (merge default-world world)]
-    (pre-solve! body dt gravity floor damping)
+  (let [{:keys [gravity floor damping iterations max-velocity]} (merge default-world world)]
+    (pre-solve! body dt gravity floor damping max-velocity)
     (doseq [c constraints] (reset-multipliers! c))
     (dotimes [_ (or iterations 1)]
       (doseq [c constraints] (project! c body dt)))
@@ -466,6 +589,8 @@
   ([body world]
    (let [{:keys [dt substeps] :as world} (merge default-world world)
          sdt (/ dt substeps)]
+     ;; Collision detection runs once here, not once per substep.
+     (doseq [c (:constraints body)] (prepare! c body))
      (dotimes [_ substeps] (substep! body world sdt))
      body)))
 
