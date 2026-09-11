@@ -130,3 +130,44 @@
   to a basis vector, which is what a joint frame is made of."
   [q a]
   (rotate q a))
+
+(defn to-matrix
+  "The rotation as three rows, `[[r00 r01 r02] [r10 ...] [r20 ...]]`.
+
+  The columns are where the x, y and z axes end up, which is what makes a
+  matrix the convenient form when a calculation wants to read one axis out
+  -- extracting joint angles from an orientation, say."
+  [q]
+  (let [[x y z] (rotate q [1.0 0.0 0.0])
+        [a b c] (rotate q [0.0 1.0 0.0])
+        [d e f] (rotate q [0.0 0.0 1.0])]
+    [[x a d]
+     [y b e]
+     [z c f]]))
+
+(defn from-matrix
+  "A quaternion from three rows of a rotation matrix.
+
+  Shepperd's method: four ways to compute the same quaternion, each stable
+  where a different component is largest, and taking whichever the trace
+  says is safest. The naive single formula divides by a number that goes
+  to zero on a half turn."
+  [[[r00 r01 r02] [r10 r11 r12] [r20 r21 r22]]]
+  (let [trace (+ r00 r11 r22)]
+    (normalize
+     (cond
+       (pos? trace)
+       (let [s (* 2.0 (math/sqrt (+ 1.0 trace)))]
+         [(/ (- r21 r12) s) (/ (- r02 r20) s) (/ (- r10 r01) s) (* 0.25 s)])
+
+       (and (> r00 r11) (> r00 r22))
+       (let [s (* 2.0 (math/sqrt (+ 1.0 r00 (- r11) (- r22))))]
+         [(* 0.25 s) (/ (+ r01 r10) s) (/ (+ r02 r20) s) (/ (- r21 r12) s)])
+
+       (> r11 r22)
+       (let [s (* 2.0 (math/sqrt (+ 1.0 r11 (- r00) (- r22))))]
+         [(/ (+ r01 r10) s) (* 0.25 s) (/ (+ r12 r21) s) (/ (- r02 r20) s)])
+
+       :else
+       (let [s (* 2.0 (math/sqrt (+ 1.0 r22 (- r00) (- r11))))]
+         [(/ (+ r02 r20) s) (/ (+ r12 r21) s) (* 0.25 s) (/ (- r10 r01) s)])))))

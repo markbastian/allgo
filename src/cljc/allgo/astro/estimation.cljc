@@ -17,75 +17,8 @@
 
   Both need the state transition matrix of chapter 7 to relate a correction
   at the epoch to its effect at the time of an observation."
-  (:require [clojure.math :as math]))
-
-;; -------------------------------------------------------- linear algebra
-
-(defn transpose [m] (apply mapv vector m))
-
-(defn mat-mul [a b]
-  (let [bt (transpose b)]
-    (mapv (fn [row] (mapv (fn [col] (reduce + (map * row col))) bt)) a)))
-
-(defn mat-vec [m v] (mapv (fn [row] (reduce + (map * row v))) m))
-
-(defn mat-add [a b] (mapv (fn [r s] (mapv + r s)) a b))
-(defn mat-sub [a b] (mapv (fn [r s] (mapv - r s)) a b))
-(defn mat-scale [m s] (mapv (fn [r] (mapv #(* % s) r)) m))
-(defn eye [n] (mapv (fn [i] (mapv #(if (= i %) 1.0 0.0) (range n))) (range n)))
-
-(defn cholesky
-  "Lower-triangular L with L L^T = A, for symmetric positive definite A.
-
-  Returns nil when A is not positive definite. For a normal matrix that is
-  not a numerical mishap but a statement about the data: some direction of
-  the state is not determined by the observations, and no amount of solving
-  will invent it."
-  [A]
-  (let [n (count A)]
-    (loop [i 0 L (vec (repeat n (vec (repeat n 0.0))))]
-      (cond
-        (nil? L) nil
-        (= i n)  L
-        :else
-        (recur (inc i)
-               (loop [j 0 L L]
-                 (cond
-                   (nil? L) nil
-                   (> j i)  L
-                   :else
-                   (let [s (reduce + (map * (take j (nth L i)) (take j (nth L j))))
-                         v (- (nth (nth A i) j) s)]
-                     (if (= i j)
-                       (if (<= v 0.0)
-                         nil
-                         (recur (inc j) (assoc-in L [i j] (math/sqrt v))))
-                       (recur (inc j) (assoc-in L [i j] (/ v (nth (nth L j) j)))))))))))))
-
-(defn cholesky-solve
-  "Solve A x = b for symmetric positive definite A, by forward then back
-  substitution through the Cholesky factor."
-  [A b]
-  (when-let [L (cholesky A)]
-    (let [n (count A)
-          y (reduce (fn [y i]
-                      (conj y (/ (- (nth b i) (reduce + (map * (take i (nth L i)) y)))
-                                 (nth (nth L i) i))))
-                    [] (range n))
-          x (reduce (fn [x i]
-                      (let [s (reduce + (map (fn [k] (* (nth (nth L k) i) (get x k 0.0)))
-                                             (range (inc i) n)))]
-                        (assoc x i (/ (- (nth y i) s) (nth (nth L i) i)))))
-                    (vec (repeat n 0.0)) (reverse (range n)))]
-      x)))
-
-(defn inverse
-  "Inverse of a symmetric positive definite matrix, column by column."
-  [A]
-  (let [n (count A)]
-    (when (cholesky A)
-      (transpose (mapv (fn [i] (cholesky-solve A (mapv #(if (= i %) 1.0 0.0) (range n))))
-                       (range n))))))
+  (:require [allgo.numerics.linear :as lin]
+            [clojure.math :as math]))
 
 ;; --------------------------------------------------------- batch estimation
 
@@ -99,9 +32,9 @@
   [rows n]
   (reduce (fn [{:keys [N b]} {:keys [H residual weight]}]
             (let [w (or weight 1.0)]
-              {:N (mat-add N (mat-scale (mapv (fn [hi] (mapv #(* hi %) H)) H) w))
+              {:N (lin/mat-add N (lin/mat-scale (mapv (fn [hi] (mapv #(* hi %) H)) H) w))
                :b (mapv + b (mapv #(* % w residual) H))}))
-          {:N (mat-scale (eye n) 0.0) :b (vec (repeat n 0.0))}
+          {:N (lin/mat-scale (lin/eye n) 0.0) :b (vec (repeat n 0.0))}
           rows))
 
 (defn solve-batch
@@ -114,8 +47,8 @@
   is."
   [rows n]
   (let [{:keys [N b]} (normal-equations rows n)]
-    (when-let [dx (cholesky-solve N b)]
-      {:correction dx :information N :covariance (inverse N)})))
+    (when-let [dx (lin/cholesky-solve N b)]
+      {:correction dx :information N :covariance (lin/inverse N)})))
 
 (defn rms
   "Root-mean-square residual, the number that says whether an iteration
@@ -135,8 +68,8 @@
   ignores new data. Without it the covariance shrinks forever and the filter
   quietly stops learning, which is the classic way to make one diverge."
   [x P phi Q]
-  {:x (mat-vec phi x)
-   :P (mat-add (mat-mul (mat-mul phi P) (transpose phi)) Q)})
+  {:x (lin/mat-vec phi x)
+   :P (lin/mat-add (lin/mat-mul (lin/mat-mul phi P) (lin/transpose phi)) Q)})
 
 (defn kalman-update
   "Measurement update for a scalar observation.
@@ -146,14 +79,14 @@
   That matters over a long arc: a covariance that loses positive
   definiteness produces a negative variance, and the filter is finished."
   [x P H z-residual R]
-  (let [PHt  (mat-vec P H)                      ; P is symmetric
+  (let [PHt  (lin/mat-vec P H)                      ; P is symmetric
         S    (+ (reduce + (map * H PHt)) R)
         K     (mapv #(/ % S) PHt)
         x'    (mapv + x (mapv #(* % z-residual) K))
         n     (count x)
-        IKH   (mat-sub (eye n) (mapv (fn [ki] (mapv #(* ki %) H)) K))
-        joseph (mat-add (mat-mul (mat-mul IKH P) (transpose IKH))
-                        (mat-scale (mapv (fn [ki] (mapv #(* ki % R) K)) K) 1.0))]
+        IKH   (lin/mat-sub (lin/eye n) (mapv (fn [ki] (mapv #(* ki %) H)) K))
+        joseph (lin/mat-add (lin/mat-mul (lin/mat-mul IKH P) (lin/transpose IKH))
+                            (lin/mat-scale (mapv (fn [ki] (mapv #(* ki % R) K)) K) 1.0))]
     {:x x' :P joseph :gain K :innovation-variance S}))
 
 ;; ------------------------------------------------- orthogonal least squares
@@ -230,12 +163,12 @@
           ;; R^-1 column by column, each column solving R c = e_i
           (let [cols  (mapv (fn [i] (back (mapv #(if (= i %) 1.0 0.0) (range n)))) (range n))]
             (when (every? some? cols)
-              (let [Rinv (transpose cols)]
+              (let [Rinv (lin/transpose cols)]
                 {:correction x
                  :r-factor R
                  ;; (A^T A)^-1 = (R^T R)^-1 = R^-1 R^-T. The order matters:
                  ;; the transpose on the right, not the left.
-                 :covariance (mat-mul Rinv (transpose Rinv))}))))))))
+                 :covariance (lin/mat-mul Rinv (lin/transpose Rinv))}))))))))
 
 (defn solve
   "Solve the batch problem, by orthogonal reduction unless asked otherwise.

@@ -16,6 +16,7 @@
             [allgo.astro.time :as t]
             [allgo.astro.variational :as var]
             [allgo.numerics :as num]
+            [allgo.numerics.linear :as lin]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- close? [a b tol] (< (abs (double (- a b))) tol))
@@ -1420,18 +1421,18 @@
   (testing "an exact solve on a known system"
     (let [A [[4.0 2.0 0.6] [2.0 5.0 1.0] [0.6 1.0 3.0]]
           x [1.0 -2.0 3.0]]
-      (doseq [[a b] (map vector x (est/cholesky-solve A (est/mat-vec A x)))]
+      (doseq [[a b] (map vector x (lin/cholesky-solve A (lin/mat-vec A x)))]
         (is (close? a b 1e-12)))))
   (testing "and an inverse that really is one"
     (let [A [[4.0 2.0 0.6] [2.0 5.0 1.0] [0.6 1.0 3.0]]
-          I (est/mat-mul A (est/inverse A))]
+          I (lin/mat-mul A (lin/inverse A))]
       (doseq [i (range 3) j (range 3)]
         (is (close? (if (= i j) 1.0 0.0) (nth (nth I i) j) 1e-12)))))
   (testing "a system the data does not determine is refused, not fudged"
     ;; For a normal matrix this is not a numerical mishap but a statement
     ;; about the observations: some direction of the state is unobservable.
-    (is (nil? (est/cholesky-solve [[1.0 1.0] [1.0 1.0]] [1.0 1.0])) "singular")
-    (is (nil? (est/cholesky-solve [[-1.0 0.0] [0.0 1.0]] [1.0 1.0])) "not positive definite")
+    (is (nil? (lin/cholesky-solve [[1.0 1.0] [1.0 1.0]] [1.0 1.0])) "singular")
+    (is (nil? (lin/cholesky-solve [[-1.0 0.0] [0.0 1.0]] [1.0 1.0])) "not positive definite")
     (is (nil? (est/solve-batch [{:H [1.0 0.0] :residual 1.0}] 2))
         "one observation cannot fix two unknowns")))
 
@@ -1474,16 +1475,16 @@
           (is (close? (nth (nth P' 0) 1) (nth (nth P' 1) 0) 1e-12) "symmetric")
           (is (pos? (nth (nth P' 0) 0)) "positive variance")
           (is (pos? (nth (nth P' 1) 1)))
-          (is (some? (est/cholesky P')) "and still positive definite")
+          (is (some? (lin/cholesky P')) "and still positive definite")
           (recur x' P' (inc n)))))))
 
 (deftest process-noise-keeps-a-filter-listening
   ;; Without it the covariance shrinks forever and the filter stops learning,
   ;; which is the classic way to make one diverge.
-  (let [phi (est/eye 2)
+  (let [phi (lin/eye 2)
         P   [[1.0 0.0] [0.0 1.0]]
-        no-q  (:P (est/kalman-predict [0.0 0.0] P phi (est/mat-scale (est/eye 2) 0.0)))
-        with-q (:P (est/kalman-predict [0.0 0.0] P phi (est/mat-scale (est/eye 2) 0.5)))]
+        no-q  (:P (est/kalman-predict [0.0 0.0] P phi (lin/mat-scale (lin/eye 2) 0.0)))
+        with-q (:P (est/kalman-predict [0.0 0.0] P phi (lin/mat-scale (lin/eye 2) 0.5)))]
     (is (close? 1.0 (nth (nth no-q 0) 0) 1e-12) "no noise, no growth")
     (is (close? 1.5 (nth (nth with-q 0) 0) 1e-12) "noise adds uncertainty back")))
 
@@ -1660,7 +1661,7 @@
 
 (defn- lauchli-rows [eps]
   (let [A (lauchli eps)
-        b (est/mat-vec A [1.0 1.0 1.0])]
+        b (lin/mat-vec A [1.0 1.0 1.0])]
     (mapv (fn [a bi] {:H a :residual bi :weight 1.0}) A b)))
 
 (deftest normal-equations-square-the-condition-number
