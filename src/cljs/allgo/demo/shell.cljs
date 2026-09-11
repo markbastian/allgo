@@ -9,6 +9,9 @@
             [allgo.demo.boids-viewer :as boids-2d]
             [allgo.demo.boids-voronoi :as boids-voronoi]
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
+            [allgo.demo.cave :as cave]
+            [allgo.demo.delaunay-viewer :as delaunay]
+            [allgo.demo.dungeon :as dungeon]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
@@ -21,7 +24,10 @@
 (def ^:private storage-key "allgo.demo")
 
 (def ^:private lifecycles
-  {"terrain"  {:start terrain/start!  :stop terrain/stop!}
+  {"caves"    {:start cave/start!    :stop cave/stop!}
+   "delaunay" {:start delaunay/start! :stop delaunay/stop!}
+   "terrain"  {:start terrain/start!  :stop terrain/stop!}
+   "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
    "boids-voronoi" {:start boids-voronoi/start! :stop boids-voronoi/stop!}
    "boids-voronoi-3d" {:start boids-voronoi-3d/start! :stop boids-voronoi-3d/stop!}
@@ -144,3 +150,6 @@
     (rdom/render picker-root [picker (demos)])))
 
 (main)
+
+(defn on-js-reload []
+  (main))

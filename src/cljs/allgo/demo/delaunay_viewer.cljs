@@ -1,6 +1,15 @@
 (ns allgo.demo.delaunay-viewer
+  "Reagent demo for `allgo.geometry.delaunay`: a Delaunay triangulation drawn
+  over its dual Voronoi diagram.
+
+  The one tile rendered with Reagent rather than a canvas -- it is static
+  between clicks, so there is no animation loop to drive and SVG says what
+  it means. It still starts and stops through the same lifecycle as the
+  rest, so the shell has a single way to swap demos in and out."
   (:require [allgo.geometry.delaunay :as delaunay]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [reagent.core :as r]
+            [reagent.dom.client :as rdom]))
 
 (def width 480)
 (def height 480)
@@ -38,3 +47,19 @@
                               (swap! state assoc :n n' :points (rand-points n'))))}]
       [:span (str "points: " n)]
       [:button {:on-click #(swap! state assoc :points (rand-points n))} "Regenerate"]]]))
+
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private state (r/atom nil))
+(defonce ^:private root (atom nil))
+
+(defn start! []
+  (when-let [el (.getElementById js/document "delaunay")]
+    (when-not @state (reset! state (init-state)))
+    (rdom/render (or @root (reset! root (rdom/create-root el)))
+                 [render state])))
+
+(defn stop! []
+  ;; Nothing is running between clicks, so there is nothing to tear down;
+  ;; the mounted tree is left in place and simply hidden by the shell.
+  nil)
