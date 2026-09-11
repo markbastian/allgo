@@ -13,78 +13,84 @@
         and astrodynamics &mdash; each one running live.</p>
     <div id="demo-picker"></div>
 </header>
+<!-- Every card ships hidden: the shell reveals the selected one once it
+     mounts. Without this the browser paints all of them for as long as it
+     takes to parse and run the bundle, and a refresh flashes the whole
+     stack before collapsing to one. The shell clears `hidden` on the
+     active card before starting its renderer, so a demo is still visible
+     -- and therefore measurable -- by the time it is built. -->
 <main class="demo-grid">
-    <section class="demo-card" data-demo="caves"
+    <section class="demo-card" hidden data-demo="caves"
              data-label="Cellular Caves"
              data-blurb="Cellular automata carving connected caverns">
         <div id="caves" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="dungeon"
+    <section class="demo-card" hidden data-demo="dungeon"
              data-label="Dungeon Generation"
              data-blurb="Scatter, separate, triangulate, span, carve">
         <div id="dungeon" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="hex"
+    <section class="demo-card" hidden data-demo="hex"
              data-label="Hex Grids"
              data-blurb="Coordinates, regions and pathfinding on hexagons">
         <div id="hex" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="delaunay"
+    <section class="demo-card" hidden data-demo="delaunay"
              data-label="Delaunay / Voronoi"
              data-blurb="Bowyer&ndash;Watson triangulation and its dual">
         <div id="delaunay"></div>
     </section>
-    <section class="demo-card" data-demo="terrain"
+    <section class="demo-card" hidden data-demo="terrain"
              data-label="Fractal Terrain"
              data-blurb="Diamond-square and TIN heightmaps in WebGL">
         <div id="terrain" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="boids"
+    <section class="demo-card" hidden data-demo="boids"
              data-label="Flocking &mdash; 2D"
              data-blurb="Reynolds' boids on a canvas">
         <div id="boids" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="dungeon-boids"
+    <section class="demo-card" hidden data-demo="dungeon-boids"
              data-label="Flocking &mdash; Dungeon"
              data-blurb="A flock finding its way through generated corridors">
         <div id="dungeon-boids" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="boids-voronoi"
+    <section class="demo-card" hidden data-demo="boids-voronoi"
              data-label="Flocking &mdash; Voronoi"
              data-blurb="The flock's Voronoi diagram, retriangulated each frame">
         <div id="boids-voronoi" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="boids-3d"
+    <section class="demo-card" hidden data-demo="boids-3d"
              data-label="Flocking &mdash; 3D"
              data-blurb="The same rules in three dimensions">
         <div id="boids-3d" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="boids-voronoi-3d"
+    <section class="demo-card" hidden data-demo="boids-voronoi-3d"
              data-label="Flocking &mdash; Voronoi 3D"
              data-blurb="Voronoi polyhedra of the flock, rebuilt each frame">
         <div id="boids-voronoi-3d" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="lorenz"
+    <section class="demo-card" hidden data-demo="lorenz"
              data-label="Lorenz &mdash; Numerical Integration"
              data-blurb="Chapter 4 of Montenbruck &amp; Gill, integrating in real time">
         <div id="lorenz" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="kepler"
+    <section class="demo-card" hidden data-demo="kepler"
              data-label="Kepler &mdash; Nystrom Integration"
              data-blurb="Two-body motion, and how each method holds its energy">
         <div id="kepler" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="satellite"
+    <section class="demo-card" hidden data-demo="satellite"
              data-label="Satellite &mdash; Orbit Perturbations"
              data-blurb="Montenbruck &amp; Gill chapter 3 forces, integrated by chapter 4">
         <div id="satellite" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="orbit-determination"
+    <section class="demo-card" hidden data-demo="orbit-determination"
              data-label="Orbit Determination"
              data-blurb="Recovering an orbit from noisy ranges &mdash; Montenbruck &amp; Gill ch. 8">
         <div id="orbit-determination" class="demo-viewport"></div>
     </section>
-    <section class="demo-card" data-demo="solar-system"
+    <section class="demo-card" hidden data-demo="solar-system"
              data-label="Solar System"
              data-blurb="Planets, Moon and satellite in one J2000 frame">
         <div id="solar-system" class="demo-viewport"></div>
