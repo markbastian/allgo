@@ -26,6 +26,7 @@
             [allgo.demo.solar-system :as solar]
             [allgo.demo.spatial-hash :as spatial-hash]
             [allgo.demo.terrain-webgl :as terrain]
+            [allgo.demo.water :as water]
             [reagent.core :as r]
             [reagent.dom.client :as rdom]))
 
@@ -40,6 +41,7 @@
    "cloth"    {:start cloth/start!    :stop cloth/stop!}
    "fluid"    {:start fluid/start!    :stop fluid/stop!}
    "flip"     {:start flip/start!     :stop flip/stop!}
+   "water"    {:start water/start!    :stop water/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
