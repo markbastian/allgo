@@ -1,5 +1,5 @@
 {
-  "name": "procedurals",
+  "name": "allgo",
   "private": true,
   "devDependencies": {
     "shadow-cljs": "^3.5.0"

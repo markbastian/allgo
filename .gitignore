@@ -1,19 +1,30 @@
+# build output
 /target
 /classes
-pom.xml
-pom.xml.asc
+/resources/public/js
 *.jar
 *.class
-/.nrepl-port
+pom.xml
+pom.xml.asc
+
+# tooling caches
 /.cpcache
 /.shadow-cljs
 /.cljs_node_repl
+/.nrepl-port
 /node_modules
+.clj-kondo/.cache
+.lsp/.cache
+
+# editors
 *.iml
 /.idea
+/.vscode
+/.calva
+.claude/settings.local.json
+
+# scratch
 .DS_Store
-/resources/public/js
 scratch.clj
 *.log
-.clj-kondo/.cache
 /tmp
