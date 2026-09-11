@@ -26,6 +26,7 @@
   4; grid keys, by contrast, are tile indices."
   (:require [allgo.geometry.delaunay :as delaunay]
             [allgo.graph :as graph]
+            [allgo.spatial.sweep :as sweep]
             [clojure.math :as math]))
 
 (def default-config
@@ -211,28 +212,72 @@
 (defn- nudge [room dx dy]
   (update room :center (fn [[x y]] [(+ x dx) (+ y dy)])))
 
+(defn- broad-phase
+  "Somewhere to keep the sweep and prune state across the sweeps.
+
+  Separation is very nearly the whole cost of generating a dungeon -- 332ms
+  of 336ms at the default hundred and fifty rooms -- because it compares
+  every room with every other, once per sweep, over hundreds of sweeps.
+  Rooms are axis-aligned boxes, which is what `allgo.spatial.sweep` prunes,
+  and between sweeps they have barely moved, which is what makes keeping
+  the sorted order worth more than rebuilding it."
+  [n]
+  {:sweep (sweep/sweep (max 1 n))
+   ;; The dungeon is two-dimensional and the sweep is three, so every box
+   ;; is flat in z. That axis prunes nothing, and never picks itself as the
+   ;; one to sweep, having no spread to pick.
+   :mins (double-array (* 3 (max 1 n)))
+   :maxs (double-array (* 3 (max 1 n)))})
+
+(defn- load-boxes!
+  [rooms {:keys [^doubles mins ^doubles maxs]}]
+  (dotimes [i (count rooms)]
+    (let [[x0 y0 x1 y1] (bounds (nth rooms i))
+          b (* 3 i)]
+      (aset mins b (double x0))
+      (aset mins (+ b 1) (double y0))
+      (aset mins (+ b 2) 0.0)
+      (aset maxs b (double x1))
+      (aset maxs (+ b 1) (double y1))
+      (aset maxs (+ b 2) 0.0))))
+
+(defn- candidate-pairs
+  "The room pairs close enough to be worth the exact test.
+
+  A superset of the pairs that actually need separating: `push-apart`
+  refuses anything overlapping by less than a whisker, which is stricter
+  than the boxes overlapping at all. A superset is all this has to be."
+  [rooms broad]
+  (load-boxes! rooms broad)
+  (sweep/overlapping-pairs (:sweep broad) (:mins broad) (:maxs broad) (count rooms)))
+
+(defn- resolve-pass
+  "One sweep over the candidate pairs, each overlap split between the two
+  rooms by `correction`. Returns `[rooms moved?]`.
+
+  Later pairs see the moves made by earlier ones, which converges in far
+  fewer sweeps than collecting every correction and applying them at the
+  end. The candidates come from the positions the sweep started at, so a
+  move can open an overlap this pass does not see -- which costs nothing,
+  because the caller sweeps again whenever anything moved, and a sweep that
+  moves nothing was one where the broad phase found no overlapping boxes at
+  all."
+  [rooms broad correction]
+  (reduce (fn [[rooms moved?] [i j]]
+            (if-let [push (push-apart (nth rooms i) (nth rooms j))]
+              (let [[dx dy] (correction push)]
+                [(-> rooms
+                     (update i nudge dx dy)
+                     (update j nudge (- dx) (- dy)))
+                 true])
+              [rooms moved?]))
+          [rooms false]
+          (candidate-pairs rooms broad)))
+
 (defn- separation-pass
-  "One sweep over every pair, splitting each overlap between the two rooms.
-  Returns `[rooms moved?]`. Later pairs see the moves made by earlier ones,
-  which converges in far fewer sweeps than collecting all the corrections
-  and applying them at the end."
-  [rooms]
-  (let [n (count rooms)]
-    (loop [i 0 rooms rooms moved? false]
-      (if (>= i n)
-        [rooms moved?]
-        (let [[rooms moved?]
-              (loop [j (inc i) rooms rooms moved? moved?]
-                (if (>= j n)
-                  [rooms moved?]
-                  (if-let [[mx my] (push-apart (rooms i) (rooms j))]
-                    (recur (inc j)
-                           (-> rooms
-                               (update i nudge (* 0.5 mx) (* 0.5 my))
-                               (update j nudge (* -0.5 mx) (* -0.5 my)))
-                           true)
-                    (recur (inc j) rooms moved?))))]
-          (recur (inc i) rooms moved?))))))
+  "Half the overlap to each room."
+  [rooms broad]
+  (resolve-pass rooms broad (fn [[mx my]] [(* 0.5 mx) (* 0.5 my)])))
 
 (defn- snap-center [room tile-size]
   ;; To nearest, not up: `roundm` would shove every room the same direction
@@ -249,26 +294,12 @@
   are too, so a correction rounded up to a whole tile clears the overlap
   outright and leaves the room on the grid. Unlike the continuous sweep
   this terminates exactly rather than converging on zero from above."
-  [rooms tile-size]
-  (let [n (count rooms)
-        quantize (fn [v] (* tile-size (math/ceil (/ (/ (abs v) 2.0) tile-size))))]
-    (loop [i 0 rooms rooms moved? false]
-      (if (>= i n)
-        [rooms moved?]
-        (let [[rooms moved?]
-              (loop [j (inc i) rooms rooms moved? moved?]
-                (if (>= j n)
-                  [rooms moved?]
-                  (if-let [[mx my] (push-apart (rooms i) (rooms j))]
-                    (let [dx (if (zero? mx) 0.0 (* (math/signum mx) (quantize mx)))
-                          dy (if (zero? my) 0.0 (* (math/signum my) (quantize my)))]
-                      (recur (inc j)
-                             (-> rooms
-                                 (update i nudge dx dy)
-                                 (update j nudge (- dx) (- dy)))
-                             true))
-                    (recur (inc j) rooms moved?))))]
-          (recur (inc i) rooms moved?))))))
+  [rooms tile-size broad]
+  (let [quantize (fn [v] (* tile-size (math/ceil (/ (/ (abs v) 2.0) tile-size))))]
+    (resolve-pass rooms broad
+                  (fn [[mx my]]
+                    [(if (zero? mx) 0.0 (* (math/signum mx) (quantize mx)))
+                     (if (zero? my) 0.0 (* (math/signum my) (quantize my)))]))))
 
 (defn separate
   "Step 2. Sweeps until nothing overlaps, then settles the result onto the
@@ -288,16 +319,18 @@
   works in whole tiles from the snapped positions and closes them, so the
   rooms that come out are grid-aligned *and* disjoint."
   [rooms {:keys [tile-size max-iterations]}]
-  (let [spread  (loop [rooms (vec rooms) i 0]
+  (let [rooms   (vec rooms)
+        broad   (broad-phase (count rooms))
+        spread  (loop [rooms rooms i 0]
                   (if (>= i max-iterations)
                     rooms
-                    (let [[rooms moved?] (separation-pass rooms)]
+                    (let [[rooms moved?] (separation-pass rooms broad)]
                       (if moved? (recur rooms (inc i)) rooms))))
         snapped (mapv #(snap-center % tile-size) spread)]
     (loop [rooms snapped i 0]
       (if (>= i max-iterations)
         rooms
-        (let [[rooms moved?] (grid-separation-pass rooms tile-size)]
+        (let [[rooms moved?] (grid-separation-pass rooms tile-size broad)]
           (if moved? (recur rooms (inc i)) rooms))))))
 
 ;; ---------------------------------------------------------------------------
