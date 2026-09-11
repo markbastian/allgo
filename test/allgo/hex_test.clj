@@ -374,3 +374,28 @@
     (is (every? board p))
     (is (>= (count p) (inc (h/distance [0 0] [3 -1])))
         "no shorter than the shortest path, and usually longer")))
+
+(deftest layout-matrices-are-the-published-ones
+  ;; The orientation matrices are derived from the cube lattice rather than
+  ;; copied in. This pins the derivation to the constants the guide gives,
+  ;; so a mistake in it cannot pass quietly.
+  (let [root3 (Math/sqrt 3.0)
+        close (fn [a b] (every? #(< (abs %) 1e-12) (map - a b)))]
+    (testing "pointy-top"
+      (is (close [root3 (/ root3 2.0) 0.0 1.5] (:f (:pointy h/orientations))))
+      (is (close [(/ root3 3.0) (/ -1.0 3.0) 0.0 (/ 2.0 3.0)]
+                 (:b (:pointy h/orientations)))))
+
+    (testing "flat-top"
+      (is (close [1.5 0.0 (/ root3 2.0) root3] (:f (:flat h/orientations))))
+      (is (close [(/ 2.0 3.0) 0.0 (/ -1.0 3.0) (/ root3 3.0)]
+                 (:b (:flat h/orientations)))))
+
+    (testing "forward and inverse really are inverses"
+      (doseq [o [:pointy :flat]]
+        (let [[a b c d] (:f (o h/orientations))
+              [e f g i] (:b (o h/orientations))]
+          ;; [[a b][c d]] . [[e f][g i]] = identity
+          (is (close [1.0 0.0 0.0 1.0]
+                     [(+ (* a e) (* b g)) (+ (* a f) (* b i))
+                      (+ (* c e) (* d g)) (+ (* c f) (* d i))])))))))

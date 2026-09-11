@@ -330,13 +330,56 @@
 ;; brings a point back. They differ between orientations only by a 30
 ;; degree turn, which `start-angle` also applies to the corners.
 
+(defn- cross3 [[a b c] [d e f]]
+  [(- (* b f) (* c e)) (- (* c d) (* a f)) (- (* a e) (* b d))])
+
+(defn- dot3 [a b] (reduce + (map * a b)))
+
+(defn- normalize3 [v]
+  (let [m (math/sqrt (dot3 v v))] (mapv #(/ % m) v)))
+
+(def ^:private pointy-forward
+  "The pointy-top forward matrix, derived rather than tabulated.
+
+  A hex grid is the plane `q + r + s = 0` cut through the cubic lattice,
+  so the layout follows from projecting the three cube axes onto that
+  plane. Take `[1 1 1]` as the plane's normal, build an orthonormal basis
+  in it, and project each axis; a hex at `[q r]` is `q` along the
+  projected q-axis plus `r` along the projected r-axis, both measured
+  relative to the projected s-axis because `s` is `-q-r`.
+
+  This is Mark Bastian's construction in markbastian/hex's `fhex`, and it
+  produces the guide's matrix exactly once scaled by `sqrt(3/2)` -- the
+  projection measures a hex by its projected axis length where the guide
+  measures it by its circumradius. `layout-matrices-are-the-published-ones`
+  pins that equality."
+  (let [oz    (normalize3 [1.0 1.0 1.0])
+        ox    (normalize3 (cross3 [0.0 1.0 0.0] oz))
+        oy    (normalize3 (cross3 oz ox))
+        project (fn [axis] [(dot3 axis ox) (dot3 axis oy)])
+        [hq hr hs] (map project [[1.0 0.0 0.0] [0.0 1.0 0.0] [0.0 0.0 1.0]])
+        [q-x q-y]  (mapv - hq hs)
+        [r-x r-y]  (mapv - hr hs)
+        k     (math/sqrt 1.5)]
+    [(* k q-x) (* k r-x) (* k q-y) (* k r-y)]))
+
+(defn- invert
+  "The inverse of the 2x2 `[a b c d]`, which takes pixels back to hexes."
+  [[a b c d]]
+  (let [det (- (* a d) (* b c))]
+    [(/ d det) (/ (- b) det) (/ (- c) det) (/ a det)]))
+
 (def orientations
-  {:pointy {:f [(math/sqrt 3.0) (/ (math/sqrt 3.0) 2.0) 0.0 (/ 3.0 2.0)]
-            :b [(/ (math/sqrt 3.0) 3.0) (/ -1.0 3.0) 0.0 (/ 2.0 3.0)]
-            :start-angle 0.5}
-   :flat   {:f [(/ 3.0 2.0) 0.0 (/ (math/sqrt 3.0) 2.0) (math/sqrt 3.0)]
-            :b [(/ 2.0 3.0) 0.0 (/ -1.0 3.0) (/ (math/sqrt 3.0) 3.0)]
-            :start-angle 0.0}})
+  "The forward and inverse matrices for each orientation, and the angle of
+  the first corner.
+
+  Flat-top is pointy-top with both axes swapped -- `S M S` for the swap
+  matrix `S`, which for a 2x2 written out in row order is just the
+  coefficients reversed."
+  (let [pointy pointy-forward
+        flat   (vec (rseq pointy))]
+    {:pointy {:f pointy :b (invert pointy) :start-angle 0.5}
+     :flat   {:f flat   :b (invert flat)   :start-angle 0.0}}))
 
 (defn layout
   "How hexes sit on the screen: `orientation` is `:pointy` or `:flat`,
