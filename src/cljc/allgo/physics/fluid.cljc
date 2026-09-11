@@ -75,14 +75,34 @@
                          whatever the grid, which is the property that
                          matters.
 
-  Measured, as the cheapest setting of each that gets the worst remaining
-  divergence under a target on a wind tunnel with an obstacle:
+  Measured on a 128 grid wind tunnel with an obstacle, worst remaining
+  divergence against the work spent:
 
-    grid  target    Gauss-Seidel           CG            multigrid
-     64    1e-4    96ms, 2048 sweeps      never        12ms, 16 cycles
-    128    1e-2   400ms, 2048 sweeps  84ms, 512 iters  48ms, 16 cycles
-    128    1e-4        never              never        93ms, 32 cycles
-    256    1e-4        never              never       719ms, 64 cycles
+    sweeps/cycles   Gauss-Seidel        CG          multigrid
+        512          3.4e-2 146ms   7.0e-4 188ms   2.3e-5  49ms
+       2048          5.0e-3 339ms   7.3e-4 351ms   2.3e-5  49ms
+       8192          1.8e-6 1515ms  7.3e-4 1373ms  2.3e-5  49ms
+
+  Read it carefully, because the three behave in three different ways.
+
+  Multigrid is done by about thirty cycles and more do not help: it
+  settles at 2.3e-5 and stays there. Gauss-Seidel is merely slow -- it
+  gets past multigrid eventually, reaching 1.8e-6 by eight thousand
+  sweeps, for sixteen times the time multigrid took to reach a figure
+  nobody can see the difference from. Conjugate gradient genuinely stops:
+  7.3e-4 at five hundred iterations and 7.3e-4 at thirty-two thousand,
+  which is the loss of orthogonality that single precision does to it.
+
+  So multigrid is the one to reach for when the grid is large, Gauss-Seidel
+  is the one to reach for when a few sweeps of roughly-right is all that
+  is wanted, and conjugate gradient is here mostly to be measured against.
+
+  Where multigrid's floor comes from is not settled. It scales with the
+  size of the velocities, at 4.7e-6 of the largest, which looks like
+  single-precision rounding -- but Gauss-Seidel gets a decade below it on
+  the same single-precision velocities, so it is not simply the storage.
+  The scratch grids the cycle works in are single precision too, and that
+  is the obvious next suspect; it has not been tested.
 
   The default is still Gauss-Seidel, because it is what every scene here
   was tuned against and forty sweeps of it look right at these grid
