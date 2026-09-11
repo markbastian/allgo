@@ -22,6 +22,7 @@
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
+            [allgo.demo.rigid :as rigid]
             [allgo.demo.satellite :as satellite]
             [allgo.demo.skinning :as skinning]
             [allgo.demo.soft-body :as soft-body]
@@ -46,6 +47,7 @@
    "flip"     {:start flip/start!     :stop flip/stop!}
    "fire"     {:start fire/start!     :stop fire/stop!}
    "water"    {:start water/start!    :stop water/stop!}
+   "rigid"    {:start rigid/start!    :stop rigid/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
