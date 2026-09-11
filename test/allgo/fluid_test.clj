@@ -217,3 +217,92 @@
               (is (< (abs (- avg-u (expected i j))) 1e-3)
                   (str label " at " [i j] ": averaged " avg-u
                        " instead of " (expected i j))))))))))
+
+(defn- stirred
+  "A velocity field that badly needs projecting, in a tunnel with an
+  obstacle."
+  [res]
+  (let [f (-> (fl/fluid res res (/ 1.0 res) 1000.0) (fl/close-border! true))]
+    (fl/wind-tunnel! f 2.0 0.1)
+    (fl/disc! f 0.35 0.5 0.12)
+    (dotimes [i res]
+      (dotimes [j res]
+        (let [k (fl/idx f i j)]
+          (aset ^floats (:u f) k (float (Math/sin (* 0.4 i))))
+          (aset ^floats (:v f) k (float (Math/cos (* 0.3 j)))))))
+    f))
+
+(defn- projected
+  "Divergence left after one projection with the given solver."
+  [res solver iterations]
+  (let [f (stirred res)]
+    (fl/project! f {:solver solver :iterations iterations
+                    :dt (/ 1.0 60.0) :tolerance 0.0})
+    [f (fl/max-divergence f)]))
+
+(deftest solver-test
+  (testing "every solver drives the divergence down"
+    (doseq [solver [:gauss-seidel :conjugate-gradient :multigrid]]
+      (let [before (fl/max-divergence (stirred 32))
+            [_ after] (projected 32 solver 64)]
+        (is (< after (* 0.2 before)) (str (name solver) " left " after)))))
+
+  (testing "and they agree, because they solve the same system"
+    ;; The property that makes them interchangeable. Converged, the
+    ;; velocity field does not depend on how the pressure was found.
+    (let [[a _] (projected 32 :gauss-seidel 4000)
+          [b _] (projected 32 :multigrid 64)
+          worst (reduce max 0.0
+                        (for [k (range (:n a))]
+                          (max (abs (- (aget ^floats (:u a) k) (aget ^floats (:u b) k)))
+                               (abs (- (aget ^floats (:v a) k) (aget ^floats (:v b) k))))))]
+      (is (< worst 1e-3) (str "velocity fields differ by " worst))))
+
+  (testing "multigrid needs about the same number of cycles whatever the grid"
+    ;; The whole point of it. Gauss-Seidel carries information one cell per
+    ;; sweep, so a grid twice as fine wants roughly four times the sweeps;
+    ;; a V-cycle carries it across the whole grid at once.
+    (doseq [res [32 64 128]]
+      (let [[_ d] (projected res :multigrid 32)]
+        (is (< d 1e-3) (str res " grid left " d " after 32 cycles")))))
+
+  (testing "where Gauss-Seidel cannot get there at all in sixteen times the work"
+    (let [[_ d] (projected 128 :gauss-seidel 512)]
+      (is (> d 1e-3) (str "512 sweeps reached " d ", so this test has gone stale"))))
+
+  (testing "a closed tank works as well as an open one"
+    ;; Closed is the harder case for a solver: with no open cell anywhere
+    ;; the pressure is only determined up to a constant.
+    (let [f (-> (fl/fluid 48 48 (/ 1.0 48) 1000.0) (fl/close-border!))]
+      (dotimes [i 48]
+        (dotimes [j 48]
+          (let [k (fl/idx f i j)]
+            (aset ^floats (:u f) k (float (Math/sin (* 0.4 i))))
+            (aset ^floats (:v f) k (float (Math/cos (* 0.3 j)))))))
+      (let [before (fl/max-divergence f)]
+        (fl/project! f {:solver :multigrid :iterations 32 :dt (/ 1.0 60.0) :tolerance 0.0})
+        (is (< (fl/max-divergence f) (* 0.05 before))))))
+
+  (testing "the solvers stay finite"
+    (doseq [solver [:gauss-seidel :conjugate-gradient :multigrid]]
+      (let [[f _] (projected 64 solver 64)]
+        (is (every? #(Float/isFinite (aget ^floats (:u f) %)) (range (:n f)))
+            (str (name solver) " left something that is not a number)"))
+        (is (every? #(Float/isFinite (aget ^floats (:v f) %)) (range (:n f)))))))
+
+  (testing "the default is still the one it always was"
+    (is (= :gauss-seidel (:solver fl/default-solver)))
+    (let [[_ a] (projected 32 :gauss-seidel 40)
+          f (stirred 32)]
+      (fl/project! f {:iterations 40 :dt (/ 1.0 60.0) :tolerance 0.0})
+      (is (< (abs (- a (fl/max-divergence f))) 1e-9))))
+
+  (testing "and the positional arity still means Gauss-Seidel"
+    (let [[_ a] (projected 32 :gauss-seidel 40)
+          f (stirred 32)]
+      (fl/project! f 40 (/ 1.0 60.0) 1.9)
+      (is (< (abs (- a (fl/max-divergence f))) 1e-9))))
+
+  (testing "an unknown solver is an error, not a silent nothing"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (fl/project! (stirred 16) {:solver :telepathy :dt (/ 1.0 60.0)})))))

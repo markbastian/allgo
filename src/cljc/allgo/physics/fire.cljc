@@ -223,13 +223,13 @@
   trying to heat and project at once."
   ([f] (step! f {}))
   ([{:keys [vortices] :as f} world]
-   (let [{:keys [dt gravity iterations over-relaxation
+   (let [{:keys [dt gravity
                  vortex-radius] :as w}
          (merge default-world world)
          {:keys [^floats p]} f]
      (fluid/integrate! f dt gravity)
      (dotimes [i (alength p)] (aset p i (float 0.0)))
-     (fluid/project! f iterations dt over-relaxation)
+     (fluid/project! f w)
      (fluid/extrapolate! f)
      (fluid/advect-velocity! f dt)
      (fluid/advect-smoke! f dt)

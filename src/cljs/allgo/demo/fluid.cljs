@@ -9,6 +9,12 @@
   compressible, because the projection no longer has time to drive the
   divergence out. Then turn `overRelax` off at the same iteration count
   and watch it get worse again -- the overshoot is worth several sweeps.
+
+  Then leave it low and switch `solver` to multigrid, where an iteration
+  means a V-cycle rather than a sweep. Eight of them beat two thousand
+  sweeps on a 128 grid, because a sweep moves information one cell and a
+  cycle moves it across the whole grid. `overRelax` does nothing except
+  for Gauss-Seidel; it is that solver's own trick.
   `show` switches between the dye, the speed of the flow, and the pressure
   the projection worked out."
   (:require [allgo.demo.fps :as fps]
@@ -18,6 +24,7 @@
 (def ^:private ^js controls
   #js {:resolution 96
        :speed      2.0
+       :solver     "gauss-seidel"
        :iterations 40
        :overRelax  true
        :gravity    0.0
@@ -135,6 +142,7 @@
                   ;; otherwise bleed it away within a few steps.
                   (fluid/wind-tunnel! fluid (.-speed controls) 0.1)
                   (fluid/step! fluid {:gravity (.-gravity controls)
+                                      :solver (keyword (.-solver controls))
                                       :iterations (.-iterations controls)
                                       :over-relaxation (if (.-overRelax controls) 1.9 1.0)})
                   (draw! ctx st (:bounds st))
@@ -148,6 +156,7 @@
         (doto gui
           (-> (.add controls "resolution" 32 160 8) (.onFinishChange rebuild!))
           (.add controls "speed" 0 6 0.1)
+          (.add controls "solver" #js ["gauss-seidel" "conjugate-gradient" "multigrid"])
           (.add controls "iterations" 1 100 1)
           (.add controls "overRelax")
           (.add controls "gravity" -20 20 0.5)
