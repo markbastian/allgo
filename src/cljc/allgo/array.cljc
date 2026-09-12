@@ -41,11 +41,20 @@
       :cljs (doto (js/Int32Array. n) (.fill fill)))))
 
 (defn f64
-  "A double array. In ClojureScript this is an ordinary JavaScript array
-  rather than a `Float64Array`, which is what `cljs.core/double-array`
-  gives and what `aget` and `aset` expect there."
-  ([n-or-coll] (double-array n-or-coll))
-  ([n fill] (double-array n fill)))
+  "A double array: `n` zeros, or the contents of a collection.
+
+  A real `Float64Array` in ClojureScript rather than the ordinary array
+  `cljs.core/double-array` returns. `aget`, `aset` and `alength` work on
+  either, and the typed one stores eight bytes a number where the plain
+  one stores a pointer to a boxed one."
+  ([n-or-coll]
+   #?(:clj (double-array n-or-coll)
+      :cljs (if (number? n-or-coll)
+              (js/Float64Array. n-or-coll)
+              (js/Float64Array. (into-array n-or-coll)))))
+  ([n fill]
+   #?(:clj (double-array n fill)
+      :cljs (doto (js/Float64Array. n) (.fill fill)))))
 
 (defn fill!
   "Sets every element of a float array, and returns it."
