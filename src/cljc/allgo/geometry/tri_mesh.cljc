@@ -154,6 +154,89 @@
                       id))]
      (complete {:verts verts :tri-ids tris}))))
 
+(def ^:private icosahedron
+  "The twelve vertices and twenty faces, wound counter-clockwise seen from
+  outside. Three golden rectangles at right angles to each other, which is
+  the neatest way to write the thing down."
+  (let [t (/ (inc (math/sqrt 5.0)) 2.0)]
+    {:verts [[-1.0 t 0.0] [1.0 t 0.0] [-1.0 (- t) 0.0] [1.0 (- t) 0.0]
+             [0.0 -1.0 t] [0.0 1.0 t] [0.0 -1.0 (- t)] [0.0 1.0 (- t)]
+             [t 0.0 -1.0] [t 0.0 1.0] [(- t) 0.0 -1.0] [(- t) 0.0 1.0]]
+     :faces [[0 11 5] [0 5 1] [0 1 7] [0 7 10] [0 10 11]
+             [1 5 9] [5 11 4] [11 10 2] [10 7 6] [7 1 8]
+             [3 9 4] [3 4 2] [3 2 6] [3 6 8] [3 8 9]
+             [4 9 5] [2 4 11] [6 2 10] [8 6 7] [9 8 1]]}))
+
+(defn geodesic
+  "A sphere of `radius` made by subdividing an icosahedron `n` times.
+
+  `n` = 0 is the icosahedron itself; each level splits every triangle into
+  four and pushes the three new vertices out onto the sphere, so the mesh
+  has `10 * 4^n + 2` vertices and `20 * 4^n` faces.
+
+  The reason to build one rather than to divide latitude and longitude:
+  every triangle is nearly the same size and nearly equilateral, and there
+  are no poles where the parameterisation piles up and no seam where it
+  wraps. That matters for anything sampled per vertex -- a procedural
+  planet spends the same effort per unit of surface everywhere, rather
+  than lavishing it on two points nobody is looking at.
+
+  Only `:verts` and `:tri-ids`; run it through `complete` if you want the
+  edge lists, which a mesh that is only being drawn does not need."
+  ([n] (geodesic n 1.0))
+  ([n radius]
+   (let [radius (double radius)
+         unit (fn [[x y z]]
+                (let [l (math/sqrt (+ (* x x) (* y y) (* z z)))]
+                  [(/ x l) (/ y l) (/ z l)]))
+         {:keys [verts faces]} icosahedron]
+     (loop [level 0
+            verts (mapv unit verts)
+            faces faces]
+       (if (>= level (long n))
+         {:verts (vec (mapcat (fn [[x y z]] [(* radius x) (* radius y) (* radius z)]) verts))
+          :tri-ids (vec (mapcat identity faces))}
+         ;; Split every edge once, not once per face that uses it: the
+         ;; cache is what keeps the mesh welded, and a mesh that is not
+         ;; welded has seams down every original edge.
+         (let [[verts' mids]
+               (reduce (fn [[vs cache] [a b]]
+                         (if (contains? cache [a b])
+                           [vs cache]
+                           (let [i (count vs)
+                                 m (unit (mapv + (nth vs a) (nth vs b)))]
+                             [(conj vs m) (assoc cache [a b] i [b a] i)])))
+                       [verts {}]
+                       (mapcat (fn [[a b c]] [[(min a b) (max a b)]
+                                              [(min b c) (max b c)]
+                                              [(min c a) (max c a)]])
+                               faces))
+               faces' (vec (mapcat (fn [[a b c]]
+                                     (let [ab (mids [a b]) bc (mids [b c]) ca (mids [c a])]
+                                       [[a ab ca] [b bc ab] [c ca bc] [ab bc ca]]))
+                                   faces))]
+           (recur (inc level) verts' faces')))))))
+
+(defn mean-edge-length
+  "The average length of a triangle side.
+
+  How finely the mesh samples whatever is being drawn on it, which is
+  what anything procedural needs to know before it decides how much
+  detail to generate -- see `allgo.procedural.fractal/octaves-for`.
+  Interior edges are counted once per triangle that uses them, which
+  cannot move the mean of a mesh whose triangles are all much the same
+  size, and this is only ever asked of meshes like that."
+  ^double [{:keys [verts tri-ids]}]
+  (let [tris (partition 3 tri-ids)
+        d (fn ^double [a b]
+            (let [p (vertex verts a) q (vertex verts b)]
+              (v/length (v/sub p q))))
+        total (reduce (fn [^double acc [a b c]]
+                        (+ acc (d a b) (d b c) (d c a)))
+                      0.0
+                      tris)]
+    (if (zero? (count tris)) 0.0 (/ total (* 3.0 (count tris))))))
+
 (defn translate [mesh [dx dy dz]]
   (update mesh :verts
           (fn [verts]

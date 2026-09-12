@@ -42,6 +42,73 @@
       (let [diagonals (set (map set (partition 2 (tri/bending-edges (:tri-ids m)))))]
         (is (> (count diagonals) 1))))))
 
+(deftest geodesic-test
+  (testing "each level splits every face into four and adds the midpoints"
+    (doseq [n (range 0 6)]
+      (let [{:keys [verts tri-ids]} (tri/geodesic n)
+            faces (long (* 20 (Math/pow 4 n)))]
+        (is (= faces (quot (count tri-ids) 3)))
+        ;; Euler: every new vertex is one edge's midpoint, shared by the
+        ;; two faces that edge belongs to, so the count follows the faces.
+        (is (= (+ 2 (quot faces 2)) (quot (count verts) 3))))))
+
+  (testing "every vertex is on the sphere of the radius asked for"
+    (doseq [r [1.0 0.5 7.25]]
+      (let [{:keys [verts]} (tri/geodesic 3 r)]
+        (doseq [[x y z] (partition 3 verts)]
+          (is (< (abs (- r (Math/sqrt (+ (* x x) (* y y) (* z z))))) 1e-12))))))
+
+  (testing "the mesh is welded -- no vertex is duplicated"
+    ;; The midpoint cache is what does this, and a sphere that is not
+    ;; welded looks fine until it is shaded and then shows every original
+    ;; edge as a seam.
+    (let [{:keys [verts]} (tri/geodesic 4)
+          pts (map vec (partition 3 verts))]
+      (is (= (count pts) (count (set pts))))))
+
+  (testing "every face is wound counter-clockwise seen from outside"
+    (let [{:keys [verts tri-ids]} (tri/geodesic 3)
+          pts (vec (map vec (partition 3 verts)))]
+      (doseq [[a b c] (partition 3 tri-ids)]
+        (let [p (pts a)
+              e1 (mapv - (pts b) p)
+              e2 (mapv - (pts c) p)
+              n [(- (* (e1 1) (e2 2)) (* (e1 2) (e2 1)))
+                 (- (* (e1 2) (e2 0)) (* (e1 0) (e2 2)))
+                 (- (* (e1 0) (e2 1)) (* (e1 1) (e2 0)))]]
+          (is (pos? (reduce + (map * n p))))))))
+
+  (testing "the triangles are all much the same size, which is the point"
+    ;; A latitude-longitude sphere has triangles hundreds of times larger
+    ;; at the equator than at the poles; this is why a planet sampled per
+    ;; vertex is sampled here rather than there.
+    (let [m (tri/geodesic 4)
+          areas (map (fn [[a b c]] (tri/triangle-area (:verts m) a b c))
+                     (partition 3 (:tri-ids m)))]
+      (is (< (/ (apply max areas) (apply min areas)) 2.0))))
+
+  (testing "the mean edge length is the spacing the sphere is sampled at"
+    ;; Area per vertex is 4*pi*r^2/V, and an equilateral triangulation
+    ;; puts the edge at about the root of that. Anything procedural drawn
+    ;; on the mesh needs this number to know how much detail to make.
+    (doseq [n [3 4 5] r [1.0 3.0]]
+      (let [m (tri/geodesic n r)
+            v (quot (count (:verts m)) 3)
+            expected (Math/sqrt (/ (* 4.0 Math/PI r r) v))]
+        (is (< 0.8 (/ (tri/mean-edge-length m) expected) 1.3)))))
+
+  (testing "and it halves with each level, as the subdivision says"
+    (doseq [n [2 3 4]]
+      (is (< (abs (- 2.0 (/ (tri/mean-edge-length (tri/geodesic n))
+                            (tri/mean-edge-length (tri/geodesic (inc n))))))
+             0.05))))
+
+  (testing "and it is complete-able like any other mesh"
+    (let [m (tri/complete (tri/geodesic 2))]
+      ;; Euler again, from the other side: V - E + F = 2.
+      (is (= 2 (- (+ (quot (count (:verts m)) 3) (quot (count (:tri-ids m)) 3))
+                  (quot (count (:edge-ids m)) 2)))))))
+
 (deftest topology-test
   (testing "two triangles meeting at an edge know about each other"
     (let [n (tri/triangle-neighbours (:tri-ids pair))]
