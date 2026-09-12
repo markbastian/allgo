@@ -2,6 +2,7 @@
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.kinematics.analytic :as ik]
+            [allgo.kinematics.arm :as arm]
             [allgo.kinematics.chain :as k]
             [allgo.kinematics.numeric :as num]
             [clojure.math :as math]
@@ -292,3 +293,116 @@
           "descent can only ever find configurations that exist")
       (doseq [s found]
         (is (< (pose-error (k/pose puma s) target) 1e-5))))))
+
+;; ---------------------------------------------------------------------------
+;; The seven-jointed arm
+
+(def human (arm/arm {:upper 0.30 :forearm 0.27}))
+
+(defn- reachable-wrist [^java.util.Random r a]
+  (let [[lo hi] (arm/span a)
+        d (+ lo 0.02 (* (- hi lo 0.04) (.nextDouble r)))]
+    (v/scale (v/normalize [(- (.nextDouble r) 0.5)
+                           (- (.nextDouble r) 0.5)
+                           (- (.nextDouble r) 0.5)])
+             d)))
+
+(defn- random-rot [^java.util.Random r]
+  (q/normalize [(- (.nextDouble r) 0.5) (- (.nextDouble r) 0.5)
+                (- (.nextDouble r) 0.5) (- (.nextDouble r) 0.5)]))
+
+(deftest arm-reach-test
+  (testing "the arm spans from folded to straight"
+    (is (= [0.03 0.57] (mapv #(Double/parseDouble (format "%.2f" %)) (arm/span human)))))
+
+  (testing "the elbow bends by whatever the cosine rule says"
+    ;; Straight at full stretch, folded right up at the near limit.
+    (is (< (abs (arm/elbow-bend human 0.57)) 1e-6))
+    (is (< (abs (- math/PI (arm/elbow-bend human 0.03))) 1e-6))
+    (is (< 0.0 (arm/elbow-bend human 0.4) math/PI)))
+
+  (testing "and cannot reach past either end"
+    (is (nil? (arm/elbow-bend human 0.6)))
+    (is (nil? (arm/elbow-bend human 0.01)))
+    (is (nil? (arm/elbow-circle human [1.0 0.0 0.0])))
+    (is (nil? (arm/solve human {:pos [1.0 0.0 0.0] :rot q/identity-q} 0.0)))))
+
+(deftest elbow-circle-test
+  (testing "the elbow lies one upper arm from the shoulder, all the way round"
+    (let [r (java.util.Random. 61)]
+      (dotimes [_ 40]
+        (let [w (reachable-wrist r human)
+              circle (arm/elbow-circle human w)]
+          (is (some? circle))
+          (doseq [psi (range 0.0 6.28 0.4)]
+            (let [e (arm/elbow-at circle psi)]
+              (is (< (abs (- (:upper human) (v/distance e (:shoulder human)))) 1e-9)
+                  "an upper arm from the shoulder")
+              (is (< (abs (- (:forearm human) (v/distance e w))) 1e-9)
+                  "and a forearm from the wrist")))))))
+
+  (testing "a wrist along the reference direction still gets a circle"
+    ;; The default reference is straight down; a wrist straight down leaves
+    ;; it with nothing to say, and some perpendicular has to be invented.
+    (let [circle (arm/elbow-circle human [0.0 -0.4 0.0])]
+      (is (some? circle))
+      (is (< (abs (v/dot (:zero circle) (:axis circle))) 1e-9)
+          "and it is still perpendicular to the axis")
+      (is (< (abs (- 1.0 (v/length (:zero circle)))) 1e-9)))))
+
+(deftest swivel-test
+  (let [r (java.util.Random. 67)]
+    (testing "every swivel puts the hand in exactly the same place"
+      ;; The redundancy itself. A seven-jointed arm has a whole circle of
+      ;; ways to reach a pose, not the eight a six-axis robot has.
+      (dotimes [_ 60]
+        (let [w (reachable-wrist r human)
+              rot (random-rot r)
+              target {:pos w :rot rot}
+              sols (arm/swivel-samples human target 16)]
+          (is (= 16 (count sols)))
+          (doseq [c sols]
+            (let [p (arm/pose human c)]
+              (is (< (v/distance (:wrist p) w) 1e-9))
+              (is (< (min (q/angle (q/between (:hand p) rot))
+                          (q/angle (q/between (:hand p) (mapv - rot))))
+                     1e-9)))))))
+
+    (testing "while the elbow moves a long way"
+      (let [w (reachable-wrist r human)
+            sols (arm/swivel-samples human {:pos w :rot q/identity-q} 16)
+            elbows (map #(:elbow-position (arm/pose human %)) sols)]
+        (is (> (reduce max (for [a elbows b elbows] (v/distance a b))) 0.05)
+            "the elbow should sweep a real circle, not sit still")))
+
+    (testing "and the elbow's bend does not change at all"
+      ;; How far apart the shoulder and wrist are fixes the bend, and
+      ;; swinging the elbow round does not change that distance.
+      (dotimes [_ 30]
+        (let [w (reachable-wrist r human)
+              sols (arm/swivel-samples human {:pos w :rot (random-rot r)} 16)
+              bends (map :elbow sols)]
+          (is (< (- (reduce max bends) (reduce min bends)) 1e-12)))))
+
+    (testing "the swivel can be read back off a configuration"
+      (dotimes [_ 40]
+        (let [w (reachable-wrist r human)
+              target {:pos w :rot (random-rot r)}]
+          (doseq [psi [-2.5 -1.0 0.0 0.7 2.9]]
+            (when-let [c (arm/solve human target psi)]
+              (is (< (abs (k/wrap-angle (- psi (arm/swivel-of human c)))) 1e-9)))))))))
+
+(deftest arm-forward-test
+  (testing "a straight arm reaches its whole length"
+    (let [p (arm/pose human {:shoulder q/identity-q :elbow 0.0 :wrist q/identity-q})]
+      (is (< (v/distance (:wrist p) [0.57 0.0 0.0]) 1e-12))
+      (is (< (v/distance (:elbow-position p) [0.30 0.0 0.0]) 1e-12))))
+
+  (testing "a fully folded arm brings the wrist back toward the shoulder"
+    (let [p (arm/pose human {:shoulder q/identity-q :elbow math/PI :wrist q/identity-q})]
+      (is (< (abs (- 0.03 (v/distance (:wrist p) (:shoulder p)))) 1e-12))))
+
+  (testing "the shoulder carries the whole arm with it"
+    (let [turn (q/from-axis-angle [0.0 0.0 1.0] (/ math/PI 2))
+          p (arm/pose human {:shoulder turn :elbow 0.0 :wrist q/identity-q})]
+      (is (< (v/distance (:wrist p) [0.0 0.57 0.0]) 1e-9)))))
