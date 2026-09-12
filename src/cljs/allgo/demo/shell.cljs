@@ -25,6 +25,7 @@
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
+            [allgo.demo.planet :as planet]
             [allgo.demo.rigid :as rigid]
             [allgo.demo.satellite :as satellite]
             [allgo.demo.skinning :as skinning]
@@ -56,6 +57,7 @@
    "joints"   {:start joints/start!   :stop joints/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
+   "planet"   {:start planet/start!   :stop planet/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
    "dungeon-boids" {:start dungeon-boids/start! :stop dungeon-boids/stop!}

@@ -9,7 +9,7 @@ Everything lives under a single `allgo` root, one package per discipline:
 
 | Package            | Contents                                                                                      |
 |--------------------|-----------------------------------------------------------------------------------------------|
-| `allgo.procedural` | Cellular caves, dungeon generation, Perlin noise, diamond-square terrain, TIN, mesh shading   |
+| `allgo.procedural` | Cellular caves, dungeons, noise bases, fractals, procedural planets, terrain, TIN, atmosphere |
 | `allgo.geometry`   | Delaunay triangulation, 3D Voronoi cells, GJK/EPA collision detection                         |
 | `allgo.simulation` | Reynolds' boids                                                                               |
 | `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, Gragg-Bulirsch-Stoer extrapolation         |
@@ -21,6 +21,49 @@ Everything lives under a single `allgo` root, one package per discipline:
 Orbits*; planetary and lunar positions follow Vallado, *Fundamentals of
 Astrodynamics and Applications*. Everything astrodynamical is expressed in
 EME2000 so the pieces can be visualized in one frame.
+
+### Texturing & Modeling
+
+Seven namespaces under `allgo.procedural` follow Ebert, Musgrave, Peachey,
+Perlin and Worley, *Texturing & Modeling: A Procedural Approach*, and are
+arranged the way chapter 20 argues they should be -- a small set of parts
+that compose freely, rather than a set of finished effects:
+
+| Namespace                     | Chapter | What it is                                                       |
+|-------------------------------|---------|------------------------------------------------------------------|
+| `allgo.procedural.shaping`    | 2       | `step`, `smoothstep`, `bias`, `gain`, `spline` -- the vocabulary |
+| `allgo.procedural.noise`      | 2, 12   | Value, gradient and 4D gradient noise, sparse convolution, warps |
+| `allgo.procedural.cellular`   | 4       | Worley's F1, F2, F2-F1 and the metrics that reshape the cells    |
+| `allgo.procedural.fractal`    | 14, 16  | fBm, turbulence, and the three multifractals                     |
+| `allgo.procedural.qaeb`       | 17      | Error-bounded ray marching of a surface that is only a function  |
+| `allgo.procedural.atmosphere` | 18      | Exponential density, Rayleigh and Mie scattering, aerial haze    |
+| `allgo.procedural.planet`     | 20      | The lot, assembled into a world                                  |
+
+The contract between them is one line: a *basis* is a function of `[x y z]`
+to a number near [-1, 1], a *fractal* takes a basis and returns a basis,
+and so a fractal can be the basis of another fractal. Everything else
+follows from that.
+
+    (planet/planet
+     {:sea-level 0.0
+      :terrain (-> (noise/gradient-basis {:seed 7})
+                   (noise/distorted (noise/vector-basis {:seed 8}) 0.4)
+                   (fractal/ridged-multifractal {:octaves 9 :H 0.9}))})
+
+Nothing is stored: the coastline, the colour of the ground and the cover of
+the clouds are all evaluated from the 3D direction of the point being
+asked about, which is what keeps a planet free of the seam and the polar
+smear that a latitude-longitude map cannot avoid.
+
+The other half of making that look right is knowing when to stop.
+`fractal/octaves-for` says how many octaves a given sampling rate can
+actually carry; past that, octaves do not arrive as detail but as speckle
+that moves when the camera does, and they are paid for at full price.
+Passing `:sample-spacing` to a planet cuts every layer to what its mesh
+can hold -- which is both cleaner and, at a typical resolution, about
+three times faster. The detail that no longer fits in the geometry goes
+where it can be seen instead: `noise/gradient-basis` takes a `:period`,
+so a tile of fine relief can be baked and read per pixel without a seam.
 
 Sources are split by platform: `src/cljc` for the algorithms themselves,
 `src/cljs` for the demos, `src/clj` for the desktop renderers.
@@ -48,9 +91,9 @@ file the development build writes, so run `make dev` afterwards to get
 readable names and source maps back.
 
     encoding      size
-    identity      1.1M
-    gzip          312K
-    br            256K
+    identity      1.4M
+    gzip          401K
+    br            320K
 
 `.br` is Brotli, which every current browser accepts and which beats gzip
 by about 18% here. Both files are *hints to the server* -- nothing
@@ -70,9 +113,9 @@ Release builds delete the output directory first, which matters more than
 it sounds: the development build writes ~15MB of per-namespace files into
 it under `cljs-runtime/`, and those are stale the instant a release is
 built but would still be deployed alongside it. Clearing first takes the
-deployed tree from about 17MB to 1.8MB.
+deployed tree from about 17MB to 2.2MB.
 
-Size is dominated by three.js, at 630KB of the 1.1MB bundle -- using
+Size is dominated by three.js, at 630KB of the 1.4MB bundle -- using
 `WebGLRenderer` reaches most of the library, so it does not tree-shake
 usefully (`:js-provider :shadow` makes no difference). React, ReactDOM
 and Reagent account for another 147KB, and are needed only by the demo
