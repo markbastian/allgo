@@ -28,7 +28,19 @@
   follows exactly -- there is nothing left over to choose.
 
   `sweep` runs the swivel round on its own, which is the clearest way to
-  see a hand held still by an arm that will not stop moving."
+  see a hand held still by an arm that will not stop moving.
+
+  Click a ball and the arm reaches it, as the six-axis robot next door
+  does -- and the difference between the two readouts is the whole point.
+  There the count is eight, and you can list them. Here there is no count
+  to give: the answers form a circle, and the ghosts are samples of it
+  rather than all of it.
+
+  Reaching is also easier for this arm than for that one, and for a reason
+  worth naming. The robot has to arrive with a particular orientation, and
+  most of its eight configurations break a joint limit doing it. This arm
+  ends in a ball joint, which absorbs whatever orientation is left over --
+  so whether it can touch something depends only on how far away it is."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.quaternion :as quat]
             [allgo.geometry.vec3 :as v]
@@ -43,21 +55,37 @@
        :speed      0.5
        :ghosts     9
        :showCircle true
-       :reach      0.62
-       :height     0.30})
+       :targets    7})
 
 (def ^:private the-arm (arm/arm {:upper 0.30 :forearm 0.27}))
 
 (defn- target-pose
-  "Where the hand is being held. Reach and height place it; the hand keeps
-  a fixed orientation so that the only thing free is the elbow."
-  []
-  (let [[lo hi] (arm/span the-arm)
-        d (max (+ lo 0.02) (min (- hi 0.02) (* (.-reach controls) hi)))
-        up (.-height controls)
-        dir (v/normalize [1.0 (* 2.0 (- up 0.5)) 0.25])]
-    {:pos (v/scale dir d)
-     :rot (quat/from-vectors [1.0 0.0 0.0] dir)}))
+  "The hand pose for touching a point.
+
+  The orientation is the hand laid along the line out from the shoulder,
+  which is a natural way to arrive -- and unlike the six-axis robot, the
+  choice costs nothing here. A ball joint at the wrist takes up whatever
+  orientation is asked of it, so what the arm can touch depends on
+  distance alone."
+  [at]
+  {:pos at
+   :rot (quat/from-vectors [1.0 0.0 0.0]
+                           (if (< (v/length at) 1e-9) [1.0 0.0 0.0] at))})
+
+(defn- scatter-targets
+  "Balls to reach for, in a shell around the shoulder, with a couple set
+  beyond the arm's reach so that being unable to is visible too."
+  [n]
+  (let [[lo hi] (arm/span the-arm)]
+    (vec (for [i (range n)]
+           (let [beyond? (and (pos? i) (zero? (mod i 4)))
+                 d (if beyond?
+                     (* hi (+ 1.15 (* 0.35 (js/Math.random))))
+                     (+ lo 0.05 (* (- hi lo 0.12) (js/Math.random))))
+                 phi (+ (* 1.6 js/Math.PI (/ i (max 1 n))) 0.4)
+                 lift (- (* 1.1 (js/Math.random)) 0.4)
+                 dir (v/normalize [(js/Math.cos phi) lift (js/Math.sin phi)])]
+             {:pos (v/scale dir d) :beyond? beyond?})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Drawing
@@ -141,17 +169,46 @@
     (.set (.-position camera) 0.62 0.42 0.72)
     (.appendChild container (.-domElement renderer))
     (let [orbit (OrbitControls. camera (.-domElement renderer))
-          ;; The hand, drawn where it is being held so that it is visibly
-          ;; the thing not moving.
-          held (THREE/Mesh. (THREE/SphereGeometry. 0.028 20 14)
-                            (THREE/MeshPhongMaterial. #js {:color 0xf2b134}))
+          raycaster (THREE/Raycaster.)
           ring (THREE/Line. (THREE/BufferGeometry.)
                             (THREE/LineBasicMaterial. #js {:color 0x6fd0ff}))]
-      (.add scene held)
       (.add scene ring)
       (set! (.-enableDamping orbit) true)
       (.set (.-target orbit) 0.18 0.0 0.0)
-      (letfn [(resize! []
+      (letfn [(rebuild! []
+                (doseq [^js m (:target-meshes @state)] (.remove scene m))
+                (let [targets (scatter-targets (.-targets controls))
+                      meshes (mapv (fn [t]
+                                     (let [m (THREE/Mesh.
+                                              (THREE/SphereGeometry. 0.026 18 14)
+                                              (THREE/MeshPhongMaterial.
+                                               #js {:color (if (:beyond? t) 0x8b4a52 0x4f7ac0)}))
+                                           [x y z] (:pos t)]
+                                       (.set (.-position m) x y z)
+                                       (.add scene m)
+                                       m))
+                                   targets)]
+                  (swap! state assoc :targets targets :target-meshes meshes
+                         :picked nil :target nil)))
+              (pick! [^js e]
+                (let [rect (.getBoundingClientRect (.-domElement renderer))
+                      nx (- (* 2 (/ (- (.-clientX e) (.-left rect)) (.-width rect))) 1)
+                      ny (- 1 (* 2 (/ (- (.-clientY e) (.-top rect)) (.-height rect))))]
+                  (.setFromCamera raycaster (THREE/Vector2. nx ny) camera)
+                  (let [hits (.intersectObjects raycaster
+                                                (clj->js (:target-meshes @state)) false)]
+                    (when (pos? (.-length hits))
+                      (let [idx (.indexOf (to-array (:target-meshes @state))
+                                          (.-object (aget hits 0)))
+                            t (nth (:targets @state) idx)]
+                        ;; Highlight the one being reached for.
+                        (doseq [[i ^js m] (map-indexed vector (:target-meshes @state))]
+                          (.setHex (.. m -material -color)
+                                   (cond (= i idx) 0xf2b134
+                                         (:beyond? (nth (:targets @state) i)) 0x8b4a52
+                                         :else 0x4f7ac0)))
+                        (swap! state assoc :picked idx :target (:pos t)))))))
+              (resize! []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (when (and (pos? w) (pos? h))
                     (.setSize renderer w h)
@@ -162,51 +219,65 @@
                 (when @running?
                   (js/requestAnimationFrame tick)
                   (let [t0 (js/performance.now)
-                        {:keys [limb ghosts phase]} @state
+                        {:keys [limb ghosts phase picked]} @state
+                        at (:target @state)
                         phase (if (.-sweep controls)
                                 (+ phase (* 0.016 (.-speed controls)))
                                 phase)
                         psi (if (.-sweep controls)
                               (* 2 js/Math.PI (mod phase 1.0))
                               (.-swivel controls))
-                        target (target-pose)
-                        circle (arm/elbow-circle the-arm (:pos target))
-                        solution (arm/solve the-arm target psi)]
+                        target (when at (target-pose at))
+                        circle (when target (arm/elbow-circle the-arm (:pos target)))
+                        solution (when target (arm/solve the-arm target psi))]
                     (swap! state assoc :phase phase)
                     (when (.-sweep controls)
                       (set! (.-swivel controls) psi))
-                    (let [[hx hy hz] (:pos target)]
-                      (.set (.-position held) hx hy hz))
                     (set! (.-visible ring) (boolean (and circle (.-showCircle controls))))
                     (when (.-showCircle controls) (draw-circle! ring circle))
                     ;; Ghosts at evenly spaced swivels: the family, sampled.
-                    (let [samples (if (pos? (.-ghosts controls))
+                    (let [samples (if (and target (pos? (.-ghosts controls)))
                                     (arm/swivel-samples the-arm target (.-ghosts controls))
                                     [])]
                       (doseq [[i g] (map-indexed vector ghosts)]
                         (if (< i (count samples))
                           (draw-limb! g (arm/pose the-arm (nth samples i)))
                           (hide-limb! g))))
-                    (if solution
+                    (cond
+                      (nil? at)
+                      (do (hide-limb! limb)
+                          (set! (.-textContent overlay) "click a ball for the arm to touch"))
+
+                      solution
                       (let [p (arm/pose the-arm solution)]
                         (draw-limb! limb p)
                         (set! (.-textContent overlay)
-                              (str "swivel " (.toFixed psi 2) " rad\n"
-                                   "elbow bend " (.toFixed (:elbow solution) 3)
-                                   " rad -- unchanged by the swivel\n"
-                                   "hand held at "
-                                   (.toFixed (v/distance (:pos target) [0 0 0]) 3)
-                                   " m from the shoulder")))
+                              (str "target " picked "\n"
+                                   ;; No count to give. The answers are a
+                                   ;; circle, and the ghosts sample it.
+                                   "a circle of solutions, not a list of them\n"
+                                   "swivel " (.toFixed psi 2)
+                                   " rad -- elbow bend " (.toFixed (:elbow solution) 3)
+                                   " rad, unchanged by it")))
+
+                      :else
                       (do (hide-limb! limb)
-                          (set! (.-textContent overlay) "out of reach")))
+                          (set! (.-textContent overlay)
+                                (str "target " picked "\nout of reach\n"
+                                     (.toFixed (v/distance at [0.0 0.0 0.0]) 3)
+                                     " m away; the arm spans "
+                                     (.toFixed (first (arm/span the-arm)) 2) " to "
+                                     (.toFixed (second (arm/span the-arm)) 2) " m"))))
                     (.update orbit)
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
+        (.addEventListener (.-domElement renderer) "pointerdown" pick!)
         (.observe (js/ResizeObserver. resize!) container)
         (resize!)
         (swap! state assoc
                :limb (make-limb scene 0xd9a15c 1.0 0.026)
                :ghosts (vec (repeatedly 16 #(make-limb scene 0x7fc4ff 0.16 0.012))))
+        (rebuild!)
         (let [gui (GUI. #js {:container container})]
           (doto gui
             (.add controls "sweep")
@@ -214,8 +285,8 @@
             (.add controls "speed" 0.05 2 0.05)
             (.add controls "ghosts" 0 16 1)
             (.add controls "showCircle")
-            (.add controls "reach" 0.25 0.98 0.01)
-            (.add controls "height" 0.0 1.0 0.01)))
+            (-> (.add controls "targets" 3 12 1) (.onFinishChange rebuild!))
+            (.add #js {:reset rebuild!} "reset")))
         {:start (fn [] (when-not @running? (reset! running? true) (resize!) (tick)))
          :stop  (fn [] (reset! running? false))}))))
 
