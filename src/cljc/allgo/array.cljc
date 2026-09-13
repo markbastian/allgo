@@ -47,12 +47,12 @@
   `cljs.core/double-array` returns. `aget`, `aset` and `alength` work on
   either, and the typed one stores eight bytes a number where the plain
   one stores a pointer to a boxed one."
-  ([n-or-coll]
+  (^doubles [n-or-coll]
    #?(:clj (double-array n-or-coll)
       :cljs (if (number? n-or-coll)
               (js/Float64Array. n-or-coll)
               (js/Float64Array. (into-array n-or-coll)))))
-  ([n fill]
+  (^doubles [n fill]
    #?(:clj (double-array n fill)
       :cljs (doto (js/Float64Array. n) (.fill fill)))))
 
