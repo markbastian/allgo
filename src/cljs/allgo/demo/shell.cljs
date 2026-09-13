@@ -32,6 +32,7 @@
             [allgo.demo.soft-body :as soft-body]
             [allgo.demo.solar-system :as solar]
             [allgo.demo.spatial-hash :as spatial-hash]
+            [allgo.demo.sphere-fluid :as sphere-fluid]
             [allgo.demo.terrain-webgl :as terrain]
             [allgo.demo.water :as water]
             [reagent.core :as r]
@@ -58,6 +59,7 @@
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "planet"   {:start planet/start!   :stop planet/stop!}
+   "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
    "dungeon-boids" {:start dungeon-boids/start! :stop dungeon-boids/stop!}

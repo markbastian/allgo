@@ -12,7 +12,8 @@ Everything lives under a single `allgo` root, one package per discipline:
 | `allgo.procedural` | Cellular caves, dungeons, noise bases, fractals, procedural planets, terrain, TIN, atmosphere |
 | `allgo.geometry`   | Delaunay triangulation, 3D Voronoi cells, GJK/EPA collision detection                         |
 | `allgo.simulation` | Reynolds' boids                                                                               |
-| `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, Gragg-Bulirsch-Stoer extrapolation         |
+| `allgo.physics`    | Rigid bodies, XPBD cloth, Eulerian and FLIP fluids, fluid on a sphere, joints, skinning        |
+| `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, extrapolation, FFT, tridiagonal solves      |
 | `allgo.astro`      | Force models, frames, time scales, geodesy, Kepler elements, ephemerides, orbit determination |
 | `allgo.demo`       | ClojureScript demo viewers (browser)                                                          |
 | `allgo.desktop`    | JVM-only renderers (Quil, Swing, Lanterna)                                                    |
@@ -64,6 +65,57 @@ can hold -- which is both cleaner and, at a typical resolution, about
 three times faster. The detail that no longer fits in the geometry goes
 where it can be seen instead: `noise/gradient-basis` takes a `:period`,
 so a tile of fine relief can be baked and read per pixel without a seam.
+
+### Flow on a sphere
+
+`allgo.physics.sphere-fluid` is the same physics as the flat
+`allgo.physics.fluid` and a deliberately different answer to it. The flat
+one tracks velocity and cancels the divergence with a pressure solve; this
+one never represents divergence at all.
+
+A sphere is closed and has genus zero, so the Hodge decomposition leaves
+no harmonic part and *every* divergence-free field on it is the rotated
+gradient of a streamfunction, with nothing left over. The whole state is
+then one scalar -- the vorticity -- and incompressibility stops being a
+constraint to enforce and becomes a property of the representation. There
+is no pressure, no projection and no residual; the discrete velocity is
+divergence-free to the last bit, poles included, and there is a test that
+says so.
+
+The classical pole problem largely evaporates with it. The singularity in
+latitude and longitude is a singularity of the *frame*, not of the
+physics, and a solver that advects only scalars -- by rotating points
+along great circles in 3D, where no frame appears -- never meets it. What
+the axis buys in exchange is a fast direct Poisson solve: the operator is
+separable and longitude is periodic, so an FFT along it leaves one
+tridiagonal system per zonal wavenumber. Transform, solve, transform
+back, with no iteration and no tolerance.
+
+The same machinery takes three operators, and the third is what lets the
+planet spin. `laplacian` is Poisson, for the streamfunction;
+`laplacian - alpha` is Helmholtz, for implicit diffusion; and
+`laplacian + c d/dlam` is the Coriolis term solved implicitly rather than
+stepped. That last one matters more than it looks. Rotation makes the
+vorticity-streamfunction loop oscillate -- those are Rossby waves, and the
+fastest are the largest-scale ones, with frequency near the rotation rate
+itself. Stepping them from the start of the interval is forward Euler on
+an oscillation, which grows at every step size there is: energy came out
+ten thousand times too large at a rotation of 80, however small the step.
+Solving the term implicitly removes the restriction and costs nothing,
+because `d/dlam` is diagonal in the same Fourier basis -- the tridiagonal
+system merely becomes complex.
+
+The trapezoidal rule, specifically, and not the obvious implicit one:
+backward Euler is stable *because* it damps, and what it would damp here
+are precisely the waves that organise the flow into bands.
+
+Bands do not emerge from scattered vortices in any reasonable time -- on a
+real planet they are held up by forcing from below over geological time --
+so `zonal-jets!` puts them in, and the simulation shows what the rotation
+does to them. They shred without it and hold with it. The vortex chains
+along each band appear only while the jets are still barotropically
+unstable, which is `rotation < amplitude * jets / 2`; past that the bands
+go glassy and the whorls disappear.
 
 Sources are split by platform: `src/cljc` for the algorithms themselves,
 `src/cljs` for the demos, `src/clj` for the desktop renderers.
