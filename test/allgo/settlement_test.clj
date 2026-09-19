@@ -144,9 +144,49 @@
           loose (world {:towns 30 :spacing 5})]
       (is (> (count (:towns tight)) (count (:towns loose)))))))
 
+(deftest naming-test
+  (let [{:keys [centers towns realms rivers cultures]} @m]
+
+    (testing "every town and every held cell is named"
+      (is (every? #(:name (centers %)) towns))
+      (is (every? :realm (filter :territory (remove :water? centers)))))
+
+    (testing "a realm's name is the same everywhere it is claimed"
+      (is (every? (fn [[t nm]]
+                    (every? #(= nm (:realm %))
+                            (filter #(= t (:territory %)) centers)))
+                  realms)))
+
+    (testing "cultures are coarser than realms, which is the point"
+      ;; A realm holds one town, so a language per realm would mean no
+      ;; two places on the map ever share one. Grouping realms into a
+      ;; handful of cultures is what makes neighbours sound alike.
+      (is (< (count cultures) (count towns)))
+      (is (every? #(some #{(:culture %)} cultures)
+                  (filter :territory (remove :water? centers)))))
+
+    (testing "a culture is a connected patch, not a scattering"
+      ;; It comes out of a cheapest-source sweep, so every cell in a
+      ;; culture has a neighbour nearer its seed -- which means you can
+      ;; always walk home without leaving it.
+      (let [by-id (into {} (map (juxt :id identity)) centers)]
+        (is (every? (fn [c]
+                      (or (some #{(:id c)} cultures)
+                          (some #(= (:culture (by-id %)) (:culture c))
+                                (:neighbors c))))
+                    (filter :culture centers)))))
+
+    (testing "rivers are named, largest first"
+      (is (seq rivers))
+      (is (every? :name rivers))
+      (is (apply >= (map :flow rivers))))))
+
 (deftest determinism-test
   (testing "the same island gives the same towns, roads and borders"
     (let [a (world) b (world)]
       (is (= (:towns a) (:towns b)))
       (is (= (:roads a) (:roads b)))
-      (is (= (map :territory (:centers a)) (map :territory (:centers b)))))))
+      (is (= (map :territory (:centers a)) (map :territory (:centers b))))
+      (is (= (keep :name (:centers a)) (keep :name (:centers b))))
+      (is (= (:realms a) (:realms b)))
+      (is (= (map :name (:rivers a)) (map :name (:rivers b)))))))

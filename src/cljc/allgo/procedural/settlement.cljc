@@ -34,16 +34,25 @@
 
   ## What is not here
 
+  Names come from `allgo.procedural.naming`, one invented language per
+  *culture* -- and cultures are deliberately coarser than realms. A realm
+  here has exactly one town in it, so a language per realm would mean no
+  two places on the map ever share one, which is the bag of unrelated
+  syllables that namespace exists to avoid. Grouped into a handful of
+  cultures instead, neighbouring realms sound alike and the places where
+  that changes are audible.
+
   No population, no economy, no politics, no history. Azgaar's generator
-  has all of those and they are what makes it a *fantasy* map generator;
-  this stops at the geography people impose on land. Names are the
-  obvious next thing and would be the cheapest to add."
+  has all of those and they are what make it a *fantasy* map generator;
+  this stops at the geography people impose on land."
   (:require [allgo.graph :as graph]
+            [allgo.procedural.naming :as naming]
             [allgo.search :as search]
             [clojure.math :as math]))
 
 (def defaults
   {:towns 14
+   :seed 1
    ;; Cells of separation, measured in graph hops rather than distance,
    ;; so towns spread out by how connected the land is rather than by how
    ;; the map happens to be scaled.
@@ -163,23 +172,23 @@
   (fn [id]
     (into [] (remove #(:water? (centers %))) (:neighbors (centers id)))))
 
-(defn assign-territories
-  "Multi-source Dijkstra from every town at once.
+(defn nearest-source
+  "Multi-source Dijkstra: for every land cell, which of `sources` is
+  cheapest to reach it from, and at what cost.
 
-  One sweep, not one per town: seed the queue with all of them and the
-  first to reach a cell claims it, which is exactly the cheapest-town
-  rule and costs the same as a single search. `:territory` is the town id
-  and `:reach` the cost of getting there, which is what a border is drawn
-  from."
-  [{:keys [centers towns] :as island}]
+  One sweep, not one per source. Seed the queue with all of them and the
+  first to arrive claims the cell, which is exactly the cheapest-source
+  rule at the cost of a single search. Returns `[owner cost]`, both maps
+  keyed by cell."
+  [island sources]
   (let [step (travel island)
         nbrs (land-neighbours island)
         [best owner]
         (loop [;; Ordered by cost then id, so ties break the same way on
                ;; every platform rather than on map iteration order.
-               queue (into (sorted-set) (map (fn [t] [0.0 t t])) towns)
-               best (into {} (map (fn [t] [t 0.0])) towns)
-               owner (into {} (map (fn [t] [t t])) towns)]
+               queue (into (sorted-set) (map (fn [t] [0.0 t t])) sources)
+               best (into {} (map (fn [t] [t 0.0])) sources)
+               owner (into {} (map (fn [t] [t t])) sources)]
           (if-let [[cost id town :as entry] (first queue)]
             (let [queue (disj queue entry)]
               (if (> cost (get best id ##Inf))
@@ -194,12 +203,59 @@
                               (nbrs id))]
                   (recur queue best owner))))
             [best owner]))]
+    [owner best]))
+
+(defn assign-territories
+  "Who holds what: every land cell goes to the town it is cheapest to
+  reach.
+
+  `:territory` is the town id and `:reach` the cost of getting there,
+  which is what a border is drawn from."
+  [{:keys [centers towns] :as island}]
+  (let [[owner best] (nearest-source island towns)]
     (assoc island :centers
            (mapv (fn [c]
                    (assoc c
                           :territory (get owner (:id c))
                           :reach (get best (:id c))))
                  centers))))
+
+(defn- spread-picks
+  "`n` of `ids`, chosen to be as far apart as they can be.
+
+  Farthest-point sampling: take one, then repeatedly take whichever is
+  furthest from everything taken so far. Taking the first `n` instead
+  would cluster them, because the list is ordered by how good a site is
+  and the good sites are not evenly distributed."
+  [island ids n]
+  (let [pts (fn [id] (:point ((:centers island) id)))
+        ids (vec ids)]
+    (if (<= (count ids) (long n))
+      ids
+      (loop [taken [(first ids)]]
+        (if (= (count taken) (long n))
+          taken
+          (recur (conj taken
+                       (apply max-key
+                              (fn [id] (reduce min (map #(distance (pts id) (pts %)) taken)))
+                              (remove (set taken) ids)))))))))
+
+(defn assign-cultures
+  "Groups the realms into a handful of cultures, spatially.
+
+  Without this each realm is its own culture, and since a realm has one
+  town in it, no two places on the map ever share a language -- which
+  makes the naming a bag of unrelated syllables again, the exact thing
+  `allgo.procedural.naming` exists to avoid. Cultures are coarser than
+  realms on purpose: several neighbouring realms sound alike, and the
+  places where that changes are the interesting borders."
+  [{:keys [centers towns] :as island} {:keys [cultures]}]
+  (let [n (max 1 (long (or cultures (max 2 (quot (count towns) 3)))))
+        seeds (spread-picks island towns n)
+        [owner _] (nearest-source island seeds)]
+    (assoc island
+           :cultures (vec seeds)
+           :centers (mapv (fn [c] (assoc c :culture (get owner (:id c)))) centers))))
 
 (defn- centers->edge
   "Which mesh edge joins each pair of neighbouring cells."
@@ -261,12 +317,77 @@
            :edges (mapv (fn [e] (assoc e :road (get traffic (:id e) 0))) (:edges island))
            :roads (vec tree))))
 
+;; ---------------------------------------------------------------------------
+;; Names
+
+(defn- river-mouths
+  "Where each river meets the sea, and how much it carries when it gets
+  there.
+
+  A mouth is a corner that is coast or ocean with a river running into
+  it. Rivers have no identity of their own in the model -- there are
+  only edges carrying flow -- so the mouth is what stands in for one,
+  which is also how they are named in practice."
+  [{:keys [corners edges]}]
+  (let [flowing (filter #(pos? (long (:river % 0))) edges)
+        at (reduce (fn [m e]
+                     (reduce (fn [m v]
+                               (let [c (corners v)]
+                                 (if (or (:coast? c) (:ocean? c))
+                                   (update m v (fnil max 0) (long (:river e)))
+                                   m)))
+                             m
+                             (:corners e)))
+                   {}
+                   flowing)]
+    (->> at
+         (map (fn [[v flow]] {:mouth v :flow flow}))
+         (sort-by :flow >)
+         vec)))
+
+(defn assign-names
+  "One invented language per territory, and a name for everything that
+  has one.
+
+  A town is named out of its own realm's language, a realm out of its
+  capital's, and a river out of whichever realm owns the land at its
+  mouth. Names are keyed by the id of the thing named rather than drawn
+  from a running stream, so adding a town does not rename the rest of the
+  map."
+  [{:keys [centers towns cultures] :as island} {:keys [seed]}]
+  (let [seed (long (or seed 1))
+        langs (into {} (map (fn [c] [c (naming/language (+ (* 7919 seed) (long c)))]))
+                    cultures)
+        fallback (naming/language (+ (* 7919 seed) 104729))
+        ;; A place speaks the language of its culture, not of its realm.
+        lang-at (fn [id] (get langs (:culture (centers id)) fallback))
+        realms (into {} (map (fn [t] [t (naming/name-for (lang-at t) (+ 5000 (long t)))])) towns)
+        centers (mapv (fn [c]
+                        (cond-> c
+                          (:town? c) (assoc :name (naming/name-for (lang-at (:id c)) (:id c)))
+                          (:territory c) (assoc :realm (get realms (:territory c)))))
+                      centers)
+        rivers (mapv (fn [{:keys [mouth] :as r}]
+                       (let [owner (some #(when (:culture (centers %)) %)
+                                         (:touches ((:corners island) mouth)))]
+                         (assoc r :name (naming/name-for (if owner (lang-at owner) fallback)
+                                                         (+ 20011 (long mouth))))))
+                     (river-mouths island))]
+    (assoc island
+           :centers centers
+           :realms realms
+           :rivers rivers
+           :languages langs)))
+
 (defn populate
-  "Towns, then the roads between them, then who holds what."
+  "Towns, the roads between them, who holds what, and what it is all
+  called."
   ([island] (populate island {}))
   ([island opts]
    (let [opts (merge defaults opts)]
      (-> island
          (assign-towns opts)
          assign-roads
-         assign-territories))))
+         assign-territories
+         (assign-cultures opts)
+         (assign-names opts)))))

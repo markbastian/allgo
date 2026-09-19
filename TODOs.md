@@ -120,8 +120,17 @@ Removed from the list below, with where each one landed:
   looking for one — measured, border cells average an elevation of 0.36
   against 0.21 for interiors, and there is a test pinning it.
 
-  **Not implemented**: names, cultures, states, religions, population,
-  history. See below.
+  Names and cultures are in too — `allgo.procedural.naming` invents a
+  language and then draws names out of it, rather than drawing syllables
+  out of one shared bag. A language is a small phonology picked from a
+  much larger pool, so the family resemblance within one is a consequence
+  rather than an effect: if a language never drew `k`, none of its towns
+  have a `k` in them. Cultures are coarser than realms on purpose — a
+  realm holds one town, so a language per realm would mean no two places
+  on the map ever share one.
+
+  **Not implemented**: states as distinct from realms, religions,
+  population, history. See below.
 
 # Terrain Generation
 
@@ -138,17 +147,19 @@ territories** above. What is left in
 [Azgaar](https://azgaar.github.io/Fantasy-Map-Generator/) is the part
 that makes it a *fantasy* map rather than a map:
 
-## Names
+## States, religions and history
 
-The cheapest remaining win and the one that would change how the maps
-read. A Markov chain or syllable grammar over a seeded corpus, giving
-towns, regions and rivers names that belong to the same culture as their
-neighbours. Everything needed to attach them is already on the cells.
+Cultures and names are done. What is left in Azgaar is states as a layer
+distinct from the realms here (with capitals, diplomacy and borders that
+move), religions, population and a potted history run over all of it.
 
-## Cultures, states and history
+None of that is geometry. It is simulation on top of a map that already
+exists, which is a different project from the rest of this repository —
+worth saying out loud rather than leaving as an open item that looks
+like the others.
 
-Azgaar grows cultures from origin points, states from capitals, and
-religions from both, then runs a potted history over them. This is a
-large surface and none of it is geometry — it is simulation on top of a
-map that already exists, which is a different project from the rest of
-this repository.
+The one piece that *is* geometry and is still missing: rivers have names
+but no identity. They are edges carrying flow, and a river is named by
+its mouth standing in for it. Giving a river a body — tracing the main
+stem up the largest tributary at each fork — would let a river be
+labelled along its length and let a border follow one.

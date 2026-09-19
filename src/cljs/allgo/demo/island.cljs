@@ -31,6 +31,13 @@
                 Worth a look once: every other view is a property
                 attached to this.
 
+  Towns, roads, borders and names come from
+  `allgo.procedural.settlement`. The names are worth reading rather than
+  glancing at: each culture invents its own small phonology, so a run of
+  neighbouring towns share a sound and the places where that changes are
+  the cultural borders -- which do not line up with the political ones,
+  because a culture spans several realms.
+
   `noisy` is the one to toggle back and forth. It redraws rather than
   regenerates -- the paths are always there -- so the same island appears
   as polygons and then as a coastline, and nothing else about it moves.
@@ -62,6 +69,7 @@
        :seed 1
        :view "biome"
        :towns 14
+       :labels true
        :rivers true
        :roads true
        :outlines true
@@ -228,6 +236,23 @@
           (.beginPath ctx) (.arc ctx (sx x) (sy y) 4.5 0 (* 2 js/Math.PI)) (.fill ctx)
           (set! (.-fillStyle ctx) "rgb(250,240,212)")
           (.beginPath ctx) (.arc ctx (sx x) (sy y) 3.0 0 (* 2 js/Math.PI)) (.fill ctx)))
+      (when (and (.-labels controls) (seq (:towns m)))
+        (set! (.-font ctx) "10px ui-sans-serif, system-ui, sans-serif")
+        (set! (.-textAlign ctx) "center")
+        (set! (.-lineJoin ctx) "round")
+        (doseq [t (:towns m)]
+          (let [c (centers t)
+                [x y] (:point c)]
+            (when-let [nm (:name c)]
+              ;; Drawn twice: a dark stroke under a light fill, so a name
+              ;; stays readable over pale sand and dark forest alike
+              ;; without a box behind it.
+              (set! (.-strokeStyle ctx) "rgba(8,10,18,0.9)")
+              (set! (.-lineWidth ctx) 3)
+              (.strokeText ctx nm (sx x) (- (sy y) 7))
+              (set! (.-fillStyle ctx) "rgb(246,240,226)")
+              (.fillText ctx nm (sx x) (- (sy y) 7)))))
+        (set! (.-textAlign ctx) "left"))
       (let [land (remove :water? centers)
             lakes (count (filter :lake? centers))
             rivers (count (filter #(pos? (long (:river % 0))) edges))]
@@ -291,6 +316,7 @@
           (-> (.add controls "relax" 0 3 1) (.onFinishChange generate!))
           (-> (.add controls "towns" 0 30 1) (.onFinishChange generate!))
           (-> (.add controls "noisy") (.onChange render!))
+          (-> (.add controls "labels") (.onChange render!))
           (-> (.add controls "rivers") (.onChange render!))
           (-> (.add controls "roads") (.onChange render!))
           (-> (.add controls "outlines") (.onChange render!))
