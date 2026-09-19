@@ -16,6 +16,7 @@
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dungeon :as dungeon]
             [allgo.demo.dungeon-boids :as dungeon-boids]
+            [allgo.demo.erosion :as erosion]
             [allgo.demo.fire :as fire]
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
@@ -58,6 +59,7 @@
    "joints"   {:start joints/start!   :stop joints/stop!}
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
+   "erosion"  {:start erosion/start!  :stop erosion/stop!}
    "planet"   {:start planet/start!   :stop planet/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
@@ -86,11 +88,18 @@
           :el    el})))
 
 (defn- grouped
-  "`[[group items] ...]`, in the order the cards appear."
+  "`[[group items] ...]`, each group once, in the order it first appears.
+
+  Not `partition-by`, which only gathers cards that are already next to
+  each other: two \"Spatial Queries\" cards with a couple of robotics ones
+  between them came out as two runs under one name, so the picker drew
+  the heading twice and handed React the same key twice with it. Where a
+  card sits in the document is not something the group list should
+  depend on."
   [items]
-  (->> items
-       (partition-by :group)
-       (mapv (fn [run] [(:group (first run)) (vec run)]))))
+  (let [order (distinct (map :group items))
+        by-group (group-by :group items)]
+    (mapv (fn [g] [g (vec (by-group g))]) order)))
 
 (defn- matches?
   "Whether a demo answers to what has been typed.
@@ -157,8 +166,11 @@
               by-id   (into {} (map (juxt :id identity)) items)
               current (get by-id selected (first items))
               ;; Arrow keys walk what is on screen, not what exists, or
-              ;; they step into rows the filter has taken away.
-              visible (filterv #(matches? query %) items)
+              ;; they step into rows the filter has taken away -- and in
+              ;; the order it is on screen, which is the grouped order
+              ;; rather than the order the cards were declared in.
+              groups  (grouped (filterv #(matches? query %) items))
+              visible (into [] (mapcat second) groups)
               idx     (fn [id] (or (first (keep-indexed #(when (= (:id %2) id) %1) visible)) 0))
               focus!  (fn [i] (when (seq visible)
                                 (some-> (@nodes (mod i (count visible))) .focus)))
@@ -213,7 +225,7 @@
                (if (empty? visible)
                  [:p.demo-picker__empty "Nothing matches that."]
                  (doall
-                  (for [[group run] (grouped visible)]
+                  (for [[group run] groups]
                     ^{:key group}
                     ;; A listbox may only contain options and groups, so
                     ;; the block carries the role and the heading is left
