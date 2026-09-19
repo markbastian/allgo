@@ -268,12 +268,22 @@ html, body {
   border-radius: 14px;
   padding: 1rem;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  width: 512px;
+  width: calc(var(--viewport) + 2rem);
+}
+
+/* The tile is as large as the window allows rather than a fixed 480px.
+   Width and height both have a say because the tile is square and the
+   header above it is not free: 82vh leaves room for the title and the
+   picker on a laptop without the page scrolling, and the vw term takes
+   over on a narrow window. Every demo sizes its canvas or renderer from
+   the container through a ResizeObserver, so they all follow. */
+:root {
+  --viewport: clamp(320px, min(88vw, 82vh), 1024px);
 }
 
 .demo-viewport {
-  width: 480px;
-  height: 480px;
+  width: var(--viewport);
+  height: var(--viewport);
   border-radius: 8px;
   background: #000;
   position: relative;

@@ -29,7 +29,12 @@
         edges     (mapcat (fn [{:keys [points]}] (partition 2 1 (conj points (first points)))) triangles)]
     [:div
      [:div.demo-viewport
-      [:svg {:width width :height height}
+      ;; A viewBox rather than a fixed pixel size, so the drawing fills
+      ;; whatever the tile has become. Points stay in the 480-unit space
+      ;; they are generated in.
+      [:svg {:viewBox (str "0 0 " width " " height)
+             :width "100%" :height "100%"
+             :preserveAspectRatio "xMidYMid meet"}
        (doall (map-indexed (fn [i cell]
                              [:polygon {:key (str "cell-" i) :points (pts->str cell)
                                         :fill "none" :stroke "#3fa34d" :stroke-width 1}])

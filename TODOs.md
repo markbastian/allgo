@@ -155,14 +155,33 @@ Removed from the list below, with where each one landed:
   13.4s → 244ms. There is a test comparing the indexed result against the
   old linear scan, because an index bug would still produce a plausible
   triangulation — just not the Delaunay one.
+- **Diffusion-limited aggregation** — `allgo.procedural.dla`, with a
+  demo in `allgo.demo.dla`. Release a particle far from a seed, let it
+  wander, stick it where it first touches the cluster. The shape that
+  grows is dendritic, and nothing in the rule mentions branching: the
+  cluster shadows itself, so a walker is far likelier to meet a tip
+  sticking out than to find its way into a gap between two, and tips
+  outrun gaps.
 
-# Terrain Generation
+  The cluster is a *tree*, not a set of cells — every particle remembers
+  what it stuck to — and that is what makes it terrain rather than a
+  texture. A node carrying half the cluster behind it is a trunk and
+  should be high; a node with nothing behind it is a twig. Height is read
+  off the subtree size, so the ridge line follows the branching structure
+  rather than the geometry, then blurred and refined to give the skeleton
+  flanks.
 
-## Diffusion-Limited Aggregation (DLA)
+  This is the one generator here whose branching has a *direction*, out
+  from the trunk to the tips, which is what `allgo.procedural.fractal`
+  cannot produce at any setting.
 
-Particles move randomly until they stick to existing structures, naturally
-growing branching patterns that resemble organic mountain ridges.
-[1](https://www.youtube.com/watch?v=gsJHzBTPG0Y&t=568)
+  Two bounds make it finish rather than wander forever: walkers are born
+  on a circle just outside the cluster's reach, and abandoned if they
+  stray well past it — by symmetry a walker that far out is as likely to
+  return from anywhere else, so restarting loses nothing. And, as with
+  the triangulation, flat arrays rather than a set of `[x y]` vectors:
+  hashing those to answer "is this cell taken?" a few million times cost
+  six times the rest of the algorithm.
 
 # Map Generation
 

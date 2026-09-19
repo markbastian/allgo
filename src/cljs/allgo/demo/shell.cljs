@@ -14,6 +14,7 @@
             [allgo.demo.cave :as cave]
             [allgo.demo.cloth :as cloth]
             [allgo.demo.delaunay-viewer :as delaunay]
+            [allgo.demo.dla :as dla]
             [allgo.demo.dungeon :as dungeon]
             [allgo.demo.dungeon-boids :as dungeon-boids]
             [allgo.demo.erosion :as erosion]
@@ -62,6 +63,7 @@
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "erosion"  {:start erosion/start!  :stop erosion/stop!}
    "island"   {:start island/start!   :stop island/stop!}
+   "dla"      {:start dla/start!      :stop dla/stop!}
    "planet"   {:start planet/start!   :stop planet/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
