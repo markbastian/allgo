@@ -51,11 +51,13 @@
 
   ## Cost
 
-  `delaunay/triangulate` is Bowyer-Watson against a linear scan of every
-  triangle, so this is quadratic: about 80ms for a thousand points and
-  1.2 seconds for four thousand, measured on the JVM. That is what sets
-  the sizes `allgo.procedural.island` offers, and giving the
-  triangulation a spatial index is what would lift it."
+  `delaunay/triangulate` indexes its triangles by circumcircle, so it is
+  near enough linear and no longer the ceiling it was: 23ms for a
+  thousand points and 136ms for four thousand on the JVM, against 83ms
+  and 1.2 seconds when it scanned every triangle for every point. In a
+  browser the gap is wider still. What is left is this namespace's own
+  assembly, which is one pass over the triangles and is now the larger
+  half of building a mesh."
   (:require [allgo.geometry.delaunay :as delaunay]
             [clojure.math :as math]))
 

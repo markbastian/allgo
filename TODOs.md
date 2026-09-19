@@ -131,6 +131,28 @@ Removed from the list below, with where each one landed:
 
   **Not implemented**: states as distinct from realms, religions,
   population, history. See below.
+- **A spatial index for the triangulation** —
+  `allgo.geometry.delaunay` indexes triangles by the bounding box of
+  their circumcircle and looks only in the cell the new point falls in.
+  Exact rather than approximate: a circumcircle containing the point has
+  a box containing it, so every triangle the old linear scan would have
+  found is in that cell. No adjacency, no point location and no argument
+  about the cavity being connected — which is what the textbook fix needs
+  and where its bugs live.
+
+  Two things had to be measured rather than reasoned about. The threshold
+  for holding an oversized triangle aside is bad at both ends: too low
+  and ordinary triangles land in a list scanned on every insertion, too
+  high and the huge circumcircles near the super-triangle get filed into
+  thousands of cells each. And the first version used nested persistent
+  maps, which was a large win on the JVM and made a 500-point
+  triangulation *slower* in a browser than the scan it replaced. A flat
+  array with lazy deletion fixed that.
+
+  Browser, `triangulate` alone: 500 points 1193ms → 26ms, 4000 points
+  13.4s → 244ms. There is a test comparing the indexed result against the
+  old linear scan, because an index bug would still produce a plausible
+  triangulation — just not the Delaunay one.
 
 # Terrain Generation
 
@@ -163,3 +185,10 @@ but no identity. They are edges carrying flow, and a river is named by
 its mouth standing in for it. Giving a river a body — tracing the main
 stem up the largest tributary at each fork — would let a river be
 labelled along its length and let a border follow one.
+
+## Physics Engines
+
+- We should implement Sequential Impuse (SI) and Temporal Gauss-Seidel (TGS)
+- What other physical simulation techniques are we missing?
+- I'd like a demo where I get to shoot a 3D spherical projectile at a wall of bricks and have the physics be fast
+  - Would it make sense to use all three techniques (the above plus XPBD) to show differences?

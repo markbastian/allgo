@@ -45,6 +45,70 @@
     (testing "a polygon wholly outside clips away"
       (is (empty? (d/clip-polygon square [[20 20] [30 30]]))))))
 
+(defn- naive-triangulate
+  "Bowyer-Watson against a linear scan of every triangle: the
+  implementation `triangulate` used to be, kept here to check the
+  spatial index against.
+
+  The index rests on one claim -- that a circumcircle containing `p` has
+  a bounding box containing `p`, so looking in `p`'s grid cell finds
+  every triangle the scan would have found. If that were ever wrong the
+  result would still be a plausible triangulation, just not the Delaunay
+  one, and the property test below would mostly still pass. This is the
+  test that would not."
+  [points]
+  (let [sq (fn [x] (* x x))
+        d2 (fn [[x1 y1] [x2 y2]] (+ (sq (- x2 x1)) (sq (- y2 y1))))
+        circum (fn [[ax ay] [bx by] [cx cy]]
+                 (let [dd (* 2.0 (+ (* ax (- by cy)) (* bx (- cy ay)) (* cx (- ay by))))]
+                   (when-not (zero? dd)
+                     (let [a2 (+ (sq ax) (sq ay)) b2 (+ (sq bx) (sq by)) c2 (+ (sq cx) (sq cy))
+                           ux (/ (+ (* a2 (- by cy)) (* b2 (- cy ay)) (* c2 (- ay by))) dd)
+                           uy (/ (+ (* a2 (- cx bx)) (* b2 (- ax cx)) (* c2 (- bx ax))) dd)]
+                       {:center [ux uy] :radius-sq (d2 [ux uy] [ax ay])}))))
+        mk (fn [p1 p2 p3] {:points [p1 p2 p3] :circle (circum p1 p2 p3)})
+        inside? (fn [{:keys [circle]} p]
+                  (and circle (<= (d2 (:center circle) p) (:radius-sq circle))))
+        xs (map first points) ys (map second points)
+        mx (/ (+ (apply min xs) (apply max xs)) 2.0)
+        my (/ (+ (apply min ys) (apply max ys)) 2.0)
+        dm (* 20 (max 1.0 (- (apply max xs) (apply min xs)) (- (apply max ys) (apply min ys))))
+        st (mk [(- mx dm) (- my dm)] [mx (+ my dm)] [(+ mx dm) (- my dm)])
+        sp (set (:points st))
+        step (fn [tris p]
+               (let [{bad true ok false} (group-by #(inside? % p) tris)
+                     boundary (->> bad
+                                   (mapcat (fn [{[a b c] :points}] [#{a b} #{b c} #{c a}]))
+                                   frequencies
+                                   (keep (fn [[e n]] (when (= n 1) e))))]
+                 (into (vec ok)
+                       (map (fn [e] (let [[p1 p2] (vec e)] (mk p1 p2 p))))
+                       boundary)))]
+    (remove #(some sp (:points %)) (reduce step [st] points))))
+
+(defn- shape [tris] (set (map #(set (:points %)) tris)))
+
+(deftest index-matches-the-scan
+  (testing "the indexed triangulation is the one the linear scan gives"
+    (let [g (rng 4242)]
+      (doseq [n [4 9 30 120 260]]
+        (let [pts (points g n)]
+          (is (= (shape (naive-triangulate pts)) (shape (d/triangulate pts)))
+              (str "n=" n))))))
+
+  (testing "including the awkward inputs"
+    (doseq [[label pts] [["collinear" [[0.0 0.0] [1.0 1.0] [2.0 2.0] [3.0 3.0]]]
+                         ["repeated point" [[0.0 0.0] [1.0 0.0] [0.0 1.0] [1.0 0.0]]]
+                         ["exact lattice" (vec (for [i (range 7) j (range 7)]
+                                                 [(double i) (double j)]))]
+                         ["one triangle" [[0.0 0.0] [1.0 0.0] [0.0 1.0]]]]]
+      (is (= (shape (naive-triangulate pts)) (shape (d/triangulate pts))) label)))
+
+  (testing "fewer than three points make no triangles, and do not throw"
+    (is (empty? (d/triangulate [])))
+    (is (empty? (d/triangulate [[0.0 0.0]])))
+    (is (empty? (d/triangulate [[0.0 0.0] [1.0 0.0]])))))
+
 (deftest triangulation-is-delaunay
   ;; The defining property: no site lies strictly inside any triangle's
   ;; circumcircle.

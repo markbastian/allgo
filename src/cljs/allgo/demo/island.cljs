@@ -47,13 +47,11 @@
 
   ## A note on `points`
 
-  The triangulation underneath is quadratic, so this is where the cost
-  is, and `relax` multiplies it because each round is another
-  triangulation. Five hundred points and one round is about a second and
-  a half in a browser; the top of both sliders is several seconds. They
-  are capped well below where it stops being a demo, and the ceiling is
-  the triangulation rather than anything here -- see the note on cost in
-  `allgo.geometry.dual-mesh`."
+  `relax` multiplies the cost, because each round is another
+  triangulation of the whole point set. The triangulation itself used to
+  be quadratic and was the reason this demo topped out at twelve hundred
+  points; now that it indexes its triangles the sliders go further, and
+  the cost rises with the point count rather than with its square."
   (:require [allgo.geometry.dual-mesh :as dm]
             [allgo.procedural.island :as island]
             [allgo.procedural.settlement :as settlement]
@@ -64,8 +62,8 @@
 
 (def ^:private ^js controls
   #js {:shape "noise"
-       :points 500
-       :relax 1
+       :points 800
+       :relax 2
        :seed 1
        :view "biome"
        :towns 14
@@ -312,7 +310,7 @@
               (.onChange render!))
           (-> (.add controls "shape" #js ["noise" "radial"]) (.onFinishChange generate!))
           (-> (.add controls "seed" 1 60 1) (.onFinishChange generate!))
-          (-> (.add controls "points" 200 1200 100) (.onFinishChange generate!))
+          (-> (.add controls "points" 200 3000 100) (.onFinishChange generate!))
           (-> (.add controls "relax" 0 3 1) (.onFinishChange generate!))
           (-> (.add controls "towns" 0 30 1) (.onFinishChange generate!))
           (-> (.add controls "noisy") (.onChange render!))
