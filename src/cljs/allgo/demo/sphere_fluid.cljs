@@ -19,7 +19,30 @@
   * **Vorticity against tracer.** The vorticity is what is solved for; the
     tracer is a passive dye that shows what the velocity does to material,
     and stretches into filaments far finer than the vortices that make
-    them."
+    them.
+
+  ## Which frame you are watching from
+
+  The simulation is solved in the frame that turns with the sphere -- that
+  is what the Coriolis term is for -- so `co-rotating` is not a convenience
+  view, it is the frame the numbers are already in, and holding the sphere
+  still is what lets the weather be visible at all.
+
+  `inertial` turns the sphere at its real rate, and at any setting that
+  produces bands it will strobe. That is the honest answer rather than a
+  defect: the planet turns roughly thirty times while material crosses it
+  once, which is about Jupiter's ratio, and there is no way to show both
+  motions at one speed. `drifting` makes no physical claim -- it is a slow
+  turn so the far side comes round without dragging.
+
+  The `speed` control is the other half of this. The jets reach about 1.1
+  radians per unit time, which at full speed laps the planet in under five
+  seconds, so the default runs at a quarter of that. Nothing about the
+  physics changes with it; it only sets how much simulated time a frame
+  covers.
+
+  The polar axis is drawn because banded flow looks like stripes from
+  everywhere, and stripes say nothing about which way is up."
   (:require [allgo.demo.fps :as fps]
             [allgo.physics.sphere-fluid :as sf]
             ["lil-gui" :default GUI]
@@ -35,6 +58,14 @@
    ;; point of the method.
    :dt 0.02
    :steps-per-frame 1
+   ;; The jets reach about 1.1 radians per unit time, so at full speed
+   ;; they lap the planet in under five seconds of wall clock -- which
+   ;; reads as a blur rather than as weather. Slowed to a quarter by
+   ;; default; the control goes back up.
+   :speed 0.25
+   ;; Cosmetic drift, for seeing the far side without dragging: one turn
+   ;; every seventy seconds.
+   :drift 0.0015
    ;; nlon must be a power of two -- the longitude transform is radix two.
    :resolutions {"64 x 32" [32 64] "128 x 64" [64 128] "256 x 128" [128 256]}
    :default-resolution "128 x 64"
@@ -175,6 +206,31 @@
         (aset data (+ base 3) 255)))
     data))
 
+(defn- axis-object
+  "The rotation axis, drawn so that north is obvious.
+
+  Worth having even though the axis is fixed: once the flow is banded
+  every view looks like stripes, and stripes give no clue which way is up
+  or which pole you are over."
+  []
+  (let [group (THREE/Group.)
+        pts (js/Float32Array. #js [0.0 -1.55 0.0 0.0 1.55 0.0])
+        geo (doto (THREE/BufferGeometry.)
+              (.setAttribute "position" (THREE/BufferAttribute. pts 3)))
+        line (THREE/Line. geo (THREE/LineBasicMaterial.
+                               #js {:color 0x86b5ff :transparent true :opacity 0.7}))
+        north (THREE/Mesh. (THREE/ConeGeometry. 0.05 0.14 18)
+                           (THREE/MeshBasicMaterial. #js {:color 0xa9d0ff}))
+        south (THREE/Mesh. (THREE/SphereGeometry. 0.035 14 10)
+                           (THREE/MeshBasicMaterial.
+                            #js {:color 0x3f6ea8 :transparent true :opacity 0.8}))]
+    (.set (.-position north) 0.0 1.62 0.0)
+    (.set (.-position south) 0.0 -1.58 0.0)
+    (.add group line)
+    (.add group north)
+    (.add group south)
+    group))
+
 ;; ---------------------------------------------------------------------------
 ;; Scene
 
@@ -196,8 +252,9 @@
                           :viscosity 0.0
                           :advection "corrected"
                           :show "vorticity"
-                          :speed 1.0
-                          :spin true
+                          :speed (:speed config)
+                          :view "co-rotating"
+                          :axis true
                           :stir (fn [])
                           :reset (fn [])}]
     (set! (.-background scene) (THREE/Color. 0x05060d))
@@ -205,6 +262,9 @@
     (.setPixelRatio renderer (min 2 (or js/window.devicePixelRatio 1)))
     (.appendChild container (.-domElement renderer))
     (.add scene group)
+    (let [axis (axis-object)]
+      (.add scene axis)
+      (swap! state assoc :axis axis))
     (.set (.-position camera) 0 0.9 3.0)
     (let [orbit (OrbitControls. camera (.-domElement renderer))]
       (set! (.-enableDamping orbit) true)
@@ -228,8 +288,8 @@
                             (THREE/SphereGeometry. (:radius config) 96 64)
                             (THREE/MeshBasicMaterial. #js {:map texture}))]
                   (.add group mesh)
-                  (reset! state {:sim sim :mesh mesh :texture texture :data data
-                                 :nlat nlat :nlon nlon})))
+                  (swap! state merge {:sim sim :mesh mesh :texture texture :data data
+                                      :nlat nlat :nlon nlon})))
               (repaint! []
                 (let [{:keys [sim ^js data ^js texture nlat nlon]} @state
                       vorticity? (= (.-show controls) "vorticity")
@@ -253,9 +313,34 @@
                     (dotimes [_ (:steps-per-frame config)]
                       (swap! state update :sim sf/step! dt))
                     (repaint!)
-                    (when (.-spin controls)
-                      (set! (.-y (.-rotation group))
-                            (+ (.-y (.-rotation group)) 0.0015)))
+                    ;; Three frames to watch this from, and only one of
+                    ;; them is a physical statement.
+                    ;;
+                    ;; The simulation is solved in the *co-rotating*
+                    ;; frame -- that is what the Coriolis term is for --
+                    ;; so holding the sphere still is not a trick, it is
+                    ;; the frame the numbers are already in, and it is the
+                    ;; one that lets you see the weather.
+                    ;;
+                    ;; "inertial" turns the sphere at its actual rate,
+                    ;; which at these settings is thirty-four degrees a
+                    ;; frame. That it strobes is the honest answer rather
+                    ;; than a defect: the planet really does turn about
+                    ;; thirty times in the while it takes material to
+                    ;; cross it once, which is roughly Jupiter's ratio.
+                    ;;
+                    ;; "drifting" is neither, and makes no claim to be --
+                    ;; a slow turn so the far side comes round.
+                    (let [v (.-view controls)]
+                      (cond
+                        (= v "drifting")
+                        (set! (.-y (.-rotation group))
+                              (+ (.-y (.-rotation group)) (:drift config)))
+                        (= v "inertial")
+                        (set! (.-y (.-rotation group))
+                              (+ (.-y (.-rotation group))
+                                 (* (double (.-rotation controls)) dt)))
+                        :else nil))
                     (.update orbit)
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
@@ -287,14 +372,16 @@
                 (.onChange (fn [v] (swap! state assoc-in [:sim :viscosity] (double v)))))
             (-> (.add controls "advection" #js ["corrected" "semi-lagrangian"])
                 (.onChange (fn [v] (swap! state assoc-in [:sim :advection] (keyword v)))))
-            (-> (.add controls "speed" 0.1 3.0 0.1))
+            (-> (.add controls "speed" 0.05 2.0 0.05))
             (.add controls "stir")
             (.add controls "reset"))
           (doto view
             (-> (.add controls "show" #js ["vorticity" "tracer"]))
+            (-> (.add controls "view" #js ["co-rotating" "drifting" "inertial"]))
             (-> (.add controls "resolution" (clj->js (vec (keys (:resolutions config)))))
                 (.onChange rebuild!))
-            (.add controls "spin")))
+            (-> (.add controls "axis")
+                (.onChange (fn [v] (set! (.-visible (:axis @state)) v))))))
         {:start (fn [] (when-not @running?
                          (reset! running? true)
                          (on-resize)
