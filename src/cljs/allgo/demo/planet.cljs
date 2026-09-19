@@ -45,8 +45,18 @@
   anyway -- a planet built on `F2-F1` is made of cracked plates and looks
   like nothing summed noise can produce -- but the demo caps the octaves
   and switches the distortion off when one is chosen, or a rebuild would
-  take the best part of a minute."
+  take the best part of a minute.
+
+  Simplex is worth switching to and from on the same seed. It is the
+  isotropy that shows: Perlin noise is built by fading along each axis
+  and carries a faint squareness because of it, which on a planet reads
+  as coastlines that prefer to run north-south and east-west. The catch
+  is that it is also louder -- half again the standard deviation for the
+  same nominal range -- so the terrain comes out with more relief than
+  the multifractal parameters were tuned for rather than the same world
+  rendered more evenly."
   {"gradient (Perlin)" #(noise/gradient-basis {:seed %})
+   "simplex"           #(noise/simplex-basis {:seed %})
    "value"             #(noise/value-basis {:seed %})
    "sparse convolution" #(noise/sparse-convolution-basis {:seed %})
    "cellular F1"       #(cellular/f1 {:seed %})

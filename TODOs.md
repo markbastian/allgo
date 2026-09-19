@@ -5,7 +5,6 @@ Removed from the list below, with where each one landed:
 - **Perlin noise and fBm** — `allgo.procedural.noise` (value, gradient, 4D
   gradient, sparse convolution, domain warps) and `allgo.procedural.fractal`
   (fBm, turbulence, and the three multifractals).
-  *Simplex noise specifically is still not implemented* — see below.
 - **Midpoint displacement** — `allgo.procedural.terrain`, as diamond-square.
 - **Voronoi diagrams** — `allgo.geometry.voronoi3d` for the 3D cells, and
   `allgo.procedural.cellular` for Worley's F1 / F2 / F2-F1 bases and the
@@ -39,17 +38,37 @@ Removed from the list below, with where each one landed:
   *Thermal erosion is not implemented* — Musgrave, Kolb and Mace pair
   the two, and talus slippage is what would put screes under the cliffs
   this leaves bare.
+- **Simplex noise** — `allgo.procedural.noise/simplex-basis` and
+  `simplex-basis-4d`, sharing the permutation table, hashing and gradient
+  sets with the Perlin bases beside them. Four corners a sample instead of
+  eight, five instead of sixteen in 4D.
+
+  The corner counts oversell the speed: measured, it is about a sixth
+  faster in 3D and a fifth in 4D, not half and not three times. Finding
+  which simplex you are in is work gradient noise does not do, and in 4D
+  both bases are held back by the same thing — `hash4` and `grad4` take
+  five arguments, and Clojure's primitive interfaces stop at four, so
+  every corner boxes. Giving those an unboxed path would widen the gap
+  and speed up `gradient-basis-4d` too. *That is the obvious next
+  optimisation here.*
+
+  The real reason to reach for it is isotropy. Perlin noise fades along
+  each axis and carries a faint squareness; simplex sums radial bumps and
+  has no axis to align to. Selectable in the planet demo, where it reads
+  as coastlines that stop preferring the compass points.
+
+  Two things worth remembering. It is louder — standard deviation near
+  0.39 against gradient noise's 0.27 — so a multifractal tuned against
+  Perlin is not tuned against this. And there is no `:period`: tiling
+  comes from folding the integer lattice, and the simplex tiling is that
+  lattice sheared, so an axis-aligned repeat is not a symmetry of it.
+
+  On the patent that prompted the note here: it covered simplex in three
+  dimensions and up, and it has expired, so this is the classic
+  construction rather than OpenSimplex — which existed to route around
+  it. Worth confirming independently if it ever matters commercially.
 
 # Terrain Generation
-
-## Simplex Noise
-
-The one gradient noise not yet here. Perlin's later lattice: simplices
-instead of cubes, so the corner count grows as `n+1` rather than `2^n` and
-4D costs 5 gradients instead of 16. Worth it mainly for the higher
-dimensions, which `allgo.procedural.noise/gradient-basis-4d` currently pays
-full price for. Mind the patent history on the 3D+ variants; OpenSimplex is
-the usual answer.
 
 ## Diffusion-Limited Aggregation (DLA)
 

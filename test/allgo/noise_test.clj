@@ -203,3 +203,101 @@
     (testing "sample calls a basis and agrees with calling it directly"
       (doseq [[x y z] (points 200)]
         (is (== (n/sample g x y z) (g x y z)))))))
+
+(deftest simplex-basis-test
+  (let [s (n/simplex-basis {:seed 5})]
+
+    (testing "it stays inside the range a basis promises"
+      (let [vs (values s 20000)]
+        (is (every? #(<= -1.0 % 1.0) vs))
+        ;; And actually uses it -- a scaling constant set too low would
+        ;; pass the bound above while quietly making everything grey.
+        (is (> (reduce max vs) 0.7))
+        (is (< (reduce min vs) -0.7))))
+
+    (testing "and averages out to nothing much"
+      (let [vs (values s 20000)]
+        (is (< (abs (/ (reduce + vs) (count vs))) 0.02))))
+
+    (testing "it is continuous, which is what says the simplex choice is right"
+      ;; The one property a wrong corner selection cannot fake. Picking
+      ;; the wrong tetrahedron gives a field that is still bounded, still
+      ;; zero-mean and still looks like noise from a distance, but it
+      ;; steps at the boundary between one simplex and the next. Walking
+      ;; in small increments and bounding the jump catches that, and
+      ;; nothing else here would.
+      (let [step 1e-5
+            worst (reduce max 0.0
+                          (for [i (range 20000)]
+                            (let [x (* 0.017 i) y (* 0.023 i) z (* 0.029 i)]
+                              (abs (- (s x y z) (s (+ x step) y z))))))]
+        (is (< worst (* 20.0 step)) (str "jumped by " worst))))
+
+    (testing "it is continuous across the diagonals too"
+      ;; Where the offsets tie is exactly where the ranking has to break
+      ;; the tie consistently, so walk along x0 = y0 = z0 and across it.
+      (let [step 1e-6
+            worst (reduce max 0.0
+                          (for [i (range 5000)
+                                :let [t (* 0.001 i)]
+                                d [[step 0.0 0.0] [0.0 step 0.0] [0.0 0.0 step]]]
+                            (let [[dx dy dz] d]
+                              (abs (- (s t t t) (s (+ t dx) (+ t dy) (+ t dz)))))))]
+        (is (< worst (* 20.0 step)) (str "jumped by " worst))))
+
+    (testing "the same seed gives the same field, a different one does not"
+      (is (= (values s 500) (values (n/simplex-basis {:seed 5}) 500)))
+      (is (not= (values s 500) (values (n/simplex-basis {:seed 6}) 500))))
+
+    (testing "it is not the lattice noise it sits next to"
+      (is (not= (values s 500) (values (n/gradient-basis {:seed 5}) 500))))
+
+    (testing "it carries more amplitude than gradient noise, which fractals feel"
+      ;; Documented on the var, and worth pinning: a multifractal tuned
+      ;; against gradient noise is louder over this.
+      (let [sd (fn [vs] (let [m (/ (reduce + vs) (count vs))]
+                          (Math/sqrt (/ (reduce + (map #(let [d (- % m)] (* d d)) vs))
+                                        (count vs)))))]
+        (is (> (sd (values s 20000))
+               (* 1.3 (sd (values (n/gradient-basis {:seed 5}) 20000)))))))))
+
+(deftest simplex-basis-4d-test
+  (let [s (n/simplex-basis-4d {:seed 7})
+        pts (fn [n] (for [i (range n)]
+                      [(* 0.0137 i) (* 0.0271 i) (* 0.0313 i) (* 0.0179 i)]))
+        vals4 (fn [f n] (mapv (fn [[x y z w]] (f x y z w)) (pts n)))]
+
+    (testing "in range, and using it"
+      (let [vs (vals4 s 20000)]
+        (is (every? #(<= -1.0 % 1.0) vs))
+        (is (> (reduce max vs) 0.7))
+        (is (< (reduce min vs) -0.7))
+        (is (< (abs (/ (reduce + vs) (count vs))) 0.02))))
+
+    (testing "continuous in every one of the four"
+      (let [step 1e-5
+            worst (reduce max 0.0
+                          (for [i (range 6000)
+                                axis (range 4)]
+                            (let [p [(* 0.017 i) (* 0.023 i) (* 0.029 i) (* 0.019 i)]
+                                  q (update p axis + step)]
+                              (abs (- (apply s p) (apply s q))))))]
+        (is (< worst (* 20.0 step)) (str "jumped by " worst))))
+
+    (testing "holding the fourth coordinate gives an ordinary 3D basis"
+      ;; What the fourth dimension is for: a slice is a field in its own
+      ;; right, and neighbouring slices are neighbouring fields rather
+      ;; than unrelated ones.
+      (let [a (n/slice s 0.0)
+            b (n/slice s 0.0)
+            far (n/slice s 40.0)
+            near (n/slice s 0.001)
+            drift (fn [f g] (/ (reduce + (map #(abs (- %1 %2)) (values f 400) (values g 400)))
+                               400.0))]
+        (is (= (values a 400) (values b 400)))
+        (is (< (drift a near) 0.02) "a slice next door is nearly the same field")
+        (is (> (drift a far) 0.1) "a slice far away is a different one")))
+
+    (testing "seeds separate it"
+      (is (= (vals4 s 400) (vals4 (n/simplex-basis-4d {:seed 7}) 400)))
+      (is (not= (vals4 s 400) (vals4 (n/simplex-basis-4d {:seed 8}) 400))))))
