@@ -22,6 +22,10 @@
       elevation  breadth-first from the coast, so height is distance from
                  the sea. Mountains end up in the middle because that is
                  what being far from the sea means
+      watershed  follow the same pointer to the end and you have the
+                 stretch of coast this corner drains to; corners that
+                 agree are one basin, and the ridges between basins fall
+                 out of the disagreements
       rivers     follow the downhill pointer from a corner to the water
       moisture   breadth-first from rivers and lakes, decaying with each
                  step, so rain shadows and dry interiors happen on their
@@ -303,6 +307,58 @@
                corners)))
 
 ;; ---------------------------------------------------------------------------
+;; Watersheds
+
+(defn- assign-watersheds
+  "Which stretch of coast each corner's water eventually reaches.
+
+  Follow the downhill pointer far enough and you arrive at the sea. The
+  corner where you arrive names the basin, so two corners share a
+  watershed exactly when the rain landing on them ends up in the same
+  place -- which is a fact about the whole path between them and not
+  about how close together they are. Basins meet along ridges, and the
+  ridge is wherever two neighbouring corners give different answers.
+
+  mapgen2 relaxes this by re-reading every corner's downhill neighbour a
+  hundred times over and stopping when nothing moves. Walking each chain
+  once and remembering what the walk found gets the same answer without
+  the iteration count -- and it has somewhere to put the case that
+  iteration quietly rounds off, which is a pit with no outlet. A corner
+  that drains into one belongs to no basin, and says so with `nil`."
+  [{:keys [corners] :as island}]
+  (let [terminal
+        (fn [cache start]
+          ;; Walk down, remembering the path, then credit the whole path
+          ;; with whatever the walk ended in. Each corner is resolved
+          ;; once however many chains run through it.
+          (loop [v start path [] seen #{}]
+            (let [c (corners v)]
+              (cond
+                (contains? @cache v)
+                (let [t (@cache v)]
+                  (swap! cache into (zipmap path (repeat t)))
+                  t)
+
+                (or (:coast? c) (:ocean? c))
+                (do (swap! cache into (zipmap (conj path v) (repeat v))) v)
+
+                ;; A pit, or a loop the pointers fell into: no outlet, so
+                ;; no basin.
+                (or (= (:downslope c) v) (contains? seen v))
+                (do (swap! cache into (zipmap (conj path v) (repeat nil))) nil)
+
+                :else
+                (recur (:downslope c) (conj path v) (conj seen v))))))
+        cache (atom {})
+        sheds (mapv #(terminal cache (:id %)) corners)
+        sizes (frequencies (remove nil? sheds))]
+    (assoc island :corners
+           (mapv (fn [v]
+                   (let [w (sheds (:id v))]
+                     (assoc v :watershed w :watershed-size (get sizes w 0))))
+                 corners))))
+
+;; ---------------------------------------------------------------------------
 ;; Rivers
 
 (defn- edge-between [{:keys [corners edges]} a b]
@@ -468,7 +524,7 @@
 
   Every pass in order, each one reading what the last one wrote:
 
-      mesh -> water -> ocean -> elevation -> downslope
+      mesh -> water -> ocean -> elevation -> downslope -> watersheds
            -> rivers -> moisture -> biomes -> noisy edges
 
   Returns the `allgo.geometry.dual-mesh` value with the centers, corners
@@ -494,6 +550,7 @@
          redistribute-elevation
          assign-center-elevation
          assign-downslope
+         assign-watersheds
          (assign-rivers rng river-attempts)
          assign-moisture
          assign-biomes

@@ -20,6 +20,12 @@
                 a dome, because that is what distance from the coast is.
     `moisture`  distance from fresh water. Dry interiors and green
                 valleys, with nothing modelling either.
+    `territory` who holds what, from `allgo.procedural.settlement`. Worth
+                comparing against `elevation`: the borders sit on the
+                ridges, because territory is assigned by travel cost and
+                a ridge is expensive to cross from either side. Assigned
+                by distance instead this would be a Voronoi diagram of
+                the towns and would ignore the land entirely.
     `mesh`      the dual graph itself, with the Delaunay edges between
                 cell centres over the Voronoi cells they belong to.
                 Worth a look once: every other view is a property
@@ -43,6 +49,7 @@
   `allgo.geometry.dual-mesh`."
   (:require [allgo.geometry.dual-mesh :as dm]
             [allgo.procedural.island :as island]
+            [allgo.procedural.settlement :as settlement]
             ["lil-gui" :default GUI]))
 
 (def ^:private background "#0a0c16")
@@ -54,7 +61,9 @@
        :relax 1
        :seed 1
        :view "biome"
+       :towns 14
        :rivers true
+       :roads true
        :outlines true
        :noisy true})
 
@@ -80,7 +89,14 @@
 (def ^:private moisture-stops
   [[196 176 124] [176 186 120] [120 168 110] [70 140 120] [44 104 140]])
 
-(defn- cell-color [view c]
+(defn- territory-color
+  "A hue per town, spread by the golden ratio so that neighbouring ids do
+  not come out as neighbouring colours."
+  [idx]
+  (str "hsl(" (js/Math.round (* 360 (mod (* (inc idx) 0.61803398875) 1.0)))
+       ",42%,62%)"))
+
+(defn- cell-color [view c town-index]
   (case view
     "biome" (rgb (get island/biome-colors (:biome c) [255 0 255]))
     "water" (cond (:ocean? c) "rgb(58,72,120)"
@@ -93,6 +109,12 @@
     "moisture" (if (:ocean? c)
                  "rgb(44,54,92)"
                  (rgb (ramp moisture-stops (:moisture c))))
+    "territory" (cond
+                  (:ocean? c) "rgb(44,54,92)"
+                  (:lake? c) "rgb(64,118,170)"
+                  (:territory c) (territory-color (get town-index (:territory c) 0))
+                  ;; Land no town can walk to. An islet of its own.
+                  :else "rgb(96,99,104)")
     ;; The mesh view wants the cells muted, so the graph on top reads.
     (if (:water? c) "rgb(38,46,76)" "rgb(64,70,92)")))
 
@@ -108,6 +130,7 @@
           sy (fn [y] (+ pad (* side (/ (- y y0) (- y1 y0)))))
           view (.-view controls)
           mesh? (= view "mesh")
+          town-index (into {} (map-indexed (fn [i t] [t i])) (:towns m))
           noisy? (.-noisy controls)
           ;; A render-time switch, not a regeneration. The paths are
           ;; always computed; this only decides whether to follow them,
@@ -131,13 +154,13 @@
                     (.closePath ctx)))]
       (doseq [c centers]
         (ring! c)
-        (set! (.-fillStyle ctx) (cell-color view c))
+        (set! (.-fillStyle ctx) (cell-color view c town-index))
         (.fill ctx)
         ;; Filling and stroking the same path closes the hairline seams
         ;; antialiasing leaves between neighbouring polygons.
         (when (or (.-outlines controls) (not mesh?))
           (set! (.-strokeStyle ctx)
-                (if (.-outlines controls) "rgba(10,12,22,0.45)" (cell-color view c)))
+                (if (.-outlines controls) "rgba(10,12,22,0.45)" (cell-color view c town-index)))
           (set! (.-lineWidth ctx) 1)
           (.stroke ctx)))
       ;; The coastline, which is every edge with the sea on exactly one
@@ -175,6 +198,36 @@
                 :when (pos? flow)]
           (set! (.-lineWidth ctx) (min 4.0 (+ 0.9 (* 0.8 (js/Math.sqrt flow)))))
           (stroke-path (edge-path e))))
+      ;; Territory borders, where two towns' claims meet.
+      (when (= view "territory")
+        (set! (.-strokeStyle ctx) "rgba(16,16,26,0.9)")
+        (set! (.-lineWidth ctx) 1.8)
+        (set! (.-lineJoin ctx) "round")
+        (doseq [e edges
+                :let [[a b] (:centers e)]
+                :when (and a b
+                           (:territory (centers a))
+                           (:territory (centers b))
+                           (not= (:territory (centers a)) (:territory (centers b))))]
+          (stroke-path (edge-path e))))
+      (when (.-roads controls)
+        ;; Roads run centre to centre, because a road goes through a
+        ;; place rather than along its boundary -- which is exactly the
+        ;; other half of the dual from where the rivers are.
+        (set! (.-strokeStyle ctx) "rgb(226,206,160)")
+        (set! (.-lineCap ctx) "round")
+        (doseq [e edges
+                :let [traffic (long (:road e 0))
+                      [a b] (:centers e)]
+                :when (and (pos? traffic) a b)]
+          (set! (.-lineWidth ctx) (min 3.0 (+ 0.9 (* 0.5 traffic))))
+          (stroke-path [(:point (centers a)) (:point (centers b))])))
+      (doseq [t (:towns m)]
+        (let [[x y] (:point (centers t))]
+          (set! (.-fillStyle ctx) "rgb(24,22,18)")
+          (.beginPath ctx) (.arc ctx (sx x) (sy y) 4.5 0 (* 2 js/Math.PI)) (.fill ctx)
+          (set! (.-fillStyle ctx) "rgb(250,240,212)")
+          (.beginPath ctx) (.arc ctx (sx x) (sy y) 3.0 0 (* 2 js/Math.PI)) (.fill ctx)))
       (let [land (remove :water? centers)
             lakes (count (filter :lake? centers))
             rivers (count (filter #(pos? (long (:river % 0))) edges))]
@@ -184,7 +237,8 @@
                    (str (count centers) " cells  ·  "
                         (js/Math.round (* 100.0 (/ (count land) (count centers)))) "% land  ·  "
                         lakes (if (= 1 lakes) " lake" " lakes") "  ·  "
-                        rivers " river edges")
+                        rivers " river edges  ·  "
+                        (count (:towns m)) " towns")
                    10 (- h 8))))))
 
 (defn init! [^js container]
@@ -215,25 +269,30 @@
                           (let [x (swap! stream #(mod (* 16807 %) 2147483647))]
                             (/ (double x) 2147483647.0)))]
                 (swap! state assoc :map
-                       (island/generate {:points (long (.-points controls))
-                                         :relax (long (.-relax controls))
-                                         :shape (keyword (.-shape controls))
-                                         :seed seed
-                                         :rng rng})))
+                       (cond-> (island/generate {:points (long (.-points controls))
+                                                 :relax (long (.-relax controls))
+                                                 :shape (keyword (.-shape controls))
+                                                 :seed seed
+                                                 :rng rng})
+                         (pos? (long (.-towns controls)))
+                         (settlement/populate {:towns (long (.-towns controls))}))))
               (render!))]
       (.observe (js/ResizeObserver. resize!) container)
       (resize!)
       (generate!)
       (let [gui (GUI. #js {:container container})]
         (doto gui
-          (-> (.add controls "view" #js ["biome" "water" "elevation" "moisture" "mesh"])
+          (-> (.add controls "view"
+                    #js ["biome" "water" "elevation" "moisture" "territory" "mesh"])
               (.onChange render!))
           (-> (.add controls "shape" #js ["noise" "radial"]) (.onFinishChange generate!))
           (-> (.add controls "seed" 1 60 1) (.onFinishChange generate!))
           (-> (.add controls "points" 200 1200 100) (.onFinishChange generate!))
           (-> (.add controls "relax" 0 3 1) (.onFinishChange generate!))
+          (-> (.add controls "towns" 0 30 1) (.onFinishChange generate!))
           (-> (.add controls "noisy") (.onChange render!))
           (-> (.add controls "rivers") (.onChange render!))
+          (-> (.add controls "roads") (.onChange render!))
           (-> (.add controls "outlines") (.onChange render!))
           (.add #js {:regenerate generate!} "regenerate")))
       {:start (fn [] (resize!) (render!))

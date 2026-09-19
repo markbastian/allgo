@@ -85,12 +85,12 @@ Removed from the list below, with where each one landed:
   the part worth remembering: water runs along the boundaries between
   regions rather than through the middles, so a river is a border.
 
-  **Not implemented from mapgen2**: watersheds (the downhill pointer is
-  there, the grouping is not), and *noisy edges* — mapgen2 subdivides
-  each edge with midpoint displacement before drawing, which is most of
-  why its coastlines look organic rather than polygonal. Ours are
-  straight lines between corners. That is the obvious next improvement,
-  and it is a rendering change rather than a model one.
+  Watersheds and noisy edges are in too. Watersheds follow the downhill
+  pointer to the sea and name the basin by where it arrives, so the
+  ridges between basins fall out of the disagreements. Noisy edges draw
+  every boundary as a wandering path confined to the quad of the edge's
+  two corners and the two cell centres either side — stored on the edge,
+  so the cells sharing it still tile exactly.
 
   **Cost**: `delaunay/triangulate` is Bowyer-Watson against a linear scan,
   so the whole thing is quadratic. Rewriting its inner step as one pass
@@ -99,6 +99,29 @@ Removed from the list below, with where each one landed:
   a browser. *Giving the triangulation a spatial index is what would lift
   it*, and would speed up the Delaunay, TIN and boids-voronoi demos with
   it.
+- **Settlements, roads and territories** — `allgo.procedural.settlement`,
+  the human layer on top of a finished island, and the part of Azgaar's
+  generator that is still geography.
+
+  Three passes, each the same kind of traversal the physical map was
+  built from. Towns are scored for fresh water, low flat ground, a coast
+  and what the land grows, then taken best-first with a refusal rule —
+  without which every town lands in the same river valley, because the
+  second best site in it beats anywhere else. Roads are a minimum
+  spanning tree over the towns with each link routed by A*, so a road
+  bends round a mountain instead of going over it. Territories are one
+  multi-source Dijkstra outward from every town at once.
+
+  The territory pass is the reason to do this on a graph. Assigned by
+  *distance* it would be a Voronoi diagram of the towns and would know
+  nothing about the land; assigned by *travel cost*, a ridge pushes the
+  border away from itself because crossing it is dear from both sides.
+  Frontiers land on watersheds and mountain chains without anything ever
+  looking for one — measured, border cells average an elevation of 0.36
+  against 0.21 for interiors, and there is a test pinning it.
+
+  **Not implemented**: names, cultures, states, religions, population,
+  history. See below.
 
 # Terrain Generation
 
@@ -110,4 +133,22 @@ growing branching patterns that resemble organic mountain ridges.
 
 # Map Generation
 
-- https://azgaar.github.io/Fantasy-Map-Generator/
+Most of the geography layer is done — see **Settlements, roads and
+territories** above. What is left in
+[Azgaar](https://azgaar.github.io/Fantasy-Map-Generator/) is the part
+that makes it a *fantasy* map rather than a map:
+
+## Names
+
+The cheapest remaining win and the one that would change how the maps
+read. A Markov chain or syllable grammar over a seeded corpus, giving
+towns, regions and rivers names that belong to the same culture as their
+neighbours. Everything needed to attach them is already on the cells.
+
+## Cultures, states and history
+
+Azgaar grows cultures from origin points, states from capitals, and
+religions from both, then runs a potted history over them. This is a
+large surface and none of it is geometry — it is simulation on top of a
+map that already exists, which is a different project from the rest of
+this repository.
