@@ -68,7 +68,12 @@
    :lake-threshold 0.3
    ;; Attempts, as a fraction of the corner count. Most are rejected for
    ;; starting too low, too high, or in the sea.
-   :river-attempts 0.6})
+   :river-attempts 0.6
+   ;; Draw the cell boundaries as wandering paths rather than straight
+   ;; segments. On by default: a polygon map that looks polygonal is the
+   ;; thing everyone wants to fix first, and it changes nothing but where
+   ;; the ink goes. See `allgo.geometry.dual-mesh/noisy-edges`.
+   :noisy? true})
 
 ;; ---------------------------------------------------------------------------
 ;; Island shapes
@@ -464,14 +469,20 @@
   Every pass in order, each one reading what the last one wrote:
 
       mesh -> water -> ocean -> elevation -> downslope
-           -> rivers -> moisture -> biomes
+           -> rivers -> moisture -> biomes -> noisy edges
 
   Returns the `allgo.geometry.dual-mesh` value with the centers, corners
   and edges decorated -- so `dual-mesh/polygon` still draws a cell, and
-  everything a renderer wants is on the cell it belongs to."
+  everything a renderer wants is on the cell it belongs to.
+
+  Noisy edges come last, after every decision has been made, so that
+  turning them off changes the picture and not the map: the same seed
+  gives the same coastline either way, drawn straight or drawn
+  wandering."
   ([] (generate {}))
   ([opts]
-   (let [{:keys [points bounds relax shape seed rng lake-threshold river-attempts]
+   (let [{:keys [points bounds relax shape seed rng lake-threshold river-attempts
+                 noisy?]
           :as opts} (merge defaults opts)
          shape-fn (if (fn? shape)
                     shape
@@ -485,4 +496,5 @@
          assign-downslope
          (assign-rivers rng river-attempts)
          assign-moisture
-         assign-biomes))))
+         assign-biomes
+         (cond-> noisy? (dm/noisy-edges {:rng rng}))))))

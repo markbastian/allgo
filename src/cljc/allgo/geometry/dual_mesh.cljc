@@ -293,3 +293,144 @@
       (if (>= i (long rounds))
         m
         (recur (relax m) (inc i))))))
+
+;; ---------------------------------------------------------------------------
+;; Noisy edges
+;;
+;; A Voronoi cell drawn as its corners is a polygon, and a map made of
+;; them looks like one: the coastline is a sequence of straight lines
+;; meeting at angles, which is the one thing that says "generated" no
+;; matter how good the biomes are. Amit Patel's fix is to draw each
+;; boundary as a wandering path rather than a segment, and it is worth
+;; being clear that this changes nothing about the model -- the cells,
+;; the adjacency, the elevation and the rivers are all exactly as they
+;; were. It is a change to where the ink goes.
+;;
+;; The path for an edge is stored *on the edge*, which is the whole trick.
+;; Both cells sharing it draw the same points, so the two still tile with
+;; no gap and no overlap; noise generated per cell would tear them apart
+;; along every boundary.
+;;
+;; And each path is confined to the quadrilateral made by the edge's two
+;; corners and the two cell centres either side of it. A path that
+;; wandered outside would cross into a cell that is not one of the two it
+;; separates, and a coastline would start overlapping land two cells
+;; inland. The quad is the guarantee that it cannot.
+
+(defn- lerp [[ax ay] [bx by] t]
+  [(+ ax (* (double t) (- bx ax)))
+   (+ ay (* (double t) (- by ay)))])
+
+(defn- dist [[ax ay] [bx by]]
+  (let [dx (- (double bx) ax) dy (- (double by) ay)]
+    (math/sqrt (+ (* dx dx) (* dy dy)))))
+
+(defn- subdivide
+  "The points strictly between `a` and `c`, wandering inside quad
+  `a b c d`.
+
+  Recursive midpoint displacement, but displaced along the quad rather
+  than along a perpendicular: cut the quad into two smaller quads that
+  meet at an interior point `h`, keep `h`, and recurse into both. Because
+  every child quad is inside its parent, every point produced is inside
+  the original -- which is the containment the whole scheme relies on,
+  and it holds by construction rather than by clamping."
+  [a b c d min-length rng]
+  (if (or (< (dist a c) min-length) (< (dist b d) min-length))
+    []
+    (let [;; Where the quad gets cut. Away from the ends, or the wiggle
+          ;; degenerates into a kink at a corner.
+          p (+ 0.2 (* 0.6 (rng)))
+          q (+ 0.2 (* 0.6 (rng)))
+          e (lerp a d p)
+          f (lerp b c p)
+          g (lerp a b q)
+          i (lerp d c q)
+          h (lerp e f q)
+          ;; Allowed slightly past the ends, so the child quads are not
+          ;; strictly nested and the path does not visibly taper towards
+          ;; the middle of every edge.
+          s (+ 0.6 (* 0.8 (rng)))
+          t (+ 0.6 (* 0.8 (rng)))]
+      (-> []
+          (into (subdivide a (lerp b g s) h (lerp d e t) min-length rng))
+          (conj h)
+          (into (subdivide h (lerp c f s) c (lerp d i t) min-length rng))))))
+
+(defn- edge-path
+  "One edge's wandering path, from its first corner to its second."
+  [{:keys [centers corners]} {:keys [corners' centers' midpoint]} min-length rng]
+  (let [[v0 v1] corners'
+        [d0 d1] centers'
+        p0 (:point (corners v0))
+        p1 (:point (corners v1))]
+    (if (or (nil? d0) (nil? d1))
+      ;; An edge on the rim of the map has a cell on one side only, so
+      ;; there is no quad to stay inside. Left straight, which is right:
+      ;; it is the edge of the map rather than a feature of it.
+      [p0 p1]
+      (let [c0 (:point (centers d0))
+            c1 (:point (centers d1))
+            ;; Halfway to each centre: the quad is the cell pair's shared
+            ;; neighbourhood, not the cells themselves.
+            half (fn [v c] (lerp v c 0.5))
+            first-half (into [p0] (conj (subdivide p0 (half p0 c0) midpoint (half p0 c1)
+                                                   min-length rng)
+                                        midpoint))
+            second-half (into [p1] (conj (subdivide p1 (half p1 c1) midpoint (half p1 c0)
+                                                    min-length rng)
+                                         midpoint))]
+        ;; Both halves run outward from their corner to the midpoint, so
+        ;; the second is reversed and its duplicate midpoint dropped.
+        (into first-half (rest (reverse second-half)))))))
+
+(defn noisy-edges
+  "Gives every edge a `:path`: the points to draw it as, from its first
+  corner to its second.
+
+  `:min-length` is where the subdivision stops, and it is the only knob
+  that matters -- large and the edges stay nearly straight, small and the
+  point count doubles for detail finer than anyone will see. The default
+  is a fraction of the distance between neighbouring sites, so it follows
+  the mesh rather than the units it happens to be in.
+
+  Costs one pass over the edges and leaves everything else untouched, so
+  it can be applied at any point after the mesh is built."
+  ([mesh] (noisy-edges mesh {}))
+  ([{:keys [centers edges bounds] :as mesh} {:keys [min-length rng] :or {rng rand}}]
+   (let [min-length (double (or min-length (* 0.12 (spacing bounds (count centers)))))]
+     (assoc mesh :edges
+            (mapv (fn [e]
+                    (assoc e :path (edge-path mesh
+                                              {:corners' (:corners e)
+                                               :centers' (:centers e)
+                                               :midpoint (:midpoint e)}
+                                              min-length rng)))
+                  edges)))))
+
+(defn- edge-joining
+  "The edge of `center` whose two corners are `a` and `b`."
+  [{:keys [edges]} center a b]
+  (some (fn [eid]
+          (let [[v0 v1] (:corners (edges eid))]
+            (when (or (and (= v0 a) (= v1 b)) (and (= v0 b) (= v1 a))) eid)))
+        (:borders center)))
+
+(defn noisy-polygon
+  "The ring to draw `center` as, following each edge's `:path`.
+
+  Falls back to `polygon` where `noisy-edges` has not been applied, so a
+  renderer can call this unconditionally."
+  [{:keys [corners edges] :as mesh} center]
+  (let [cs (:corners center)]
+    (if (or (< (count cs) 3) (nil? (:path (edges (first (:borders center))))))
+      (polygon mesh center)
+      (into []
+            (mapcat (fn [[a b]]
+                      (if-let [eid (edge-joining mesh center a b)]
+                        (let [{:keys [path] [v0 _] :corners} (edges eid)]
+                          ;; Each segment drops its last point; the next
+                          ;; one starts there.
+                          (butlast (if (= v0 a) path (reverse path))))
+                        [(:point (corners a))])))
+            (partition 2 1 (conj (vec cs) (first cs)))))))

@@ -25,6 +25,13 @@
                 Worth a look once: every other view is a property
                 attached to this.
 
+  `noisy` is the one to toggle back and forth. It redraws rather than
+  regenerates -- the paths are always there -- so the same island appears
+  as polygons and then as a coastline, and nothing else about it moves.
+  Straight edges are what the model actually computed; the wandering ones
+  are the same boundaries with the ink allowed to wander inside the two
+  cells that share them.
+
   ## A note on `points`
 
   The triangulation underneath is quadratic, so this is where the cost
@@ -48,7 +55,8 @@
        :seed 1
        :view "biome"
        :rivers true
-       :outlines true})
+       :outlines true
+       :noisy true})
 
 (defn- rgb [[r g b]] (str "rgb(" r "," g "," b ")"))
 
@@ -100,8 +108,23 @@
           sy (fn [y] (+ pad (* side (/ (- y y0) (- y1 y0)))))
           view (.-view controls)
           mesh? (= view "mesh")
+          noisy? (.-noisy controls)
+          ;; A render-time switch, not a regeneration. The paths are
+          ;; always computed; this only decides whether to follow them,
+          ;; which makes the comparison instant and makes the point that
+          ;; nothing about the map changed.
+          edge-path (fn [e]
+                      (let [[v0 v1] (:corners e)]
+                        (if (and noisy? (:path e))
+                          (:path e)
+                          [(:point (corners v0)) (:point (corners v1))])))
+          stroke-path (fn [pts]
+                        (.beginPath ctx)
+                        (doseq [[i [x y]] (map-indexed vector pts)]
+                          (if (zero? i) (.moveTo ctx (sx x) (sy y)) (.lineTo ctx (sx x) (sy y))))
+                        (.stroke ctx))
           ring! (fn [c]
-                  (let [pts (dm/polygon m c)]
+                  (let [pts (if noisy? (dm/noisy-polygon m c) (dm/polygon m c))]
                     (.beginPath ctx)
                     (doseq [[i [x y]] (map-indexed vector pts)]
                       (if (zero? i) (.moveTo ctx (sx x) (sy y)) (.lineTo ctx (sx x) (sy y))))
@@ -126,11 +149,8 @@
         (doseq [e edges
                 :let [[a b] (:centers e)]
                 :when (and a b (not= (:ocean? (centers a)) (:ocean? (centers b))))]
-          (let [[v0 v1] (:corners e)
-                [ax ay] (:point (corners v0))
-                [bx by] (:point (corners v1))]
-            (.moveTo ctx (sx ax) (sy ay))
-            (.lineTo ctx (sx bx) (sy by))))
+          (doseq [[i [x y]] (map-indexed vector (edge-path e))]
+            (if (zero? i) (.moveTo ctx (sx x) (sy y)) (.lineTo ctx (sx x) (sy y)))))
         (.stroke ctx))
       (when mesh?
         ;; The Delaunay half of the dual: centre to centre across every
@@ -149,17 +169,12 @@
       (when (.-rivers controls)
         (set! (.-strokeStyle ctx) "rgb(74,126,196)")
         (set! (.-lineCap ctx) "round")
+        (set! (.-lineJoin ctx) "round")
         (doseq [e edges
                 :let [flow (long (:river e 0))]
                 :when (pos? flow)]
-          (let [[v0 v1] (:corners e)
-                [ax ay] (:point (corners v0))
-                [bx by] (:point (corners v1))]
-            (set! (.-lineWidth ctx) (min 4.0 (+ 0.9 (* 0.8 (js/Math.sqrt flow)))))
-            (.beginPath ctx)
-            (.moveTo ctx (sx ax) (sy ay))
-            (.lineTo ctx (sx bx) (sy by))
-            (.stroke ctx))))
+          (set! (.-lineWidth ctx) (min 4.0 (+ 0.9 (* 0.8 (js/Math.sqrt flow)))))
+          (stroke-path (edge-path e))))
       (let [land (remove :water? centers)
             lakes (count (filter :lake? centers))
             rivers (count (filter #(pos? (long (:river % 0))) edges))]
@@ -217,6 +232,7 @@
           (-> (.add controls "seed" 1 60 1) (.onFinishChange generate!))
           (-> (.add controls "points" 200 1200 100) (.onFinishChange generate!))
           (-> (.add controls "relax" 0 3 1) (.onFinishChange generate!))
+          (-> (.add controls "noisy") (.onChange render!))
           (-> (.add controls "rivers") (.onChange render!))
           (-> (.add controls "outlines") (.onChange render!))
           (.add #js {:regenerate generate!} "regenerate")))
