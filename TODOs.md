@@ -67,6 +67,38 @@ Removed from the list below, with where each one landed:
   dimensions and up, and it has expired, so this is the classic
   construction rather than OpenSimplex — which existed to route around
   it. Worth confirming independently if it ever matters commercially.
+- **Island generation** — `allgo.geometry.dual-mesh` and
+  `allgo.procedural.island`, following redblobgames' mapgen2, with a demo
+  in `allgo.demo.island`.
+
+  Split in two on purpose. The dual mesh is the general structure — the
+  Delaunay triangulation and its Voronoi dual as one graph, with centers,
+  corners and edges that reference each other by id — and it is what the
+  Voronoi entry above meant by primitives nothing was using yet. The
+  island namespace is the passes on top, and every one of them is a graph
+  traversal rather than a formula: ocean by flood fill inwards from the
+  border, elevation breadth-first from the coast, rivers by following a
+  downhill pointer, moisture breadth-first from fresh water. Only the
+  biome step is a lookup, on Whittaker's diagram.
+
+  Elevation and water live on the corners, biomes on the cells. That is
+  the part worth remembering: water runs along the boundaries between
+  regions rather than through the middles, so a river is a border.
+
+  **Not implemented from mapgen2**: watersheds (the downhill pointer is
+  there, the grouping is not), and *noisy edges* — mapgen2 subdivides
+  each edge with midpoint displacement before drawing, which is most of
+  why its coastlines look organic rather than polygonal. Ours are
+  straight lines between corners. That is the obvious next improvement,
+  and it is a rendering change rather than a model one.
+
+  **Cost**: `delaunay/triangulate` is Bowyer-Watson against a linear scan,
+  so the whole thing is quadratic. Rewriting its inner step as one pass
+  over transients roughly halved it, and it is still the ceiling — five
+  hundred points and one relaxation round is about a second and a half in
+  a browser. *Giving the triangulation a spatial index is what would lift
+  it*, and would speed up the Delaunay, TIN and boids-voronoi demos with
+  it.
 
 # Terrain Generation
 
@@ -75,18 +107,6 @@ Removed from the list below, with where each one landed:
 Particles move randomly until they stick to existing structures, naturally
 growing branching patterns that resemble organic mountain ridges.
 [1](https://www.youtube.com/watch?v=gsJHzBTPG0Y&t=568)
-
-# Island Generation
-
-- https://www.redblobgames.com/maps/mapgen2/
-- https://www.redblobgames.com/maps/mapgen4/
-- https://www.redblobgames.com/maps/terrain-from-noise/islands.html
-
-Distinct from what `allgo.procedural.planet` does: these build a *polygon*
-map -- Voronoi cells with elevation, moisture and biome assigned by graph
-traversal from the coast -- rather than sampling a continuous function.
-The polygon map is what makes rivers, watersheds and named regions
-tractable, which a pure noise field does not give you.
 
 # Map Generation
 

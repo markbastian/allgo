@@ -22,6 +22,7 @@
             [allgo.demo.fluid :as fluid]
             [allgo.demo.hex :as hex]
             [allgo.demo.human-arm :as human-arm]
+            [allgo.demo.island :as island]
             [allgo.demo.joints :as joints]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
@@ -60,6 +61,7 @@
    "spatial-hash" {:start spatial-hash/start! :stop spatial-hash/stop!}
    "terrain"  {:start terrain/start!  :stop terrain/stop!}
    "erosion"  {:start erosion/start!  :stop erosion/stop!}
+   "island"   {:start island/start!   :stop island/stop!}
    "planet"   {:start planet/start!   :stop planet/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
