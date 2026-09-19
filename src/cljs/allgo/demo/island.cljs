@@ -234,6 +234,24 @@
           (.beginPath ctx) (.arc ctx (sx x) (sy y) 4.5 0 (* 2 js/Math.PI)) (.fill ctx)
           (set! (.-fillStyle ctx) "rgb(250,240,212)")
           (.beginPath ctx) (.arc ctx (sx x) (sy y) 3.0 0 (* 2 js/Math.PI)) (.fill ctx)))
+      (when (.-labels controls)
+        (set! (.-textAlign ctx) "center")
+        (set! (.-lineJoin ctx) "round")
+        ;; The bigger rivers, named along their length -- which is what
+        ;; having a body rather than a scattering of flowing edges buys.
+        ;; Placed a third of the way up from the mouth, where a river is
+        ;; wide and the label has somewhere to sit.
+        (set! (.-font ctx) "italic 9px ui-serif, Georgia, serif")
+        (doseq [r (take 5 (:rivers m))
+                :let [path (:path r)]
+                :when (and (:name r) (>= (count path) 3))]
+          (let [v (nth path (quot (* 2 (count path)) 3))
+                [x y] (:point (corners v))]
+            (set! (.-strokeStyle ctx) "rgba(8,10,18,0.85)")
+            (set! (.-lineWidth ctx) 3)
+            (.strokeText ctx (:name r) (sx x) (sy y))
+            (set! (.-fillStyle ctx) "rgb(150,196,238)")
+            (.fillText ctx (:name r) (sx x) (sy y)))))
       (when (and (.-labels controls) (seq (:towns m)))
         (set! (.-font ctx) "10px ui-sans-serif, system-ui, sans-serif")
         (set! (.-textAlign ctx) "center")

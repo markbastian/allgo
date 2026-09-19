@@ -403,6 +403,70 @@
            :corners (mapv #(assoc % :river (corner-flow (:id %))) corners)
            :edges (mapv #(assoc % :river (edge-flow (:id %))) edges))))
 
+(defn- trace-rivers
+  "Gives each river a body: the run of corners from its source down to
+  the sea.
+
+  Flow alone does not make a river. `assign-rivers` leaves a count on
+  every corner and edge the water crossed, which is enough to draw blue
+  lines and not enough to say *this* river -- to name one along its
+  length, or to let a border follow it, something has to decide which of
+  the streams meeting at a fork is the same river as the one below.
+
+  The rule is the obvious one and the one cartographers use: at every
+  fork, the main stem is the tributary carrying more. Walking up from the
+  mouth and taking the larger branch each time gives the length a river
+  is measured by, and everything not taken is a tributary with a mouth of
+  its own further up.
+
+  A mouth is where flow reaches the coast, which is also what stands in
+  for the river's identity -- there is nothing else unique about it."
+  [{:keys [corners edges] :as island}]
+  (let [flowing? (fn [v] (pos? (long (:river (corners v) 0))))
+        ;; Who drains into whom. The downhill pointer runs the other way,
+        ;; so this is it reversed and restricted to corners with water in
+        ;; them.
+        upstream (reduce (fn [m v]
+                           (let [d (:downslope v)]
+                             (if (and (not= d (:id v)) (flowing? (:id v)))
+                               (update m d (fnil conj []) (:id v))
+                               m)))
+                         {}
+                         corners)
+        mouths (->> corners
+                    (filter (fn [c] (and (or (:coast? c) (:ocean? c))
+                                         (seq (get upstream (:id c))))))
+                    (map :id))
+        edge-of (fn [a b]
+                  (some (fn [eid] (let [[v0 v1] (:corners (edges eid))]
+                                    (when (or (= v0 b) (= v1 b)) eid)))
+                        (:protrudes (corners a))))
+        stems (->> mouths
+                   (map (fn [mouth]
+                          (loop [v mouth path (list mouth) seen #{mouth}]
+                            (let [ups (remove seen (get upstream v []))]
+                              (if (empty? ups)
+                                (let [path (vec path)]
+                                  {:mouth mouth
+                                   :flow (long (:river (corners mouth) 0))
+                                   :path path
+                                   :edges (into [] (keep (fn [[a b]] (edge-of a b)))
+                                                (partition 2 1 path))})
+                                ;; The fork rule: follow the fuller branch.
+                                (let [next-v (apply max-key
+                                                    #(long (:river (corners %) 0))
+                                                    ups)]
+                                  (recur next-v (conj path next-v) (conj seen next-v))))))))
+                   (sort-by :flow >)
+                   vec)
+        ;; So a renderer can pick one river out of the blue lines.
+        owner (reduce (fn [m [i r]] (reduce #(assoc %1 %2 i) m (:edges r)))
+                      {}
+                      (map-indexed vector stems))]
+    (assoc island
+           :rivers stems
+           :edges (mapv (fn [e] (assoc e :river-id (get owner (:id e)))) edges))))
+
 ;; ---------------------------------------------------------------------------
 ;; Moisture
 
@@ -525,7 +589,7 @@
   Every pass in order, each one reading what the last one wrote:
 
       mesh -> water -> ocean -> elevation -> downslope -> watersheds
-           -> rivers -> moisture -> biomes -> noisy edges
+           -> rivers -> river bodies -> moisture -> biomes -> noisy edges
 
   Returns the `allgo.geometry.dual-mesh` value with the centers, corners
   and edges decorated -- so `dual-mesh/polygon` still draws a cell, and
@@ -552,6 +616,7 @@
          assign-downslope
          assign-watersheds
          (assign-rivers rng river-attempts)
+         trace-rivers
          assign-moisture
          assign-biomes
          (cond-> noisy? (dm/noisy-edges {:rng rng}))))))

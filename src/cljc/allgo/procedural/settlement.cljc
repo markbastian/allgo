@@ -320,38 +320,14 @@
 ;; ---------------------------------------------------------------------------
 ;; Names
 
-(defn- river-mouths
-  "Where each river meets the sea, and how much it carries when it gets
-  there.
-
-  A mouth is a corner that is coast or ocean with a river running into
-  it. Rivers have no identity of their own in the model -- there are
-  only edges carrying flow -- so the mouth is what stands in for one,
-  which is also how they are named in practice."
-  [{:keys [corners edges]}]
-  (let [flowing (filter #(pos? (long (:river % 0))) edges)
-        at (reduce (fn [m e]
-                     (reduce (fn [m v]
-                               (let [c (corners v)]
-                                 (if (or (:coast? c) (:ocean? c))
-                                   (update m v (fnil max 0) (long (:river e)))
-                                   m)))
-                             m
-                             (:corners e)))
-                   {}
-                   flowing)]
-    (->> at
-         (map (fn [[v flow]] {:mouth v :flow flow}))
-         (sort-by :flow >)
-         vec)))
-
 (defn assign-names
   "One invented language per territory, and a name for everything that
   has one.
 
-  A town is named out of its own realm's language, a realm out of its
-  capital's, and a river out of whichever realm owns the land at its
-  mouth. Names are keyed by the id of the thing named rather than drawn
+  A town is named out of its own culture's language, a realm out of its
+  capital's, and a river out of whichever culture holds the land at its
+  mouth. The rivers themselves come from `allgo.procedural.island`, which
+  traced them; this only names them. Names are keyed by the id of the thing named rather than drawn
   from a running stream, so adding a town does not rename the rest of the
   map."
   [{:keys [centers towns cultures] :as island} {:keys [seed]}]
@@ -367,12 +343,16 @@
                           (:town? c) (assoc :name (naming/name-for (lang-at (:id c)) (:id c)))
                           (:territory c) (assoc :realm (get realms (:territory c)))))
                       centers)
+        ;; The rivers already have bodies; this only gives them names.
+        ;; A river is named out of the culture holding the land at its
+        ;; mouth, which is where anyone naming it would have been
+        ;; standing.
         rivers (mapv (fn [{:keys [mouth] :as r}]
                        (let [owner (some #(when (:culture (centers %)) %)
                                          (:touches ((:corners island) mouth)))]
                          (assoc r :name (naming/name-for (if owner (lang-at owner) fallback)
                                                          (+ 20011 (long mouth))))))
-                     (river-mouths island))]
+                     (:rivers island))]
     (assoc island
            :centers centers
            :realms realms

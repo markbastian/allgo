@@ -132,6 +132,68 @@
       ;; clear of a single stream.
       (is (> (reduce max 0 (map :river edges)) 2)))))
 
+(deftest river-body-test
+  (let [{:keys [rivers corners edges]} @world]
+
+    (testing "each river is a run of corners ending at its mouth"
+      (is (seq rivers))
+      (is (every? #(= (last (:path %)) (:mouth %)) rivers))
+      (is (every? #(>= (count (:path %)) 2) rivers))
+      (is (every? #(apply distinct? (:path %)) rivers)))
+
+    (testing "a river runs downhill the whole way"
+      ;; It is traced up the downhill pointers, so this is the check that
+      ;; the walk never took a branch that climbs -- which is what a
+      ;; tributary of the *next* river along would be.
+      (is (every? (fn [r] (apply >= (map #(:elevation (corners %)) (:path r))))
+                  rivers)))
+
+    (testing "it ends in the sea"
+      (is (every? (fn [r] (let [c (corners (:mouth r))]
+                            (or (:coast? c) (:ocean? c))))
+                  rivers)))
+
+    (testing "at every fork it took the fuller branch"
+      ;; The rule that decides which stream is the same river as the one
+      ;; below, and the whole reason a river has a length to be labelled
+      ;; along. Checked by looking at what else drained into each step and
+      ;; confirming nothing carried more than the branch taken.
+      (let [drains-into (reduce (fn [m v]
+                                  (let [d (:downslope v)]
+                                    (if (and (not= d (:id v))
+                                             (pos? (long (:river v 0))))
+                                      (update m d (fnil conj []) (:id v))
+                                      m)))
+                                {}
+                                corners)]
+        (is (every? (fn [r]
+                      (every? (fn [[up down]]
+                                (>= (long (:river (corners up) 0))
+                                    (reduce max 0 (map #(long (:river (corners %) 0))
+                                                       (get drains-into down [])))))
+                              (partition 2 1 (:path r))))
+                    rivers))))
+
+    (testing "the edges named are the ones along the path"
+      (is (every? (fn [r] (= (count (:edges r)) (dec (count (:path r))))) rivers))
+      (is (every? (fn [r]
+                    (every? (fn [[a b]]
+                              (some (fn [eid]
+                                      (= #{a b} (set (:corners (edges eid)))))
+                                    (:edges r)))
+                            (partition 2 1 (:path r))))
+                  rivers)))
+
+    (testing "rivers come largest first, and carry flow"
+      (is (apply >= (map :flow rivers)))
+      (is (every? #(pos? (:flow %)) rivers)))
+
+    (testing "a tagged edge belongs to the river that claims it"
+      (is (every? (fn [e]
+                    (or (nil? (:river-id e))
+                        (some #{(:id e)} (:edges (nth rivers (:river-id e))))))
+                  edges)))))
+
 (deftest biome-test
   (let [{:keys [centers]} @world]
 

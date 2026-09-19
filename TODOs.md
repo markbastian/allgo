@@ -48,9 +48,11 @@ Removed from the list below, with where each one landed:
   which simplex you are in is work gradient noise does not do, and in 4D
   both bases are held back by the same thing — `hash4` and `grad4` take
   five arguments, and Clojure's primitive interfaces stop at four, so
-  every corner boxes. Giving those an unboxed path would widen the gap
-  and speed up `gradient-basis-4d` too. *That is the obvious next
-  optimisation here.*
+  every corner boxes. *Measured, that explanation is wrong*: a
+  four-argument hasher with the dot product inlined buys 12%, not a
+  factor — the JIT is already removing most of those boxes. Not worth
+  the arithmetic it would inline into the two 4D bases, and the var's
+  docstring records the numbers so nobody tries it twice.
 
   The real reason to reach for it is isotropy. Perlin noise fades along
   each axis and carries a faint squareness; simplex sums radial bumps and
@@ -180,11 +182,12 @@ exists, which is a different project from the rest of this repository —
 worth saying out loud rather than leaving as an open item that looks
 like the others.
 
-The one piece that *is* geometry and is still missing: rivers have names
-but no identity. They are edges carrying flow, and a river is named by
-its mouth standing in for it. Giving a river a body — tracing the main
-stem up the largest tributary at each fork — would let a river be
-labelled along its length and let a border follow one.
+Rivers have bodies now. `allgo.procedural.island` traces each one from
+its mouth up the fuller branch at every fork, which is the rule that
+decides which stream is the same river as the one below, and gives it a
+length to be labelled along — the demo does. Catchment is a separate
+question and already answered separately, by the watershed pass: the
+stem is the river, the watershed is everything draining into it.
 
 ## Physics Engines
 
