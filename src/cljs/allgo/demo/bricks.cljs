@@ -34,8 +34,37 @@
   - **column** -- one brick on another, `courses` high. Nothing is asked
     of it but to hold still, which is why it is the sharpest test in
     here: see below.
+  - **jenga** -- three blocks to a level, `levels` of them, each level
+    turned ninety degrees from the one below. Wide enough not to lean
+    like the column does, so it asks a different question: whether a
+    solver can rest a block across two others and leave the third alone.
   - **wall** -- a running-bond wall, `rows` by `cols`. The stack test:
     how much weight a solver can hold up without letting the bottom sag.
+
+  ## Which of them can leave a Jenga tower alone
+
+  The tower is wide enough that none of them has trouble holding it up
+  -- twelve levels stands under all three, and only sequential impulse
+  gives out at eighteen. What it separates them on instead is quiet.
+  Twelve levels, thirty-six blocks, left alone for a minute:
+
+      sequential impulse   never sleeps, all 36 awake at 60s
+      tgs                  asleep at 2.2s
+      xpbd                 never sleeps, all 36 awake at 60s
+
+  Turn sleeping off and the reason is plain -- mean block speed once it
+  has stopped going anywhere, against the 0.01 m/s the sleep test wants:
+
+      sequential impulse   0.028
+      tgs                  0.007
+      xpbd                 0.009
+
+  XPBD misses by a hair and pays the full price, because an island
+  sleeps only when everything in it is still: eleven of thirty-six
+  blocks over the line is as bad as all of them. Sequential impulse is
+  not close. And TGS's two seconds are partly self-fulfilling -- it is
+  quiet enough early to freeze, and frozen is free, so the tremble that
+  would have built up over the next minute never does.
 
   ## How tall a column each of them will hold
 
@@ -120,6 +149,12 @@
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
 
 (def ^:private brick-size [0.9 0.45 0.45])
+
+(def ^:private jenga-size
+  "A Jenga block, at the real 5 : 1.67 : 1 -- three of them laid side by
+  side are exactly as wide as one is long, which is what lets the tower
+  turn ninety degrees every level and still sit square."
+  [1.2 0.24 0.4])
 (def ^:private ball-radius 0.35)
 
 (defn- floor []
@@ -159,6 +194,26 @@
      :span (* 0.5 cols bw)
      :height (* rows bh)}))
 
+(defmethod build-scene "jenga" [_ ^js c]
+  (let [levels (long (.-jengaLevels c))
+        [bl bh bw] jenga-size]
+    {:bodies (into [(floor)]
+                   (for [l (range levels)
+                         i [-1 0 1]
+                         ;; Turned ninety degrees from the level below.
+                         ;; A box's size carries its orientation here --
+                         ;; swapping the two horizontal extents is the
+                         ;; same body as turning it, and spares the
+                         ;; contacts a rotation they cannot use.
+                         :let [across? (odd? l)
+                               o (* i bw)
+                               y (+ (* 0.5 bh) (* l bh))]]
+                     (if across?
+                       (brick [o y 0.0] [bw bh bl])
+                       (brick [0.0 y o] [bl bh bw]))))
+     :span (* 0.5 bl)
+     :height (* levels bh)}))
+
 (defmethod build-scene "column" [_ ^js c]
   (let [courses (long (.-columnCourses c))
         [bw bh bd] brick-size]
@@ -170,7 +225,7 @@
 
 (def ^:private scene-names
   "In the order they are offered, simplest first."
-  ["column" "wall"])
+  ["column" "jenga" "wall"])
 
 (def ^:private ^js controls
   #js {:scene "wall"
@@ -178,6 +233,7 @@
        :rows 5
        :cols 4
        :columnCourses 8
+       :jengaLevels 12
        :iterations 8
        :substeps 4
        :friction 0.55
@@ -195,6 +251,7 @@
   with anybody else about what, say, a sensible height is; `label` is
   how it gets a plain name back in the GUI regardless."
   {"column" [["columnCourses" 2 40 1 "courses"]]
+   "jenga"  [["jengaLevels" 3 24 1 "levels"]]
    "wall"   [["rows" 3 16 1] ["cols" 3 16 1]]})
 
 (defn- projectile
@@ -208,16 +265,35 @@
                :density 7.8
                :vel [0.0 (* 0.04 speed) (- (double speed))]}))
 
-(defn- body-mesh [b]
-  (let [mat (THREE/MeshStandardMaterial.
-             #js {:color (if (rigid/static? b) 0x2b3040 0xb98d5f)
-                  :roughness 0.82 :metalness 0.05})]
-    (if (= :ball (:shape b))
-      (THREE/Mesh. (THREE/SphereGeometry. (:radius b) 20 14)
+(defn- clay
+  "The colour of brick `i`, jittered a little about the same clay.
+
+  Not decoration. A Jenga tower is blocks that fit exactly, so in one
+  flat colour it renders as a single brown slab and the thing the scene
+  is about -- that each level lies across the one below -- is invisible.
+  The step is the plastic constant's reciprocal, which is the
+  one-dimensional golden ratio's better-behaved cousin: consecutive
+  indices land about as far apart as they can, so no two bricks laid
+  next to each other come out the same shade, and it is arithmetic
+  rather than a random number, so a scene looks the same every time it
+  is built."
+  [^long i]
+  (let [jitter (- (mod (* (inc i) 0.7548776662) 1.0) 0.5)]
+    ;; Brightness only. Turning the hue as well looked like three kinds
+    ;; of brick rather than one kind badly fired, and the seams read
+    ;; just as clearly without it.
+    (.multiplyScalar (THREE/Color. 0xb98d5f) (+ 1.0 (* 0.45 jitter)))))
+
+(defn- body-mesh [i b]
+  (if (= :ball (:shape b))
+    (THREE/Mesh. (THREE/SphereGeometry. (:radius b) 20 14)
+                 (THREE/MeshStandardMaterial.
+                  #js {:color 0x9fb6d4 :roughness 0.35 :metalness 0.5}))
+    (let [[sx sy sz] (:size b)]
+      (THREE/Mesh. (THREE/BoxGeometry. sx sy sz)
                    (THREE/MeshStandardMaterial.
-                    #js {:color 0x9fb6d4 :roughness 0.35 :metalness 0.5}))
-      (let [[sx sy sz] (:size b)]
-        (THREE/Mesh. (THREE/BoxGeometry. sx sy sz) mat)))))
+                    #js {:color (if (rigid/static? b) (THREE/Color. 0x2b3040) (clay i))
+                         :roughness 0.82 :metalness 0.05})))))
 
 (defn init! [^js container]
   (let [scene (THREE/Scene.)
@@ -256,7 +332,7 @@
                   (.dispose (.-geometry m))
                   (.dispose (.-material m)))
                 (let [{:keys [bodies] :as built} (build-scene (.-scene controls) controls)
-                      meshes (mapv body-mesh bodies)]
+                      meshes (vec (map-indexed body-mesh bodies))]
                   (doseq [^js m meshes] (.add scene m))
                   (swap! state assoc
                          :world (solver/world bodies (solver-opts))
@@ -272,7 +348,7 @@
                  :restitution (double (.-restitution controls))})
               (fire! []
                 (let [b (projectile (.-speed controls) (:framing @state))
-                      m (body-mesh b)]
+                      m (body-mesh 0 b)]
                   (.add scene m)
                   (swap! state (fn [s]
                                  (-> s
