@@ -496,18 +496,26 @@ TGS stops toppling too, though it keeps its own floor, below.
   - **Multi-degree-of-freedom joints.** A shoulder is a ball joint;
     today it has to be spelled as three hinges with massless links
     between them.
-  - **Speed.** This is now the thing in the way. A step with ground
-    contacts, on the JVM:
+  - **Speed.** Five times better and still the thing in the way. A chain
+    lying on the floor, JVM, per step:
 
-        links    0      2      4      8     16
-        ms    0.71   4.92  12.19  29.85  154.1
+        links         0      2      4      8     16
+        contacts      4      6      8     16     52
+        before     0.71   4.92  12.19  29.85  154.1
+        now        0.67   2.03   4.24   6.87   31.35
 
-    A ragdoll is around sixteen links, so that is six frames a second
-    before a browser has been asked to run it. The algorithms are the
-    right ones; the arithmetic under them is not. Every 6x6 is a vector
-    of vectors, and `inverse-mass-matrix` rebuilds every link transform
-    and every pose once per column -- (n+6) times a step, for data that
-    depends only on where the joints are.
+    The structural part is done: a contact used to cost a whole inverse
+    inertia matrix, which cost `n + 6` runs of the articulated body
+    algorithm, and is now three O(n) impulse responses. Per-configuration
+    data is built once a step rather than once per matrix column.
+
+    What is left is the arithmetic. Every 6x6 is a vector of vectors and
+    every spatial vector six boxed doubles, so a settled sixteen-link
+    step allocates on the order of fifty thousand of them. Primitive
+    doubles, as `allgo.physics.solver` did for its contact solve. A
+    ragdoll is around eleven links, so this is roughly fifteen
+    milliseconds a step on the JVM today and several times that in a
+    browser -- watchable, not smooth.
 
   - **A ragdoll demo**, which is what all of the above is for.
 - **Continuous collision detection.** Half done. Speculative contacts

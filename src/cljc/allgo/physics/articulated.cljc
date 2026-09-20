@@ -58,12 +58,19 @@
   and please take this impulse -- and neither has an obvious answer for
   a body whose motion is described by joint angles.
 
-  Both come out of `H^-1`, the generalised inverse inertia, which the
-  articulated body algorithm hands over a column at a time: nothing
-  moving, no gravity, one unit of generalised force, and the
-  accelerations that result *are* that column. With a Jacobian for the
-  contact point, `1 / (d^T J H^-1 J^T d)` is the mass felt there and
-  `H^-1 J^T d` is what an impulse does to the joint rates.
+  Both come out of the articulated body algorithm run with the velocity
+  terms taken out. An impulse is a force with no duration, so nothing
+  has time to contribute a velocity product and the bias forces are the
+  impulse itself; the articulated inertias are the ones already built
+  for this configuration. What is left is an inward walk from the body
+  that was hit to the root and an outward sweep back, which is linear in
+  the links -- `impulse-delta`.
+
+  `inverse-mass-matrix` says the same thing as a whole matrix, and is
+  kept because it can be checked against inverse dynamics and so carries
+  the evidence over to the fast path. It is not what runs: it takes
+  `n + 6` runs of the full algorithm to build, and that was, measured,
+  the entire cost of a contact -- 33ms of a 34ms solve on sixteen links.
 
   That number is the interesting one. A hand on the end of an
   outstretched arm is light; the same hand with the arm folded against
@@ -99,18 +106,27 @@
 
   ## What it costs
 
-  More than it should. A step with ground contacts, on the JVM:
+  Still more than it should. A chain lying on the floor, JVM, per step:
 
-      links    0      2      4      8     16
-      ms    0.71   4.92  12.19  29.85  154.1
+      links         0      2      4      8     16
+      contacts      4      6      8     16     52
+      before     0.71   4.92  12.19  29.85  154.1
+      now        0.67   2.03   4.24   6.87   31.35
 
-  A ragdoll is around sixteen, so this is six frames a second before a
-  browser has been asked to run it. The algorithms are the right ones --
-  the articulated body algorithm is linear in the links -- and the cost
-  is all in the arithmetic under them: every 6x6 here is a vector of
-  vectors, and `inverse-mass-matrix` rebuilds every link transform and
-  every pose once per column. That is the same fix `allgo.physics.contact`
-  wants and for the same reason.
+  Five times better and not yet enough. What was fixed was structural: a
+  contact cost a whole inverse inertia matrix, which cost `n + 6` runs
+  of the articulated body algorithm, and it is now three O(n) impulse
+  responses. The per-configuration data -- link transforms, poses,
+  articulated inertias -- is built once a step instead of once per
+  matrix column, and the inward walk visits only the path from the body
+  that was hit to the root.
+
+  What is left is not structural. Every 6x6 here is a vector of vectors
+  and every spatial vector a vector of six boxed doubles, so a step of a
+  settled sixteen-link chain allocates on the order of fifty thousand of
+  them. That is the same treatment `allgo.physics.solver` gave its
+  contact solve -- primitive doubles, no allocation in the inner loop --
+  and the same one `allgo.physics.contact` is still waiting for.
 
   ## Spatial vectors
 
@@ -310,6 +326,10 @@
           (let [s (subspace link)]
             {:xup (lin/mat-mul (transform (joint-transform link x))
                                (transform (:origin link)))
+             ;; Kept rather than taken again: every inward pass, of
+             ;; which there are now several a step, wants it.
+             :xt (lin/transpose (lin/mat-mul (transform (joint-transform link x))
+                                             (transform (:origin link))))
              :s s
              :i (spatial-inertia (:mass link) (:com link) (:inertia link))
              :parent (long (:parent link))}))
@@ -420,6 +440,44 @@
   [a b]
   (mapv (fn [ai] (mapv (fn [bj] (* (double ai) (double bj))) b)) a))
 
+(defn- articulated-inertias
+  "Each joint's articulated inertia and the two numbers taken off it,
+  plus the root's.
+
+  `IA` is what everything beyond a joint weighs given that its own
+  joints are free to move; `U = IA S` and `d = S^T U` project that onto
+  the joint's own axis, and `ia-free` is `IA` with the axis divided out
+  -- what the subtree presents to the link above once the joint between
+  them has been allowed to give.
+
+  None of it depends on how fast anything is going or on what is pushing
+  it, only on where the joints are. That is what lets one build serve
+  both the step's accelerations and every contact impulse asked about
+  afterwards, and it is the difference between a contact costing O(n)
+  and costing a whole inverse inertia matrix."
+  [model ls]
+  (let [n (count ls)
+        root (base model)]
+    (reduce
+     (fn [{:keys [links ia0] :as acc} i]
+       (let [{:keys [xup xt parent]} (nth ls i)
+             s (:s (nth ls i))
+             ia (:ia (nth links i))
+             u (lin/mat-vec ia s)
+             d (reduce + (map * s u))
+             links (-> links (assoc-in [i :u] u) (assoc-in [i :d] d))]
+         (if (< (abs d) 1e-12)
+           (assoc acc :links links)
+           (let [ia' (lin/mat-sub ia (lin/mat-scale (outer u u) (/ 1.0 d)))
+                 links (assoc-in links [i :ia-free] ia')
+                 up (lin/mat-mul xt (lin/mat-mul ia' xup))]
+             (if (neg? (long parent))
+               {:links links :ia0 (when ia0 (lin/mat-add ia0 up))}
+               {:links (update-in links [parent :ia] #(lin/mat-add % up)) :ia0 ia0})))))
+     {:links (mapv (fn [l] {:ia (:i l)}) ls)
+      :ia0 (when root (spatial-inertia (:mass root) (:com root) (:inertia root)))}
+     (reverse (range n)))))
+
 (defn forward-dynamics
   "The accelerations that torques `tau` produce, in O(n).
 
@@ -445,8 +503,9 @@
   bolted case is the same equation with the answer already known."
   ([model q-vec qd tau] (forward-dynamics model q-vec qd tau nil))
   ([model q-vec qd tau {gravity :gravity root-state :base
-                        ext :external root-force :base-force}]
-   (let [ls (links model q-vec)
+                        ext :external root-force :base-force
+                        given-ls :ls given-ai :ai}]
+   (let [ls (or given-ls (links model q-vec))
          n (count ls)
          root (base model)
          ;; Everything is computed in a frame falling at `gravity`, where
@@ -468,6 +527,10 @@
                   [0.0 0.0 0.0 (double gx) (double gy) (double gz)])
          v0 (if root (vec (or (:vel root-state) (repeat 6 0.0))) (vec (repeat 6 0.0)))
          root-i (when root (spatial-inertia (:mass root) (:com root) (:inertia root)))
+         ;; What every joint weighs from above, which depends only on
+         ;; where the joints are. Handed in when the caller has already
+         ;; built it for this configuration.
+         ai (or given-ai (articulated-inertias model ls))
          ;; Pass one, outward: velocity, the acceleration that velocity
          ;; alone implies, and the force needed to hold the link on it.
          pass1 (reduce
@@ -485,7 +548,6 @@
                         f (when ext (nth ext i nil))]
                     (conj acc {:v vi
                                :c (lin/mat-vec (crm vi) vj)
-                               :ia inertia
                                :pa (let [bias (lin/mat-vec (crf vi)
                                                            (lin/mat-vec inertia vi))]
                                      (if f (mapv - bias f) bias))})))
@@ -494,34 +556,24 @@
          ;; Pass two, inward: what the subtree beyond each joint looks
          ;; like to the link above it, and what the whole of it looks
          ;; like to the root.
+         ;; Pass two, inward: the bias forces only. The inertias they
+         ;; ride on were built once, above.
          pass2 (reduce
-                (fn [{:keys [links ia0 pa0] :as acc} i]
-                  (let [{:keys [xup s parent]} (nth ls i)
-                        {:keys [ia pa c]} (nth links i)
-                        u (lin/mat-vec ia s)
-                        d (reduce + (map * s u))
+                (fn [{:keys [links pa0] :as acc} i]
+                  (let [{:keys [s parent xt]} (nth ls i)
+                        {:keys [pa c]} (nth links i)
+                        {:keys [u d ia-free]} (nth (:links ai) i)
                         uu (- (double (nth tau i)) (reduce + (map * s pa)))
-                        acc (assoc acc :links (-> links
-                                                  (assoc-in [i :u] u)
-                                                  (assoc-in [i :d] d)
-                                                  (assoc-in [i :uu] uu)))]
-                    (if (< (abs d) 1e-12)
+                        acc (assoc-in acc [:links i :uu] uu)]
+                    (if (< (abs (double d)) 1e-12)
                       acc
-                      (let [ia' (lin/mat-sub ia (lin/mat-scale (outer u u) (/ 1.0 d)))
-                            pa' (mapv + pa (lin/mat-vec ia' c) (scaled u (/ uu d)))
-                            xt (lin/transpose xup)
-                            up-i (lin/mat-mul xt (lin/mat-mul ia' xup))
+                      (let [pa' (mapv + pa (lin/mat-vec ia-free c)
+                                      (scaled u (/ uu (double d))))
                             up-p (lin/mat-vec xt pa')]
-                        (if (neg? parent)
-                          (assoc acc
-                                 :ia0 (when ia0 (lin/mat-add ia0 up-i))
-                                 :pa0 (when pa0 (mapv + pa0 up-p)))
-                          (update acc :links
-                                  #(-> %
-                                       (update-in [parent :ia] (fn [m] (lin/mat-add m up-i)))
-                                       (update-in [parent :pa] (fn [v] (mapv + v up-p))))))))))
+                        (if (neg? (long parent))
+                          (assoc acc :pa0 (when pa0 (mapv + pa0 up-p)))
+                          (update-in acc [:links parent :pa] #(mapv + % up-p)))))))
                 {:links pass1
-                 :ia0 root-i
                  :pa0 (when root
                         (let [bias (lin/mat-vec (crf v0) (lin/mat-vec root-i v0))]
                           (if root-force (mapv - bias root-force) bias)))}
@@ -529,7 +581,7 @@
          solved (:links pass2)
          ;; The root, if it is free: force-free in the falling frame.
          a0 (if root
-              (let [m (:ia0 pass2)
+              (let [m (:ia0 ai)
                     ;; Symmetric by construction and not quite by
                     ;; arithmetic, after a chain of congruences. Cholesky
                     ;; wants it to be, and averaging costs nothing.
@@ -540,8 +592,9 @@
          out (reduce
               (fn [{:keys [a] :as acc} i]
                 (let [{:keys [xup s parent]} (nth ls i)
-                      {:keys [c u d uu]} (nth solved i)
-                      ap (if (neg? parent) a0 (nth a parent))
+                      {:keys [c uu]} (nth solved i)
+                      {:keys [u d]} (nth (:links ai) i)
+                      ap (if (neg? (long parent)) a0 (nth a parent))
                       a' (mapv + (lin/mat-vec xup ap) c)
                       qddi (if (< (abs (double d)) 1e-12)
                              0.0
@@ -559,7 +612,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Moving it
 
-(declare solve-contacts contacts-with velocity with-velocity)
+(declare solve-contacts contacts-with velocity with-velocity poses)
 
 (defn- advance-positions
   "Move by whatever the velocities now are."
@@ -616,17 +669,26 @@
    (let [root (base model)
          b (:base state)
          tau (or tau (vec (repeat (dof model) 0.0)))
+         ;; Where everything is, computed once and handed to every pass
+         ;; that needs it. It depends only on `q` and the root's pose,
+         ;; neither of which changes until the very end of the step.
+         ls (links model q)
+         frames (poses model q b)
          {:keys [qdd base-acc]} (forward-dynamics model q qd tau
-                                                  (cond-> opts root (assoc :base b)))
+                                                  (cond-> (assoc opts :ls ls)
+                                                    root (assoc :base b)))
          accel (if root (vec (concat base-acc qdd)) (vec qdd))
          moving (with-velocity model state
                   (mapv (fn [a c] (+ (double a) (* dt (double c))))
                         (velocity model state)
                         accel))
          cs (or contacts
-                (when (seq obstacles) (contacts-with model q b obstacles)))]
+                (when (seq obstacles) (contacts-with model q b obstacles frames)))]
      (advance-positions model
-                        (if (seq cs) (solve-contacts model moving cs dt opts) moving)
+                        (if (seq cs)
+                          (solve-contacts model moving cs dt
+                                          (assoc opts :ls ls :frames frames))
+                          moving)
                         dt))))
 
 ;; ---------------------------------------------------------------------------
@@ -740,11 +802,16 @@
     [(vec (repeat 6 0.0)) (vec u)]))
 
 (defn frame-of
-  "Where body `i` is, in world terms. `-1` is the free root itself."
-  [model q-vec root-state i]
-  (if (neg? (long i))
-    {:rot (or (:rot root-state) q/identity-q) :pos (or (:pos root-state) v/zero)}
-    (nth (poses model q-vec root-state) i)))
+  "Where body `i` is, in world terms. `-1` is the free root itself.
+
+  Given `frames` -- an already-computed `poses` -- it reads from those
+  instead of walking the tree again, which is what a caller asking about
+  several bodies at the same configuration should do."
+  ([model q-vec root-state i] (frame-of model q-vec root-state i nil))
+  ([model q-vec root-state i frames]
+   (if (neg? (long i))
+     {:rot (or (:rot root-state) q/identity-q) :pos (or (:pos root-state) v/zero)}
+     (nth (or frames (poses model q-vec root-state)) i))))
 
 (defn- velocity-at
   "The world velocity of the point of body `i` at `p`, given every body's
@@ -768,6 +835,16 @@
         vels (spatial-velocities ls v0 (:qd state))]
     (velocity-at vels v0 (frame-of model q-vec root-state i) i p)))
 
+(defn- jacobian*
+  "The Jacobian, given the per-configuration data already computed."
+  [model ls frame i p]
+  (let [n (generalised-dof model)
+        column (fn [j]
+                 (let [u (assoc (vec (repeat n 0.0)) j 1.0)
+                       [v0 qd] (split model u)]
+                   (velocity-at (spatial-velocities ls v0 qd) v0 frame i p)))]
+    (lin/transpose (mapv column (range n)))))
+
 (defn point-jacobian
   "The 3 by `generalised-dof` matrix taking a generalised velocity to the
   world velocity of the point of link `i` at `p`.
@@ -778,15 +855,10 @@
   velocity recursion per column where a purpose-built one would walk the
   path from the root once. At a ragdoll's twenty-odd degrees of freedom
   the difference is not worth the second implementation to get wrong."
-  [model q-vec root-state i p]
-  (let [ls (links model q-vec)
-        n (generalised-dof model)
-        frame (frame-of model q-vec root-state i)
-        column (fn [j]
-                 (let [u (assoc (vec (repeat n 0.0)) j 1.0)
-                       [v0 qd] (split model u)]
-                   (velocity-at (spatial-velocities ls v0 qd) v0 frame i p)))]
-    (lin/transpose (mapv column (range n)))))
+  ([model q-vec root-state i p]
+   (jacobian* model (links model q-vec) (frame-of model q-vec root-state i) i p))
+  ([model q-vec root-state i p ls frames]
+   (jacobian* model ls (frame-of model q-vec root-state i frames) i p)))
 
 (defn inverse-mass-matrix
   "`H^-1`, the generalised inverse inertia, a column at a time out of the
@@ -798,25 +870,139 @@
   here -- how hard is this point to push, what does an impulse do -- is
   a question about the inverse, and forming H only to factor it again
   would be work in both directions."
-  [model q-vec]
-  (let [n (generalised-dof model)
+  ([model q-vec] (inverse-mass-matrix model q-vec (links model q-vec)))
+  ([model q-vec ls]
+   (let [n (generalised-dof model)
+         root (base model)
+         nj (dof model)
+         zero-q (vec (repeat nj 0.0))
+         free {:gravity [0.0 0.0 0.0] :ls ls}
+         column (fn [j]
+                  (let [{:keys [qdd base-acc]}
+                        (if (and root (< j 6))
+                          (forward-dynamics model q-vec zero-q zero-q
+                                            (assoc free
+                                                   :base-force (assoc (vec (repeat 6 0.0)) j 1.0)
+                                                   :base {:vel (vec (repeat 6 0.0))}))
+                          (forward-dynamics model q-vec zero-q
+                                            (assoc zero-q (- j (if root 6 0)) 1.0)
+                                            (cond-> free
+                                              root (assoc :base {:vel (vec (repeat 6 0.0))}))))]
+                    (if root (vec (concat base-acc qdd)) (vec qdd))))]
+     (lin/transpose (mapv column (range n))))))
+
+(defn- point-force
+  "A unit force at world point `p` along `dir`, as a spatial force in the
+  coordinates of the body whose `frame` is given."
+  [{:keys [rot pos]} p dir]
+  (let [inv (q/conjugate rot)
+        f (q/rotate inv dir)
+        r (q/rotate inv (v/sub p pos))]
+    (vec (concat (v/cross r f) f))))
+
+(defn- generalised-force
+  "The generalised force a spatial force `f` on body `i` makes.
+
+  A walk from the body it acts on up to the root, taking each joint's
+  share along its own axis and carrying the rest to the parent. Bodies
+  off that path feel nothing at all, which is why this is a walk and not
+  a matrix -- a hand pushed sideways says nothing about the other arm."
+  [model ls i f]
+  (let [nj (count ls)
+        walk (loop [j (long i) f (vec f) acc (vec (repeat nj 0.0))]
+               (if (neg? j)
+                 {:root f :joints acc}
+                 (let [{:keys [s parent xt]} (nth ls j)]
+                   (recur (long parent)
+                          (lin/mat-vec xt f)
+                          (assoc acc j (reduce + (map * s f)))))))]
+    (if (base model)
+      (vec (concat (:root walk) (:joints walk)))
+      (vec (:joints walk)))))
+
+(defn- impulse-delta
+  "The change in generalised velocity from a spatial impulse `f` on body
+  `i`, in that body's own coordinates. `-1` is the root.
+
+  The articulated body algorithm again, with the velocity terms gone.
+  An impulse is a force with no duration, so there is no time for a
+  velocity product to contribute anything and the bias forces are the
+  impulse itself; the inertias are the ones already built for this
+  configuration. What is left is an inward pass and an outward one, both
+  linear in the links.
+
+  This is what replaced forming the inverse inertia matrix. That took
+  `n + 6` runs of the full algorithm to build and was, measured, the
+  entire cost of a contact -- 33ms of a 34ms solve on a sixteen link
+  model. A contact asks about three directions, so three of these do
+  instead."
+  [model ls ai i f]
+  (let [n (count ls)
         root (base model)
-        nj (dof model)
-        zero-q (vec (repeat nj 0.0))
-        free {:gravity [0.0 0.0 0.0]}
-        column (fn [j]
-                 (let [{:keys [qdd base-acc]}
-                       (if (and root (< j 6))
-                         (forward-dynamics model q-vec zero-q zero-q
-                                           (assoc free
-                                                  :base-force (assoc (vec (repeat 6 0.0)) j 1.0)
-                                                  :base {:vel (vec (repeat 6 0.0))}))
-                         (forward-dynamics model q-vec zero-q
-                                           (assoc zero-q (- j (if root 6 0)) 1.0)
-                                           (cond-> free
-                                             root (assoc :base {:vel (vec (repeat 6 0.0))}))))]
-                   (if root (vec (concat base-acc qdd)) (vec qdd))))]
-    (lin/transpose (mapv column (range n)))))
+        zero6 (vec (repeat 6 0.0))
+        ;; Only the bodies between the one that was hit and the root can
+        ;; have any bias force on them, so the inward pass is that walk
+        ;; and not a sweep of everything. For a ragdoll -- a shallow
+        ;; tree, not a chain -- that is three or four links out of
+        ;; sixteen. Every other link's share is zero and stays zero,
+        ;; which is what the outward pass then reads.
+        path (loop [j (long i) acc []]
+               (if (neg? j) acc (recur (long (:parent (nth ls j))) (conj acc j))))
+        inward (reduce
+                (fn [{:keys [pa pa0 uu] :as acc} j]
+                  (let [{:keys [s parent xt]} (nth ls j)
+                        {:keys [u d]} (nth (:links ai) j)
+                        paj (get pa j zero6)
+                        uj (- (reduce + (map * s paj)))
+                        acc (assoc acc :uu (assoc uu j uj))]
+                    (if (< (abs (double d)) 1e-12)
+                      acc
+                      (let [up (lin/mat-vec xt (mapv + paj (scaled u (/ uj (double d)))))]
+                        (if (neg? (long parent))
+                          (assoc acc :pa0 (mapv + pa0 up))
+                          (assoc acc :pa (update pa parent #(mapv + (or % zero6) up))))))))
+                {:pa (if (neg? (long i)) {} {i (mapv - f)})
+                 :pa0 (if (neg? (long i)) (mapv - f) zero6)
+                 :uu (vec (repeat n 0.0))}
+                path)
+        dv0 (if root
+              (let [m (:ia0 ai)
+                    sym (lin/mat-scale (lin/mat-add m (lin/transpose m)) 0.5)]
+                (mapv - (lin/cholesky-solve sym (:pa0 inward))))
+              zero6)
+        outward (reduce
+                 (fn [{:keys [dv] :as acc} j]
+                   (let [{:keys [xup s parent]} (nth ls j)
+                         {:keys [u d]} (nth (:links ai) j)
+                         a' (lin/mat-vec xup (if (neg? (long parent)) dv0 (nth dv parent)))
+                         dq (if (< (abs (double d)) 1e-12)
+                              0.0
+                              (/ (- (double (nth (:uu inward) j))
+                                    (reduce + (map * u a')))
+                                 (double d)))]
+                     (-> acc
+                         (update :dv conj (mapv + a' (scaled s dq)))
+                         (update :dqd conj dq))))
+                 {:dv [] :dqd []}
+                 (range n))]
+    (if root
+      (vec (concat dv0 (:dqd outward)))
+      (vec (:dqd outward)))))
+
+(defn- response
+  "How a unit impulse at world point `p` on body `i` along `dir` is felt.
+
+  `:g` is the generalised force it makes, so the closing speed is
+  `g . u`; `:delta` is what it does to `u`; `:m` is the mass felt there.
+  Zero rather than infinity when nothing can move that way -- this is
+  the number an impulse gets multiplied by, and a direction that cannot
+  give is a direction no impulse is worth applying."
+  [model ls ai frame i p dir]
+  (let [f (point-force frame p dir)
+        g (generalised-force model ls i f)
+        delta (impulse-delta model ls ai i f)
+        w (reduce + (map * g delta))]
+    {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
 
 (defn impulse-at
   "What a unit impulse at world point `p` on body `i`, along `dir`, does.
@@ -831,14 +1017,12 @@
   it. A hand on the end of an outstretched arm is light; the same hand
   with the arm folded against the chest is most of a torso."
   [model q-vec root-state i p dir]
-  (let [j (point-jacobian model q-vec root-state i p)
-        hinv (inverse-mass-matrix model q-vec)
-        ;; J^T d: the generalised force a unit impulse along `dir` makes.
-        jtd (lin/mat-vec (lin/transpose j) (vec dir))
-        delta (lin/mat-vec hinv jtd)
-        w (reduce + (map * jtd delta))]
+  (let [ls (links model q-vec)
+        {:keys [delta m]} (response model ls (articulated-inertias model ls)
+                                    (frame-of model q-vec root-state i)
+                                    i p (v/normalize dir))]
     {:delta-u delta
-     :effective-mass (if (> w 1e-12) (/ 1.0 w) ##Inf)}))
+     :effective-mass (if (pos? (double m)) m ##Inf)}))
 
 (defn apply-impulse
   "`state` after an impulse of `magnitude` at world point `p` on body
@@ -915,17 +1099,18 @@
   that is only there to carry a degree of freedom -- the middle of three
   stacked hinges standing in for a shoulder -- has no geometry and
   should collide with nothing."
-  [model q-vec root-state]
-  (let [ls (chain model)
-        root (base model)]
-    (into (if-let [b (and root (part-body root (frame-of model q-vec root-state -1)))]
-            [{:link -1 :body b}]
-            [])
-          (keep (fn [i]
-                  (when-let [b (part-body (nth ls i)
-                                          (nth (poses model q-vec root-state) i))]
-                    {:link i :body b})))
-          (range (count ls)))))
+  ([model q-vec root-state]
+   (collision-bodies model q-vec root-state (poses model q-vec root-state)))
+  ([model q-vec root-state frames]
+   (let [parts (chain model)
+         root (base model)]
+     (into (if-let [b (and root (part-body root (frame-of model q-vec root-state -1)))]
+             [{:link -1 :body b}]
+             [])
+           (keep (fn [i]
+                   (when-let [b (part-body (nth parts i) (nth frames i))]
+                     {:link i :body b})))
+           (range (count parts))))))
 
 (defn contacts-with
   "Every contact between the model's shapes and the static `obstacles`.
@@ -939,15 +1124,17 @@
   opposite of what `allgo.physics.contact` reports for the pair. Stating
   it in the direction the solver will use it saves a negation at every
   later step and a sign error at one of them."
-  [model q-vec root-state obstacles]
-  (into []
-        (for [{:keys [link body]} (collision-bodies model q-vec root-state)
-              ob obstacles
-              c (contact/between 0 1 body ob)]
-          {:link link
-           :point (:point c)
-           :normal (v/negate (:normal c))
-           :depth (:depth c)})))
+  ([model q-vec root-state obstacles]
+   (contacts-with model q-vec root-state obstacles (poses model q-vec root-state)))
+  ([model q-vec root-state obstacles frames]
+   (into []
+         (for [{:keys [link body]} (collision-bodies model q-vec root-state frames)
+               ob obstacles
+               c (contact/between 0 1 body ob)]
+           {:link link
+            :point (:point c)
+            :normal (v/negate (:normal c))
+            :depth (:depth c)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Solving them
@@ -991,24 +1178,19 @@
         dt (double dt)
         q (:q state)
         root-state (:base state)
-        hinv (inverse-mass-matrix model q)
+        ;; All of this depends only on where the joints are, so it is
+        ;; built once for the step. Rebuilt per contact per iteration it
+        ;; was most of the frame.
+        ls (or (:ls opts) (links model q))
+        frames (or (:frames opts) (poses model q root-state))
+        ai (or (:ai opts) (articulated-inertias model ls))
         u0 (velocity model state)
         prep (mapv (fn [c]
-                     (let [jt (lin/transpose
-                               (point-jacobian model q root-state (:link c) (:point c)))
+                     (let [i (:link c)
+                           frame (frame-of model q root-state i frames)
                            n (v/normalize (:normal c))
                            [t1 t2] (tangents n)
-                           along (fn [d]
-                                   (let [g (lin/mat-vec jt d)
-                                         delta (lin/mat-vec hinv g)
-                                         w (reduce + (map * g delta))]
-                                     ;; An effective mass of zero, not
-                                     ;; infinity: this is the number an
-                                     ;; impulse is multiplied by, and a
-                                     ;; direction nothing can move in is
-                                     ;; a direction no impulse is worth
-                                     ;; applying.
-                                     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
+                           along #(response model ls ai frame i (:point c) %)
                            dirs {:n (along n) :t1 (along t1) :t2 (along t2)}]
                        (assoc dirs
                               ;; The closing speed as the step began.

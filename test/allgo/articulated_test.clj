@@ -422,3 +422,30 @@
       ;; And the joints have stopped turning, which is the part a
       ;; constraint formulation has to be talked into.
       (is (every? #(< (abs (double %)) 0.05) (:qd later)) (str (:qd later))))))
+
+(deftest impulse-response-matches-the-matrix-test
+  (testing "the O(n) impulse response gives what the inverse inertia matrix gives"
+    ;; Two entirely different ways to the same number, and the slow one
+    ;; is the one with independent evidence behind it -- it is checked
+    ;; against the mass matrix from inverse dynamics, which is checked
+    ;; against the closed form. So this is what carries that evidence
+    ;; over to the fast path the contact solver actually runs.
+    (doseq [model [(chain 4 0.8 1.7)
+                   (floating [(rod -1 0.7 1.1) (rod 0 0.6 0.9) (rod 1 0.5 0.7)])]]
+      (let [n (ab/dof model)
+            root? (some? (ab/base model))
+            q (mapv #(* 0.37 (inc (long %))) (range n))
+            root-state (when root?
+                         {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6)
+                          :pos [0.3 -0.2 0.5]
+                          :vel [0.0 0.0 0.0 0.0 0.0 0.0]})
+            hinv (ab/inverse-mass-matrix model q)]
+        (doseq [i (if root? [-1 0 2] [0 2 3])
+                dir [[1.0 0.0 0.0] [0.0 1.0 0.0] (v/normalize [0.3 -0.8 0.5])]]
+          (let [p (v/add (:pos (ab/frame-of model q root-state i)) [0.11 -0.07 0.23])
+                fast (:delta-u (ab/impulse-at model q root-state i p dir))
+                ;; The same thing the slow way: J^T d through H^-1.
+                jt (lin/transpose (ab/point-jacobian model q root-state i p))
+                slow (lin/mat-vec hinv (lin/mat-vec jt (v/normalize dir)))]
+            (is (every? #(< (abs (double %)) 1e-9) (map - fast slow))
+                (str "body " i " along " dir "\n  fast " fast "\n  slow " slow))))))))
