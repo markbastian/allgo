@@ -10,11 +10,32 @@
             [allgo.simulation.flock :as flock]
             [clojure.test :refer [deftest is testing]]))
 
+(defn- seeded-flock
+  "A flock from a fixed seed, in place of `boids/flock`.
+
+  `boids/flock` draws on `rand`, and a comparison to a tolerance is only
+  a test if the scene it runs on is the same every time. It is not a
+  detail here: on an unlucky draw two boids sit close enough to the
+  perception radius that the two implementations round the same distance
+  to opposite sides of it, take different neighbour sets, and part
+  company by far more than double precision would explain. Seeding it
+  means a failure is a real disagreement rather than that draw coming
+  up."
+  [seed n bounds params]
+  (let [g (java.util.Random. seed)
+        max-speed (:max-speed (merge boids/defaults params))]
+    (vec (repeatedly n
+                     #(let [dir (mapv (fn [_] (- (.nextDouble g) 0.5)) bounds)]
+                        {:pos (mapv (fn [hi] (* hi (.nextDouble g))) bounds)
+                         :vel (boids/with-magnitude
+                                dir
+                                (* max-speed (+ 0.5 (* 0.5 (.nextDouble g)))))})))))
+
 (defn- run-both
   "Steps both implementations from the same start and returns the largest
   disagreement in any coordinate."
   [n bounds params ticks]
-  (let [reference (boids/flock n bounds params)
+  (let [reference (seeded-flock 20260919 n bounds params)
         fast      (flat/from-boids reference)]
     (loop [r reference f fast i 0]
       (if (= i ticks)
@@ -81,7 +102,7 @@
       (is (< (run-both 80 [500.0 500.0] params 5) 1e-9)))
 
     (testing "and the flat flock really does avoid them"
-      (let [f (flat/simulate (flat/from-boids (boids/flock 150 [500.0 500.0] params))
+      (let [f (flat/simulate (flat/from-boids (seeded-flock 20260919 150 [500.0 500.0] params))
                              [500.0 500.0] params 80)
             inside (fn [{[x y] :pos}]
                      (or (< (Math/hypot (- x 250.0) (- y 260.0)) 68.0)
