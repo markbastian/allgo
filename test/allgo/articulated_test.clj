@@ -1,0 +1,136 @@
+(ns allgo.articulated-test
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.physics.articulated :as ab]
+            [clojure.test :refer [deftest is testing]]))
+
+(def ^:private g [0.0 -9.81 0.0])
+(def ^:private opts {:gravity g})
+
+(defn- rod
+  "A uniform rod of length `L` and mass `m`, lying along +x from its own
+  joint frame and hinged about z. `q` is measured up from +x."
+  [parent L m]
+  (let [i (* (/ 1.0 12.0) m L L)]
+    {:parent parent :joint :revolute :axis [0.0 0.0 1.0]
+     :origin {:rot nil :pos (if (neg? parent) [0.0 0.0 0.0] [L 0.0 0.0])}
+     :mass m :com [(* 0.5 L) 0.0 0.0]
+     :inertia [[0.0 0.0 0.0] [0.0 i 0.0] [0.0 0.0 i]]}))
+
+(defn- chain [n L m] (mapv #(rod (dec (long %)) L m) (range n)))
+
+(defn- close? [^double a ^double b ^double tol] (< (abs (- a b)) tol))
+
+(deftest spatial-algebra-test
+  (testing "the force cross product is the negative transpose of the motion one"
+    ;; Not a definition to be taken on trust: it is what makes the inward
+    ;; pass of both algorithms a transpose rather than a second recursion.
+    (let [v [0.3 -1.1 0.7 2.0 0.5 -0.9]]
+      (is (= (ab/crf v) (lin/mat-scale (lin/transpose (ab/crm v)) -1.0)))))
+
+  (testing "a transform that moves nothing is the identity"
+    (is (= (lin/eye 6) (ab/transform {:rot nil :pos [0.0 0.0 0.0]}))))
+
+  (testing "skew is the cross product written as a matrix"
+    (let [a [0.2 -0.6 1.4] b [1.0 0.3 -0.8]]
+      (is (every? #(< (abs %) 1e-15)
+                  (map - (lin/mat-vec (ab/skew a) b)
+                       [(- (* -0.6 -0.8) (* 1.4 0.3))
+                        (- (* 1.4 1.0) (* 0.2 -0.8))
+                        (- (* 0.2 0.3) (* -0.6 1.0))])))))
+
+  (testing "a spatial inertia carries the mass in its lower-right block"
+    (let [m 2.5
+          i (ab/spatial-inertia m [0.4 0.0 0.0] (lin/eye 3))]
+      (is (= m (get-in i [3 3])))
+      (is (= m (get-in i [4 4])))
+      (is (= m (get-in i [5 5]))))))
+
+(deftest closed-form-test
+  (testing "a hinged rod accelerates as the textbook says it does"
+    ;; The one place there is an answer to check against that shares no
+    ;; code with the thing being checked. A rod pivoted at one end:
+    ;; qdd = -(m g d / I_pivot) cos q, with d the distance to the centre
+    ;; of mass and I_pivot = m L^2 / 3 by the parallel axis theorem.
+    (let [L 1.3 m 2.4
+          model [(rod -1 L m)]
+          i-pivot (* (/ 1.0 3.0) m L L)]
+      (doseq [q [0.0 0.3 1.0 -0.7 1.5707963267948966 3.0]]
+        (let [qdd (first (ab/forward-dynamics model [q] [0.0] [0.0] opts))
+              exact (/ (* (- (* m 9.81 (* 0.5 L))) (Math/cos q)) i-pivot)]
+          (is (close? qdd exact 1e-12) (str "at q=" q))))))
+
+  (testing "a mass on a frictionless slider takes gravity's component along it"
+    (let [axis (mapv #(/ (double %) (Math/sqrt 2.0)) [1.0 -1.0 0.0])
+          model [{:parent -1 :joint :prismatic :axis axis
+                  :origin {:rot nil :pos [0.0 0.0 0.0]}
+                  :mass 3.1 :com [0.0 0.0 0.0] :inertia (lin/eye 3)}]]
+      (is (close? (first (ab/forward-dynamics model [0.0] [0.0] [0.0] opts))
+                  (* 9.81 (- (double (second axis))))
+                  1e-12))))
+
+  (testing "a fixed joint does not move"
+    (let [model [(assoc (rod -1 1.0 1.0) :joint :fixed)]]
+      (is (= [0.0] (ab/forward-dynamics model [0.0] [0.0] [5.0] opts))))))
+
+(deftest forward-against-inverse-test
+  (testing "the fast path agrees with M inverse times what is left"
+    ;; The articulated body algorithm never forms the mass matrix. The
+    ;; recursive Newton-Euler algorithm can be made to hand one over a
+    ;; column at a time. Solving with it must give what the fast path
+    ;; gave, and the two share only the spatial algebra underneath.
+    (doseq [n [1 2 3 5 8]]
+      (let [model (chain n 0.8 1.7)
+            q (mapv #(* 0.37 (inc (long %))) (range n))
+            qd (mapv #(* -0.23 (inc (long %))) (range n))
+            tau (mapv #(* 0.9 (- 2 (long %))) (range n))
+            fast (ab/forward-dynamics model q qd tau opts)
+            slow (lin/mat-vec (lin/inverse (ab/mass-matrix model q))
+                              (mapv - tau (ab/bias-forces model q qd opts)))]
+        (is (every? #(< (abs (double %)) 1e-9) (map - fast slow))
+            (str "n=" n " " fast " vs " slow)))))
+
+  (testing "the mass matrix is symmetric"
+    (let [m (ab/mass-matrix (chain 4 0.8 1.7) [0.2 -0.5 1.1 0.3])]
+      (is (every? #(< (abs (double %)) 1e-12)
+                  (flatten (lin/mat-sub m (lin/transpose m)))))))
+
+  (testing "and positive definite, so the chain has a unique acceleration"
+    ;; Cholesky exists exactly when it is, which is the cheapest way to
+    ;; ask and the one that fails loudly if a link is given no inertia.
+    (is (some? (lin/cholesky (ab/mass-matrix (chain 4 0.8 1.7) [0.2 -0.5 1.1 0.3]))))))
+
+(deftest kinematics-test
+  (testing "joint angles turn back into places"
+    (let [model (chain 2 1.0 1.0)
+          origin-of (fn [q i] (mapv #(Math/round (* 1000.0 (double %)))
+                                    (:pos (nth (ab/poses model q) i))))]
+      (is (= [1000 0 0] (origin-of [0.0 0.0] 1)))
+      (is (= [0 1000 0] (origin-of [(/ Math/PI 2) 0.0] 1)))
+      ;; The second joint sits at the first link's tip whatever it does
+      ;; itself, so bending it does not move its own frame.
+      (is (= [1000 0 0] (origin-of [0.0 (/ Math/PI 2)] 1))))))
+
+(deftest energy-test
+  (testing "a chain under no torque loses energy only as fast as the integrator does"
+    ;; Semi-implicit Euler is first order, so the drift over a fixed
+    ;; stretch of time must fall off in step with the step size. That it
+    ;; does is a statement about the dynamics; that it is not zero is a
+    ;; statement about the integrator, and the two are worth keeping
+    ;; apart.
+    (doseq [n [1 2]]
+      (let [model (chain n 0.8 1.7)
+            q0 (mapv #(+ 0.4 (* 0.3 (double %))) (range n))
+            e0 (ab/energy model q0 (vec (repeat n 0.0)) opts)
+            drift (fn [h]
+                    (let [final (reduce (fn [st _] (ab/step st model h opts))
+                                        {:q q0 :qd (vec (repeat n 0.0))}
+                                        (range (long (/ 2.0 h))))]
+                      (abs (- (ab/energy model (:q final) (:qd final) opts) e0))))
+            coarse (drift 1e-3)
+            fine (drift 1e-4)]
+        (is (pos? coarse))
+        ;; Ten times the step, within a factor of two of ten times the
+        ;; drift. Looser than first order exactly, because two links are
+        ;; chaotic and the trajectories part company.
+        (is (< 5.0 (/ coarse fine) 20.0)
+            (str "n=" n " coarse " coarse " fine " fine))))))

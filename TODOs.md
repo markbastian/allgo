@@ -448,9 +448,41 @@ TGS stops toppling too, though it keeps its own floor, below.
 
 ### Other techniques still missing
 
-- **Featherstone / articulated bodies** — reduced-coordinate chains,
-  which is what a ragdoll or a robot arm actually wants and what
-  `allgo.physics.joint` approximates with constraints.
+- **Featherstone / articulated bodies** — started.
+  `allgo.physics.articulated` has the spatial algebra, the recursive
+  Newton-Euler algorithm for inverse dynamics and the articulated body
+  algorithm for forward dynamics, over a tree of one degree of freedom
+  joints on a fixed base.
+
+  Why it exists, measured rather than asserted: two metre-long links off
+  a fixed base, the lower heavier than the upper, worst separation
+  between a joint's two anchors — anchors that are meant to be the same
+  point — over two seconds of `allgo.physics.joint`:
+
+      mass ratio   5 substeps   10      20
+               1      0.00475   0.00126   0.00029
+              10      0.01633   0.00393   0.00098
+             100      0.11241   0.04149   0.01001
+            1000      2.75497   0.29095   0.09466
+
+  Substeps help and do not cure; every column climbs with the ratio.
+  Reduced coordinates have no such number, because a joint angle has
+  nowhere to put a violation.
+
+  It agrees with the closed form for a hinged rod to twelve digits, and
+  the fast path agrees with `M^-1 (tau - bias)` built out of the slow one
+  to about fourteen. What is left:
+
+  - **Contacts.** The reason the constraint formulation is still the
+    right shape for a pile of bricks is that a contact and a joint go
+    through the same solver. A reduced-coordinate ragdoll that cannot be
+    hit is not much of a ragdoll. This is the big one.
+  - **A floating base**, which is a six degree of freedom joint to the
+    world. Without it the chain is bolted to the origin.
+  - **Multi-degree-of-freedom joints.** A shoulder is a ball joint;
+    today it has to be spelled as three hinges with massless links
+    between them.
+  - **A ragdoll demo**, which is what all of the above is for.
 - **Continuous collision detection.** Half done. Speculative contacts
   — the cheap version — are in: the margin out to which a gap still
   counts as a contact is now the fixed 2cm plus how far the pair can
