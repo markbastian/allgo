@@ -493,9 +493,13 @@ TGS stops toppling too, though it keeps its own floor, below.
 
     Still missing: self-collision between links, and contact against
     things that can move back.
-  - **Multi-degree-of-freedom joints.** A shoulder is a ball joint;
-    today it has to be spelled as three hinges with massless links
-    between them.
+  - ~~**Multi-degree-of-freedom joints.**~~ Done. `:spherical` is three
+    numbers of velocity and a quaternion of configuration, for the same
+    reason the base is. Three stacked hinges would be the alternative
+    and they gimbal lock, which a tumbling ragdoll finds. Checked
+    against a hinge: the same rod swinging about one axis gives the same
+    angle to 1e-6 after two seconds, and the same effective mass to
+    1e-9.
   - **Speed.** Five times better and still the thing in the way. A chain
     lying on the floor, JVM, per step:
 

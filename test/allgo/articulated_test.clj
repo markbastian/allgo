@@ -71,9 +71,14 @@
                   (* 9.81 (- (double (second axis))))
                   1e-12))))
 
-  (testing "a fixed joint does not move"
+  (testing "a fixed joint has nothing to move"
+    ;; Not a joint with one coordinate that stays put -- no coordinate.
+    ;; A weld is there to hold two shapes together as one body, and
+    ;; giving it a degree of freedom to ignore means every pass carries
+    ;; a column of zeroes around.
     (let [model [(assoc (rod -1 1.0 1.0) :joint :fixed)]]
-      (is (= [0.0] (:qdd (ab/forward-dynamics model [0.0] [0.0] [5.0] opts)))))))
+      (is (zero? (ab/dof model)))
+      (is (= [] (:qdd (ab/forward-dynamics model [0.0] [] [] opts)))))))
 
 (deftest forward-against-inverse-test
   (testing "the fast path agrees with M inverse times what is left"
@@ -449,3 +454,129 @@
                 slow (lin/mat-vec hinv (lin/mat-vec jt (v/normalize dir)))]
             (is (every? #(< (abs (double %)) 1e-9) (map - fast slow))
                 (str "body " i " along " dir "\n  fast " fast "\n  slow " slow))))))))
+
+;; ---------------------------------------------------------------------------
+;; Ball joints
+
+(def ^:private limb-width 0.14)
+
+(defn- limb
+  "A rod with the inertia of a thin box rather than of a mathematical
+  line. A ball joint needs the third one: a line has no inertia about
+  its own length, and a joint free to turn about an axis nothing resists
+  has no acceleration there to compute."
+  [parent kind L m]
+  (let [f (/ (double m) 12.0)
+        w limb-width]
+    (cond-> {:parent parent :joint kind
+             :origin {:rot nil :pos (if (neg? (long parent)) [0.0 0.0 0.0] [L 0.0 0.0])}
+             :mass m :com [(* 0.5 L) 0.0 0.0]
+             :inertia [[(* f 2.0 w w) 0.0 0.0]
+                       [0.0 (* f (+ (* L L) (* w w))) 0.0]
+                       [0.0 0.0 (* f (+ (* L L) (* w w)))]]}
+      (= kind :revolute) (assoc :axis [0.0 0.0 1.0]))))
+
+(def ^:private idq [0.0 0.0 0.0 1.0])
+
+(deftest joint-dof-test
+  (testing "a joint is as wide as the motion it allows"
+    (is (= 1 (ab/joint-dof {:joint :revolute :axis [0.0 0.0 1.0]})))
+    (is (= 1 (ab/joint-dof {:joint :prismatic :axis [0.0 0.0 1.0]})))
+    (is (= 3 (ab/joint-dof {:joint :spherical})))
+    (is (= 0 (ab/joint-dof {:joint :fixed})))
+    ;; And the model's is the sum, which is what `qd` and `tau` are long.
+    (is (= 4 (ab/dof [(limb -1 :spherical 0.7 1.0) (limb 0 :revolute 0.6 1.0)])))))
+
+(deftest ball-joint-test
+  (testing "a ball joint swinging about one axis is a hinge about that axis"
+    ;; The same rod, the same gravity, two different ways of saying
+    ;; where it is. Nothing about the answer should depend on which.
+    (let [L 1.3 m 2.4
+          hinge [(limb -1 :revolute L m)]
+          ball [(limb -1 :spherical L m)]
+          run (fn [model st] (reduce (fn [s _] (ab/step s model 1e-4 opts)) st (range 20000)))
+          hs (run hinge {:q [0.0] :qd [0.0]})
+          bs (run ball {:q [idq] :qd [0.0 0.0 0.0]})
+          ;; The ball joint's angle about z, read back off its quaternion.
+          [bx by _] (q/rotate (first (:q bs)) [1.0 0.0 0.0])]
+      (is (close? (double (first (:q hs))) (Math/atan2 (double by) (double bx)) 1e-6))
+      (is (close? (double (first (:qd hs))) (double (nth (:qd bs) 2)) 1e-5))))
+
+  (testing "and weighs the same as the hinge does, about the hinge's axis"
+    (let [L 1.3 m 2.4]
+      (is (close? (:effective-mass (ab/impulse-at [(limb -1 :spherical L m)] [idq] nil
+                                                  0 [L 0.0 0.0] [0.0 1.0 0.0]))
+                  (:effective-mass (ab/impulse-at [(limb -1 :revolute L m)] [0.0] nil
+                                                  0 [L 0.0 0.0] [0.0 1.0 0.0]))
+                  1e-9))))
+
+  (testing "a ball joint adds rotations, not slides"
+    ;; Pushing a rod along its own length through the joint still meets
+    ;; an immovable object, because no rotation takes it that way.
+    (is (infinite? (:effective-mass (ab/impulse-at [(limb -1 :spherical 1.3 2.4)] [idq] nil
+                                                   0 [1.3 0.0 0.0] [1.0 0.0 0.0])))))
+
+  (testing "there is no orientation it stops working in"
+    ;; The reason the configuration is a quaternion and the velocity is
+    ;; three numbers rather than both being three. Turn the whole
+    ;; problem about the gravity axis and the answer must turn with it;
+    ;; a three-angle parameterisation has orientations where it does
+    ;; not, and a ragdoll finds them by tumbling.
+    (let [L 1.3 m 2.4
+          model [(limb -1 :spherical L m)]
+          swing (fn [r]
+                  (let [st (reduce (fn [s _] (ab/step s model 1e-4 opts))
+                                   {:q [r] :qd [0.0 0.0 0.0]} (range 3000))
+                        {:keys [rot pos]} (first (ab/poses model (:q st)))]
+                    (v/add pos (q/rotate rot [L 0.0 0.0]))))
+          turn (q/from-axis-angle [0.0 1.0 0.0] (/ Math/PI 2))]
+      (is (< (v/distance (swing turn) (q/rotate turn (swing idq))) 1e-9))))
+
+  (testing "a ball joint on a body with no inertia about an axis welds itself"
+    ;; Worth stating because the failure is quiet. A mathematically thin
+    ;; rod has nothing to resist rotation about its own length, so the
+    ;; three by three the joint has to invert is singular, and a joint
+    ;; whose accelerations cannot be computed does not move at all.
+    ;; Give limbs a real inertia; this is what happens if you do not.
+    (let [thin (assoc (limb -1 :spherical 1.3 2.4)
+                      :inertia [[0.0 0.0 0.0] [0.0 0.3 0.0] [0.0 0.0 0.3]])]
+      (is (every? zero? (:qdd (ab/forward-dynamics [thin] [idq] [0.0 0.0 0.0]
+                                                   [0.0 0.0 0.0] opts)))))))
+
+(deftest ball-joint-invariants-test
+  (testing "the fast impulse path still matches the matrix with ball joints in the chain"
+    (let [model {:base {:mass 3.0 :com [0.1 0.0 0.0]
+                        :inertia [[0.4 0.0 0.0] [0.0 0.6 0.0] [0.0 0.0 0.9]]}
+                 :links [(limb -1 :spherical 0.7 1.2)
+                         (limb 0 :revolute 0.6 0.9)
+                         (limb 1 :spherical 0.5 0.6)]}
+          qv [(q/from-axis-angle [0.3 0.5 0.8] 0.4) 0.37
+              (q/from-axis-angle [0.9 0.1 0.2] -0.6)]
+          rs {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6) :pos [0.3 -0.2 0.5]
+              :vel [0.0 0.0 0.0 0.0 0.0 0.0]}
+          hinv (ab/inverse-mass-matrix model qv)]
+      (is (= 13 (ab/generalised-dof model)))
+      (doseq [i [-1 0 2]
+              dir [[1.0 0.0 0.0] (v/normalize [0.3 -0.8 0.5])]]
+        (let [p (v/add (:pos (ab/frame-of model qv rs i)) [0.11 -0.07 0.23])
+              fast (:delta-u (ab/impulse-at model qv rs i p dir))
+              jt (lin/transpose (ab/point-jacobian model qv rs i p))
+              slow (lin/mat-vec hinv (lin/mat-vec jt (v/normalize dir)))]
+          (is (every? #(< (abs (double %)) 1e-9) (map - fast slow))
+              (str "body " i " along " dir))))))
+
+  (testing "and a floating chain of them still conserves both momenta"
+    (let [model {:base {:mass 3.0 :com [0.1 0.0 0.0]
+                        :inertia [[0.4 0.0 0.0] [0.0 0.6 0.0] [0.0 0.0 0.9]]}
+                 :links [(limb -1 :spherical 0.7 1.2) (limb 0 :spherical 0.6 0.9)]}
+          st0 {:q [(q/from-axis-angle [0.3 0.5 0.8] 0.4)
+                   (q/from-axis-angle [0.9 0.1 0.2] -0.6)]
+               :qd [1.1 -0.7 0.4 -0.3 0.9 1.5]
+               :base {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6)
+                      :pos [0.3 -0.2 0.5] :vel [0.4 -0.3 0.9 1.1 0.2 -0.6]}}
+          free {:gravity [0.0 0.0 0.0]}
+          m0 (ab/momentum model st0)
+          m1 (ab/momentum model (reduce (fn [s _] (ab/step s model 1e-4 free))
+                                        st0 (range 10000)))]
+      (is (< (v/distance (:linear m0) (:linear m1)) 1e-2))
+      (is (< (v/distance (:angular m0) (:angular m1)) 1e-2)))))

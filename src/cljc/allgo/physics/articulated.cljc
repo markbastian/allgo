@@ -168,9 +168,32 @@
   The base's six degrees of freedom are not coordinates. They are a
   pose and a spatial velocity, carried in the *state* rather than in
   `q`, so that nothing ever has to parameterise a rotation with three
-  numbers and find the singularity in it. The joints keep their one
-  number each and gain nothing from the base being free; the base gains
-  one 6x6 solve, and that is the whole of what a floating base costs.
+  numbers and find the singularity in it. The base costs one 6x6 solve
+  and that is all.
+
+  ## How wide a joint is
+
+  `:revolute` and `:prismatic` are one number, `:spherical` is three,
+  `:fixed` is none. So `q` has an entry per *link* -- an angle, a
+  distance, or for a ball joint a quaternion -- while `qd` and `tau` are
+  flat and as long as the model has degrees of freedom, and a link knows
+  where its own rates start in them.
+
+  A ball joint is three numbers of velocity and four of configuration
+  for the same reason the base is: the velocity is an angular velocity,
+  which is genuinely three numbers, and the configuration is a rotation,
+  which no three numbers can name without a direction in which they stop
+  working. Three stacked hinges would be the alternative and it is the
+  one that finds that direction -- a ragdoll tumbles, so it finds it.
+  It is also cheaper this way: a ball joint's motion subspace is the
+  identity on the angular half, with no intermediate frames to transform
+  through.
+
+  A ball joint does need its body to have inertia about every axis. A
+  mathematically thin rod has none about its own length, so the three by
+  three it has to invert is singular, and a joint whose accelerations
+  cannot be computed does not move -- it welds itself, quietly. Limbs
+  should be given the inertia of the shape they are, not of a line.
 
   ## What runs on it
 
@@ -274,23 +297,103 @@
 ;; ---------------------------------------------------------------------------
 ;; Joints
 
+(defn- kind-of [link] (or (:joint link) :revolute))
+
+(defn joint-dof
+  "How many numbers it takes to say how fast this joint is moving.
+
+  One for a hinge or a slider, three for a ball, none at all for a weld.
+  A joint's *coordinate* is a separate question and not always the same
+  count: a ball joint's velocity is three numbers and its configuration
+  is four, because three numbers cannot name a rotation without a
+  direction in which they stop working."
+  [link]
+  (case (kind-of link)
+    (:revolute :prismatic) 1
+    :spherical 3
+    :fixed 0))
+
 (defn- joint-transform
-  "How the child frame sits relative to the joint frame at coordinate `x`."
-  [{:keys [joint axis]} ^double x]
-  (case (or joint :revolute)
-    :revolute {:rot (q/from-axis-angle axis x) :pos v/zero}
-    :prismatic {:rot q/identity-q :pos (v/scale axis x)}
+  "How the child frame sits relative to the joint frame at coordinate `x`.
+
+  For a ball joint `x` *is* the rotation, carried as a quaternion. Every
+  other kind takes a single number."
+  [link x]
+  (case (kind-of link)
+    :revolute {:rot (q/from-axis-angle (:axis link) (double x)) :pos v/zero}
+    :prismatic {:rot q/identity-q :pos (v/scale (:axis link) (double x))}
+    :spherical {:rot (if (and (sequential? x) (= 4 (count x)))
+                       (q/normalize (vec x))
+                       q/identity-q)
+                :pos v/zero}
     :fixed {:rot q/identity-q :pos v/zero}))
 
 (defn- subspace
-  "The joint's motion subspace: the spatial velocity one unit of joint
-  rate produces, in the child's own coordinates."
-  [{:keys [joint axis]}]
-  (let [[ax ay az] axis]
-    (case (or joint :revolute)
-      :revolute [(double ax) (double ay) (double az) 0.0 0.0 0.0]
-      :prismatic [0.0 0.0 0.0 (double ax) (double ay) (double az)]
-      :fixed [0.0 0.0 0.0 0.0 0.0 0.0])))
+  "The joint's motion subspace: one column per degree of freedom, each
+  the spatial velocity that one unit of that rate produces, in the
+  child's own coordinates.
+
+  A ball joint's three columns are the identity on the angular half,
+  which is what makes it cheaper than three stacked hinges rather than
+  merely tidier -- there is no intermediate frame to transform through
+  and no configuration in which two of the three axes line up."
+  [link]
+  (let [[ax ay az] (:axis link)]
+    (case (kind-of link)
+      :revolute [[(double ax) (double ay) (double az) 0.0 0.0 0.0]]
+      :prismatic [[0.0 0.0 0.0 (double ax) (double ay) (double az)]]
+      :spherical [[1.0 0.0 0.0 0.0 0.0 0.0]
+                  [0.0 1.0 0.0 0.0 0.0 0.0]
+                  [0.0 0.0 1.0 0.0 0.0 0.0]]
+      :fixed [])))
+
+(def ^:private zero6 [0.0 0.0 0.0 0.0 0.0 0.0])
+
+(defn- s-times
+  "`S x`, the spatial vector a joint's rates make, reading them out of
+  the flat velocity `x` at this joint's offset."
+  [s x ^long offset]
+  (reduce (fn [acc k]
+            (let [r (double (nth x (+ offset k)))
+                  col (nth s k)]
+              (if (zero? r) acc (mapv (fn [a c] (+ (double a) (* r (double c)))) acc col))))
+          zero6
+          (range (count s))))
+
+(defn- st-times
+  "`S^T f`, each of a joint's axes' share of a spatial force."
+  [s f]
+  (mapv (fn [col] (reduce + (map * col f))) s))
+
+(defn- d-inverse
+  "The inverse of `S^T IA S`, or nil where the joint cannot move.
+
+  Nil rather than a huge number: a joint whose subtree presents no
+  inertia along one of its axes has no acceleration there to compute,
+  and inventing one is how a zero-mass link tears a model apart."
+  [d]
+  (case (count d)
+    0 []
+    1 (let [x (double (get-in d [0 0]))]
+        (when (> (abs x) 1e-12) [[(/ 1.0 x)]]))
+    (lin/inverse d)))
+
+(defn- outer
+  "The 6x6 `a b^T`."
+  [a b]
+  (mapv (fn [ai] (mapv (fn [bj] (* (double ai) (double bj))) b)) a))
+
+(defn- u-dinv-ut
+  "`U D^-1 U^T`, the part of an articulated inertia the joint gives away."
+  [u dinv]
+  (let [n (count u)]
+    (reduce (fn [m [k l]]
+              (let [w (double (get-in dinv [k l]))]
+                (if (zero? w)
+                  m
+                  (lin/mat-add m (lin/mat-scale (outer (nth u k) (nth u l)) w)))))
+            (vec (repeat 6 zero6))
+            (for [k (range n) l (range n)] [k l]))))
 
 (defn chain
   "The links of a model, whichever form it was given in.
@@ -308,12 +411,14 @@
   (when (map? model) (:base model)))
 
 (defn dof
-  "How many joint coordinates the model has -- one per link, since every
-  joint here is a single degree of freedom. The base's six, if it has
-  any, are not among them: they are a pose and a velocity, not
-  coordinates, precisely so that no one has to parameterise a rotation."
+  "How many numbers it takes to say how fast the model's joints are
+  moving: one per hinge or slider, three per ball joint, none per weld.
+
+  The base's six, if it has any, are not among them -- they are a pose
+  and a velocity, not coordinates, precisely so that no one has to
+  parameterise a rotation with three numbers."
   [model]
-  (count (chain model)))
+  (reduce + (map joint-dof (chain model))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared per-link setup
@@ -322,19 +427,31 @@
   "Each link's transform from its parent, motion subspace and inertia, at
   the configuration `q-vec`."
   [model q-vec]
-  (mapv (fn [link ^double x]
-          (let [s (subspace link)]
-            {:xup (lin/mat-mul (transform (joint-transform link x))
-                               (transform (:origin link)))
-             ;; Kept rather than taken again: every inward pass, of
-             ;; which there are now several a step, wants it.
-             :xt (lin/transpose (lin/mat-mul (transform (joint-transform link x))
-                                             (transform (:origin link))))
-             :s s
-             :i (spatial-inertia (:mass link) (:com link) (:inertia link))
-             :parent (long (:parent link))}))
-        (chain model)
-        q-vec))
+  (let [parts (chain model)]
+    (first
+     (reduce
+      (fn [[acc ^long off] i]
+        (let [link (nth parts i)
+              nd (long (joint-dof link))
+              xup (lin/mat-mul (transform (joint-transform link (nth q-vec i nil)))
+                               (transform (:origin link)))]
+          [(conj acc {:xup xup
+                      ;; Kept rather than taken again: every inward
+                      ;; pass, of which there are several a step, wants
+                      ;; it.
+                      :xt (lin/transpose xup)
+                      :s (subspace link)
+                      :ndof nd
+                      ;; Where this joint's rates start in the flat
+                      ;; velocity vector. Joints are no longer all one
+                      ;; number wide, so nothing can index by link any
+                      ;; more.
+                      :offset off
+                      :i (spatial-inertia (:mass link) (:com link) (:inertia link))
+                      :parent (long (:parent link))})
+           (+ off nd)]))
+      [[] 0]
+      (range (count parts))))))
 
 (defn- scaled [s ^double x] (mapv #(* (double %) x) s))
 
@@ -346,9 +463,9 @@
   -- to build the Jacobian of any point on it."
   [ls v0 qd]
   (reduce (fn [acc i]
-            (let [{:keys [xup s parent]} (nth ls i)
+            (let [{:keys [xup s parent offset]} (nth ls i)
                   vp (if (neg? (long parent)) v0 (nth acc parent))]
-              (conj acc (mapv + (lin/mat-vec xup vp) (scaled s (nth qd i))))))
+              (conj acc (mapv + (lin/mat-vec xup vp) (s-times s qd offset)))))
           []
           (range (count ls))))
 
@@ -380,14 +497,14 @@
          ;; Outward: where every link is going, and what it takes.
          out (reduce
               (fn [acc i]
-                (let [{:keys [xup s parent]} (nth ls i)
+                (let [{:keys [xup s parent offset]} (nth ls i)
                       inertia (:i (nth ls i))
-                      vj (scaled s (nth qd i))
-                      vp (if (neg? parent) (vec (repeat 6 0.0)) (:v (nth acc parent)))
+                      vj (s-times s qd offset)
+                      vp (if (neg? parent) zero6 (:v (nth acc parent)))
                       ap (if (neg? parent) (base-acceleration gravity) (:a (nth acc parent)))
                       vi (mapv + (lin/mat-vec xup vp) vj)
                       ai (mapv + (lin/mat-vec xup ap)
-                               (scaled s (nth qdd i))
+                               (s-times s qdd offset)
                                (lin/mat-vec (crm vi) vj))
                       fi (mapv + (lin/mat-vec inertia ai)
                                (lin/mat-vec (crf vi) (lin/mat-vec inertia vi)))]
@@ -405,7 +522,15 @@
                                       #(mapv + % (lin/mat-vec (lin/transpose xup) fi))))))
                         (mapv :f out)
                         (reverse (range n)))]
-     (mapv (fn [i] (reduce + (map * (:s (nth ls i)) (nth forces i)))) (range n)))))
+     ;; Each joint's share of the force on its own link, laid back into
+     ;; the flat vector the caller handed its rates in.
+     (reduce (fn [acc i]
+               (let [{:keys [s offset]} (nth ls i)]
+                 (reduce (fn [a k] (assoc a (+ (long offset) k) (nth (st-times s (nth forces i)) k)))
+                         acc
+                         (range (count s)))))
+             (vec (repeat (dof model) 0.0))
+             (range n)))))
 
 (defn mass-matrix
   "The joint-space inertia `M(q)`, a column at a time out of
@@ -435,11 +560,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Forward dynamics
 
-(defn- outer
-  "The 6x6 `a b^T`."
-  [a b]
-  (mapv (fn [ai] (mapv (fn [bj] (* (double ai) (double bj))) b)) a))
-
 (defn- articulated-inertias
   "Each joint's articulated inertia and the two numbers taken off it,
   plus the root's.
@@ -459,21 +579,24 @@
   (let [n (count ls)
         root (base model)]
     (reduce
-     (fn [{:keys [links ia0] :as acc} i]
-       (let [{:keys [xup xt parent]} (nth ls i)
-             s (:s (nth ls i))
+     (fn [{:keys [links ia0]} i]
+       (let [{:keys [xup xt parent s]} (nth ls i)
              ia (:ia (nth links i))
-             u (lin/mat-vec ia s)
-             d (reduce + (map * s u))
-             links (-> links (assoc-in [i :u] u) (assoc-in [i :d] d))]
-         (if (< (abs d) 1e-12)
-           (assoc acc :links links)
-           (let [ia' (lin/mat-sub ia (lin/mat-scale (outer u u) (/ 1.0 d)))
-                 links (assoc-in links [i :ia-free] ia')
-                 up (lin/mat-mul xt (lin/mat-mul ia' xup))]
-             (if (neg? (long parent))
-               {:links links :ia0 (when ia0 (lin/mat-add ia0 up))}
-               {:links (update-in links [parent :ia] #(lin/mat-add % up)) :ia0 ia0})))))
+             ;; One column of U per degree of freedom, and D their
+             ;; projection onto each other -- a number for a hinge, a
+             ;; three by three for a ball joint.
+             u (mapv #(lin/mat-vec ia %) s)
+             d (mapv (fn [sk] (mapv (fn [ul] (reduce + (map * sk ul))) u)) s)
+             dinv (d-inverse d)
+             ia' (if dinv (lin/mat-sub ia (u-dinv-ut u dinv)) ia)
+             links (-> links
+                       (assoc-in [i :u] u)
+                       (assoc-in [i :dinv] dinv)
+                       (assoc-in [i :ia-free] ia'))
+             up (lin/mat-mul xt (lin/mat-mul ia' xup))]
+         (if (neg? (long parent))
+           {:links links :ia0 (when ia0 (lin/mat-add ia0 up))}
+           {:links (update-in links [parent :ia] #(lin/mat-add % up)) :ia0 ia0})))
      {:links (mapv (fn [l] {:ia (:i l)}) ls)
       :ia0 (when root (spatial-inertia (:mass root) (:com root) (:inertia root)))}
      (reverse (range n)))))
@@ -535,9 +658,9 @@
          ;; alone implies, and the force needed to hold the link on it.
          pass1 (reduce
                 (fn [acc i]
-                  (let [{:keys [xup s parent]} (nth ls i)
+                  (let [{:keys [xup s parent offset]} (nth ls i)
                         inertia (:i (nth ls i))
-                        vj (scaled s (nth qd i))
+                        vj (s-times s qd offset)
                         vp (if (neg? parent) v0 (:v (nth acc parent)))
                         vi (mapv + (lin/mat-vec xup vp) vj)
                         ;; An outside force on a link reduces the bias
@@ -560,19 +683,25 @@
          ;; ride on were built once, above.
          pass2 (reduce
                 (fn [{:keys [links pa0] :as acc} i]
-                  (let [{:keys [s parent xt]} (nth ls i)
+                  (let [{:keys [s parent xt offset]} (nth ls i)
                         {:keys [pa c]} (nth links i)
-                        {:keys [u d ia-free]} (nth (:links ai) i)
-                        uu (- (double (nth tau i)) (reduce + (map * s pa)))
-                        acc (assoc-in acc [:links i :uu] uu)]
-                    (if (< (abs (double d)) 1e-12)
-                      acc
-                      (let [pa' (mapv + pa (lin/mat-vec ia-free c)
-                                      (scaled u (/ uu (double d))))
-                            up-p (lin/mat-vec xt pa')]
-                        (if (neg? (long parent))
-                          (assoc acc :pa0 (when pa0 (mapv + pa0 up-p)))
-                          (update-in acc [:links parent :pa] #(mapv + % up-p)))))))
+                        {:keys [u dinv ia-free]} (nth (:links ai) i)
+                        ;; What each of this joint's axes has left over
+                        ;; once the bias force has taken its share.
+                        uu (mapv (fn [k tk] (- (double tk) (double k)))
+                                 (st-times s pa)
+                                 (map #(nth tau (+ (long offset) %)) (range (count s))))
+                        acc (assoc-in acc [:links i :uu] uu)
+                        pa' (cond-> (mapv + pa (lin/mat-vec ia-free c))
+                              dinv (as-> x (reduce (fn [a l]
+                                                     (mapv + a (scaled (nth u l)
+                                                                       (nth (lin/mat-vec dinv uu) l))))
+                                                   x
+                                                   (range (count u)))))
+                        up-p (lin/mat-vec xt pa')]
+                    (if (neg? (long parent))
+                      (assoc acc :pa0 (when pa0 (mapv + pa0 up-p)))
+                      (update-in acc [:links parent :pa] #(mapv + % up-p)))))
                 {:links pass1
                  :pa0 (when root
                         (let [bias (lin/mat-vec (crf v0) (lin/mat-vec root-i v0))]
@@ -593,15 +722,17 @@
               (fn [{:keys [a] :as acc} i]
                 (let [{:keys [xup s parent]} (nth ls i)
                       {:keys [c uu]} (nth solved i)
-                      {:keys [u d]} (nth (:links ai) i)
+                      {:keys [u dinv]} (nth (:links ai) i)
                       ap (if (neg? (long parent)) a0 (nth a parent))
                       a' (mapv + (lin/mat-vec xup ap) c)
-                      qddi (if (< (abs (double d)) 1e-12)
-                             0.0
-                             (/ (- (double uu) (reduce + (map * u a'))) (double d)))]
+                      qddi (if dinv
+                             (lin/mat-vec dinv
+                                          (mapv (fn [k ul] (- (double k) (reduce + (map * ul a'))))
+                                                uu u))
+                             (vec (repeat (count s) 0.0)))]
                   (-> acc
-                      (update :a conj (mapv + a' (scaled s qddi)))
-                      (update :qdd conj qddi))))
+                      (update :a conj (mapv + a' (s-times s qddi 0)))
+                      (update :qdd into qddi))))
               {:a [] :qdd []}
               (range n))]
      {:qdd (:qdd out)
@@ -614,12 +745,43 @@
 
 (declare solve-contacts contacts-with velocity with-velocity poses)
 
+(defn- advance-coordinate
+  "One joint's configuration, moved by its own rates.
+
+  A hinge or a slider adds. A ball joint cannot: its configuration is a
+  quaternion and its rates are an angular velocity in the *child's* own
+  frame, so the step is `qj += dt/2 qj (w,0)` -- the joint's own
+  quaternion on the left, where the base's world-frame spin puts it on
+  the right. Getting that round the wrong way turns a ball joint into a
+  thing that drifts sideways under its own rotation."
+  [link x qd offset dt]
+  (let [offset (long offset) dt (double dt)]
+    (case (kind-of link)
+      (:revolute :prismatic) (+ (double x) (* dt (double (nth qd offset))))
+      :spherical (let [rot (if (and (sequential? x) (= 4 (count x)))
+                             (vec x)
+                             q/identity-q)
+                       w [(double (nth qd offset))
+                          (double (nth qd (+ offset 1)))
+                          (double (nth qd (+ offset 2)))]
+                       [dx dy dz dw] (q/mul rot [(w 0) (w 1) (w 2) 0.0])
+                       [rx ry rz rw] rot
+                       h (* 0.5 dt)]
+                   (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
+                                 (+ rz (* h dz)) (+ rw (* h dw))]))
+      :fixed x)))
+
 (defn- advance-positions
   "Move by whatever the velocities now are."
   [model state ^double dt]
   (let [root (base model)
         b (:base state)
-        q' (mapv (fn [a c] (+ (double a) (* dt (double c)))) (:q state) (:qd state))]
+        parts (chain model)
+        ls (links model (:q state))
+        q' (mapv (fn [i]
+                   (advance-coordinate (nth parts i) (nth (:q state) i nil)
+                                       (:qd state) (:offset (nth ls i)) dt))
+                 (range (count parts)))]
     (if-not root
       (assoc state :q q')
       (let [v (vec (:vel b))
@@ -713,14 +875,14 @@
                                       :pos (or (:pos root) v/zero)}
                                      (nth frames parent))
              {orot :rot opos :pos} (:origin link)
-             {jrot :rot jpos :pos} (joint-transform link (nth q-vec i))
+             {jrot :rot jpos :pos} (joint-transform link (nth q-vec i nil))
              rot (q/mul (q/mul prot (or orot q/identity-q)) jrot)
              pos (v/add (v/add ppos (q/rotate prot (or opos v/zero)))
                         (q/rotate (q/mul prot (or orot q/identity-q)) jpos))
              frame {:rot rot :pos pos}]
          (-> acc (update :frames conj frame) (update :out conj frame))))
      {:frames [] :out []}
-     (range (dof model))))))
+     (range (count (chain model)))))))
 
 (defn energy
   "Kinetic plus potential, for checking that nothing is being invented.
@@ -908,14 +1070,17 @@
   off that path feel nothing at all, which is why this is a walk and not
   a matrix -- a hand pushed sideways says nothing about the other arm."
   [model ls i f]
-  (let [nj (count ls)
-        walk (loop [j (long i) f (vec f) acc (vec (repeat nj 0.0))]
+  (let [nd (reduce + (map :ndof ls))
+        walk (loop [j (long i) f (vec f) acc (vec (repeat nd 0.0))]
                (if (neg? j)
                  {:root f :joints acc}
-                 (let [{:keys [s parent xt]} (nth ls j)]
+                 (let [{:keys [s parent xt offset]} (nth ls j)
+                       share (st-times s f)]
                    (recur (long parent)
                           (lin/mat-vec xt f)
-                          (assoc acc j (reduce + (map * s f)))))))]
+                          (reduce (fn [a k] (assoc a (+ (long offset) k) (nth share k)))
+                                  acc
+                                  (range (count s)))))))]
     (if (base model)
       (vec (concat (:root walk) (:joints walk)))
       (vec (:joints walk)))))
@@ -951,19 +1116,25 @@
         inward (reduce
                 (fn [{:keys [pa pa0 uu] :as acc} j]
                   (let [{:keys [s parent xt]} (nth ls j)
-                        {:keys [u d]} (nth (:links ai) j)
+                        {:keys [u dinv]} (nth (:links ai) j)
                         paj (get pa j zero6)
-                        uj (- (reduce + (map * s paj)))
-                        acc (assoc acc :uu (assoc uu j uj))]
-                    (if (< (abs (double d)) 1e-12)
-                      acc
-                      (let [up (lin/mat-vec xt (mapv + paj (scaled u (/ uj (double d)))))]
-                        (if (neg? (long parent))
-                          (assoc acc :pa0 (mapv + pa0 up))
-                          (assoc acc :pa (update pa parent #(mapv + (or % zero6) up))))))))
+                        uj (mapv - (st-times s paj))
+                        acc (assoc acc :uu (assoc uu j uj))
+                        up (lin/mat-vec
+                            xt
+                            (cond-> paj
+                              dinv (as-> x
+                                         (reduce (fn [a l]
+                                                   (mapv + a (scaled (nth u l)
+                                                                     (nth (lin/mat-vec dinv uj) l))))
+                                                 x
+                                                 (range (count u))))))]
+                    (if (neg? (long parent))
+                      (assoc acc :pa0 (mapv + pa0 up))
+                      (assoc acc :pa (update pa parent #(mapv + (or % zero6) up))))))
                 {:pa (if (neg? (long i)) {} {i (mapv - f)})
                  :pa0 (if (neg? (long i)) (mapv - f) zero6)
-                 :uu (vec (repeat n 0.0))}
+                 :uu (vec (repeat n nil))}
                 path)
         dv0 (if root
               (let [m (:ia0 ai)
@@ -973,16 +1144,22 @@
         outward (reduce
                  (fn [{:keys [dv] :as acc} j]
                    (let [{:keys [xup s parent]} (nth ls j)
-                         {:keys [u d]} (nth (:links ai) j)
+                         {:keys [u dinv]} (nth (:links ai) j)
                          a' (lin/mat-vec xup (if (neg? (long parent)) dv0 (nth dv parent)))
-                         dq (if (< (abs (double d)) 1e-12)
-                              0.0
-                              (/ (- (double (nth (:uu inward) j))
-                                    (reduce + (map * u a')))
-                                 (double d)))]
+                         ;; Bodies off the path to the impulse have no
+                         ;; bias force on them at all, which is what the
+                         ;; nil says; their joints still accelerate,
+                         ;; because everything above them moved.
+                         uj (or (nth (:uu inward) j) (vec (repeat (count s) 0.0)))
+                         dq (if dinv
+                              (lin/mat-vec dinv
+                                           (mapv (fn [k ul]
+                                                   (- (double k) (reduce + (map * ul a'))))
+                                                 uj u))
+                              (vec (repeat (count s) 0.0)))]
                      (-> acc
-                         (update :dv conj (mapv + a' (scaled s dq)))
-                         (update :dqd conj dq))))
+                         (update :dv conj (mapv + a' (s-times s dq 0)))
+                         (update :dqd into dq))))
                  {:dv [] :dqd []}
                  (range n))]
     (if root
