@@ -194,9 +194,17 @@
 ;; The world
 
 (defn world
-  "A simulation over `bodies`, which are `allgo.physics.rigid` maps."
+  "A simulation over `bodies`, which are `allgo.physics.rigid` maps.
+
+  `:broad` is the broad phase's kept state, and the reason the world is
+  threaded through `step` rather than rebuilt: sweep and prune is cheap
+  because the order it sorted the bodies into last step is nearly right
+  this step, and that is only true if it is the same one."
   ([bodies] (world bodies {}))
-  ([bodies opts] (merge defaults opts {:bodies (vec bodies) :contacts []})))
+  ([bodies opts]
+   (merge defaults opts {:bodies (vec bodies)
+                         :contacts []
+                         :broad (contact/broad-phase (count bodies))})))
 
 (defn- contact-key
   "What counts as the same contact as last step, for warm starting.
@@ -692,7 +700,7 @@
   [{:keys [bodies gravity iterations warm-start?] :as w} dt]
   (let [arrays (body-arrays bodies)
         _ (accelerate! arrays bodies gravity dt)
-        cs (prepare bodies (contact/all bodies) (:contacts w))]
+        cs (prepare bodies (contact/all bodies (:broad w)) (:contacts w))]
     (record-approach! arrays cs)
     (when warm-start? (warm-start! arrays cs))
     (dotimes [_ (long iterations)]
@@ -739,7 +747,7 @@
         h (/ (double dt) substeps)
         per (max 1 (quot (long iterations) substeps))
         relax-opts (assoc w :relax? true)
-        contacts (contact/all bodies)]
+        contacts (contact/all bodies (:broad w))]
     (loop [bodies bodies cs (prepare bodies contacts (:contacts w)) n substeps first? true]
       (if (zero? n)
         (assoc w :bodies bodies :contacts (contact-state cs))
@@ -768,7 +776,7 @@
   [{:keys [bodies gravity substeps iterations] :as w} dt]
   (let [substeps (max 1 (long substeps))
         h (/ (double dt) substeps)
-        contacts (contact/all bodies)
+        contacts (contact/all bodies (:broad w))
         cs (prepare bodies contacts (:contacts w))
         slop (double (:slop w))
         ^doubles lambda (:lambda cs)

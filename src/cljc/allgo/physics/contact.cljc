@@ -53,8 +53,10 @@
 
   which is what `allgo.physics.solver` consumes whichever solver it is
   running."
-  (:require [allgo.geometry.quaternion :as q]
-            [allgo.geometry.vec3 :as v]))
+  (:require [allgo.array :as a]
+            [allgo.geometry.quaternion :as q]
+            [allgo.geometry.vec3 :as v]
+            [allgo.spatial.sweep :as sweep]))
 
 (def ^:private eps 1e-9)
 
@@ -451,7 +453,7 @@
             (when (= :box (:shape b)) (frame b))))
 
 (defn- aabb
-  "A world-axis box around the body, for the cheap rejection."
+  "A world-axis box around the body, for the broad phase."
   [b]
   (let [r (case (:shape b)
             :ball (let [rr (double (:radius b))] [rr rr rr])
@@ -464,30 +466,66 @@
               [(reach 0) (reach 1) (reach 2)]))]
     [(v/sub (:pos b) r) (v/add (:pos b) r)]))
 
-(defn- aabb-overlap? [[amin amax] [bmin bmax]]
-  (and (<= (nth amin 0) (nth bmax 0)) (>= (nth amax 0) (nth bmin 0))
-       (<= (nth amin 1) (nth bmax 1)) (>= (nth amax 1) (nth bmin 1))
-       (<= (nth amin 2) (nth bmax 2)) (>= (nth amax 2) (nth bmin 2))))
+(defn broad-phase
+  "Somewhere for `all` to keep its sorted order between steps.
+
+  Sweep and prune earns its name across frames, not within one. Bodies
+  barely move between steps, so the order it sorted them into last time
+  is very nearly right this time, and restoring it costs about the number
+  of bodies that actually changed places. Thrown away and rebuilt each
+  step it would still beat testing every pair, and it would be paying
+  `n log n` for something that is usually `n`.
+
+  Pass the same one back every step. It resizes itself when the scene
+  grows, so a demo that fires a ball into the wall needs no ceremony."
+  ([] (broad-phase 256))
+  ([capacity] {:sweep (sweep/sweep (max 8 (long capacity)))
+               :capacity (max 8 (long capacity))}))
+
+(defn- grow
+  "The broad phase, big enough for `n` bodies."
+  [broad ^long n]
+  (if (and broad (>= (long (:capacity broad)) n))
+    broad
+    (broad-phase (max 8 (* 2 n)))))
 
 (defn all
   "Every contact among `bodies`, as a flat vector.
 
-  Pairs are rejected on their world-axis boxes first, which is most of
-  them: a wall of bricks has a few hundred bodies and each touches four
-  or five, so the exact test is worth running on a fraction of the pairs
-  and the cheap one on all of them. Two static bodies are never tested --
-  neither can move, so nothing they might say matters."
-  [bodies]
-  (let [bodies (vec bodies)
-        n (count bodies)
-        boxes (mapv aabb bodies)
-        frames (mapv #(when (= :box (:shape %)) (frame %)) bodies)]
-    (into []
-          (comp (mapcat identity))
-          (for [i (range n)
-                j (range (inc i) n)
-                :let [a (nth bodies i) b (nth bodies j)]
-                :when (and (not (and (zero? (double (:inv-mass a)))
-                                     (zero? (double (:inv-mass b)))))
-                           (aabb-overlap? (nth boxes i) (nth boxes j)))]
-            (between* i j a b (nth frames i) (nth frames j))))))
+  Two phases, which is the standard shape and the only way this gets
+  cheap. The broad phase asks which pairs could possibly touch, by
+  sorting world-axis boxes along the axis the scene is most spread along
+  and comparing only the ones that overlap on it -- `allgo.spatial.sweep`.
+  The narrow phase then runs the separating axis test on the survivors,
+  which is where all the cost is: fifteen axes, each a handful of dot and
+  cross products.
+
+  It matters more than it looks. A wall of two hundred bricks is twenty
+  thousand pairs, of which about six hundred touch; the exact test on all
+  of them is most of the frame, and on the survivors it is a fraction of
+  it. Two static bodies are never tested at all -- neither can move, so
+  nothing they might say matters.
+
+  With no `broad` given this allocates one per call, which is correct and
+  slower; `allgo.physics.solver` keeps one in the world and hands it back
+  each step."
+  ([bodies] (all bodies nil))
+  ([bodies broad]
+   (let [bodies (vec bodies)
+         n (count bodies)
+         broad (grow broad n)
+         mins (a/f64 (* 3 n))
+         maxs (a/f64 (* 3 n))
+         frames (mapv #(when (= :box (:shape %)) (frame %)) bodies)]
+     (dotimes [i n]
+       (let [[lo hi] (aabb (nth bodies i))]
+         (dotimes [k 3]
+           (aset ^doubles mins (+ (* 3 i) k) (double (nth lo k)))
+           (aset ^doubles maxs (+ (* 3 i) k) (double (nth hi k))))))
+     (into []
+           (comp (mapcat (fn [[i j]]
+                           (let [a (nth bodies i) b (nth bodies j)]
+                             (when-not (and (zero? (double (:inv-mass a)))
+                                            (zero? (double (:inv-mass b))))
+                               (between* i j a b (nth frames i) (nth frames j)))))))
+           (sweep/overlapping-pairs (:sweep broad) mins maxs n)))))

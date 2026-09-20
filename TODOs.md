@@ -233,9 +233,22 @@ What would fix it, in order of expected return:
    three-element vector. The solve was rewritten this way and went from
    139 microseconds a contact to a fraction of it; the collision
    detection has not been.
-2. **A broad phase that is not every pair against every other.**
-   `allgo.spatial.hash` and `allgo.spatial.sweep` are both sitting there
-   unused.
+2. ~~**A broad phase that is not every pair against every other.**~~
+   Done: `allgo.physics.contact/all` sweeps and prunes through
+   `allgo.spatial.sweep`, keeping the sorted order in the world between
+   steps, which is what makes it cost about `n` rather than `n log n` on
+   a scene that barely moves. Detection alone, a settled wall:
+
+       bodies               257    577    901
+       all pairs (ms)      8.04  24.98  48.97
+       sweep and prune     6.34  15.16  24.61
+
+   The gap widens with the body count, which is the whole argument. It is
+   not larger at small sizes because there was already an axis-aligned box
+   rejection in front of the exact test -- what sweep removes is the `n^2`
+   box comparisons, not the exact tests, and those were already few. Which
+   means the narrow phase is now nearly all of it, and item 1 is the
+   remaining lever.
 3. **Leaner contact preparation.** `prepare` builds a dozen typed arrays
    per step out of lazy sequences, and computes the tangent basis and the
    body-local anchors through persistent vectors.
