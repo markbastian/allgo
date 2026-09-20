@@ -520,6 +520,18 @@ TGS stops toppling too, though it keeps its own floor, below.
     three missing type hints -- reflective `aget` costs two orders of
     magnitude, and `make reflect` is what catches it.
 
+  - ~~**Joint limits.**~~ Done, and needed sooner than expected: without
+    them a body settles with its head folded back on itself and its
+    knees bent the wrong way. `:limit [lo hi]` for a hinge, `:cone` and
+    `:twist` for a ball joint, solved as one-sided constraints in the
+    same sweep as the contacts -- a limit is a push between a link and
+    its own parent where a contact is a push between a link and the
+    floor, and the impulse response does not need to know which. Held
+    to within half a degree of the limit in every direction tested.
+
+  - **Self-collision between links**, which is the last thing missing: a
+    forearm can pass through a thigh.
+
   - **A ragdoll demo**, which is what all of the above is for.
 - **Continuous collision detection.** Half done. Speculative contacts
   — the cheap version — are in: the margin out to which a gap still

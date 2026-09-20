@@ -580,3 +580,92 @@
                                         st0 (range 10000)))]
       (is (< (v/distance (:linear m0) (:linear m1)) 1e-2))
       (is (< (v/distance (:angular m0) (:angular m1)) 1e-2)))))
+
+;; ---------------------------------------------------------------------------
+;; Joint limits
+
+(defn- swung
+  "How far a ball joint's bone has swung from where it rests, in degrees."
+  [link x]
+  (let [rest-dir (v/normalize (:com link))
+        bone (q/rotate (vec x) rest-dir)]
+    (Math/toDegrees (Math/acos (max -1.0 (min 1.0 (v/dot bone rest-dir)))))))
+
+(defn- twisted
+  "How far it has turned about the bone itself, in degrees."
+  [link x]
+  (let [rest-dir (v/normalize (:com link))
+        r (let [r (vec x)] (if (neg? (double (nth r 3))) (mapv - r) r))]
+    (Math/toDegrees (* 2.0 (Math/atan2 (v/dot [(nth r 0) (nth r 1) (nth r 2)] rest-dir)
+                                       (double (nth r 3)))))))
+
+(defn- swinging-limb
+  "A limb hanging off a ball joint, free to be kicked."
+  [extra]
+  [(merge (limb -1 :spherical 0.6 2.0) extra)])
+
+(deftest hinge-limit-test
+  (testing "a hinge stops at its limit instead of going round"
+    (let [free [(limb -1 :revolute 0.6 2.0)]
+          held [(assoc (limb -1 :revolute 0.6 2.0)
+                       :limit [(Math/toRadians -40.0) (Math/toRadians 40.0)])]
+          swing (fn [model]
+                  (->> (iterate #(ab/step % model (/ 1.0 240.0) opts) {:q [0.0] :qd [12.0]})
+                       (take 900)
+                       (map #(Math/toDegrees (double (first (:q %)))))))]
+      ;; Unlimited, it goes over the top and keeps going.
+      (is (> (apply max (swing free)) 90.0))
+      ;; Limited, it never leaves the range by more than the soft
+      ;; constraint's overshoot.
+      (is (< (apply max (swing held)) 42.0))
+      (is (> (apply min (swing held)) -42.0)))))
+
+(deftest cone-limit-test
+  (testing "a ball joint's bone stays inside its cone"
+    (let [kick {:q [[0.0 0.0 0.0 1.0]] :qd [0.0 0.0 6.0]}
+          worst (fn [extra]
+                  (let [model (swinging-limb extra)]
+                    (->> (iterate #(ab/step % model (/ 1.0 240.0) opts) kick)
+                         (take 1200)
+                         (map #(swung (first model) (first (:q %))))
+                         (apply max))))]
+      ;; Free, the kick takes it most of the way over.
+      (is (> (worst {}) 70.0))
+      (is (< (worst {:cone (Math/toRadians 30.0)}) 32.0))
+      (is (< (worst {:cone (Math/toRadians 60.0)}) 62.0))))
+
+  (testing "and the cone says nothing about twist, which is its own limit"
+    ;; The distinction is worth a test because it is the one that is easy
+    ;; to miss by eye: a head can be within forty degrees of upright and
+    ;; still be facing backwards.
+    ;;
+    ;; Both cases keep the cone on. Swing and twist are read out of the
+    ;; joint's quaternion by projecting onto the bone, and that
+    ;; projection stops meaning anything as the swing approaches half a
+    ;; turn -- so a twist measured on a limb that has swung right over
+    ;; is noise, whatever the limit did.
+    (let [spin {:q [[0.0 0.0 0.0 1.0]] :qd [5.0 0.0 0.0]}
+          cone (Math/toRadians 30.0)
+          worst (fn [extra]
+                  (let [model (swinging-limb (assoc extra :cone cone))]
+                    (->> (iterate #(ab/step % model (/ 1.0 240.0) opts) spin)
+                         (take 600)
+                         (map #(abs (twisted (first model) (first (:q %)))))
+                         (apply max))))]
+      (is (> (worst {}) 120.0) "a cone alone should leave twist free")
+      (is (< (worst {:twist (Math/toRadians 45.0)}) 47.0)))))
+
+(deftest limits-without-contacts-test
+  (testing "limits hold with nothing to stand on"
+    ;; They are solved in the same sweep as contacts, and for a while
+    ;; that sweep only ran when there were contacts -- so a limb waving
+    ;; in mid-air folded through itself freely and nothing said so.
+    (let [model (swinging-limb {:cone (Math/toRadians 25.0)})]
+      (is (ab/limited? model))
+      (is (not (ab/limited? (swinging-limb {}))))
+      (is (< (->> (iterate #(ab/step % model (/ 1.0 240.0) opts)
+                           {:q [[0.0 0.0 0.0 1.0]] :qd [0.0 0.0 6.0]})
+                  (take 600)
+                  (map #(swung (first model) (first (:q %))))
+                  (apply max))
+             27.0)))))

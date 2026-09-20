@@ -196,6 +196,44 @@
   identity on the angular half, with no intermediate frames to transform
   through.
 
+  ## Limits
+
+  A joint can be given a range to stay inside, and a ragdoll needs one:
+  without limits a body settles with its head folded back on itself and
+  its knees bent the wrong way, which is a pile of sticks rather than a
+  figure.
+
+  `:limit [lo hi]` bounds a hinge or a slider. `:cone theta` bounds how
+  far a ball joint's bone may swing from where it rests, and `:twist`
+  how far it may turn about that bone -- two different things, and a
+  cone alone leaves a head free to face backwards.
+
+  They are solved as one-sided constraints in the same sweep as the
+  contacts, which is why they can be: a limit is a push between a link
+  and its own parent where a contact is a push between a link and the
+  floor, and the impulse response does not need to be told which. Limits
+  go first in each sweep, because a knee that has folded backwards is a
+  worse thing to look at than a foot a millimetre into the floor.
+
+  ## Limits
+
+  A joint can be given a range to stay inside, and a ragdoll needs one:
+  without limits a body settles with its head folded back on itself and
+  its knees bent the wrong way, which is a pile of sticks rather than a
+  figure.
+
+  `:limit [lo hi]` bounds a hinge or a slider. `:cone theta` bounds how
+  far a ball joint's bone may swing from where it rests, and `:twist`
+  how far it may turn about that bone -- two different things, and a
+  cone alone leaves a head free to face backwards.
+
+  They are solved as one-sided constraints in the same sweep as the
+  contacts, which is why they can be: a limit is a push between a link
+  and its own parent where a contact is a push between a link and the
+  floor, and the impulse response does not need to be told which. Limits
+  go first in each sweep, because a knee that has folded backwards is a
+  worse thing to look at than a foot a millimetre into the floor.
+
   A ball joint does need its body to have inertia about every axis. A
   mathematically thin rod has none about its own length, so the three by
   three it has to invert is singular, and a joint whose accelerations
@@ -947,7 +985,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Moving it
 
-(declare solve-contacts contacts-with velocity with-velocity poses)
+(declare solve-constraints contacts-with velocity with-velocity poses limited?)
 
 (defn- advance-coordinate
   "One joint's configuration, moved by its own rates.
@@ -1051,9 +1089,13 @@
          cs (or contacts
                 (when (seq obstacles) (contacts-with model q b obstacles frames)))]
      (advance-positions model
-                        (if (seq cs)
-                          (solve-contacts model moving cs dt
-                                          (assoc opts :ls ls :frames frames))
+                        ;; Limits are solved even with nothing to stand
+                        ;; on. A joint folding backwards in mid-air is
+                        ;; still a joint folding backwards, and a model
+                        ;; with no limits at all pays only this test.
+                        (if (or (seq cs) (limited? model))
+                          (solve-constraints model moving (vec cs) dt
+                                             (assoc opts :ls ls :frames frames))
                           moving)
                         dt))))
 
@@ -1289,42 +1331,46 @@
           (recur (long parent) (mv6 xt f)))))
     out))
 
-(defn- impulse-delta
-  "The change in generalised velocity from a spatial impulse `f` on body
-  `i`, in that body's own coordinates. `-1` is the root.
+(defn- ancestry
+  "Body `i` and every parent above it, tips first. `-1` is the root and
+  has no entry -- it is where the walk ends."
+  [ls i]
+  (loop [j (long i) acc []]
+    (if (neg? j) acc (recur (long (:parent (nth ls j))) (conj acc j)))))
 
-  The articulated body algorithm again, with the velocity terms gone.
-  An impulse is a force with no duration, so there is no time for a
+(defn- delta-from
+  "The change in generalised velocity an impulse makes, whatever kind.
+
+  The articulated body algorithm with the velocity terms gone. An
+  impulse is a force with no duration, so there is no time for a
   velocity product to contribute anything and the bias forces are the
   impulse itself; the inertias are the ones already built for this
-  configuration. What is left is an inward pass and an outward one, both
-  linear in the links.
+  configuration. What is left is an inward walk and an outward sweep,
+  both linear in the links.
+
+  `pa` maps a body to the spatial impulse sitting on it and `pa0` is the
+  root's, which is how a contact enters. `extra` maps a joint to a
+  generalised impulse applied along its own axes, which is how a limit
+  enters. Both end up in the same `uu` and neither needs the recursion
+  to know which it was.
 
   This is what replaced forming the inverse inertia matrix. That took
   `n + 6` runs of the full algorithm to build and was, measured, the
   entire cost of a contact -- 33ms of a 34ms solve on a sixteen link
-  model. A contact asks about three directions, so three of these do
-  instead."
-  ^doubles [model ls ai i ^doubles f]
+  model."
+  ^doubles [model ls ai path pa pa0 extra]
   (let [n (count ls)
         root (base model)
-        neg-f (let [o (a/f64 6)] (dotimes [k 6] (aset o k (- (aget f k)))) o)
-        ;; Only the bodies between the one that was hit and the root can
-        ;; have any bias force on them, so the inward pass is that walk
-        ;; and not a sweep of everything. For a ragdoll -- a shallow
-        ;; tree, not a chain -- that is three or four links out of
-        ;; sixteen. Every other link's share is zero and stays zero,
-        ;; which is what the outward pass then reads.
-        path (loop [j (long i) acc []]
-               (if (neg? j) acc (recur (long (:parent (nth ls j))) (conj acc j))))
         inward (reduce
                 (fn [{:keys [pa pa0 uu] :as acc} j]
                   (let [{:keys [s ndof parent xt]} (nth ls j)
                         nd (long ndof)
                         {:keys [^doubles u dinv]} (nth (:links ai) j)
                         ^doubles paj (or (get pa j) (a/f64 6))
+                        ^doubles seed (get extra j)
                         uj (let [^doubles share (s-dot s nd paj) o (a/f64 (max 1 nd))]
-                             (dotimes [k nd] (aset o k (- (aget share k))))
+                             (dotimes [k nd]
+                               (aset o k (- (if seed (aget seed k) 0.0) (aget share k))))
                              o)
                         acc (assoc acc :uu (assoc uu j uj))
                         up (mv6 xt (cond-> (copy6 paj)
@@ -1332,9 +1378,7 @@
                     (if (neg? (long parent))
                       (assoc acc :pa0 (add6! pa0 up))
                       (assoc acc :pa (update pa parent #(add6! (or % (a/f64 6)) up))))))
-                {:pa (if (neg? (long i)) {} {i neg-f})
-                 :pa0 (if (neg? (long i)) (copy6 neg-f) (a/f64 6))
-                 :uu (vec (repeat n nil))}
+                {:pa pa :pa0 pa0 :uu (vec (repeat n nil))}
                 path)
         dv0 (if root
               (a/f64 (mapv - (root-solve (:ia0 ai) (:pa0 inward))))
@@ -1345,10 +1389,10 @@
                          nd (long ndof)
                          {:keys [^doubles u dinv]} (nth (:links ai) j)
                          a' (mv6 xup (if (neg? (long parent)) dv0 (nth dv parent)))
-                         ;; Bodies off the path to the impulse have no
-                         ;; bias force on them at all, which is what the
-                         ;; nil says; their joints still accelerate,
-                         ;; because everything above them moved.
+                         ;; Bodies off the path have no bias force on
+                         ;; them at all, which is what the nil says;
+                         ;; their joints still accelerate, because
+                         ;; everything above them moved.
                          ^doubles uj (or (nth (:uu inward) j) (a/f64 (max 1 nd)))
                          dq (if dinv
                               (small-solve dinv nd
@@ -1378,6 +1422,41 @@
             ^doubles dq (nth (:dq outward) j)]
         (dotimes [k (long ndof)] (aset out (+ base-off (long offset) k) (aget dq k)))))
     out))
+
+(defn- impulse-delta
+  "The change in generalised velocity from a spatial impulse `f` on body
+  `i`, in that body's own coordinates. `-1` is the root.
+
+  The articulated body algorithm again, with the velocity terms gone.
+  An impulse is a force with no duration, so there is no time for a
+  velocity product to contribute anything and the bias forces are the
+  impulse itself; the inertias are the ones already built for this
+  configuration. What is left is an inward pass and an outward one, both
+  linear in the links.
+
+  This is what replaced forming the inverse inertia matrix. That took
+  `n + 6` runs of the full algorithm to build and was, measured, the
+  entire cost of a contact -- 33ms of a 34ms solve on a sixteen link
+  model. A contact asks about three directions, so three of these do
+  instead."
+  ^doubles [model ls ai i ^doubles f]
+  (let [neg-f (let [o (a/f64 6)] (dotimes [k 6] (aset o k (- (aget f k)))) o)]
+    (delta-from model ls ai
+                (ancestry ls i)
+                (if (neg? (long i)) {} {i neg-f})
+                (if (neg? (long i)) (copy6 neg-f) (a/f64 6))
+                {})))
+
+(defn- joint-delta
+  "The change in generalised velocity from a generalised impulse `w` on
+  joint `j`'s own axes.
+
+  What a joint limit needs, where a contact needs `impulse-delta`. The
+  walk is the same one -- a limit is a push between a link and its own
+  parent rather than between a link and the floor, and neither of them
+  is anything the recursion has to be told about."
+  ^doubles [model ls ai j ^doubles w]
+  (delta-from model ls ai (ancestry ls j) {} (a/f64 6) {j w}))
 
 (defn- response
   "How a unit impulse at world point `p` on body `i` along `dir` is felt.
@@ -1546,9 +1625,103 @@
         t1 (v/normalize (v/cross n a))]
     [t1 (v/cross n t1)]))
 
-(defn solve-contacts
-  "`state` with its velocities corrected so the contacts are not being
-  driven into.
+(defn limited?
+  "Whether any joint has a limit to be checked at all."
+  [model]
+  (boolean (some #(or (:limit %) (:cone %) (:twist %)) (chain model))))
+
+(defn- limit-rows
+  "The joint limits currently being pushed against, as one-sided
+  constraints on the generalised velocity.
+
+  A hinge with `:limit [lo hi]` is the easy half: the violation is a
+  number and the direction to push is its own axis.
+
+  A ball joint with `:cone theta` is a limit on how far the bone may
+  swing from where it points at rest -- `:limit-axis` in the child's own
+  frame, the direction of the centre of mass unless said otherwise. Turn
+  it by the joint's rotation and the angle to the rest direction is the
+  swing; the axis to turn about to reduce it is the cross product of the
+  two, carried back into the child's frame because that is where a
+  spherical joint's velocity lives. There is no limit on twist: a
+  ragdoll's shoulder needs a cone and does not care.
+
+  Only violated limits are returned. A joint inside its range is not a
+  constraint and solving it as one costs a row for nothing."
+  [model ls ai q dt bias-factor max-push]
+  (let [dt (double dt) bias-factor (double bias-factor) max-push (double max-push)
+        parts (chain model)
+        root? (some? (base model))
+        base-off (if root? 6 0)
+        nd-total (+ base-off (long (reduce + (map :ndof ls))))]
+    (into []
+          (keep
+           (fn [j]
+             (let [link (nth parts j)
+                   {:keys [ndof offset]} (nth ls j)
+                   nd (long ndof)
+                   x (nth q j nil)
+                   ;; `depth` is how far past the limit, `w` the
+                   ;; generalised impulse direction that comes back.
+                   [depth ^doubles w]
+                   (case (kind-of link)
+                     (:revolute :prismatic)
+                     (when-let [[lo hi] (:limit link)]
+                       (let [xv (double x)]
+                         (cond (< xv (double lo)) [(- (double lo) xv) (a/f64 [1.0])]
+                               (> xv (double hi)) [(- xv (double hi)) (a/f64 [-1.0])]
+                               :else nil)))
+                     :spherical
+                     (let [rest-dir (v/normalize (or (:limit-axis link) (:com link)))
+                           rot (if (and (sequential? x) (= 4 (count x)))
+                                 ;; Both halves of the sphere name the
+                                 ;; same rotation; the twist angle read
+                                 ;; off the wrong one is out by a turn.
+                                 (let [r (vec x)] (if (neg? (double (nth r 3))) (mapv - r) r))
+                                 q/identity-q)
+                           bone (q/rotate rot rest-dir)
+                           swing (Math/acos (max -1.0 (min 1.0 (v/dot bone rest-dir))))
+                           cone (:cone link)
+                           twist-max (:twist link)
+                           ;; How far it has turned about the bone
+                           ;; itself, which the cone says nothing about:
+                           ;; a head can be within forty degrees of
+                           ;; upright and still be facing backwards.
+                           proj (v/dot [(nth rot 0) (nth rot 1) (nth rot 2)] rest-dir)
+                           twist (* 2.0 (Math/atan2 proj (double (nth rot 3))))]
+                       (cond
+                         (and cone (> swing (double cone)))
+                         (let [n (v/cross bone rest-dir)
+                               len (v/length n)]
+                           (when (> len 1e-9)
+                             (let [axis (q/rotate (q/conjugate rot) (v/scale n (/ 1.0 len)))]
+                               [(- swing (double cone))
+                                (a/f64 [(nth axis 0) (nth axis 1) (nth axis 2)])])))
+
+                         (and twist-max (> (abs twist) (double twist-max)))
+                         (let [sgn (if (pos? twist) -1.0 1.0)]
+                           [(- (abs twist) (double twist-max))
+                            (a/f64 [(* sgn (nth rest-dir 0))
+                                    (* sgn (nth rest-dir 1))
+                                    (* sgn (nth rest-dir 2))])])
+
+                         :else nil))
+                     nil)]
+               (when depth
+                 (let [delta (joint-delta model ls ai j w)
+                       g (let [o (a/f64 nd-total)]
+                           (dotimes [k nd]
+                             (aset o (+ base-off (long offset) k) (aget w k)))
+                           o)
+                       wgt (dot-n g delta)]
+                   {:g g :delta delta
+                    :m (if (> wgt 1e-12) (/ 1.0 wgt) 0.0)
+                    :bias (min max-push (/ (* bias-factor (double depth)) dt))})))))
+          (range (count parts)))))
+
+(defn solve-constraints
+  "`state` with its velocities corrected so that neither the contacts nor
+  the joint limits are being driven into.
 
   Sequential impulse, the same as `allgo.physics.solver` runs, over the
   same kind of accumulated clamped impulses -- and the reason it can be
@@ -1594,8 +1767,10 @@
                                                            (double slop))))
                                             dt)))))
                    cs)
-        k (count prep)]
-    (if (zero? k)
+        limits (limit-rows model ls ai q dt bias-factor max-push-speed)
+        k (count prep)
+        nl (count limits)]
+    (if (and (zero? k) (zero? nl))
       state
       ;; One mutable generalised velocity for the whole sweep, and one
       ;; flat array of accumulated impulses beside it. Every push is a
@@ -1604,8 +1779,22 @@
       ;; iterations over fifty contacts is twelve hundred of each, and
       ;; on boxed vectors that was most of what a contact cost.
       (let [^doubles u u0
-            ^doubles acc (a/f64 (* 3 k))]
+            ^doubles acc (a/f64 (* 3 k))
+            ^doubles lacc (a/f64 (max 1 nl))]
         (dotimes [_ (long iterations)]
+          ;; Limits first. A joint being held inside its range changes
+          ;; what the contacts below it are pushing against, and a knee
+          ;; that has folded backwards is a worse thing to look at than
+          ;; a foot a millimetre into the floor.
+          (dotimes [i nl]
+            (let [{:keys [m bias]} (nth limits i)
+                  ^doubles gl (:g (nth limits i))
+                  ^doubles dl (:delta (nth limits i))
+                  vn (dot-n gl u)
+                  old (aget lacc i)
+                  nw (max 0.0 (+ old (* (double m) (- (double bias) vn))))]
+              (axpy-n! u dl (- nw old))
+              (aset lacc i nw)))
           (dotimes [i k]
             (let [{:keys [n t1 t2 approach bias]} (nth prep i)
                   b (* 3 i)
