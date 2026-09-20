@@ -38,8 +38,44 @@
     turned ninety degrees from the one below. Wide enough not to lean
     like the column does, so it asks a different question: whether a
     solver can rest a block across two others and leave the third alone.
+  - **keep** -- a round tower inside a half circle of rampart, which is
+    the board of Crossbows and Catapults laid out in bricks. Both are
+    rings of boxes rather than anything curved, so every contact in it
+    is between two faces that are not parallel -- the one scene here
+    that is not built out of right angles.
   - **wall** -- a running-bond wall, `rows` by `cols`. The stack test:
     how much weight a solver can hold up without letting the bottom sag.
+
+  ## The ring, which reverses the answer
+
+  The keep is the only scene here not built out of right angles: a ring
+  of boxes meets its neighbours face to face only at the inner edge and
+  fans apart outwards, so almost every contact in it is between two
+  planes at an angle.
+
+  At the size it starts -- five courses of keep inside two of rampart,
+  59 blocks -- that costs nothing. Every block is still where it was
+  laid after a minute and the whole scene is asleep, under all three
+  solvers, for about 0.4ms a step.
+
+  One course more of each is where they part company. Six and three, 77
+  blocks, after a minute:
+
+      sequential impulse   23 of 48 keep blocks still laid; the top
+                           three courses have unwound off the tower
+      tgs                  all 48 laid, but the rampart never goes
+                           quiet, so nothing sleeps -- 5.3ms a step
+      xpbd                 all 48 laid, everything asleep, 0.5ms
+
+  Which is the opposite of the Jenga answer below, where XPBD is the
+  one that cannot settle and TGS is the one that can. Neither result is
+  the general one: they are two different scenes and the character that
+  wins in each is different.
+
+  Two of 29 rampart blocks come off under all three, and that is not a
+  fault: an arc bonded course over course leaves a block at each end of
+  the top course with a joint under it, and it falls off the same way
+  the wall's end brick does.
 
   ## Which of them can leave a Jenga tower alone
 
@@ -142,6 +178,7 @@
   not every pair against every other -- `allgo.spatial.hash` and
   `allgo.spatial.sweep` are both sitting there unused."
   (:require [allgo.demo.fps :as fps]
+            [allgo.geometry.quaternion :as q]
             [allgo.physics.rigid :as rigid]
             [allgo.physics.solver :as solver]
             ["lil-gui" :default GUI]
@@ -166,6 +203,33 @@
   ([pos size rot]
    (rigid/box (cond-> {:pos pos :size size :density 1.6}
                 rot (assoc :rot rot)))))
+
+(def ^:private keep-radius 1.3)
+(def ^:private rampart-radius 3.2)
+
+(defn- chord
+  "How long a block may be to sit in a ring and still touch its
+  neighbours rather than start inside them.
+
+  A ring of boxes is wedges the wrong way round: the blocks meet at
+  their inner faces and fan apart towards the outside. So the length to
+  take is the chord at the inner radius, `step` radians apart. Taking it
+  at the centres instead buries each block a few millimetres in the one
+  beside it, and a ring laid like that does not settle -- it springs."
+  ^double [^double radius ^double depth ^double step]
+  (* 2.0 (- radius (* 0.5 depth)) (Math/sin (* 0.5 step))))
+
+(defn- ring-brick
+  "A block `theta` radians round a ring of `radius`, lying along it.
+
+  Turned about the upright so that its length runs along the tangent and
+  its depth points out from the centre, which is a quarter turn less
+  `theta` -- at `theta` of zero the block faces down +x and has to be
+  turned ninety degrees to get there."
+  [^double radius ^double theta ^double y [len height depth]]
+  (brick [(* radius (Math/cos theta)) y (* radius (Math/sin theta))]
+         [len height depth]
+         (q/from-axis-angle [0.0 1.0 0.0] (- (* 0.5 Math/PI) theta))))
 
 (defmulti build-scene
   "The named scene to knock down, read off the GUI `controls`.
@@ -193,6 +257,42 @@
                      (brick [x (+ (* 0.5 bh) (* r bh)) 0.0] [bw bh bd])))
      :span (* 0.5 cols bw)
      :height (* rows bh)}))
+
+(defmethod build-scene "keep" [_ ^js c]
+  (let [courses (long (.-keepCourses c))
+        rampart (long (.-rampartCourses c))
+        [_ bh bd] brick-size
+        ;; Eight blocks to a course round the keep, ten to a course
+        ;; round the half circle of the rampart -- which at these two
+        ;; radii comes out at very nearly the same block for both.
+        keep-step (/ (* 2.0 Math/PI) 8)
+        wall-step (/ Math/PI 10)
+        keep-len (chord keep-radius bd keep-step)
+        wall-len (chord rampart-radius bd wall-step)]
+    {:bodies (-> [(floor)]
+                 (into (for [r (range courses)
+                             i (range 8)
+                             ;; Half a block round on every other
+                             ;; course, for the same reason the wall
+                             ;; does it: without the bond the keep is
+                             ;; eight independent columns.
+                             :let [theta (* keep-step (+ i (if (odd? r) 0.5 0.0)))]]
+                         (ring-brick keep-radius theta (+ (* 0.5 bh) (* r bh))
+                                     [keep-len bh bd])))
+                 (into (for [r (range rampart)
+                             ;; The rampart is an arc, not a ring, so
+                             ;; the bonded course cannot just be shifted
+                             ;; -- that would hang a block off each end
+                             ;; over nothing. It drops one block instead
+                             ;; and sits half a block in at both ends.
+                             :let [odd? (odd? r)
+                                   n (if odd? 9 10)]
+                             i (range n)
+                             :let [theta (* wall-step (+ i (if odd? 1.0 0.5)))]]
+                         (ring-brick rampart-radius theta (+ (* 0.5 bh) (* r bh))
+                                     [wall-len bh bd]))))
+     :span (+ rampart-radius (* 0.5 bd))
+     :height (* (max courses rampart) bh)}))
 
 (defmethod build-scene "jenga" [_ ^js c]
   (let [levels (long (.-jengaLevels c))
@@ -225,7 +325,7 @@
 
 (def ^:private scene-names
   "In the order they are offered, simplest first."
-  ["column" "jenga" "wall"])
+  ["column" "jenga" "keep" "wall"])
 
 (def ^:private ^js controls
   #js {:scene "wall"
@@ -234,6 +334,8 @@
        :cols 4
        :columnCourses 8
        :jengaLevels 12
+       :keepCourses 5
+       :rampartCourses 2
        :iterations 8
        :substeps 4
        :friction 0.55
@@ -252,6 +354,8 @@
   how it gets a plain name back in the GUI regardless."
   {"column" [["columnCourses" 2 40 1 "courses"]]
    "jenga"  [["jengaLevels" 3 24 1 "levels"]]
+   "keep"   [["keepCourses" 2 14 1 "keep courses"]
+             ["rampartCourses" 1 8 1 "rampart courses"]]
    "wall"   [["rows" 3 16 1] ["cols" 3 16 1]]})
 
 (defn- projectile
