@@ -79,9 +79,24 @@
    ;; a resting stack jitters forever, chasing a penetration that the
    ;; next step's rounding puts straight back.
    :slop 0.005
-   ;; How much of the remaining penetration to push out per step. All of
-   ;; it overshoots and the stack breathes; none of it and bodies sink.
-   :bias 0.2
+   ;; Contacts are springs, not rules. A rigid contact solved with a
+   ;; Baumgarte bias pushes overlapping bodies apart at `bias/dt` times
+   ;; the overlap, which for a stack too deep to converge in the
+   ;; iterations it has is enough to throw the bricks off each other: they
+   ;; leave, they lose the contact and its remembered impulse, they fall
+   ;; back deeper, and it pushes harder. A twenty brick column pogoed
+   ;; itself apart in three seconds that way.
+   ;;
+   ;; A spring of a stated frequency and damping cannot do that. The
+   ;; pushout is bounded by construction, the damping ratio says how it
+   ;; comes to rest, and the constraint forgets a little of its
+   ;; accumulated impulse each iteration -- which is what makes it unable
+   ;; to pump. Erin Catto's soft constraints; Box2D v3 and PhysX's TGS
+   ;; Soft are both this.
+   :contact-hertz 30.0
+   :contact-damping 10.0
+   ;; However deep the overlap, it is never pushed out faster than this.
+   :max-push-speed 3.0
    ;; Below this closing speed a contact is treated as resting and does
    ;; not bounce, however elastic the material.
    :restitution-threshold 1.0
@@ -183,6 +198,20 @@
   ([bodies] (world bodies {}))
   ([bodies opts] (merge defaults opts {:bodies (vec bodies) :contacts []})))
 
+(defn- contact-key
+  "What counts as the same contact as last step, for warm starting.
+
+  The pair, and the feature id `allgo.physics.contact` stamps on the
+  point -- which corner of which face is pressed into which face. It used
+  to be the contact point rounded to two centimetres, and that is a fine
+  key for a stack that is already still and a bad one for a stack that is
+  moving: the points slide across the rounding and the match is lost
+  exactly when the impulse history is most needed. A twenty brick column
+  matched a quarter of its contacts that way and fell over; on ids it
+  matches all of them."
+  [c]
+  [(:a c) (:b c) (:id c)])
+
 (defn- prepare
   "Turns a frame's contacts into the solver's own arrays.
 
@@ -191,14 +220,12 @@
   sequential impulse does not and ignores them."
   [bodies contacts previous]
   (let [n (count contacts)
-        ;; Last step's impulse for the same pair and roughly the same
-        ;; place, which is the guess warm starting rests on.
-        old (reduce (fn [m c]
-                      (assoc m [(:a c) (:b c)
-                                (mapv #(math/round (* 50.0 (double %))) (:point c))]
-                             [(:pn c) (:p1 c) (:p2 c)]))
+        ;; Last step's impulses for the same contact, which is the guess
+        ;; warm starting rests on.
+        old (reduce (fn [m c] (assoc m (contact-key c) [(:pn c) (:p1 c) (:p2 c)]))
                     {}
-                    previous)]
+                    previous)
+        remembered (mapv (fn [c] (or (get old (contact-key c)) [0.0 0.0 0.0])) contacts)]
     {:n n
      :a (a/i32 (map :a contacts))
      :b (a/i32 (map :b contacts))
@@ -216,13 +243,14 @@
                               contacts))
      :rb-local (a/f64 (mapcat (fn [c] (rigid/world->local (nth bodies (:b c)) (:point c)))
                               contacts))
-     :pn (a/f64 (map (fn [c] (or (first (get old [(:a c) (:b c)
-                                                  (mapv #(math/round (* 50.0 (double %)))
-                                                        (:point c))]))
-                                 0.0))
-                     contacts))
-     :p1 (a/f64 n)
-     :p2 (a/f64 n)
+     :pn (a/f64 (map #(nth % 0) remembered))
+     ;; The tangential impulses come back too, now that the match is
+     ;; exact. They were being dropped -- stored by `contact-state` every
+     ;; step and never read -- so friction began each step from nothing
+     ;; and had to be rediscovered in the iterations it had left, which
+     ;; is what let a stack creep sideways while it stood.
+     :p1 (a/f64 (map #(nth % 1) remembered))
+     :p2 (a/f64 (map #(nth % 2) remembered))
      ;; What the XPBD position solve had to push with to keep this contact
      ;; apart, summed over the last substep. Only that solver fills it,
      ;; and it is what bounds friction there.
@@ -271,7 +299,7 @@
   JVM's escape analysis hides most of the cost; JavaScript's does not,
   and this has to run in both."
   [{:keys [vel omega ii inv-mass]} cs dt opts]
-  (let [{:keys [friction slop bias restitution]} opts
+  (let [{:keys [friction slop restitution]} opts
         ^doubles vel vel ^doubles omega omega ^doubles ii ii ^doubles inv-mass inv-mass
         ^doubles normal (:normal cs)
         ^doubles t1 (:t1 cs)
@@ -288,9 +316,23 @@
         dt (double dt)
         friction (double friction)
         slop (double slop)
-        bias (double bias)
         restitution (double restitution)
         threshold (double (:restitution-threshold opts))
+        ;; The spring, as three numbers the solve can use directly. A
+        ;; contact cannot be stiffer than the step can represent, so the
+        ;; frequency is capped at a quarter of the step rate -- above that
+        ;; the spring oscillates between steps instead of damping.
+        hertz (min (double (:contact-hertz opts)) (* 0.25 (/ 1.0 dt)))
+        zeta (double (:contact-damping opts))
+        w (* 2.0 math/PI hertz)
+        c (* dt w (+ (* 2.0 zeta) (* dt w)))
+        bias-rate (/ w (+ (* 2.0 zeta) (* dt w)))
+        ;; How much of the ideal impulse to apply, and how much of what
+        ;; has accumulated to give back. The second is the whole trick:
+        ;; an accumulated impulse that decays cannot store energy.
+        mass-scale (/ c (+ 1.0 c))
+        impulse-scale (/ 1.0 (+ 1.0 c))
+        max-push (double (:max-push-speed opts))
         n-contacts (long (:n cs))]
     (dotimes [k n-contacts]
       (let [ia (aget ia-arr k) ib (aget ib-arr k)
@@ -300,7 +342,7 @@
             ia3 (* 3 ia) ib3 (* 3 ib) ia9 (* 9 ia) ib9 (* 9 ib)
             ima (aget inv-mass ia) imb (aget inv-mass ib)
             pen (- (aget depth k) slop)
-            b-term (if (pos? pen) (* (/ bias dt) pen) 0.0)
+            b-term (if (pos? pen) (min (* bias-rate pen) max-push) 0.0)
             va (aget approach k)
             r-term (if (< va (- threshold)) (* (- restitution) va) 0.0)
             normal-target (+ b-term r-term)]
@@ -354,8 +396,14 @@
                         (* dz (- (* ibx rby) (* iby rbx))))
                   keff (+ ima imb ka kb)
                   m (if (> keff 1e-12) (/ 1.0 keff) 0.0)
-                  lambda (* m (- target vd))
                   old (aget acc k)
+                  ;; The normal is a spring and gives some of its
+                  ;; accumulated impulse back each time; the tangents are
+                  ;; rigid, and `mass-scale` 1 with `impulse-scale` 0 is
+                  ;; exactly the hard solve they had before.
+                  lambda (if normal?
+                           (- (* m mass-scale (- target vd)) (* impulse-scale old))
+                           (* m (- target vd)))
                   nw (min hi (max lo (+ old lambda)))
                   d (- nw old)]
               (aset acc k nw)

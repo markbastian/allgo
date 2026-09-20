@@ -140,24 +140,64 @@
               (for [i (range 3) s [1.0 -1.0]]
                 [[i s] (v/dot (v/scale (nth as i) s) n)])))))
 
+(def ^:private clip-eps
+  "A corner this close to a clip plane counts as inside it.
+
+  Two identical bricks stacked square have all four corners of the
+  incident face sitting exactly on the reference face's four side planes.
+  Clipped strictly, each of those is a cut rather than a corner, the
+  answer comes back with six points instead of four, and which six
+  depends on the last bit of the arithmetic -- so the manifold is a
+  different manifold every step and nothing can be warm started. Kept as
+  corners, the pair reports the same four points, with the same ids,
+  for as long as it stands there."
+  1e-9)
+
 (defn- clip-against-plane
   "Sutherland-Hodgman: the part of `poly` on the inner side of the plane
-  `(dot n x) <= d`."
-  [poly n d]
+  `(dot n x) <= d`.
+
+  `poly` is a sequence of `[point id]`, and the ids are the point of it.
+  A corner that survives the clip keeps the id it came in with; a point
+  made by cutting an edge gets one built from the plane that cut it and
+  the corner the cut started from. So the same configuration next step
+  produces the same ids, and a contact can be recognised as the one that
+  was there before rather than merely as one nearby."
+  [poly n d tag]
   (let [pts (vec poly)
         cnt (count pts)]
     (into []
           (mapcat (fn [i]
-                    (let [p (nth pts i)
-                          q' (nth pts (mod (inc i) cnt))
+                    (let [[p pid] (nth pts i)
+                          [q' qid] (nth pts (mod (inc i) cnt))
                           dp (- (v/dot n p) d)
-                          dq (- (v/dot n q') d)]
+                          dq (- (v/dot n q') d)
+                          cut (fn [] [(v/lerp p q' (/ dp (- dp dq))) [tag pid]])]
                       (cond
-                        (and (<= dp 0.0) (<= dq 0.0)) [q']
-                        (<= dp 0.0) [(v/lerp p q' (/ dp (- dp dq)))]
-                        (<= dq 0.0) [(v/lerp p q' (/ dp (- dp dq))) q']
+                        (and (<= dp clip-eps) (<= dq clip-eps)) [[q' qid]]
+                        (<= dp clip-eps) [(cut)]
+                        (<= dq clip-eps) [(cut) [q' qid]]
                         :else []))))
           (range cnt))))
+
+(defn- distinct-points
+  "A transducer over `[point id]` pairs dropping any point already seen.
+
+  Within `tol` counts as already seen. The comparison is against every
+  point kept so far, which is fine at four of them and would not be at
+  four hundred."
+  [tol]
+  (let [tol (double tol)]
+    (fn [rf]
+      (let [seen (volatile! [])]
+        (fn
+          ([] (rf))
+          ([acc] (rf acc))
+          ([acc [p _ :as x]]
+           (if (some #(< (v/distance p %) tol) @seen)
+             acc
+             (do (vswap! seen conj p)
+                 (rf acc x)))))))))
 
 (defn- face-contacts
   "Contacts from a face of `ref-body` pressing into `inc-body`.
@@ -172,26 +212,46 @@
         ref-c (v/add (:pos ref-body) (v/scale ref-n (nth h ref-axis)))
         ref-d (v/dot ref-n ref-c)
         [[inc-axis inc-sign] _] (most-opposed-face inc-body ref-n)
-        poly (face-verts inc-body inc-axis inc-sign)
-        ;; The four sides of the reference face, as planes facing outward.
-        sides (for [k (range 3) :when (not= k ref-axis) s [1.0 -1.0]]
-                [(v/scale (nth as k) s)
-                 (v/dot (v/scale (nth as k) s)
-                        (v/add (:pos ref-body) (v/scale (nth as k) (* s (nth h k)))))])
-        clipped (reduce (fn [p [sn sd]] (if (seq p) (clip-against-plane p sn sd) p))
+        poly (map-indexed (fn [i p] [p i]) (face-verts inc-body inc-axis inc-sign))
+        ;; The four sides of the reference face, as planes facing outward,
+        ;; each tagged so that a point cut by one can say which.
+        sides (map-indexed
+               (fn [t [sn sd]] [sn sd t])
+               (for [k (range 3) :when (not= k ref-axis) s [1.0 -1.0]]
+                 [(v/scale (nth as k) s)
+                  (v/dot (v/scale (nth as k) s)
+                         (v/add (:pos ref-body) (v/scale (nth as k) (* s (nth h k)))))]))
+        clipped (reduce (fn [p [sn sd t]] (if (seq p) (clip-against-plane p sn sd t) p))
                         poly
                         sides)]
     (into []
-          (keep (fn [p]
-                  (let [depth (- ref-d (v/dot ref-n p))]
-                    (when (>= depth (- eps))
+          ;; A face clipped against a face it exactly coincides with --
+          ;; two identical bricks, square on -- has every corner sitting
+          ;; on a clip plane, and Sutherland-Hodgman answers each of those
+          ;; twice. Keeping both gives a pair six or eight contact points
+          ;; where it has four, and which of them survive changes from
+          ;; step to step. One point per place, first id wins, and the
+          ;; ordering is the incident face's own, so the choice is the
+          ;; same every step.
+          (comp (distinct-points 1e-6)
+                (keep (fn [[p pid]]
+                        (let [depth (- ref-d (v/dot ref-n p))]
+                          (when (>= depth (- eps))
                       ;; Reported on the reference surface rather than at
                       ;; the clipped point, so both bodies agree where the
                       ;; touch is.
-                      {:a ia :b ib
-                       :point (v/add-scaled p ref-n (* 0.5 depth))
-                       :normal (if flip? (v/negate n) n)
-                       :depth (max 0.0 depth)}))))
+                            {:a ia :b ib
+                             :point (v/add-scaled p ref-n (* 0.5 depth))
+                             :normal (if flip? (v/negate n) n)
+                       ;; Which corner of which face, pressed into which
+                       ;; face -- the same answer every step for as long
+                       ;; as the two bodies stay in the same arrangement,
+                       ;; which is what warm starting needs to recognise
+                       ;; it by. `flip?` is in it because it says which
+                       ;; body was the reference, and that decides what
+                       ;; the rest of the id means.
+                             :id [(boolean flip?) ref-axis ref-sign inc-axis inc-sign pid]
+                             :depth (max 0.0 depth)})))))
           clipped)))
 
 (defn- closest-on-segments
@@ -233,6 +293,8 @@
     [{:a ia :b ib
       :point (closest-on-segments p1 q1 p2 q2)
       :normal n
+      ;; One point, named by the pair of edges that made it.
+      :id [:edge i j]
       :depth depth}]))
 
 (defn box-box
@@ -246,10 +308,14 @@
                            (map-indexed (fn [j ax] [:b nil j ax]) bs))
         edge-tests (for [i (range 3) j (range 3)]
                      [:edge i j (v/cross (nth as i) (nth bs j))])
-        ;; Faces get a small handicap in their favour. Equal overlaps
-        ;; otherwise flip between a face result and an edge result on
-        ;; floating-point noise, and a resting brick loses three of its
-        ;; four contact points for a frame.
+        ;; Faces get a small handicap in their favour, and a's faces one
+        ;; over b's. Equal overlaps otherwise flip between a face result
+        ;; and an edge result, or between a's face and b's, on
+        ;; floating-point noise -- and a resting brick loses three of its
+        ;; four contact points for a frame, or keeps four points that are
+        ;; named after the other box and so match nothing from last step.
+        ;; Two identical bricks stacked square on each other tie exactly,
+        ;; which is the commonest case there is.
         best (reduce (fn [best [kind i j ax]]
                        (let [r (overlap-on a b ax)]
                          (cond
@@ -292,6 +358,7 @@
           :point (v/add-scaled (:pos a) n (* 0.5 (+ dist (- (double (:radius a))
                                                             (double (:radius b))))))
           :normal n
+          :id :sphere
           :depth (- r dist)}]))))
 
 (defn sphere-box
@@ -320,6 +387,7 @@
         [{:a ia :b ib
           :point (:pos a)
           :normal (v/negate n)
+          :id [:inside axis]
           :depth (+ r gap)}])
       (let [world (v/add (q/rotate (:rot b) clamped) (:pos b))
             d (v/sub world (:pos a))
@@ -329,6 +397,7 @@
           [{:a ia :b ib
             :point world
             :normal (v/scale d (/ 1.0 dist))
+            :id :sphere-box
             :depth (- r dist)}])))))
 
 ;; ---------------------------------------------------------------------------

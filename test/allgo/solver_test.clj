@@ -97,6 +97,38 @@
         (is (every? #(< (abs (nth (:pos %) 0)) 0.3) (dynamics w))
             (str (name solver) " walked sideways"))))))
 
+(deftest stays-put-test
+  (testing "a settled column does not merely settle, it stops"
+    ;; The difference is the whole point. A stack under a Baumgarte bias
+    ;; comes to rest in the sense that it stops going anywhere, and never
+    ;; stops *moving*: it jitters at a centimetre a second forever,
+    ;; because the velocity invented to push the overlap out is left in
+    ;; the bodies and gravity puts it back. Over a minute that walks a
+    ;; wall sideways and over it goes. A soft contact has no such
+    ;; velocity to leave behind, and the column below is still to every
+    ;; digit printed.
+    ;; Sequential impulse only, and the other two say why. TGS divides
+    ;; the iteration budget by the substeps, so each substep gets two
+    ;; sweeps to cancel the gravity it just added and a five course stack
+    ;; keeps about one substep of it -- 0.05 m/s that no contact model
+    ;; fixes. XPBD is still quietly pushing overlap out through the
+    ;; position solve at this point and creeps a centimetre over the five
+    ;; seconds. Both are in TODOs.
+    (doseq [solver [:sequential-impulse]]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 6)]
+                                (brick [0.0 (+ 0.25 (* i 0.5)) 0.0]))))
+            settled (run solver bodies 300)
+            where (mapv :pos (dynamics settled))
+            later (loop [w settled i 0] (if (= i 300) w (recur (s/step w dt) (inc i))))]
+        (is (< (apply max (map speed (dynamics later))) 0.005)
+            (str (name solver) " still moving: "
+                 (vec (map speed (dynamics later)))))
+        (is (every? #(< % 0.002)
+                    (map v/distance where (map :pos (dynamics later))))
+            (str (name solver) " wandered: "
+                 (vec (map v/distance where (map :pos (dynamics later))))))))))
+
 (deftest restitution-test
   (testing "a bouncy ball bounces and a dead one does not"
     (doseq [solver solvers]

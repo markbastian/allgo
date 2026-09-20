@@ -240,55 +240,105 @@ What would fix it, in order of expected return:
    per step out of lazy sequences, and computes the tangent basis and the
    body-local anchors through persistent vectors.
 
-### What still makes a wall fall over on its own
+### Standing still
 
-Leave the demo running and the wall comes down by itself. Three separate
-things, measured headlessly on a running-bond wall with no projectile:
+A wall or a column left alone used to come down by itself, and the three
+things that made it are dealt with. What is left is written after them.
 
-- **XPBD had no friction at rest, and that is fixed.** The velocity pass
-  bounded friction by the approach speed, which is zero for anything
-  settled, so nothing removed the sideways and angular velocity the
-  position solve hands back — and it hands it back divided by the
-  substep, so a millimetre is a quarter of a metre a second. It bounded
-  by the position solve's own multiplier now (`mu * lambda / h`), the
-  velocity pass runs inside the substep rather than once a frame, and the
-  angular half of each contact correction is relaxed by half. A six brick
-  column went from 29 m/s at five seconds to 5 mm/s indefinitely, and a
-  twelve course double-thick wall now settles dead. `left-alone-test`
-  covers it; the old `stack-test` stopped at three seconds and the
-  wind-up was still at four millimetres a second there.
+**Contacts are soft now, and that is what stopped the energy.** A rigid
+contact solved with a Baumgarte bias separates overlapping bodies at
+`bias/dt` times the overlap and leaves that velocity in them; gravity
+puts the overlap back, and the pair does it again. A stack too deep to
+converge in the iterations it has gets pushed hard enough to leave the
+ground: a twenty brick column threw its own bricks into the air, lost
+the contacts and the impulses remembered against them, fell back deeper,
+and pushed harder still — apart in three seconds. `allgo.physics.solver`
+now solves the normal as a spring of a stated frequency and damping
+(Catto's soft constraints; Box2D v3 and PhysX TGS Soft are both this),
+which bounds the pushout by construction and gives a little of the
+accumulated impulse back each iteration, so the constraint cannot store
+energy. A six course column is now still to every digit — `KE` exactly
+zero, positions unchanged to four decimals, for sixty seconds — where it
+used to wander a centimetre and jitter at 2 cm/s forever.
+`stays-put-test` is that, and it fails without this.
 
-- **XPBD still gives out somewhere around fourteen courses.** Sixteen
-  blows up within five seconds however it is tuned, and *more* substeps
-  or passes make it worse rather than better — which says the trouble is
-  the velocity read-back amplifying corrections that never settle, not
-  convergence. The honest fix is a penetration that is re-measured
-  against the geometry per substep rather than `depth0` plus the anchor
-  drift, which is a linearisation that goes stale as the bricks turn.
+**Contacts have identity now.** Warm starting matched last step's
+impulse by rounding the contact point to two centimetres, which is a
+good key for a stack already still and a bad one for a stack that is
+moving: the points slide across the rounding and the impulse history is
+lost exactly when it is most needed. `allgo.physics.contact` stamps each
+point with the feature that made it — which corner of which face is
+pressed into which face — and the solver matches on that. Two
+consequences: the match is exact, and the tangential impulses can come
+back too, which they never did. Friction used to start every step from
+nothing and be rediscovered in the iterations it had left, which is what
+let a stack creep sideways while it stood.
 
-- **TGS leaves a velocity floor of about one substep of gravity.** Its
-  Baumgarte bias is `bias/h` rather than `bias/dt`, so with four substeps
-  it pushes four times as hard, and the separating velocity it invents to
-  do that stays in the body afterwards. A settled wall under TGS never
-  gets below ~0.05 m/s, drifts sideways a millimetre or two a second, and
-  topples after fifteen to thirty seconds. Sequential impulse has the
-  same defect a quarter as strong. The fix is the standard one: solve the
-  bias into a pseudo-velocity that moves positions and is thrown away, or
-  go to soft constraints, so the penetration correction never becomes
-  real momentum.
+**And the manifold is stable.** Two identical bricks stacked square have
+all four corners of the incident face sitting exactly on the reference
+face's clip planes. Clipped strictly each of those is a cut, not a
+corner, the answer comes back with six points instead of four, and which
+six depends on the last bit of the arithmetic — so it was a different
+manifold every step and nothing could be matched to anything. Corners
+within `clip-eps` of a plane count as inside it now.
 
-- **Friction is never warm started.** `prepare` restores the normal
-  impulse from last step and quietly drops the tangential ones — they are
-  stored by `contact-state` and never read back. Restoring them makes the
-  wall dramatically better (sequential impulse settles to *zero* and
-  stands for a minute where it collapsed at thirty-three seconds) and
-  makes a plain column worse, because the manifold has no feature
-  identity: contacts are matched by rounding the contact point to two
-  centimetres, which misses five to eight percent of the time, and in a
-  column the tangential impulses being remembered are mostly friction
-  fighting contact-point jitter — a third of them are at the cone limit
-  with no sideways load at all. Contact feature IDs come first; then this
-  is a one-line win.
+Measured on the running-bond wall, no projectile, forty seconds:
+sequential impulse settles to `mean |v|` of exactly zero and does not
+move again; it used to sit at 0.011 and topple at thirty-four seconds.
+TGS stops toppling too, though it keeps its own floor, below.
+
+### What is still wrong
+
+- **A column deeper than about eight courses telescopes.** Ten bricks
+  and up, every solver, before this work and after: the stack sinks into
+  itself until the boxes are more than half overlapped, at which point
+  the separating axis test picks a different axis, the normal flips, and
+  they pass through each other. More iterations do not fix it — sixty is
+  no better than eight — so it is not the solve converging too slowly on
+  its own terms. Two things to try, in order: substepping proper (Macklin's
+  *Small Steps in Physics Simulation* — several small steps each solved
+  once beats one step solved many times, and it is what XPBD and TGS are
+  built on), and a contact that refuses to flip its normal once it has one,
+  which is what a persistent manifold buys beyond warm starting.
+
+- **TGS leaves a velocity floor of about one substep of gravity, and it
+  is starvation rather than Baumgarte.** Every brick in a settled wall
+  under TGS is falling at 0.03 to 0.05 m/s — downward, and more of it the
+  higher up the wall, which is the shape of a Gauss-Seidel correction
+  that has not reached the top. `per` is `(quot iterations substeps)`, so
+  the demo's defaults give each substep *two* sweeps to cancel the
+  gravity that substep just added, and two sweeps carry the floor's
+  correction up two courses of five. The floor tracks that budget and
+  nothing else:
+
+      sweeps per substep   8     4     2     1
+      floor (m/s)          0.011 0.035 0.049 0.058
+
+  It was flat against the old `bias` too — 0.2, 0.1 and 0.05 all gave
+  0.049 — which is what ruled Baumgarte out. Sequential impulse gets the
+  whole budget in one go. The fix is sweeps, and the question is what
+  `iterations` should mean: PhysX substeps are full solves, this one
+  divides a fixed budget so the three solvers can be compared at equal
+  cost. Right for a demo about comparing them, wrong for a wall that is
+  meant to stand.
+
+- **Split impulse was tried and does not pay.** Written and measured:
+  the bias solved into a pseudo velocity of its own, cleared every
+  substep, added to the real velocity to move the bodies and then
+  dropped. It does what it says and makes things *worse*, because the
+  separating motion no longer passes through the friction solve, so the
+  wall slides apart instead — sequential impulse went from toppling at
+  thirty-five seconds to nineteen. Solving friction against the pseudo
+  velocity too recovers most of that and still loses to leaving it alone.
+  Soft contacts were the right answer to the same problem.
+
+- **XPBD gives out somewhere around fourteen courses.** Sixteen blows up
+  within five seconds however it is tuned, and *more* substeps or passes
+  make it worse rather than better — which says the trouble is the
+  velocity read-back amplifying corrections that never settle, not
+  convergence. The honest fix is a penetration re-measured against the
+  geometry per substep rather than `depth0` plus the anchor drift, which
+  is a linearisation that goes stale as the bricks turn.
 
 ### Other techniques still missing
 
