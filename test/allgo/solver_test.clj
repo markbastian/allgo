@@ -195,15 +195,30 @@
 
 (deftest restitution-test
   (testing "a bouncy ball bounces and a dead one does not"
+    ;; Measured while still in flight: a second after being let go from
+    ;; two metres, the dead ball is on the floor and the elastic one is
+    ;; most of the way back up.
+    ;;
+    ;; The thresholds are absolute on purpose. This used to ask only
+    ;; that the elastic ball be higher than the dead one, and TGS met
+    ;; that for as long as it existed without ever bouncing: both balls
+    ;; lay on the floor and the comparison came down to the fourth
+    ;; decimal place of two resting heights. A test that can be passed
+    ;; by noise is not testing anything.
     (doseq [solver solvers]
       (let [drop-it (fn [e]
                       (let [w (run solver [(floor) (rigid/ball {:pos [0.0 2.0 0.0] :radius 0.3
                                                                 :density 1.0})]
                                    60 {:restitution e})]
-                        (apply max (map y-of (dynamics w)))))]
-        ;; Measured while still in flight: the elastic one is higher up
-        ;; at the same moment because it has already come back.
-        (is (> (drop-it 0.8) (drop-it 0.0)) (name solver))))))
+                        (apply max (map y-of (dynamics w)))))
+            dead (drop-it 0.0)
+            half (drop-it 0.4)
+            bouncy (drop-it 0.8)]
+        (is (< dead 0.35) (str (name solver) " dead ball at " dead))
+        (is (> bouncy 1.0) (str (name solver) " bouncy ball at " bouncy))
+        ;; And it is a coefficient, not a switch.
+        (is (< dead half bouncy)
+            (str (name solver) " " dead " " half " " bouncy))))))
 
 (deftest friction-test
   (testing "friction decides whether a box slides down a ramp"

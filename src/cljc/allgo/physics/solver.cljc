@@ -388,6 +388,7 @@
         restitution (double restitution)
         threshold (double (:restitution-threshold opts))
         relax? (boolean (:relax? opts))
+        bounce? (boolean (:bounce? opts))
         ;; The spring, as three numbers the solve can use directly. A
         ;; contact cannot be stiffer than the step can represent, so the
         ;; frequency is capped at a quarter of the step rate -- above that
@@ -431,16 +432,26 @@
             ;; after the bodies have moved and its job is to take back the
             ;; velocity the push put in, which is the cheap and standard
             ;; alternative to carrying that push in a pseudo velocity.
-            normal-target (if relax? 0.0 (+ b-term r-term))
-            ms (if relax? 1.0 ms)
-            is (if relax? 0.0 is)]
+            ;; Three modes. The solve pushes overlap out and holds
+            ;; gaps open; the relax pass takes back what the push added
+            ;; and asks for nothing else; the bounce pass asks for the
+            ;; rebound alone, after the other two have finished, and
+            ;; only of a contact that actually pushed -- `pn` is the
+            ;; evidence that the surfaces met rather than merely being
+            ;; near each other.
+            normal-target (cond relax? 0.0
+                                bounce? r-term
+                                :else (+ b-term r-term))
+            ms (if (or relax? bounce?) 1.0 ms)
+            is (if (or relax? bounce?) 0.0 is)
+            skip? (and bounce? (or (zero? r-term) (<= (aget pn k) 0.0)))]
         ;; Three directions in turn -- the normal, then two tangents --
         ;; rather than a closure called three times. The closure was
         ;; allocated per contact per sweep, two and a half thousand of
         ;; them a step, and in a browser that cost more than the
         ;; arithmetic it wrapped.
         (loop [dir 0 limit 0.0]
-          (when (< dir 3)
+          (when (and (not skip?) (< dir (if bounce? 1 3)))
             (let [^doubles darr (case dir 0 normal 1 t1 t2)
                   ^doubles acc (case dir 0 pn 1 p1 p2)
                   dx (aget darr k3) dy (aget darr (+ k3 1)) dz (aget darr (+ k3 2))
@@ -920,25 +931,40 @@
                            and it is why no pseudo velocity is needed.
 
   Restitution is measured once, against the closing speed as the step
-  began -- after a substep of solving it is gone."
+  began -- after a substep of solving it is gone. Applying it is a pass
+  of its own, after the last substep, and that is not tidiness. The
+  relax pass exists to remove separating velocity that the bias put in,
+  and it cannot tell that from a rebound: a bouncy ball solved with
+  restitution inside the substep left the floor and had the leaving
+  speed taken straight back off it by the relax that followed. TGS did
+  not bounce at all, at any coefficient. So the substeps run dead and
+  the rebound is applied once at the end, to the contacts that actually
+  pushed, which is what Box2D v3 does and for this reason."
   [{:keys [bodies gravity iterations substeps warm-start?] :as w} dt]
   (let [substeps (max 1 (long substeps))
         h (/ (double dt) substeps)
         per (max 1 (quot (long iterations) substeps))
+        ;; No bounce inside the substeps -- see above.
+        solve-opts (assoc w :restitution 0.0)
         relax-opts (assoc w :relax? true)
+        bounce-opts (assoc w :bounce? true)
         contacts (contact/all bodies (:broad w))
         bodies (rouse bodies contacts)]
     (loop [bodies bodies cs (prepare bodies contacts (:contacts w)) n substeps first? true]
       (if (zero? n)
-        (assoc w
-               :bodies (settle bodies contacts dt w)
-               :contacts (contact-state cs))
+        (let [bounced (let [arrays (body-arrays bodies)]
+                        (refresh-anchors! bodies cs)
+                        (solve-velocities! arrays cs h bounce-opts)
+                        (write-back bodies arrays))]
+          (assoc w
+                 :bodies (settle bounced contacts dt w)
+                 :contacts (contact-state cs)))
         (let [arrays (body-arrays bodies)
               _ (accelerate! arrays bodies gravity h)
               _ (refresh-anchors! bodies cs)
               _ (when first? (record-approach! arrays cs))
               _ (when warm-start? (warm-start! arrays cs))
-              _ (dotimes [_ per] (solve-velocities! arrays cs h w))
+              _ (dotimes [_ per] (solve-velocities! arrays cs h solve-opts))
               moved (-> bodies (write-back arrays) (advance h))
               ;; The relax pass sees the bodies where the substep left
               ;; them, so the anchors are measured again first.
