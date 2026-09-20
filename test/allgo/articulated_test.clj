@@ -1,5 +1,7 @@
 (ns allgo.articulated-test
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.geometry.quaternion :as q]
+            [allgo.geometry.vec3 :as v]
+            [allgo.numerics.linear :as lin]
             [allgo.physics.articulated :as ab]
             [clojure.test :refer [deftest is testing]]))
 
@@ -55,7 +57,7 @@
           model [(rod -1 L m)]
           i-pivot (* (/ 1.0 3.0) m L L)]
       (doseq [q [0.0 0.3 1.0 -0.7 1.5707963267948966 3.0]]
-        (let [qdd (first (ab/forward-dynamics model [q] [0.0] [0.0] opts))
+        (let [qdd (first (:qdd (ab/forward-dynamics model [q] [0.0] [0.0] opts)))
               exact (/ (* (- (* m 9.81 (* 0.5 L))) (Math/cos q)) i-pivot)]
           (is (close? qdd exact 1e-12) (str "at q=" q))))))
 
@@ -64,13 +66,13 @@
           model [{:parent -1 :joint :prismatic :axis axis
                   :origin {:rot nil :pos [0.0 0.0 0.0]}
                   :mass 3.1 :com [0.0 0.0 0.0] :inertia (lin/eye 3)}]]
-      (is (close? (first (ab/forward-dynamics model [0.0] [0.0] [0.0] opts))
+      (is (close? (first (:qdd (ab/forward-dynamics model [0.0] [0.0] [0.0] opts)))
                   (* 9.81 (- (double (second axis))))
                   1e-12))))
 
   (testing "a fixed joint does not move"
     (let [model [(assoc (rod -1 1.0 1.0) :joint :fixed)]]
-      (is (= [0.0] (ab/forward-dynamics model [0.0] [0.0] [5.0] opts))))))
+      (is (= [0.0] (:qdd (ab/forward-dynamics model [0.0] [0.0] [5.0] opts)))))))
 
 (deftest forward-against-inverse-test
   (testing "the fast path agrees with M inverse times what is left"
@@ -83,7 +85,7 @@
             q (mapv #(* 0.37 (inc (long %))) (range n))
             qd (mapv #(* -0.23 (inc (long %))) (range n))
             tau (mapv #(* 0.9 (- 2 (long %))) (range n))
-            fast (ab/forward-dynamics model q qd tau opts)
+            fast (:qdd (ab/forward-dynamics model q qd tau opts))
             slow (lin/mat-vec (lin/inverse (ab/mass-matrix model q))
                               (mapv - tau (ab/bias-forces model q qd opts)))]
         (is (every? #(< (abs (double %)) 1e-9) (map - fast slow))
@@ -120,12 +122,12 @@
     (doseq [n [1 2]]
       (let [model (chain n 0.8 1.7)
             q0 (mapv #(+ 0.4 (* 0.3 (double %))) (range n))
-            e0 (ab/energy model q0 (vec (repeat n 0.0)) opts)
+            e0 (ab/energy model {:q q0 :qd (vec (repeat n 0.0))} opts)
             drift (fn [h]
                     (let [final (reduce (fn [st _] (ab/step st model h opts))
                                         {:q q0 :qd (vec (repeat n 0.0))}
                                         (range (long (/ 2.0 h))))]
-                      (abs (- (ab/energy model (:q final) (:qd final) opts) e0))))
+                      (abs (- (ab/energy model final opts) e0))))
             coarse (drift 1e-3)
             fine (drift 1e-4)]
         (is (pos? coarse))
@@ -134,3 +136,76 @@
         ;; chaotic and the trajectories part company.
         (is (< 5.0 (/ coarse fine) 20.0)
             (str "n=" n " coarse " coarse " fine " fine))))))
+
+;; ---------------------------------------------------------------------------
+;; A base that is free to move
+
+(defn- floating
+  "A root body with `links` hanging off it."
+  [links]
+  {:base {:mass 3.0 :com [0.1 0.0 0.0]
+          :inertia [[0.4 0.0 0.0] [0.0 0.6 0.0] [0.0 0.0 0.9]]}
+   :links (vec links)})
+
+(def ^:private at-rest
+  {:rot [0.0 0.0 0.0 1.0] :pos [0.0 0.0 0.0] :vel [0.0 0.0 0.0 0.0 0.0 0.0]})
+
+(deftest floating-base-test
+  (testing "a free body with nothing attached falls at g and nothing else"
+    (let [{:keys [base-acc]} (ab/forward-dynamics (floating []) [] [] []
+                                                  (assoc opts :base at-rest))]
+      (is (every? #(< (abs (double %)) 1e-12)
+                  (map - base-acc [0.0 0.0 0.0 0.0 -9.81 0.0])))))
+
+  (testing "and falls the distance it should"
+    (let [model (floating [])
+          final (reduce (fn [st _] (ab/step st model 1e-4 opts))
+                        {:q [] :qd [] :base at-rest}
+                        (range 10000))]
+      ;; Half g t squared, to the accuracy a first-order step has after
+      ;; ten thousand of them.
+      (is (close? (double (second (:pos (:base final)))) (* -0.5 9.81) 1e-3))))
+
+  (testing "a bolted model reports no base acceleration at all"
+    (is (= [0.0 0.0 0.0 0.0 0.0 0.0]
+           (:base-acc (ab/forward-dynamics (chain 2 0.8 1.7) [0.1 0.2] [0.0 0.0]
+                                           [0.0 0.0] opts))))))
+
+(deftest momentum-test
+  (testing "a floating chain with no gravity conserves both momenta"
+    ;; The strongest thing available to say about a free multibody, and
+    ;; the reason it is worth saying: momentum is a property of the whole
+    ;; system rather than of any link, so a sign lost anywhere in the
+    ;; recursion shows up here even when every individual link looks
+    ;; plausible.
+    (let [model (floating [(rod -1 0.7 1.2) (rod 0 0.6 0.9) (rod 1 0.5 0.6)])
+          st0 {:q [0.3 -0.5 0.8] :qd [1.4 -2.1 0.7]
+               :base {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6)
+                      :pos [0.3 -0.2 0.5] :vel [0.4 -0.3 0.9 1.1 0.2 -0.6]}}
+          free {:gravity [0.0 0.0 0.0]}
+          m0 (ab/momentum model st0)
+          m1 (ab/momentum model (reduce (fn [st _] (ab/step st model 1e-4 free))
+                                        st0 (range 10000)))]
+      (is (< (v/distance (:linear m0) (:linear m1)) 1e-2)
+          (str (:linear m0) " -> " (:linear m1)))
+      (is (< (v/distance (:angular m0) (:angular m1)) 1e-2)
+          (str (:angular m0) " -> " (:angular m1)))))
+
+  (testing "and with gravity on, linear momentum grows at exactly M g"
+    ;; The check that catches gravity being applied in the wrong frame,
+    ;; which is otherwise nearly invisible: sideways momentum is
+    ;; conserved whatever the joints do, and a base that both falls and
+    ;; spins stops conserving it the moment world-frame gravity is added
+    ;; to a body-frame acceleration.
+    (let [model (floating [(rod -1 0.7 1.2) (rod 0 0.6 0.9)])
+          total (+ 3.0 1.2 0.9)
+          st0 {:q [0.3 -0.5] :qd [1.4 -2.1]
+               :base {:rot [0.0 0.0 0.0 1.0] :pos [0.0 0.0 0.0]
+                      :vel [0.2 0.1 -0.3 0.5 0.0 0.1]}}
+          m0 (ab/momentum model st0)
+          m1 (ab/momentum model (reduce (fn [st _] (ab/step st model 1e-4 opts))
+                                        st0 (range 10000)))]
+      (is (< (v/distance (mapv + (:linear m0) (mapv #(* (double %) total) g))
+                         (:linear m1))
+             1e-2)
+          (str (:linear m0) " -> " (:linear m1))))))

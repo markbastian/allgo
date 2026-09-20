@@ -41,6 +41,18 @@
   it can describe. Contacts are the interesting half of that and are not
   here yet.
 
+  ## Knowing it is right
+
+  There is not much to see in a number like `qdd`, so the checks are
+  quantities that have to hold whatever the algorithm does. A hinged rod
+  matches the closed form to twelve digits. The fast path matches
+  `M^-1 (tau - bias)`, built out of the slow one, to about fourteen.
+  And a free chain under no gravity conserves both its momenta, which is
+  the strongest of them: momentum belongs to the whole system rather
+  than to any link, so a sign lost anywhere in the recursion shows up
+  there even when every link looks plausible on its own. It is what
+  caught gravity being added in the wrong frame.
+
   ## Spatial vectors
 
   The algorithms are short because the algebra is. A rigid body's motion
@@ -71,8 +83,19 @@
   `:origin` is the fixed transform from the parent's frame to this
   joint's frame, `:axis` the joint's axis in that frame, `:inertia` the
   3x3 rotational inertia about the link's own centre of mass. Parent -1
-  is the base, which is fixed: a floating base is a six degree of freedom
-  joint to the world and is not here yet.
+  means the root.
+
+  That vector on its own is a chain bolted to the world. Wrapped as
+  `{:base {:mass :com :inertia} :links [...]}` the root is free, which
+  is what anything that has to fall over needs -- a ragdoll's pelvis
+  goes nowhere useful if it is nailed to the origin.
+
+  The base's six degrees of freedom are not coordinates. They are a
+  pose and a spatial velocity, carried in the *state* rather than in
+  `q`, so that nothing ever has to parameterise a rotation with three
+  numbers and find the singularity in it. The joints keep their one
+  number each and gain nothing from the base being free; the base gains
+  one 6x6 solve, and that is the whole of what a floating base costs.
 
   ## What runs on it
 
@@ -81,6 +104,14 @@
   accelerated, what torques does that take. `forward-dynamics` is the
   articulated body algorithm: given the torques, what accelerations. Both
   are O(n) and the second is the one a simulation wants.
+
+  Gravity arrives through neither of them. The whole recursion runs in a
+  frame falling at `g`, where there is no gravity to account for, a free
+  root is simply force-free and the answer needs one offset put back at
+  the end. The offset is in the root's own coordinates, which is the
+  thing to be careful about: left in the world's it is right only while
+  the root is unrotated, and a body that falls and spins at the same time
+  quietly stops conserving sideways momentum.
 
   Having both is also how either is trusted. The mass matrix can be read
   out of inverse dynamics a column at a time -- unit acceleration on one
@@ -184,11 +215,28 @@
       :prismatic [0.0 0.0 0.0 (double ax) (double ay) (double az)]
       :fixed [0.0 0.0 0.0 0.0 0.0 0.0])))
 
-(defn dof
-  "How many coordinates the model has -- one per link, since every joint
-  here is a single degree of freedom."
+(defn chain
+  "The links of a model, whichever form it was given in.
+
+  A bare vector of links is a chain bolted to the world. A map
+  `{:base {:mass :com :inertia} :links [...]}` gives it a root body that
+  is free to move, which is what a ragdoll's pelvis is and what anything
+  that has to fall over needs."
   [model]
-  (count model))
+  (if (map? model) (:links model) model))
+
+(defn base
+  "The free root body, or nil if the model is bolted to the world."
+  [model]
+  (when (map? model) (:base model)))
+
+(defn dof
+  "How many joint coordinates the model has -- one per link, since every
+  joint here is a single degree of freedom. The base's six, if it has
+  any, are not among them: they are a pose and a velocity, not
+  coordinates, precisely so that no one has to parameterise a rotation."
+  [model]
+  (count (chain model)))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared per-link setup
@@ -204,7 +252,7 @@
              :s s
              :i (spatial-inertia (:mass link) (:com link) (:inertia link))
              :parent (long (:parent link))}))
-        model
+        (chain model)
         q-vec))
 
 (defn- scaled [s ^double x] (mapv #(* (double %) x) s))
@@ -298,7 +346,10 @@
   (mapv (fn [ai] (mapv (fn [bj] (* (double ai) (double bj))) b)) a))
 
 (defn forward-dynamics
-  "The accelerations `qdd` that torques `tau` produce, in O(n).
+  "The accelerations that torques `tau` produce, in O(n).
+
+  Returns `{:qdd :base-acc}` -- the joint accelerations, and the base's
+  spatial acceleration, which is zero for a model bolted to the world.
 
   Featherstone's articulated body algorithm. The idea it turns on: seen
   from one joint, everything beyond it behaves like a single rigid body
@@ -310,11 +361,37 @@
 
   Three passes: outward for velocities and the bias force each link's own
   motion generates, inward accumulating articulated inertias and their
-  bias forces onto the parents, outward again for the accelerations."
+  bias forces onto the parents, outward again for the accelerations.
+
+  A free base costs one 6x6 solve and no change to any of that. The
+  inward pass carries the whole body's articulated inertia and bias force
+  up to the root, and a root nothing is holding is a root with no force
+  on it, so its acceleration is whatever makes that sum vanish. The
+  bolted case is the same equation with the answer already known."
   ([model q-vec qd tau] (forward-dynamics model q-vec qd tau nil))
-  ([model q-vec qd tau {:keys [gravity]}]
+  ([model q-vec qd tau {gravity :gravity root-state :base}]
    (let [ls (links model q-vec)
          n (count ls)
+         root (base model)
+         ;; Everything is computed in a frame falling at `gravity`, where
+         ;; there is nothing to account for and a free root is simply
+         ;; force-free. The offset comes back out at the end.
+         ;;
+         ;; In the root's *own* coordinates, which is the part that is
+         ;; easy to get wrong: every spatial quantity here is in the
+         ;; frame it belongs to, so gravity has to be turned into the
+         ;; base's before it can be added to anything. Left in world
+         ;; coordinates it is right only while the base is unrotated,
+         ;; and a falling body that is also spinning quietly stops
+         ;; conserving horizontal momentum.
+         a-grav (let [[gx gy gz] (if root
+                                   (q/rotate (q/conjugate (or (:rot root-state)
+                                                              q/identity-q))
+                                             (or gravity [0.0 -9.81 0.0]))
+                                   (or gravity [0.0 -9.81 0.0]))]
+                  [0.0 0.0 0.0 (double gx) (double gy) (double gz)])
+         v0 (if root (vec (or (:vel root-state) (repeat 6 0.0))) (vec (repeat 6 0.0)))
+         root-i (when root (spatial-inertia (:mass root) (:com root) (:inertia root)))
          ;; Pass one, outward: velocity, the acceleration that velocity
          ;; alone implies, and the force needed to hold the link on it.
          pass1 (reduce
@@ -322,7 +399,7 @@
                   (let [{:keys [xup s parent]} (nth ls i)
                         inertia (:i (nth ls i))
                         vj (scaled s (nth qd i))
-                        vp (if (neg? parent) (vec (repeat 6 0.0)) (:v (nth acc parent)))
+                        vp (if (neg? parent) v0 (:v (nth acc parent)))
                         vi (mapv + (lin/mat-vec xup vp) vj)]
                     (conj acc {:v vi
                                :c (lin/mat-vec (crm vi) vj)
@@ -331,63 +408,118 @@
                 []
                 (range n))
          ;; Pass two, inward: what the subtree beyond each joint looks
-         ;; like to the link above it.
+         ;; like to the link above it, and what the whole of it looks
+         ;; like to the root.
          pass2 (reduce
-                (fn [acc i]
+                (fn [{:keys [links ia0 pa0] :as acc} i]
                   (let [{:keys [xup s parent]} (nth ls i)
-                        {:keys [ia pa c]} (nth acc i)
+                        {:keys [ia pa c]} (nth links i)
                         u (lin/mat-vec ia s)
                         d (reduce + (map * s u))
                         uu (- (double (nth tau i)) (reduce + (map * s pa)))
-                        acc (assoc-in acc [i :u] u)
-                        acc (assoc-in acc [i :d] d)
-                        acc (assoc-in acc [i :uu] uu)]
-                    (if (or (neg? parent) (< (abs d) 1e-12))
+                        acc (assoc acc :links (-> links
+                                                  (assoc-in [i :u] u)
+                                                  (assoc-in [i :d] d)
+                                                  (assoc-in [i :uu] uu)))]
+                    (if (< (abs d) 1e-12)
                       acc
                       (let [ia' (lin/mat-sub ia (lin/mat-scale (outer u u) (/ 1.0 d)))
                             pa' (mapv + pa (lin/mat-vec ia' c) (scaled u (/ uu d)))
-                            xt (lin/transpose xup)]
-                        (-> acc
-                            (update-in [parent :ia]
-                                       #(lin/mat-add % (lin/mat-mul xt (lin/mat-mul ia' xup))))
-                            (update-in [parent :pa]
-                                       #(mapv + % (lin/mat-vec xt pa'))))))))
-                pass1
-                (reverse (range n)))]
-     ;; Pass three, outward: each joint's acceleration, then the link's.
-     (:qdd
-      (reduce
-       (fn [{:keys [a] :as acc} i]
-         (let [{:keys [xup s parent]} (nth ls i)
-               {:keys [c u d uu]} (nth pass2 i)
-               ap (if (neg? parent) (base-acceleration gravity) (nth a parent))
-               a' (mapv + (lin/mat-vec xup ap) c)
-               qddi (if (< (abs (double d)) 1e-12)
-                      0.0
-                      (/ (- (double uu) (reduce + (map * u a'))) (double d)))]
-           (-> acc
-               (update :a conj (mapv + a' (scaled s qddi)))
-               (update :qdd conj qddi))))
-       {:a [] :qdd []}
-       (range n))))))
+                            xt (lin/transpose xup)
+                            up-i (lin/mat-mul xt (lin/mat-mul ia' xup))
+                            up-p (lin/mat-vec xt pa')]
+                        (if (neg? parent)
+                          (assoc acc
+                                 :ia0 (when ia0 (lin/mat-add ia0 up-i))
+                                 :pa0 (when pa0 (mapv + pa0 up-p)))
+                          (update acc :links
+                                  #(-> %
+                                       (update-in [parent :ia] (fn [m] (lin/mat-add m up-i)))
+                                       (update-in [parent :pa] (fn [v] (mapv + v up-p))))))))))
+                {:links pass1
+                 :ia0 root-i
+                 :pa0 (when root
+                        (lin/mat-vec (crf v0) (lin/mat-vec root-i v0)))}
+                (reverse (range n)))
+         solved (:links pass2)
+         ;; The root, if it is free: force-free in the falling frame.
+         a0 (if root
+              (let [m (:ia0 pass2)
+                    ;; Symmetric by construction and not quite by
+                    ;; arithmetic, after a chain of congruences. Cholesky
+                    ;; wants it to be, and averaging costs nothing.
+                    sym (lin/mat-scale (lin/mat-add m (lin/transpose m)) 0.5)]
+                (mapv - (lin/cholesky-solve sym (:pa0 pass2))))
+              (mapv - a-grav))
+         ;; Pass three, outward: each joint's acceleration, then the link's.
+         out (reduce
+              (fn [{:keys [a] :as acc} i]
+                (let [{:keys [xup s parent]} (nth ls i)
+                      {:keys [c u d uu]} (nth solved i)
+                      ap (if (neg? parent) a0 (nth a parent))
+                      a' (mapv + (lin/mat-vec xup ap) c)
+                      qddi (if (< (abs (double d)) 1e-12)
+                             0.0
+                             (/ (- (double uu) (reduce + (map * u a'))) (double d)))]
+                  (-> acc
+                      (update :a conj (mapv + a' (scaled s qddi)))
+                      (update :qdd conj qddi))))
+              {:a [] :qdd []}
+              (range n))]
+     {:qdd (:qdd out)
+      ;; Back out of the falling frame, which is where the root's own
+      ;; share of gravity comes from.
+      :base-acc (if root (mapv + a0 a-grav) (vec (repeat 6 0.0)))})))
 
 ;; ---------------------------------------------------------------------------
 ;; Moving it
 
 (defn step
-  "One semi-implicit Euler step of `{:q :qd}` under `tau`.
+  "One semi-implicit Euler step of `{:q :qd}`, and `:base` if there is
+  one, under `tau`.
 
   Velocity first and then position, which is the same choice
   `allgo.physics.rigid` makes and for the same reason: it costs nothing
   and it does not pump energy into an oscillation the way explicit Euler
-  does."
+  does.
+
+  The base's state is a pose and a spatial velocity in its own frame,
+  not six more coordinates. Three reasons, and the third is the one that
+  matters: a rotation has no three-number parameterisation without a
+  singularity in it; a quaternion is the shape the rest of this library
+  speaks; and a velocity in body coordinates is what the algorithms
+  already produce, so nothing has to be converted on the way in."
   ([state model dt] (step state model dt nil))
-  ([{:keys [q qd]} model ^double dt {:keys [tau] :as opts}]
-   (let [tau (or tau (vec (repeat (dof model) 0.0)))
-         qdd (forward-dynamics model q qd tau opts)
-         qd' (mapv (fn [a b] (+ (double a) (* dt (double b)))) qd qdd)]
-     {:q (mapv (fn [a b] (+ (double a) (* dt (double b)))) q qd')
-      :qd qd'})))
+  ([{:keys [q qd] :as state} model ^double dt {:keys [tau] :as opts}]
+   (let [root (base model)
+         b (:base state)
+         tau (or tau (vec (repeat (dof model) 0.0)))
+         {:keys [qdd base-acc]} (forward-dynamics model q qd tau
+                                                  (cond-> opts root (assoc :base b)))
+         qd' (mapv (fn [a c] (+ (double a) (* dt (double c)))) qd qdd)
+         q' (mapv (fn [a c] (+ (double a) (* dt (double c)))) q qd')]
+     (if-not root
+       {:q q' :qd qd'}
+       (let [v (vec (or (:vel b) (repeat 6 0.0)))
+             v' (mapv (fn [a c] (+ (double a) (* dt (double c)))) v base-acc)
+             rot (or (:rot b) q/identity-q)
+             pos (or (:pos b) v/zero)
+             ;; Both halves of the spatial velocity are in the base's own
+             ;; frame, so both are turned into the world before they move
+             ;; anything.
+             w (q/rotate rot (subvec v' 0 3))
+             u (q/rotate rot (subvec v' 3 6))
+             ;; rot += dt/2 (omega, 0) rot, then back onto the unit
+             ;; sphere -- the same first-order step `allgo.physics.rigid`
+             ;; takes, and it walks off for the same reason.
+             [dx dy dz dw] (q/mul [(w 0) (w 1) (w 2) 0.0] rot)
+             [rx ry rz rw] rot
+             h (* 0.5 dt)]
+         {:q q' :qd qd'
+          :base {:rot (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
+                                    (+ rz (* h dz)) (+ rw (* h dw))])
+                 :pos (v/add-scaled pos u dt)
+                 :vel v'}})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Where the links are
@@ -396,25 +528,29 @@
   "Each link's frame in world coordinates, as `{:rot :pos}`.
 
   Reduced coordinates describe an arm by its angles, and something has to
-  turn those back into places to draw."
-  [model q-vec]
-  (:out
-   (reduce
-    (fn [{:keys [frames] :as acc} i]
-      (let [link (nth model i)
-            parent (long (:parent link))
-            {prot :rot ppos :pos} (if (neg? parent)
-                                    {:rot q/identity-q :pos v/zero}
-                                    (nth frames parent))
-            {orot :rot opos :pos} (:origin link)
-            {jrot :rot jpos :pos} (joint-transform link (nth q-vec i))
-            rot (q/mul (q/mul prot (or orot q/identity-q)) jrot)
-            pos (v/add (v/add ppos (q/rotate prot (or opos v/zero)))
-                       (q/rotate (q/mul prot (or orot q/identity-q)) jpos))
-            frame {:rot rot :pos pos}]
-        (-> acc (update :frames conj frame) (update :out conj frame))))
-    {:frames [] :out []}
-    (range (count model)))))
+  turn those back into places to draw. `root` is where the base sits, for
+  a model that has one; without it everything comes out relative to the
+  world origin, which is where a bolted model is."
+  ([model q-vec] (poses model q-vec nil))
+  ([model q-vec root]
+   (:out
+    (reduce
+     (fn [{:keys [frames] :as acc} i]
+       (let [link (nth (chain model) i)
+             parent (long (:parent link))
+             {prot :rot ppos :pos} (if (neg? parent)
+                                     {:rot (or (:rot root) q/identity-q)
+                                      :pos (or (:pos root) v/zero)}
+                                     (nth frames parent))
+             {orot :rot opos :pos} (:origin link)
+             {jrot :rot jpos :pos} (joint-transform link (nth q-vec i))
+             rot (q/mul (q/mul prot (or orot q/identity-q)) jrot)
+             pos (v/add (v/add ppos (q/rotate prot (or opos v/zero)))
+                        (q/rotate (q/mul prot (or orot q/identity-q)) jpos))
+             frame {:rot rot :pos pos}]
+         (-> acc (update :frames conj frame) (update :out conj frame))))
+     {:frames [] :out []}
+     (range (dof model))))))
 
 (defn energy
   "Kinetic plus potential, for checking that nothing is being invented.
@@ -422,26 +558,69 @@
   A chain under no torque and no damping must keep this constant, and an
   error in the spatial algebra almost always shows up here before it
   shows up anywhere a person would notice."
-  ([model q-vec qd] (energy model q-vec qd nil))
-  ([model q-vec qd {:keys [gravity]}]
+  ([model state] (energy model state nil))
+  ([model {:keys [q qd] :as state} {:keys [gravity]}]
    (let [g (or gravity [0.0 -9.81 0.0])
-         ls (links model q-vec)
-         fs (poses model q-vec)
+         root (base model)
+         b (:base state)
+         ls (links model q)
+         fs (poses model q b)
+         v0 (if root (vec (or (:vel b) (repeat 6 0.0))) (vec (repeat 6 0.0)))
          vels (reduce (fn [acc i]
                         (let [{:keys [xup s parent]} (nth ls i)
-                              vp (if (neg? parent) (vec (repeat 6 0.0)) (nth acc parent))]
+                              vp (if (neg? parent) v0 (nth acc parent))]
                           (conj acc (mapv + (lin/mat-vec xup vp) (scaled s (nth qd i))))))
                       []
-                      (range (count ls)))]
-     (reduce
-      +
-      (map (fn [i]
-             (let [vi (nth vels i)
-                   inertia (:i (nth ls i))
-                   ;; Half v^T I v, with both in the link's own frame.
-                   ke (* 0.5 (reduce + (map * vi (lin/mat-vec inertia vi))))
-                   {:keys [rot pos]} (nth fs i)
-                   com (v/add pos (q/rotate rot (:com (nth model i))))
-                   pe (- (* (double (:mass (nth model i))) (v/dot g com)))]
-               (+ ke pe)))
-           (range (count ls)))))))
+                      (range (count ls)))
+         part (fn [inertia vi rot pos mass com]
+                (let [ke (* 0.5 (reduce + (map * vi (lin/mat-vec inertia vi))))
+                      c (v/add pos (q/rotate rot com))]
+                  (- ke (* (double mass) (v/dot g c)))))]
+     (+ (if root
+          (part (spatial-inertia (:mass root) (:com root) (:inertia root))
+                v0 (or (:rot b) q/identity-q) (or (:pos b) v/zero)
+                (:mass root) (:com root))
+          0.0)
+        (reduce +
+                (map (fn [i]
+                       (let [link (nth (chain model) i)
+                             {:keys [rot pos]} (nth fs i)]
+                         (part (:i (nth ls i)) (nth vels i) rot pos
+                               (:mass link) (:com link))))
+                     (range (count ls))))))))
+
+(defn momentum
+  "The whole model's linear and angular momentum about the world origin.
+
+  Under no torque and no gravity both are conserved exactly, whatever the
+  joints are doing, and that is the strongest statement available about a
+  floating chain -- it is a property of the physics rather than of any
+  one link, so a sign error anywhere in the recursion breaks it."
+  [model {:keys [q qd] :as state}]
+  (let [root (base model)
+        b (:base state)
+        ls (links model q)
+        fs (poses model q b)
+        v0 (if root (vec (or (:vel b) (repeat 6 0.0))) (vec (repeat 6 0.0)))
+        vels (reduce (fn [acc i]
+                       (let [{:keys [xup s parent]} (nth ls i)
+                             vp (if (neg? parent) v0 (nth acc parent))]
+                         (conj acc (mapv + (lin/mat-vec xup vp) (scaled s (nth qd i))))))
+                     []
+                     (range (count ls)))
+        ;; Each body's spatial momentum `I v` is in its own frame and
+        ;; about its own origin. Both have to be carried to the world
+        ;; before they can be added up.
+        one (fn [inertia vi {:keys [rot pos]}]
+              (let [h (lin/mat-vec inertia vi)
+                    ang (q/rotate rot (subvec (vec h) 0 3))
+                    lin (q/rotate rot (subvec (vec h) 3 6))]
+                [lin (v/add ang (v/cross pos lin))]))
+        parts (cond-> (mapv (fn [i] (one (:i (nth ls i)) (nth vels i) (nth fs i)))
+                            (range (count ls)))
+                root (conj (one (spatial-inertia (:mass root) (:com root) (:inertia root))
+                                v0
+                                {:rot (or (:rot b) q/identity-q)
+                                 :pos (or (:pos b) v/zero)})))]
+    {:linear (reduce v/add v/zero (map first parts))
+     :angular (reduce v/add v/zero (map second parts))}))

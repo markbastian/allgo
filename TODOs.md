@@ -469,16 +469,23 @@ TGS stops toppling too, though it keeps its own floor, below.
   Reduced coordinates have no such number, because a joint angle has
   nowhere to put a violation.
 
-  It agrees with the closed form for a hinged rod to twelve digits, and
-  the fast path agrees with `M^-1 (tau - bias)` built out of the slow one
-  to about fourteen. What is left:
+  The root can be free as well as bolted: `{:base {...} :links [...]}`
+  gives it a body whose pose and spatial velocity live in the state
+  rather than in `q`, so nothing has to parameterise a rotation with
+  three numbers. It costs one 6x6 solve a step and changes nothing about
+  the joints.
+
+  It agrees with the closed form for a hinged rod to twelve digits, the
+  fast path agrees with `M^-1 (tau - bias)` built out of the slow one to
+  about fourteen, and a free chain under no gravity conserves both its
+  momenta. That last is the one that earns its keep: it caught gravity
+  being applied in the world's frame rather than the root's, which is
+  invisible until the root both falls and spins. What is left:
 
   - **Contacts.** The reason the constraint formulation is still the
     right shape for a pile of bricks is that a contact and a joint go
     through the same solver. A reduced-coordinate ragdoll that cannot be
     hit is not much of a ragdoll. This is the big one.
-  - **A floating base**, which is a six degree of freedom joint to the
-    world. Without it the chain is bolted to the origin.
   - **Multi-degree-of-freedom joints.** A shoulder is a ball joint;
     today it has to be spelled as three hinges with massless links
     between them.
