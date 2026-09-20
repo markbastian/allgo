@@ -31,8 +31,38 @@
   different question to ask a solver, and each brings its own controls
   and its own camera:
 
+  - **column** -- one brick on another, `courses` high. Nothing is asked
+    of it but to hold still, which is why it is the sharpest test in
+    here: see below.
   - **wall** -- a running-bond wall, `rows` by `cols`. The stack test:
     how much weight a solver can hold up without letting the bottom sag.
+
+  ## How tall a column each of them will hold
+
+  A column is the demo's hardest question, and it is worth being clear
+  about why. Its bricks are laid square, so in exact arithmetic it would
+  stand for ever -- every contact is symmetric and there is nothing to
+  tip it. What it actually does is lean, slowly, along its narrow axis,
+  and past a certain height the lean runs away with it. The seconds
+  below are how long it stood before the top brick left the footprint,
+  watched for twenty, gripping at 0.55:
+
+      courses             5    6    7    8    9   10   11   12
+      sequential impulse  --   --   --  4.8  2.8  2.7  2.5  2.9
+      tgs                 --   --   --   --   --   --   --  7.3
+      xpbd                --   --   --   --   --  8.4  5.3  4.2
+
+  So seven courses for sequential impulse, nine for XPBD and eleven for
+  TGS, and the demo starts at eight -- tall enough that switching to
+  sequential impulse knocks it down while you watch.
+
+  It is drift, not a kick. Trace the top brick and it walks one way in
+  millimetres a second and never comes back; the column is standing on
+  its own rounding error, and once the centre of mass is outside the
+  footprint gravity does the rest. Iterations do not buy it back --
+  sixteen and four fall at the same height -- because the error is not
+  in how well each step is solved but in the fact that there are sixty
+  of them a second, each leaving a little behind.
 
   ## How tall a wall each of them will hold
 
@@ -129,15 +159,25 @@
      :span (* 0.5 cols bw)
      :height (* rows bh)}))
 
+(defmethod build-scene "column" [_ ^js c]
+  (let [courses (long (.-columnCourses c))
+        [bw bh bd] brick-size]
+    {:bodies (into [(floor)]
+                   (for [r (range courses)]
+                     (brick [0.0 (+ (* 0.5 bh) (* r bh)) 0.0] [bw bh bd])))
+     :span (* 0.5 bw)
+     :height (* courses bh)}))
+
 (def ^:private scene-names
   "In the order they are offered, simplest first."
-  ["wall"])
+  ["column" "wall"])
 
 (def ^:private ^js controls
   #js {:scene "wall"
        :solver "tgs"
        :rows 5
        :cols 4
+       :columnCourses 8
        :iterations 8
        :substeps 4
        :friction 0.55
@@ -147,13 +187,15 @@
        :reset (fn [])})
 
 (def ^:private scene-sliders
-  "The sliders each scene brings with it, as `[property min max step]`.
+  "The sliders each scene brings with it, `[property min max step label]`.
 
   Everything not here -- the solver, the material, the shot -- is common
   to all of them and always shown. A property belongs to exactly one
   scene, so that each can pick its own range without having to agree
-  with anybody else about what, say, a sensible height is."
-  {"wall" [["rows" 3 16 1] ["cols" 3 16 1]]})
+  with anybody else about what, say, a sensible height is; `label` is
+  how it gets a plain name back in the GUI regardless."
+  {"column" [["columnCourses" 2 40 1 "courses"]]
+   "wall"   [["rows" 3 16 1] ["cols" 3 16 1]]})
 
 (defn- projectile
   "A shot high on the stack, from far enough out to see it coming.
@@ -275,8 +317,9 @@
           ;; business of tearing down and rebuilding the GUI.
           (let [sliders (into {}
                               (for [[_ specs] scene-sliders
-                                    [prop lo hi step] specs]
+                                    [prop lo hi step label] specs]
                                 [prop (-> (.add gui controls prop lo hi step)
+                                          (.name (or label prop))
                                           (.onFinishChange rebuild!))]))
                 show-sliders! (fn []
                                 (let [mine (into #{} (map first)
