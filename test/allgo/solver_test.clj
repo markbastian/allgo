@@ -170,6 +170,29 @@
           w (run :sequential-impulse bodies 300 {:allow-sleep? false})]
       (is (not-any? rigid/sleeping? (dynamics w))))))
 
+(deftest pushout-bound-test
+  (testing "however deep the overlap, nothing is fired out of it"
+    ;; A box dropped half inside another is not a scene anyone builds on
+    ;; purpose; it is what a stack too tall for the solver turns into,
+    ;; one course at a time, and what the solver does about it decides
+    ;; whether the wall falls over or leaves the building. XPBD reads
+    ;; velocity back off the position correction, over the substep, so
+    ;; an unbounded correction is an unbounded velocity -- a sixteen
+    ;; course wall reached sixty metres a second that way. The bound is
+    ;; `max-push-speed`, which the impulse solvers have always had.
+    (doseq [solver solvers]
+      (let [limit 3.0
+            bodies [(floor)
+                    (brick [0.0 0.25 0.0])
+                    ;; Half a brick down into the one below it.
+                    (brick [0.0 0.5 0.0])]
+            w (run solver bodies 1 {:max-push-speed limit})
+            fastest (apply max 0.0 (map speed (dynamics w)))]
+        ;; The bound, and one step of gravity on top of it.
+        (is (< fastest (+ limit 0.2))
+            (str (name solver) " left the overlap at " fastest " m/s"))
+        (is (every? finite? (dynamics w)) (name solver))))))
+
 (deftest restitution-test
   (testing "a bouncy ball bounces and a dead one does not"
     (doseq [solver solvers]

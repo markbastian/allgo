@@ -25,6 +25,27 @@
   cannot inject energy, and a wall under it settles dead rather than
   shivering. What it gives up is control over the bounce.
 
+  ## How tall a wall each of them will hold
+
+  Turn the rows up and they part company. Four bricks wide, gripping at
+  0.55, left alone for twenty seconds, counting the bricks still where
+  they were laid -- one short is full marks, because a running bond ends
+  every course with a brick half over the edge and that one falls off by
+  itself:
+
+      courses            4      6      8     12     16
+      sequential impulse 15/16  23/24  31/32  10/48   0/64
+      tgs                15/16  23/24  31/32  47/48  63/64
+      xpbd               15/16  23/24  31/32   2/48   0/64
+
+  Up to eight courses it makes no difference which is selected. Past
+  that, TGS is the only one that holds, because it is the only one that
+  substeps: support reaches the top of the wall within the step instead
+  of a course per step. Sequential impulse cannot be iterated into it --
+  sixteen iterations and sixty-four give the same nineteen bricks -- and
+  XPBD gives out at the same height for its own reason. Neither is
+  broken; the difference is the thing the demo is for.
+
   ## Cost, and where it actually goes
 
   The wall starts small because this is not yet fast, and it is worth

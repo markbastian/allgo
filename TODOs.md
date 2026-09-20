@@ -323,6 +323,11 @@ TGS stops toppling too, though it keeps its own floor, below.
   asymmetry, a millimetre a second or so, and an unstable equilibrium
   amplifies whatever it is given.
 
+  For XPBD specifically, what would raise the ceiling is a penetration
+  re-measured against the geometry each substep rather than `depth0` plus
+  the anchor drift, which is a linearisation that goes stale as the
+  bricks turn.
+
   Sleeping is in now, and it is the answer for a column that *reaches*
   rest: a six course one is asleep two seconds in and then does not move
   at all, ever, because it is not being integrated. It is not the answer
@@ -369,13 +374,25 @@ TGS stops toppling too, though it keeps its own floor, below.
   velocity too recovers most of that and still loses to leaving it alone.
   Soft contacts were the right answer to the same problem.
 
-- **XPBD gives out somewhere around fourteen courses.** Sixteen blows up
-  within five seconds however it is tuned, and *more* substeps or passes
-  make it worse rather than better — which says the trouble is the
-  velocity read-back amplifying corrections that never settle, not
-  convergence. The honest fix is a penetration re-measured against the
-  geometry per substep rather than `depth0` plus the anchor drift, which
-  is a linearisation that goes stale as the bricks turn.
+- **The three solvers part company at about eight courses, and that is
+  documented rather than outstanding.** All of them hold a four-wide
+  running bond up to eight; at twelve only TGS does, and at sixteen it
+  holds 63 of 64. The table and the reasoning are in
+  `allgo.physics.solver`'s docstring and in the demo's.
+
+  Sequential impulse is not fixable here and should not be fixed: it
+  linearises once per step, which is what it *is*, and iterating harder
+  does nothing — sixteen iterations and sixty-four leave the same
+  nineteen bricks standing. TGS exists because of this.
+
+  XPBD used to *explode* past its limit rather than fall over, reaching
+  sixty metres a second on a sixteen course wall from a standing start.
+  That was a missing bound, not a depth limit: it reads velocity back off
+  the position correction over the substep, so an unbounded correction is
+  an unbounded velocity. It is now bounded by `max-push-speed`, the same
+  number the impulse solvers have always used, and `pushout-bound-test`
+  holds it there. It still cannot stack past eight courses, and the
+  reason it cannot is the one below.
 
 ### Tried and not kept
 

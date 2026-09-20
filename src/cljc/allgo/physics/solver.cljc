@@ -46,6 +46,48 @@
   velocity pass afterwards to get restitution and friction, and by being
   stiffer to tune.
 
+  ## Which one to use
+
+  Measured, on the demo's own wall -- a running bond four bricks wide,
+  gripping at 0.55, left alone for twenty seconds. The count is the
+  bricks still where they were laid; one short of the total is a full
+  marks, because every course of a running bond ends in a brick
+  overhanging by exactly half, and that one falls off on its own.
+
+      courses            4      6      8     12     16
+      sequential impulse 15/16  23/24  31/32  10/48   0/64
+      tgs                15/16  23/24  31/32  47/48  63/64
+      xpbd               15/16  23/24  31/32   2/48   0/64
+
+  **Up to about eight courses, take any of them.** They all hold, and
+  the choice is about character rather than whether the wall stands:
+  sequential impulse is the cheapest step, XPBD settles the deadest,
+  TGS is the most controllable on impact.
+
+  **Past eight courses, use TGS.** It is the only one of the three that
+  substeps, and holding a tall stack is exactly what substepping buys:
+  the bodies move between iterations and the geometry is measured again,
+  so support propagates from the floor to the top *within* the step.
+
+  Sequential impulse cannot get there and more iterations will not take
+  it -- sixteen and sixty-four both leave nineteen bricks of a sixteen
+  course wall standing, which is the same answer at four times the cost.
+  It linearises once, at the top of the step, so its later iterations are
+  solving lever arms and overlaps measured before anything moved. That is
+  not a bug to be fixed; it is what sequential impulse *is*, and it is
+  why TGS exists.
+
+  XPBD stops at about the same height and for a different reason. It
+  reads velocity back off the position correction, at the substep rate,
+  so a correction that does not settle becomes a velocity that does not
+  settle. Past what it can hold, it now comes down rather than taking
+  off -- the correction is bounded by `max-push-speed`, the same bound
+  the impulse solvers have always had -- but it does come down.
+
+  So: **tall stacks want TGS**. Shallow piles, ragdolls, anything thrown
+  around, and anything where a scene settling dead matters more than a
+  scene standing tall, can have whichever suits.
+
   ## The state, and why it is in arrays
 
   Bodies come in and go out as the maps `allgo.physics.rigid` makes. In
@@ -680,7 +722,7 @@
   unrelaxed it was doing twenty metres a second within a second, and
   solving it harder -- more passes, more substeps -- made it worse, which
   is what says the trouble is the read-back and not convergence."
-  [bodies cs slop dt]
+  [bodies cs slop dt max-push]
   (let [^doubles normal (:normal cs)
         ^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
         ^doubles depth0 (:depth0 cs)
@@ -694,7 +736,13 @@
                     pb (rigid/local->world b (vec3-at rbl k))
                     n (vec3-at normal k)
                     pen (+ (aget depth0 k) (v/dot (v/sub pa pb) n))
-                    c (- pen (double slop))]
+                    ;; Bounded, for the same reason and by the same
+                    ;; number the impulse solvers use: however deep the
+                    ;; overlap, it is not pushed out faster than
+                    ;; `max-push-speed`. A deep overlap takes several
+                    ;; substeps to clear instead of one, which is slower
+                    ;; and is not 60 metres a second.
+                    c (min (- pen (double slop)) (double max-push))]
                 (if (pos? c)
                   (let [{:keys [bodies force]}
                         (rigid/correct bs {:a ia :b ib
@@ -914,6 +962,12 @@
         bodies (rouse bodies contacts)
         cs (prepare bodies contacts (:contacts w))
         slop (double (:slop w))
+        ;; The furthest a contact may push in one substep. The impulse
+        ;; solvers have had this bound since they were written and this
+        ;; one did not, which is the whole of why it explodes: it reads
+        ;; velocity back off the correction, over the substep, so an
+        ;; unbounded correction is an unbounded velocity.
+        push-limit (* (double (:max-push-speed w)) h)
         ^doubles lambda (:lambda cs)
         passes (max 1 (quot (long iterations) substeps))]
     (loop [bodies bodies n substeps]
@@ -930,7 +984,7 @@
               ;; Restitution is measured against this; after the position
               ;; solve it is whatever the pushout left behind.
               _ (record-approach! (body-arrays bodies) cs)
-              bodies (reduce (fn [bs _] (project-contacts bs cs slop h))
+              bodies (reduce (fn [bs _] (project-contacts bs cs slop h push-limit))
                              bodies
                              (range passes))
               bodies (mapv #(if (awake? %) (rigid/update-velocities % h) %) bodies)
