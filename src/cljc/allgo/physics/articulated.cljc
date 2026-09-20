@@ -106,27 +106,34 @@
 
   ## What it costs
 
-  Still more than it should. A chain lying on the floor, JVM, per step:
+  A chain lying on the floor, JVM, per step:
 
       links         0      2      4      8     16
       contacts      4      6      8     16     52
-      before     0.71   4.92  12.19  29.85  154.1
-      now        0.67   2.03   4.24   6.87   31.35
+      at first   0.71   4.92  12.19  29.85  154.1
+      structure  0.67   2.03   4.24   6.87   31.35
+      flat       0.45   0.86   1.36   1.78    5.21
 
-  Five times better and not yet enough. What was fixed was structural: a
-  contact cost a whole inverse inertia matrix, which cost `n + 6` runs
-  of the articulated body algorithm, and it is now three O(n) impulse
-  responses. The per-configuration data -- link transforms, poses,
-  articulated inertias -- is built once a step instead of once per
-  matrix column, and the inward walk visits only the path from the body
-  that was hit to the root.
+  Thirty times, in two halves. The structural half: a contact used to
+  cost a whole inverse inertia matrix, which cost `n + 6` runs of the
+  articulated body algorithm, and is now three O(n) impulse responses;
+  the per-configuration data is built once a step rather than once per
+  matrix column; the inward walk visits only the path from the body that
+  was hit to the root.
 
-  What is left is not structural. Every 6x6 here is a vector of vectors
-  and every spatial vector a vector of six boxed doubles, so a step of a
-  settled sixteen-link chain allocates on the order of fifty thousand of
-  them. That is the same treatment `allgo.physics.solver` gave its
-  contact solve -- primitive doubles, no allocation in the inner loop --
-  and the same one `allgo.physics.contact` is still waiting for.
+  The other half is arithmetic. Everything in the section above is the
+  readable statement of the algebra and is what the tests check, and it
+  is *not* what the inner loops run on -- a 6x6 as a vector of vectors
+  is seven objects and thirty-six boxed doubles. The per-configuration
+  cache holds flat `double` arrays instead, the passes over them
+  allocate one result apiece, and the contact sweep keeps one mutable
+  generalised velocity that every impulse adds into. The conversion
+  happens once per link per step, where it costs nothing.
+
+  A word of warning from having done it: the first attempt was *slower*,
+  because three type hints were missing and reflective `aget` costs two
+  orders of magnitude. `make reflect` is a build step for this reason
+  and it is worth running before believing any measurement.
 
   ## Spatial vectors
 
@@ -219,7 +226,8 @@
   algorithm produced without ever forming M. The two share the spatial
   algebra and nothing else, so agreeing to fourteen digits is worth
   something."
-  (:require [allgo.geometry.quaternion :as q]
+  (:require [allgo.array :as a]
+            [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.numerics.linear :as lin]
             [allgo.physics.contact :as contact]
@@ -297,6 +305,217 @@
 ;; ---------------------------------------------------------------------------
 ;; Joints
 
+;; ---------------------------------------------------------------------------
+;; The same algebra, flat
+;;
+;; Everything above is the readable statement of what a spatial vector is
+;; and what may be done to one, and it is what the tests check. It is not
+;; what the inner loops run on. A 6x6 as a vector of vectors is seven
+;; objects and thirty-six boxed doubles; `mat-vec` over one allocates six
+;; lazy sequences to produce a seventh vector. A settled sixteen link
+;; model asks for several hundred of those a step, which was, measured,
+;; most of a frame.
+;;
+;; So the per-configuration cache holds `double` arrays -- a 6x6 as
+;; thirty-six numbers in row-major order, a spatial vector as six -- and
+;; the passes over it allocate one result array apiece and nothing else.
+;; The conversion happens once per link per step, where it costs nothing.
+
+(defn- flat36
+  "A 6x6 from rows into one array, row-major."
+  ^doubles [m]
+  (let [out (a/f64 36)]
+    (dotimes [r 6]
+      (let [row (nth m r)]
+        (dotimes [c 6] (aset out (+ (* 6 r) c) (double (nth row c))))))
+    out))
+
+(defn- mv6
+  "`m x` for a flat 6x6 and a flat spatial vector."
+  ^doubles [^doubles m ^doubles x]
+  (let [out (a/f64 6)]
+    (dotimes [r 6]
+      (let [b (* 6 r)]
+        (aset out r (+ (* (aget m b) (aget x 0))
+                       (* (aget m (+ b 1)) (aget x 1))
+                       (* (aget m (+ b 2)) (aget x 2))
+                       (* (aget m (+ b 3)) (aget x 3))
+                       (* (aget m (+ b 4)) (aget x 4))
+                       (* (aget m (+ b 5)) (aget x 5))))))
+    out))
+
+(defn- mm6
+  "`a b` for two flat 6x6s."
+  ^doubles [^doubles a ^doubles b]
+  (let [out (a/f64 36)]
+    (dotimes [r 6]
+      (dotimes [c 6]
+        (let [ar (* 6 r)]
+          (aset out (+ ar c)
+                (+ (* (aget a ar) (aget b c))
+                   (* (aget a (+ ar 1)) (aget b (+ 6 c)))
+                   (* (aget a (+ ar 2)) (aget b (+ 12 c)))
+                   (* (aget a (+ ar 3)) (aget b (+ 18 c)))
+                   (* (aget a (+ ar 4)) (aget b (+ 24 c)))
+                   (* (aget a (+ ar 5)) (aget b (+ 30 c))))))))
+    out))
+
+(defn- transpose6
+  ^doubles [^doubles m]
+  (let [out (a/f64 36)]
+    (dotimes [r 6] (dotimes [c 6] (aset out (+ (* 6 c) r) (aget m (+ (* 6 r) c)))))
+    out))
+
+(defn- add6! ^doubles [^doubles dst ^doubles x] (dotimes [i 6] (aset dst i (+ (aget dst i) (aget x i)))) dst)
+(defn- add36! ^doubles [^doubles dst ^doubles x] (dotimes [i 36] (aset dst i (+ (aget dst i) (aget x i)))) dst)
+
+(defn- dot6 ^double [^doubles a ^doubles b]
+  (+ (* (aget a 0) (aget b 0)) (* (aget a 1) (aget b 1)) (* (aget a 2) (aget b 2))
+     (* (aget a 3) (aget b 3)) (* (aget a 4) (aget b 4)) (* (aget a 5) (aget b 5))))
+
+(defn- copy6 ^doubles [^doubles x] (let [o (a/f64 6)] (dotimes [i 6] (aset o i (aget x i))) o))
+(defn- copy36 ^doubles [^doubles x] (let [o (a/f64 36)] (dotimes [i 36] (aset o i (aget x i))) o))
+
+(defn- cross-motion
+  "`crm(v) x`, written out rather than built.
+
+  The 6x6 of `crm` never has to exist: the angular half of the answer is
+  `w x a` and the linear half is `u x a + w x b`, which is twelve
+  multiplications against thirty-six and no matrix."
+  ^doubles [^doubles v ^doubles x]
+  (let [wx (aget v 0) wy (aget v 1) wz (aget v 2)
+        ux (aget v 3) uy (aget v 4) uz (aget v 5)
+        ax (aget x 0) ay (aget x 1) az (aget x 2)
+        bx (aget x 3) by (aget x 4) bz (aget x 5)
+        out (a/f64 6)]
+    (aset out 0 (- (* wy az) (* wz ay)))
+    (aset out 1 (- (* wz ax) (* wx az)))
+    (aset out 2 (- (* wx ay) (* wy ax)))
+    (aset out 3 (+ (- (* uy az) (* uz ay)) (- (* wy bz) (* wz by))))
+    (aset out 4 (+ (- (* uz ax) (* ux az)) (- (* wz bx) (* wx bz))))
+    (aset out 5 (+ (- (* ux ay) (* uy ax)) (- (* wx by) (* wy bx))))
+    out))
+
+(defn- cross-force
+  "`crf(v) f`, likewise. Angular is `w x n + u x f`, linear is `w x f`."
+  ^doubles [^doubles v ^doubles f]
+  (let [wx (aget v 0) wy (aget v 1) wz (aget v 2)
+        ux (aget v 3) uy (aget v 4) uz (aget v 5)
+        nx (aget f 0) ny (aget f 1) nz (aget f 2)
+        fx (aget f 3) fy (aget f 4) fz (aget f 5)
+        out (a/f64 6)]
+    (aset out 0 (+ (- (* wy nz) (* wz ny)) (- (* uy fz) (* uz fy))))
+    (aset out 1 (+ (- (* wz nx) (* wx nz)) (- (* uz fx) (* ux fz))))
+    (aset out 2 (+ (- (* wx ny) (* wy nx)) (- (* ux fy) (* uy fx))))
+    (aset out 3 (- (* wy fz) (* wz fy)))
+    (aset out 4 (- (* wz fx) (* wx fz)))
+    (aset out 5 (- (* wx fy) (* wy fx)))
+    out))
+
+(defn- s-dot
+  "`S^T f`, as a flat `ndof` array -- each of a joint's axes' share."
+  ^doubles [^doubles s nd ^doubles f]
+  (let [nd (long nd) out (a/f64 nd)]
+    (dotimes [k nd]
+      (let [b (* 6 k)]
+        (aset out k (+ (* (aget s b) (aget f 0)) (* (aget s (+ b 1)) (aget f 1))
+                       (* (aget s (+ b 2)) (aget f 2)) (* (aget s (+ b 3)) (aget f 3))
+                       (* (aget s (+ b 4)) (aget f 4)) (* (aget s (+ b 5)) (aget f 5))))))
+    out))
+
+(defn- s-apply!
+  "`dst += S x`, taking the joint's rates from `x` at `off`."
+  ^doubles [^doubles dst ^doubles s nd x off]
+  (dotimes [k (long nd)]
+    (let [r (double (nth x (+ (long off) k))) b (* 6 k)]
+      (when-not (zero? r)
+        (dotimes [i 6] (aset dst i (+ (aget dst i) (* r (aget s (+ b i)))))))))
+  dst)
+
+(defn- s-apply-arr!
+  "`dst += S x` for a flat `x` of exactly this joint's rates."
+  ^doubles [^doubles dst ^doubles s nd ^doubles x]
+  (dotimes [k nd]
+    (let [r (aget x k) b (* 6 k)]
+      (when-not (zero? r)
+        (dotimes [i 6] (aset dst i (+ (aget dst i) (* r (aget s (+ b i)))))))))
+  dst)
+
+(defn- flat-d-inverse
+  "The inverse of a joint's `D`, or nil where it has none.
+
+  Nil rather than a huge number: a joint whose subtree presents no
+  inertia along one of its axes has no acceleration there to compute."
+  ^doubles [^doubles d nd]
+  (case (long nd)
+    0 nil
+    1 (let [x (aget d 0)] (when (> (abs x) 1e-12) (a/f64 [(/ 1.0 x)])))
+    (let [rows (mapv (fn [r] (mapv (fn [c] (aget d (+ (* nd r) c))) (range nd))) (range nd))]
+      (when-let [inv (lin/inverse rows)]
+        (a/f64 (mapcat identity inv))))))
+
+(defn- minus-u-dinv-ut
+  "`IA - U D^-1 U^T`, the inertia a joint presents once it has been
+  allowed to give."
+  ^doubles [^doubles ia ^doubles u ^doubles dinv nd]
+  (let [nd (long nd) out (copy36 ia)]
+    (dotimes [k nd]
+      (dotimes [l nd]
+        (let [w (aget dinv (+ (* nd k) l))]
+          (when-not (zero? w)
+            (let [bk (* 6 k) bl (* 6 l)]
+              (dotimes [r 6]
+                (let [uk (* w (aget u (+ bk r)))]
+                  (when-not (zero? uk)
+                    (dotimes [c 6]
+                      (aset out (+ (* 6 r) c)
+                            (- (aget out (+ (* 6 r) c)) (* uk (aget u (+ bl c))))))))))))))
+    out))
+
+(defn- dot-n
+  "The dot product of two flat arrays of the same length."
+  ^double [^doubles a ^doubles b]
+  (let [n (alength a)]
+    (loop [i 0 acc 0.0] (if (= i n) acc (recur (inc i) (+ acc (* (aget a i) (aget b i))))))))
+
+(defn- axpy-n!
+  "`dst += s x` over a whole flat array."
+  ^doubles [^doubles dst ^doubles x s]
+  (let [s (double s) n (alength dst)]
+    (when-not (zero? s)
+      (dotimes [i n] (aset dst i (+ (aget dst i) (* s (aget x i))))))
+    dst))
+
+(defn- root-solve
+  "`IA0^-1 p` for the free root's six by six.
+
+  Symmetric by construction and not quite by arithmetic, after a chain
+  of congruences, so it is averaged with its own transpose before being
+  factored. Cholesky wants it to be and it costs thirty-six additions."
+  [^doubles ia0 ^doubles p]
+  (let [rows (mapv (fn [r] (mapv (fn [c]
+                                   (* 0.5 (+ (aget ia0 (+ (* 6 r) c))
+                                             (aget ia0 (+ (* 6 c) r)))))
+                                 (range 6)))
+                   (range 6))]
+    (lin/cholesky-solve rows (mapv (fn [i] (aget p (long i))) (range 6)))))
+
+(defn- small-solve
+  "`D^-1 y` for the one by one or three by three a joint presents.
+
+  Nil `dinv` is a joint whose subtree resists nothing along one of its
+  axes; there is no acceleration there to compute and inventing one is
+  how a zero-inertia limb tears a model apart."
+  ^doubles [^doubles dinv nd ^doubles y]
+  (let [nd (long nd) out (a/f64 nd)]
+    (dotimes [r nd]
+      (let [b (* nd r)]
+        (aset out r (double (loop [c 0 acc 0.0]
+                              (if (= c nd)
+                                acc
+                                (recur (inc c) (+ acc (* (aget dinv (+ b c)) (aget y c))))))))))
+    out))
+
 (defn- kind-of [link] (or (:joint link) :revolute))
 
 (defn joint-dof
@@ -347,54 +566,6 @@
                   [0.0 0.0 1.0 0.0 0.0 0.0]]
       :fixed [])))
 
-(def ^:private zero6 [0.0 0.0 0.0 0.0 0.0 0.0])
-
-(defn- s-times
-  "`S x`, the spatial vector a joint's rates make, reading them out of
-  the flat velocity `x` at this joint's offset."
-  [s x ^long offset]
-  (reduce (fn [acc k]
-            (let [r (double (nth x (+ offset k)))
-                  col (nth s k)]
-              (if (zero? r) acc (mapv (fn [a c] (+ (double a) (* r (double c)))) acc col))))
-          zero6
-          (range (count s))))
-
-(defn- st-times
-  "`S^T f`, each of a joint's axes' share of a spatial force."
-  [s f]
-  (mapv (fn [col] (reduce + (map * col f))) s))
-
-(defn- d-inverse
-  "The inverse of `S^T IA S`, or nil where the joint cannot move.
-
-  Nil rather than a huge number: a joint whose subtree presents no
-  inertia along one of its axes has no acceleration there to compute,
-  and inventing one is how a zero-mass link tears a model apart."
-  [d]
-  (case (count d)
-    0 []
-    1 (let [x (double (get-in d [0 0]))]
-        (when (> (abs x) 1e-12) [[(/ 1.0 x)]]))
-    (lin/inverse d)))
-
-(defn- outer
-  "The 6x6 `a b^T`."
-  [a b]
-  (mapv (fn [ai] (mapv (fn [bj] (* (double ai) (double bj))) b)) a))
-
-(defn- u-dinv-ut
-  "`U D^-1 U^T`, the part of an articulated inertia the joint gives away."
-  [u dinv]
-  (let [n (count u)]
-    (reduce (fn [m [k l]]
-              (let [w (double (get-in dinv [k l]))]
-                (if (zero? w)
-                  m
-                  (lin/mat-add m (lin/mat-scale (outer (nth u k) (nth u l)) w)))))
-            (vec (repeat 6 zero6))
-            (for [k (range n) l (range n)] [k l]))))
-
 (defn chain
   "The links of a model, whichever form it was given in.
 
@@ -433,27 +604,29 @@
       (fn [[acc ^long off] i]
         (let [link (nth parts i)
               nd (long (joint-dof link))
-              xup (lin/mat-mul (transform (joint-transform link (nth q-vec i nil)))
-                               (transform (:origin link)))]
+              xup (flat36 (lin/mat-mul (transform (joint-transform link (nth q-vec i nil)))
+                                       (transform (:origin link))))
+              cols (subspace link)
+              sarr (a/f64 (* 6 (max 1 nd)))]
+          (dotimes [k nd]
+            (dotimes [j 6] (aset sarr (+ (* 6 k) j) (double (nth (nth cols k) j)))))
           [(conj acc {:xup xup
                       ;; Kept rather than taken again: every inward
                       ;; pass, of which there are several a step, wants
                       ;; it.
-                      :xt (lin/transpose xup)
-                      :s (subspace link)
+                      :xt (transpose6 xup)
+                      :s sarr
                       :ndof nd
                       ;; Where this joint's rates start in the flat
                       ;; velocity vector. Joints are no longer all one
                       ;; number wide, so nothing can index by link any
                       ;; more.
                       :offset off
-                      :i (spatial-inertia (:mass link) (:com link) (:inertia link))
+                      :i (flat36 (spatial-inertia (:mass link) (:com link) (:inertia link)))
                       :parent (long (:parent link))})
            (+ off nd)]))
       [[] 0]
       (range (count parts))))))
-
-(defn- scaled [s ^double x] (mapv #(* (double %) x) s))
 
 (defn- spatial-velocities
   "Every link's spatial velocity, in its own coordinates.
@@ -461,11 +634,11 @@
   Linear in `(v0, qd)` and used three ways because of it: to say what a
   model is doing now, and -- one unit of generalised velocity at a time
   -- to build the Jacobian of any point on it."
-  [ls v0 qd]
+  [ls ^doubles v0 qd]
   (reduce (fn [acc i]
-            (let [{:keys [xup s parent offset]} (nth ls i)
+            (let [{:keys [xup s ndof parent offset]} (nth ls i)
                   vp (if (neg? (long parent)) v0 (nth acc parent))]
-              (conj acc (mapv + (lin/mat-vec xup vp) (s-times s qd offset)))))
+              (conj acc (s-apply! (mv6 xup vp) s ndof qd offset))))
           []
           (range (count ls))))
 
@@ -497,38 +670,39 @@
          ;; Outward: where every link is going, and what it takes.
          out (reduce
               (fn [acc i]
-                (let [{:keys [xup s parent offset]} (nth ls i)
-                      inertia (:i (nth ls i))
-                      vj (s-times s qd offset)
-                      vp (if (neg? parent) zero6 (:v (nth acc parent)))
-                      ap (if (neg? parent) (base-acceleration gravity) (:a (nth acc parent)))
-                      vi (mapv + (lin/mat-vec xup vp) vj)
-                      ai (mapv + (lin/mat-vec xup ap)
-                               (s-times s qdd offset)
-                               (lin/mat-vec (crm vi) vj))
-                      fi (mapv + (lin/mat-vec inertia ai)
-                               (lin/mat-vec (crf vi) (lin/mat-vec inertia vi)))]
+                (let [{:keys [xup s ndof parent offset]} (nth ls i)
+                      ^doubles inertia (:i (nth ls i))
+                      vj (s-apply! (a/f64 6) s ndof qd offset)
+                      vp (if (neg? parent) (a/f64 6) (:v (nth acc parent)))
+                      ap (if (neg? parent)
+                           (a/f64 (base-acceleration gravity))
+                           (:a (nth acc parent)))
+                      vi (add6! (mv6 xup vp) vj)
+                      ai (-> (mv6 xup ap)
+                             (s-apply! s ndof qdd offset)
+                             (add6! (cross-motion vi vj)))
+                      fi (add6! (mv6 inertia ai) (cross-force vi (mv6 inertia vi)))]
                   (conj acc {:v vi :a ai :f fi})))
               []
               (range n))
          ;; Inward: each link's force, plus everything its children left
          ;; on it, read off along the joint axis.
          forces (reduce (fn [fs i]
-                          (let [{:keys [xup parent]} (nth ls i)
+                          (let [{:keys [xt parent]} (nth ls i)
                                 fi (nth fs i)]
                             (if (neg? parent)
                               fs
-                              (update fs parent
-                                      #(mapv + % (lin/mat-vec (lin/transpose xup) fi))))))
-                        (mapv :f out)
+                              (update fs parent #(add6! % (mv6 xt fi))))))
+                        (mapv #(copy6 (:f %)) out)
                         (reverse (range n)))]
      ;; Each joint's share of the force on its own link, laid back into
      ;; the flat vector the caller handed its rates in.
      (reduce (fn [acc i]
-               (let [{:keys [s offset]} (nth ls i)]
-                 (reduce (fn [a k] (assoc a (+ (long offset) k) (nth (st-times s (nth forces i)) k)))
+               (let [{:keys [s ndof offset]} (nth ls i)
+                     ^doubles share (s-dot s ndof (nth forces i))]
+                 (reduce (fn [a k] (assoc a (+ (long offset) k) (aget share k)))
                          acc
-                         (range (count s)))))
+                         (range (long ndof)))))
              (vec (repeat (dof model) 0.0))
              (range n)))))
 
@@ -580,25 +754,44 @@
         root (base model)]
     (reduce
      (fn [{:keys [links ia0]} i]
-       (let [{:keys [xup xt parent s]} (nth ls i)
-             ia (:ia (nth links i))
+       (let [{:keys [xup xt parent ndof]} (nth ls i)
+             ^doubles s (:s (nth ls i))
+             nd (long ndof)
+             ^doubles ia (:ia (nth links i))
              ;; One column of U per degree of freedom, and D their
              ;; projection onto each other -- a number for a hinge, a
              ;; three by three for a ball joint.
-             u (mapv #(lin/mat-vec ia %) s)
-             d (mapv (fn [sk] (mapv (fn [ul] (reduce + (map * sk ul))) u)) s)
-             dinv (d-inverse d)
-             ia' (if dinv (lin/mat-sub ia (u-dinv-ut u dinv)) ia)
+             u (a/f64 (* 6 (max 1 nd)))
+             _ (dotimes [k nd]
+                 (let [col (a/f64 6)]
+                   (dotimes [j 6] (aset col j (aget s (+ (* 6 k) j))))
+                   (let [^doubles uk (mv6 ia col)]
+                     (dotimes [j 6] (aset u (+ (* 6 k) j) (aget uk j))))))
+             d (let [out (a/f64 (* (max 1 nd) (max 1 nd)))]
+                 (dotimes [r nd]
+                   (dotimes [c nd]
+                     (let [br (* 6 r) bc (* 6 c)]
+                       (aset out (+ (* nd r) c)
+                             (double (loop [j 0 acc 0.0]
+                                       (if (= j 6)
+                                         acc
+                                         (recur (inc j)
+                                                (+ acc (* (aget s (+ br j))
+                                                          (aget u (+ bc j))))))))))))
+                 out)
+             dinv (flat-d-inverse d nd)
+             ia' (if dinv (minus-u-dinv-ut ia u dinv nd) ia)
              links (-> links
                        (assoc-in [i :u] u)
                        (assoc-in [i :dinv] dinv)
                        (assoc-in [i :ia-free] ia'))
-             up (lin/mat-mul xt (lin/mat-mul ia' xup))]
+             up (mm6 xt (mm6 ia' xup))]
          (if (neg? (long parent))
-           {:links links :ia0 (when ia0 (lin/mat-add ia0 up))}
-           {:links (update-in links [parent :ia] #(lin/mat-add % up)) :ia0 ia0})))
-     {:links (mapv (fn [l] {:ia (:i l)}) ls)
-      :ia0 (when root (spatial-inertia (:mass root) (:com root) (:inertia root)))}
+           {:links links :ia0 (when ia0 (add36! ia0 up))}
+           {:links (update-in links [parent :ia] #(add36! % up)) :ia0 ia0})))
+     {:links (mapv (fn [l] {:ia (copy36 (:i l))}) ls)
+      :ia0 (when root
+             (flat36 (spatial-inertia (:mass root) (:com root) (:inertia root))))}
      (reverse (range n)))))
 
 (defn forward-dynamics
@@ -647,9 +840,10 @@
                                                               q/identity-q))
                                              (or gravity [0.0 -9.81 0.0]))
                                    (or gravity [0.0 -9.81 0.0]))]
-                  [0.0 0.0 0.0 (double gx) (double gy) (double gz)])
-         v0 (if root (vec (or (:vel root-state) (repeat 6 0.0))) (vec (repeat 6 0.0)))
-         root-i (when root (spatial-inertia (:mass root) (:com root) (:inertia root)))
+                  (a/f64 [0.0 0.0 0.0 (double gx) (double gy) (double gz)]))
+         v0 (a/f64 (if root (vec (or (:vel root-state) (repeat 6 0.0))) (repeat 6 0.0)))
+         root-i (when root
+                  (flat36 (spatial-inertia (:mass root) (:com root) (:inertia root))))
          ;; What every joint weighs from above, which depends only on
          ;; where the joints are. Handed in when the caller has already
          ;; built it for this configuration.
@@ -658,22 +852,22 @@
          ;; alone implies, and the force needed to hold the link on it.
          pass1 (reduce
                 (fn [acc i]
-                  (let [{:keys [xup s parent offset]} (nth ls i)
-                        inertia (:i (nth ls i))
-                        vj (s-times s qd offset)
+                  (let [{:keys [xup s ndof parent offset]} (nth ls i)
+                        ^doubles inertia (:i (nth ls i))
+                        vj (s-apply! (a/f64 6) s ndof qd offset)
                         vp (if (neg? parent) v0 (:v (nth acc parent)))
-                        vi (mapv + (lin/mat-vec xup vp) vj)
+                        vi (add6! (mv6 xup vp) vj)
                         ;; An outside force on a link reduces the bias
                         ;; force the link needs of its parent by exactly
                         ;; itself, which is the whole of how anything
                         ;; external gets in -- a contact, a thruster, a
                         ;; hand pushing.
-                        f (when ext (nth ext i nil))]
+                        f (when ext (nth ext i nil))
+                        bias (cross-force vi (mv6 inertia vi))]
+                    (when f (dotimes [k 6] (aset bias k (- (aget bias k) (double (nth f k))))))
                     (conj acc {:v vi
-                               :c (lin/mat-vec (crm vi) vj)
-                               :pa (let [bias (lin/mat-vec (crf vi)
-                                                           (lin/mat-vec inertia vi))]
-                                     (if f (mapv - bias f) bias))})))
+                               :c (cross-motion vi vj)
+                               :pa bias})))
                 []
                 (range n))
          ;; Pass two, inward: what the subtree beyond each joint looks
@@ -683,62 +877,72 @@
          ;; ride on were built once, above.
          pass2 (reduce
                 (fn [{:keys [links pa0] :as acc} i]
-                  (let [{:keys [s parent xt offset]} (nth ls i)
-                        {:keys [pa c]} (nth links i)
-                        {:keys [u dinv ia-free]} (nth (:links ai) i)
+                  (let [{:keys [s ndof parent xt offset]} (nth ls i)
+                        nd (long ndof)
+                        {:keys [^doubles pa ^doubles c]} (nth links i)
+                        {:keys [^doubles u dinv ^doubles ia-free]} (nth (:links ai) i)
                         ;; What each of this joint's axes has left over
                         ;; once the bias force has taken its share.
-                        uu (mapv (fn [k tk] (- (double tk) (double k)))
-                                 (st-times s pa)
-                                 (map #(nth tau (+ (long offset) %)) (range (count s))))
+                        uu (let [^doubles share (s-dot s nd pa) out (a/f64 (max 1 nd))]
+                             (dotimes [k nd]
+                               (aset out k (- (double (nth tau (+ (long offset) k)))
+                                              (aget share k))))
+                             out)
                         acc (assoc-in acc [:links i :uu] uu)
-                        pa' (cond-> (mapv + pa (lin/mat-vec ia-free c))
-                              dinv (as-> x (reduce (fn [a l]
-                                                     (mapv + a (scaled (nth u l)
-                                                                       (nth (lin/mat-vec dinv uu) l))))
-                                                   x
-                                                   (range (count u)))))
-                        up-p (lin/mat-vec xt pa')]
+                        pa' (cond-> (add6! (mv6 ia-free c) pa)
+                              dinv (s-apply-arr! u nd (small-solve dinv nd uu)))
+                        up-p (mv6 xt pa')]
                     (if (neg? (long parent))
-                      (assoc acc :pa0 (when pa0 (mapv + pa0 up-p)))
-                      (update-in acc [:links parent :pa] #(mapv + % up-p)))))
+                      (assoc acc :pa0 (when pa0 (add6! pa0 up-p)))
+                      (update-in acc [:links parent :pa] #(add6! % up-p)))))
                 {:links pass1
                  :pa0 (when root
-                        (let [bias (lin/mat-vec (crf v0) (lin/mat-vec root-i v0))]
-                          (if root-force (mapv - bias root-force) bias)))}
+                        (let [bias (cross-force v0 (mv6 root-i v0))]
+                          (when root-force
+                            (dotimes [k 6]
+                              (aset bias k (- (aget bias k) (double (nth root-force k))))))
+                          bias))}
                 (reverse (range n)))
          solved (:links pass2)
          ;; The root, if it is free: force-free in the falling frame.
          a0 (if root
-              (let [m (:ia0 ai)
-                    ;; Symmetric by construction and not quite by
-                    ;; arithmetic, after a chain of congruences. Cholesky
-                    ;; wants it to be, and averaging costs nothing.
-                    sym (lin/mat-scale (lin/mat-add m (lin/transpose m)) 0.5)]
-                (mapv - (lin/cholesky-solve sym (:pa0 pass2))))
-              (mapv - a-grav))
+              (a/f64 (mapv - (root-solve (:ia0 ai) (:pa0 pass2))))
+              (let [o (a/f64 6)] (dotimes [k 6] (aset o k (- (aget a-grav k)))) o))
          ;; Pass three, outward: each joint's acceleration, then the link's.
          out (reduce
               (fn [{:keys [a] :as acc} i]
-                (let [{:keys [xup s parent]} (nth ls i)
-                      {:keys [c uu]} (nth solved i)
-                      {:keys [u dinv]} (nth (:links ai) i)
+                (let [{:keys [xup s ndof parent]} (nth ls i)
+                      nd (long ndof)
+                      {:keys [^doubles c ^doubles uu]} (nth solved i)
+                      {:keys [^doubles u dinv]} (nth (:links ai) i)
                       ap (if (neg? (long parent)) a0 (nth a parent))
-                      a' (mapv + (lin/mat-vec xup ap) c)
+                      ^doubles a' (add6! (mv6 xup ap) c)
                       qddi (if dinv
-                             (lin/mat-vec dinv
-                                          (mapv (fn [k ul] (- (double k) (reduce + (map * ul a'))))
-                                                uu u))
-                             (vec (repeat (count s) 0.0)))]
+                             (small-solve dinv nd
+                                          (let [y (a/f64 (max 1 nd))]
+                                            (dotimes [k nd]
+                                              (let [b (* 6 k)]
+                                                (aset y k (- (aget uu k)
+                                                             (loop [j 0 s2 0.0]
+                                                               (if (= j 6)
+                                                                 s2
+                                                                 (recur (inc j)
+                                                                        (+ s2 (* (aget u (+ b j))
+                                                                                 (aget a' j))))))))))
+                                            y))
+                             (a/f64 (max 1 nd)))]
                   (-> acc
-                      (update :a conj (mapv + a' (s-times s qddi 0)))
-                      (update :qdd into qddi))))
+                      (update :a conj (s-apply-arr! (copy6 a') s nd qddi))
+                      (update :qdd into (take nd (seq qddi))))))
               {:a [] :qdd []}
               (range n))]
-     {:qdd (:qdd out)
+     {:qdd (vec (:qdd out))
       ;; Back out of the falling frame, which is where the root's own
       ;; share of gravity comes from.
-      :base-acc (if root (mapv + a0 a-grav) (vec (repeat 6 0.0)))})))
+      :base-acc (if root
+                  (mapv (fn [i] (+ (aget ^doubles a0 (long i)) (aget ^doubles a-grav (long i))))
+                        (range 6))
+                  (vec (repeat 6 0.0)))})))
 
 ;; ---------------------------------------------------------------------------
 ;; Moving it
@@ -897,14 +1101,14 @@
          b (:base state)
          ls (links model q)
          fs (poses model q b)
-         v0 (if root (vec (or (:vel b) (repeat 6 0.0))) (vec (repeat 6 0.0)))
+         v0 (a/f64 (if root (or (:vel b) (repeat 6 0.0)) (repeat 6 0.0)))
          vels (spatial-velocities ls v0 qd)
-         part (fn [inertia vi rot pos mass com]
-                (let [ke (* 0.5 (reduce + (map * vi (lin/mat-vec inertia vi))))
+         part (fn [^doubles inertia ^doubles vi rot pos mass com]
+                (let [ke (* 0.5 (dot6 vi (mv6 inertia vi)))
                       c (v/add pos (q/rotate rot com))]
                   (- ke (* (double mass) (v/dot g c)))))]
      (+ (if root
-          (part (spatial-inertia (:mass root) (:com root) (:inertia root))
+          (part (flat36 (spatial-inertia (:mass root) (:com root) (:inertia root)))
                 v0 (or (:rot b) q/identity-q) (or (:pos b) v/zero)
                 (:mass root) (:com root))
           0.0)
@@ -928,19 +1132,20 @@
         b (:base state)
         ls (links model q)
         fs (poses model q b)
-        v0 (if root (vec (or (:vel b) (repeat 6 0.0))) (vec (repeat 6 0.0)))
+        v0 (a/f64 (if root (or (:vel b) (repeat 6 0.0)) (repeat 6 0.0)))
         vels (spatial-velocities ls v0 qd)
         ;; Each body's spatial momentum `I v` is in its own frame and
         ;; about its own origin. Both have to be carried to the world
         ;; before they can be added up.
-        one (fn [inertia vi {:keys [rot pos]}]
-              (let [h (lin/mat-vec inertia vi)
-                    ang (q/rotate rot (subvec (vec h) 0 3))
-                    lin (q/rotate rot (subvec (vec h) 3 6))]
+        one (fn [^doubles inertia ^doubles vi {:keys [rot pos]}]
+              (let [^doubles h (mv6 inertia vi)
+                    ang (q/rotate rot [(aget h 0) (aget h 1) (aget h 2)])
+                    lin (q/rotate rot [(aget h 3) (aget h 4) (aget h 5)])]
                 [lin (v/add ang (v/cross pos lin))]))
         parts (cond-> (mapv (fn [i] (one (:i (nth ls i)) (nth vels i) (nth fs i)))
                             (range (count ls)))
-                root (conj (one (spatial-inertia (:mass root) (:com root) (:inertia root))
+                root (conj (one (flat36 (spatial-inertia (:mass root) (:com root)
+                                                         (:inertia root)))
                                 v0
                                 {:rot (or (:rot b) q/identity-q)
                                  :pos (or (:pos b) v/zero)})))]
@@ -978,10 +1183,10 @@
 (defn- velocity-at
   "The world velocity of the point of body `i` at `p`, given every body's
   spatial velocity and where they are."
-  [vels v0 {:keys [rot pos]} i p]
-  (let [vi (vec (if (neg? (long i)) v0 (nth vels i)))
-        w (q/rotate rot (subvec vi 0 3))
-        at-origin (q/rotate rot (subvec vi 3 6))]
+  [vels ^doubles v0 {:keys [rot pos]} i p]
+  (let [^doubles vi (if (neg? (long i)) v0 (nth vels i))
+        w (q/rotate rot [(aget vi 0) (aget vi 1) (aget vi 2)])
+        at-origin (q/rotate rot [(aget vi 3) (aget vi 4) (aget vi 5)])]
     (v/add at-origin (v/cross w (v/sub p pos)))))
 
 (defn point-velocity
@@ -993,7 +1198,7 @@
   [model q-vec state i p]
   (let [ls (links model q-vec)
         root-state (:base state)
-        v0 (vec (or (:vel root-state) (repeat 6 0.0)))
+        v0 (a/f64 (or (:vel root-state) (repeat 6 0.0)))
         vels (spatial-velocities ls v0 (:qd state))]
     (velocity-at vels v0 (frame-of model q-vec root-state i) i p)))
 
@@ -1003,7 +1208,8 @@
   (let [n (generalised-dof model)
         column (fn [j]
                  (let [u (assoc (vec (repeat n 0.0)) j 1.0)
-                       [v0 qd] (split model u)]
+                       [v0 qd] (split model u)
+                       v0 (a/f64 v0)]
                    (velocity-at (spatial-velocities ls v0 qd) v0 frame i p)))]
     (lin/transpose (mapv column (range n)))))
 
@@ -1056,11 +1262,11 @@
 (defn- point-force
   "A unit force at world point `p` along `dir`, as a spatial force in the
   coordinates of the body whose `frame` is given."
-  [{:keys [rot pos]} p dir]
+  ^doubles [{:keys [rot pos]} p dir]
   (let [inv (q/conjugate rot)
         f (q/rotate inv dir)
         r (q/rotate inv (v/sub p pos))]
-    (vec (concat (v/cross r f) f))))
+    (a/f64 (concat (v/cross r f) f))))
 
 (defn- generalised-force
   "The generalised force a spatial force `f` on body `i` makes.
@@ -1069,21 +1275,19 @@
   share along its own axis and carrying the rest to the parent. Bodies
   off that path feel nothing at all, which is why this is a walk and not
   a matrix -- a hand pushed sideways says nothing about the other arm."
-  [model ls i f]
-  (let [nd (reduce + (map :ndof ls))
-        walk (loop [j (long i) f (vec f) acc (vec (repeat nd 0.0))]
-               (if (neg? j)
-                 {:root f :joints acc}
-                 (let [{:keys [s parent xt offset]} (nth ls j)
-                       share (st-times s f)]
-                   (recur (long parent)
-                          (lin/mat-vec xt f)
-                          (reduce (fn [a k] (assoc a (+ (long offset) k) (nth share k)))
-                                  acc
-                                  (range (count s)))))))]
-    (if (base model)
-      (vec (concat (:root walk) (:joints walk)))
-      (vec (:joints walk)))))
+  ^doubles [model ls i f]
+  (let [root? (some? (base model))
+        nj (long (reduce + (map :ndof ls)))
+        out (a/f64 (+ nj (if root? 6 0)))
+        base-off (if root? 6 0)]
+    (loop [j (long i) ^doubles f f]
+      (if (neg? j)
+        (when root? (dotimes [k 6] (aset out k (aget f k))))
+        (let [{:keys [s ndof parent xt offset]} (nth ls j)
+              ^doubles share (s-dot s ndof f)]
+          (dotimes [k (long ndof)] (aset out (+ base-off (long offset) k) (aget share k)))
+          (recur (long parent) (mv6 xt f)))))
+    out))
 
 (defn- impulse-delta
   "The change in generalised velocity from a spatial impulse `f` on body
@@ -1101,10 +1305,10 @@
   entire cost of a contact -- 33ms of a 34ms solve on a sixteen link
   model. A contact asks about three directions, so three of these do
   instead."
-  [model ls ai i f]
+  ^doubles [model ls ai i ^doubles f]
   (let [n (count ls)
         root (base model)
-        zero6 (vec (repeat 6 0.0))
+        neg-f (let [o (a/f64 6)] (dotimes [k 6] (aset o k (- (aget f k)))) o)
         ;; Only the bodies between the one that was hit and the root can
         ;; have any bias force on them, so the inward pass is that walk
         ;; and not a sweep of everything. For a ragdoll -- a shallow
@@ -1115,56 +1319,65 @@
                (if (neg? j) acc (recur (long (:parent (nth ls j))) (conj acc j))))
         inward (reduce
                 (fn [{:keys [pa pa0 uu] :as acc} j]
-                  (let [{:keys [s parent xt]} (nth ls j)
-                        {:keys [u dinv]} (nth (:links ai) j)
-                        paj (get pa j zero6)
-                        uj (mapv - (st-times s paj))
+                  (let [{:keys [s ndof parent xt]} (nth ls j)
+                        nd (long ndof)
+                        {:keys [^doubles u dinv]} (nth (:links ai) j)
+                        ^doubles paj (or (get pa j) (a/f64 6))
+                        uj (let [^doubles share (s-dot s nd paj) o (a/f64 (max 1 nd))]
+                             (dotimes [k nd] (aset o k (- (aget share k))))
+                             o)
                         acc (assoc acc :uu (assoc uu j uj))
-                        up (lin/mat-vec
-                            xt
-                            (cond-> paj
-                              dinv (as-> x
-                                         (reduce (fn [a l]
-                                                   (mapv + a (scaled (nth u l)
-                                                                     (nth (lin/mat-vec dinv uj) l))))
-                                                 x
-                                                 (range (count u))))))]
+                        up (mv6 xt (cond-> (copy6 paj)
+                                     dinv (s-apply-arr! u nd (small-solve dinv nd uj))))]
                     (if (neg? (long parent))
-                      (assoc acc :pa0 (mapv + pa0 up))
-                      (assoc acc :pa (update pa parent #(mapv + (or % zero6) up))))))
-                {:pa (if (neg? (long i)) {} {i (mapv - f)})
-                 :pa0 (if (neg? (long i)) (mapv - f) zero6)
+                      (assoc acc :pa0 (add6! pa0 up))
+                      (assoc acc :pa (update pa parent #(add6! (or % (a/f64 6)) up))))))
+                {:pa (if (neg? (long i)) {} {i neg-f})
+                 :pa0 (if (neg? (long i)) (copy6 neg-f) (a/f64 6))
                  :uu (vec (repeat n nil))}
                 path)
         dv0 (if root
-              (let [m (:ia0 ai)
-                    sym (lin/mat-scale (lin/mat-add m (lin/transpose m)) 0.5)]
-                (mapv - (lin/cholesky-solve sym (:pa0 inward))))
-              zero6)
+              (a/f64 (mapv - (root-solve (:ia0 ai) (:pa0 inward))))
+              (a/f64 6))
         outward (reduce
                  (fn [{:keys [dv] :as acc} j]
-                   (let [{:keys [xup s parent]} (nth ls j)
-                         {:keys [u dinv]} (nth (:links ai) j)
-                         a' (lin/mat-vec xup (if (neg? (long parent)) dv0 (nth dv parent)))
+                   (let [{:keys [xup s ndof parent]} (nth ls j)
+                         nd (long ndof)
+                         {:keys [^doubles u dinv]} (nth (:links ai) j)
+                         a' (mv6 xup (if (neg? (long parent)) dv0 (nth dv parent)))
                          ;; Bodies off the path to the impulse have no
                          ;; bias force on them at all, which is what the
                          ;; nil says; their joints still accelerate,
                          ;; because everything above them moved.
-                         uj (or (nth (:uu inward) j) (vec (repeat (count s) 0.0)))
+                         ^doubles uj (or (nth (:uu inward) j) (a/f64 (max 1 nd)))
                          dq (if dinv
-                              (lin/mat-vec dinv
-                                           (mapv (fn [k ul]
-                                                   (- (double k) (reduce + (map * ul a'))))
-                                                 uj u))
-                              (vec (repeat (count s) 0.0)))]
+                              (small-solve dinv nd
+                                           (let [y (a/f64 (max 1 nd))]
+                                             (dotimes [k nd]
+                                               (let [b (* 6 k)]
+                                                 (aset y k
+                                                       (- (aget uj k)
+                                                          (loop [t 0 acc2 0.0]
+                                                            (if (= t 6)
+                                                              acc2
+                                                              (recur (inc t)
+                                                                     (+ acc2 (* (aget u (+ b t))
+                                                                                (aget a' t))))))))))
+                                             y))
+                              (a/f64 (max 1 nd)))]
                      (-> acc
-                         (update :dv conj (mapv + a' (s-times s dq 0)))
-                         (update :dqd into dq))))
-                 {:dv [] :dqd []}
-                 (range n))]
-    (if root
-      (vec (concat dv0 (:dqd outward)))
-      (vec (:dqd outward)))))
+                         (update :dv conj (s-apply-arr! (copy6 a') s nd dq))
+                         (update :dq conj dq))))
+                 {:dv [] :dq []}
+                 (range n))
+        base-off (if root 6 0)
+        out (a/f64 (+ (long (reduce + (map :ndof ls))) base-off))]
+    (when root (dotimes [k 6] (aset out k (aget ^doubles dv0 k))))
+    (dotimes [j n]
+      (let [{:keys [ndof offset]} (nth ls j)
+            ^doubles dq (nth (:dq outward) j)]
+        (dotimes [k (long ndof)] (aset out (+ base-off (long offset) k) (aget dq k)))))
+    out))
 
 (defn- response
   "How a unit impulse at world point `p` on body `i` along `dir` is felt.
@@ -1178,7 +1391,7 @@
   (let [f (point-force frame p dir)
         g (generalised-force model ls i f)
         delta (impulse-delta model ls ai i f)
-        w (reduce + (map * g delta))]
+        w (dot-n g delta)]
     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
 
 (defn impulse-at
@@ -1198,7 +1411,7 @@
         {:keys [delta m]} (response model ls (articulated-inertias model ls)
                                     (frame-of model q-vec root-state i)
                                     i p (v/normalize dir))]
-    {:delta-u delta
+    {:delta-u (vec (seq ^doubles delta))
      :effective-mass (if (pos? (double m)) m ##Inf)}))
 
 (defn apply-impulse
@@ -1361,7 +1574,7 @@
         ls (or (:ls opts) (links model q))
         frames (or (:frames opts) (poses model q root-state))
         ai (or (:ai opts) (articulated-inertias model ls))
-        u0 (velocity model state)
+        u0 (a/f64 (velocity model state))
         prep (mapv (fn [c]
                      (let [i (:link c)
                            frame (frame-of model q root-state i frames)
@@ -1374,7 +1587,7 @@
                               ;; Restitution is measured against this and
                               ;; nothing later, for the same reason the
                               ;; rigid solvers record it once.
-                              :approach (reduce + (map * (:g (:n dirs)) u0))
+                              :approach (dot-n (:g (:n dirs)) u0)
                               :bias (min (double max-push-speed)
                                          (/ (* (double bias-factor)
                                                (max 0.0 (- (double (:depth c))
@@ -1384,46 +1597,42 @@
         k (count prep)]
     (if (zero? k)
       state
-      (with-velocity
-        model state
-        (loop [u u0
-               acc (vec (repeat k [0.0 0.0 0.0]))
-               iter 0]
-          (if (= iter (long iterations))
-            u
-            (let [[u acc]
-                  (reduce
-                   (fn [[u acc] i]
-                     (let [{:keys [n t1 t2 approach bias]} (nth prep i)
-                           [an at1 at2] (nth acc i)
-                           ;; Normal first: friction is bounded by the
-                           ;; force it rides on, so it needs this
-                           ;; iteration's answer and not last one's.
-                           target (max (double bias)
-                                       (if (< (double approach) -0.5)
-                                         (* (- (double restitution)) (double approach))
-                                         0.0))
-                           vn (reduce + (map * (:g n) u))
-                           dn (* (double (:m n)) (- target vn))
-                           an' (max 0.0 (+ (double an) dn))
-                           u (mapv #(+ (double %1) (* (double %2) (- an' (double an))))
-                                   u (:delta n))
-                           limit (* (double friction) an')
-                           [u at1'] (let [vt (reduce + (map * (:g t1) u))
-                                          d (* (double (:m t1)) (- vt))
-                                          a' (min limit (max (- limit) (+ (double at1) d)))]
-                                      [(mapv #(+ (double %1)
-                                                 (* (double %2) (- a' (double at1))))
-                                             u (:delta t1))
-                                       a'])
-                           [u at2'] (let [vt (reduce + (map * (:g t2) u))
-                                          d (* (double (:m t2)) (- vt))
-                                          a' (min limit (max (- limit) (+ (double at2) d)))]
-                                      [(mapv #(+ (double %1)
-                                                 (* (double %2) (- a' (double at2))))
-                                             u (:delta t2))
-                                       a'])]
-                       [u (assoc acc i [an' at1' at2'])]))
-                   [u acc]
-                   (range k))]
-              (recur u acc (inc iter)))))))))
+      ;; One mutable generalised velocity for the whole sweep, and one
+      ;; flat array of accumulated impulses beside it. Every push is a
+      ;; scaled add into the first and every closing speed a dot product
+      ;; out of it, so the inner loop allocates nothing: eight
+      ;; iterations over fifty contacts is twelve hundred of each, and
+      ;; on boxed vectors that was most of what a contact cost.
+      (let [^doubles u u0
+            ^doubles acc (a/f64 (* 3 k))]
+        (dotimes [_ (long iterations)]
+          (dotimes [i k]
+            (let [{:keys [n t1 t2 approach bias]} (nth prep i)
+                  b (* 3 i)
+                  ;; The normal first: friction is bounded by the force
+                  ;; it rides on, so it wants this sweep's answer and
+                  ;; not the last one's.
+                  target (max (double bias)
+                              (if (< (double approach) -0.5)
+                                (* (- (double restitution)) (double approach))
+                                0.0))
+                  ^doubles gn (:g n)
+                  ^doubles dn (:delta n)
+                  vn (dot-n gn u)
+                  an (aget acc b)
+                  an' (max 0.0 (+ an (* (double (:m n)) (- target vn))))]
+              (axpy-n! u dn (- an' an))
+              (aset acc b an')
+              (let [limit (* (double friction) an')]
+                (dotimes [t 2]
+                  (let [dir (if (zero? t) t1 t2)
+                        ^doubles gt (:g dir)
+                        ^doubles dt' (:delta dir)
+                        idx (+ b 1 t)
+                        vt (dot-n gt u)
+                        old (aget acc idx)
+                        a' (min limit (max (- limit)
+                                           (+ old (* (double (:m dir)) (- vt)))))]
+                    (axpy-n! u dt' (- a' old))
+                    (aset acc idx a')))))))
+        (with-velocity model state (vec (seq u)))))))

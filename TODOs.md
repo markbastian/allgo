@@ -500,26 +500,25 @@ TGS stops toppling too, though it keeps its own floor, below.
     against a hinge: the same rod swinging about one axis gives the same
     angle to 1e-6 after two seconds, and the same effective mass to
     1e-9.
-  - **Speed.** Five times better and still the thing in the way. A chain
-    lying on the floor, JVM, per step:
+  - ~~**Speed.**~~ Thirty times, and no longer the thing in the way. A
+    chain lying on the floor, JVM, per step:
 
         links         0      2      4      8     16
         contacts      4      6      8     16     52
-        before     0.71   4.92  12.19  29.85  154.1
-        now        0.67   2.03   4.24   6.87   31.35
+        at first   0.71   4.92  12.19  29.85  154.1
+        structure  0.67   2.03   4.24   6.87   31.35
+        flat       0.45   0.86   1.36   1.78    5.21
 
-    The structural part is done: a contact used to cost a whole inverse
-    inertia matrix, which cost `n + 6` runs of the articulated body
-    algorithm, and is now three O(n) impulse responses. Per-configuration
-    data is built once a step rather than once per matrix column.
+    The structural half: a contact used to cost a whole inverse inertia
+    matrix and is now three O(n) impulse responses, with the
+    per-configuration data built once a step. The other half: the inner
+    loops run on flat `double` arrays rather than vectors of vectors,
+    and the contact sweep keeps one mutable generalised velocity.
 
-    What is left is the arithmetic. Every 6x6 is a vector of vectors and
-    every spatial vector six boxed doubles, so a settled sixteen-link
-    step allocates on the order of fifty thousand of them. Primitive
-    doubles, as `allgo.physics.solver` did for its contact solve. A
-    ragdoll is around eleven links, so this is roughly fifteen
-    milliseconds a step on the JVM today and several times that in a
-    browser -- watchable, not smooth.
+    A ragdoll is around eleven links, so two milliseconds a step on the
+    JVM. Worth knowing: the first flat-array attempt was *slower*, from
+    three missing type hints -- reflective `aget` costs two orders of
+    magnitude, and `make reflect` is what catches it.
 
   - **A ragdoll demo**, which is what all of the above is for.
 - **Continuous collision detection.** Half done. Speculative contacts
