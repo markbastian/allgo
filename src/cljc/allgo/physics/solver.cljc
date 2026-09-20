@@ -257,11 +257,18 @@
 (defn- solve-velocities!
   "One Gauss-Seidel sweep over the contacts.
 
-  `positional?` says whether the lever arms and separations have been
-  refreshed from the bodies' current poses, which is the only thing TGS
-  does that sequential impulse does not."
+  Written out in primitive doubles rather than through
+  `allgo.geometry.vec3`, and that is not a style choice. Each contact
+  solve is a couple of dozen small vector operations, and in a browser
+  every one of them allocates a three-element persistent vector: a wall
+  of seventy bricks came to 308 contacts, and eight sweeps over them took
+  343ms -- 139 microseconds to do about a hundred floating point
+  operations. The same arithmetic on locals is a fraction of that. The
+  JVM's escape analysis hides most of the cost; JavaScript's does not,
+  and this has to run in both."
   [{:keys [vel omega ii inv-mass]} cs dt opts]
   (let [{:keys [friction slop bias restitution]} opts
+        ^doubles vel vel ^doubles omega omega ^doubles ii ii ^doubles inv-mass inv-mass
         ^doubles normal (:normal cs)
         ^doubles t1 (:t1 cs)
         ^doubles t2 (:t2 cs)
@@ -274,49 +281,97 @@
         ^doubles approach (:approach cs)
         ^ints ia-arr (:a cs)
         ^ints ib-arr (:b cs)
-        dt (double dt)]
-    (dotimes [k (long (:n cs))]
-      (let [ia (aget ia-arr k)
-            ib (aget ib-arr k)
-            n (vec3-at normal k)
-            ra (vec3-at ra-arr k)
-            rb (vec3-at rb-arr k)
-            pen (- (aget depth k) (double slop))
-            ;; Baumgarte: a slice of the overlap turned into a target
-            ;; speed. It is a fudge and a famous one -- it puts energy in
-            ;; -- but the alternatives cost a second solve.
-            b-term (if (pos? pen) (* (/ (double bias) dt) pen) 0.0)
-            rest-term (let [va (aget approach k)]
-                        (if (< va (- (double (:restitution-threshold opts))))
-                          (* (- (double restitution)) va)
-                          0.0))
-            rv (relative-velocity vel omega ia ib ra rb)
-            vn (v/dot rv n)
-            m (effective-mass ii inv-mass ia ib ra rb n)
-            lambda (* m (- (+ b-term rest-term) vn))
-            ;; Accumulated and clamped, not applied raw: a contact may
-            ;; only ever have pushed, however the iterations got there.
-            old (aget pn k)
-            new (max 0.0 (+ old lambda))
-            d (- new old)]
-        (aset pn k new)
-        (apply-impulse! vel omega ii inv-mass ia ra (v/scale n d) -1.0)
-        (apply-impulse! vel omega ii inv-mass ib rb (v/scale n d) 1.0)
-        ;; Friction, bounded by the normal force it rides on -- which is
-        ;; why it is solved after and with the *current* `pn`.
-        (let [limit (* (double friction) new)
-              rv (relative-velocity vel omega ia ib ra rb)]
-          (doseq [[tarr acc] [[t1 p1] [t2 p2]]]
-            (let [t (vec3-at ^doubles tarr k)
-                  vt (v/dot rv t)
-                  mt (effective-mass ii inv-mass ia ib ra rb t)
-                  ^doubles acc acc
+        dt (double dt)
+        friction (double friction)
+        slop (double slop)
+        bias (double bias)
+        restitution (double restitution)
+        threshold (double (:restitution-threshold opts))
+        n-contacts (long (:n cs))]
+    (dotimes [k n-contacts]
+      (let [ia (aget ia-arr k) ib (aget ib-arr k)
+            k3 (* 3 k)
+            rax (aget ra-arr k3) ray (aget ra-arr (+ k3 1)) raz (aget ra-arr (+ k3 2))
+            rbx (aget rb-arr k3) rby (aget rb-arr (+ k3 1)) rbz (aget rb-arr (+ k3 2))
+            ia3 (* 3 ia) ib3 (* 3 ib) ia9 (* 9 ia) ib9 (* 9 ib)
+            ima (aget inv-mass ia) imb (aget inv-mass ib)
+            pen (- (aget depth k) slop)
+            b-term (if (pos? pen) (* (/ bias dt) pen) 0.0)
+            va (aget approach k)
+            r-term (if (< va (- threshold)) (* (- restitution) va) 0.0)
+            normal-target (+ b-term r-term)]
+        ;; Three directions in turn -- the normal, then two tangents --
+        ;; rather than a closure called three times. The closure was
+        ;; allocated per contact per sweep, two and a half thousand of
+        ;; them a step, and in a browser that cost more than the
+        ;; arithmetic it wrapped.
+        (loop [dir 0 limit 0.0]
+          (when (< dir 3)
+            (let [^doubles darr (case dir 0 normal 1 t1 t2)
+                  ^doubles acc (case dir 0 pn 1 p1 p2)
+                  dx (aget darr k3) dy (aget darr (+ k3 1)) dz (aget darr (+ k3 2))
+                  normal? (zero? dir)
+                  lo (if normal? 0.0 (- limit))
+                  hi (if normal? ##Inf limit)
+                  target (if normal? normal-target 0.0)
+                  rvx (- (+ (aget vel ib3)
+                            (- (* (aget omega (+ ib3 1)) rbz) (* (aget omega (+ ib3 2)) rby)))
+                         (+ (aget vel ia3)
+                            (- (* (aget omega (+ ia3 1)) raz) (* (aget omega (+ ia3 2)) ray))))
+                  rvy (- (+ (aget vel (+ ib3 1))
+                            (- (* (aget omega (+ ib3 2)) rbx) (* (aget omega ib3) rbz)))
+                         (+ (aget vel (+ ia3 1))
+                            (- (* (aget omega (+ ia3 2)) rax) (* (aget omega ia3) raz))))
+                  rvz (- (+ (aget vel (+ ib3 2))
+                            (- (* (aget omega ib3) rby) (* (aget omega (+ ib3 1)) rbx)))
+                         (+ (aget vel (+ ia3 2))
+                            (- (* (aget omega ia3) ray) (* (aget omega (+ ia3 1)) rax))))
+                  vd (+ (* rvx dx) (* rvy dy) (* rvz dz))
+                  ;; r x d, through the inverse inertia, and back across r
+                  ;; -- the first is the angular impulse, the pair is the
+                  ;; angular share of the effective mass.
+                  cax (- (* ray dz) (* raz dy))
+                  cay (- (* raz dx) (* rax dz))
+                  caz (- (* rax dy) (* ray dx))
+                  iax (+ (* (aget ii ia9) cax) (* (aget ii (+ ia9 1)) cay) (* (aget ii (+ ia9 2)) caz))
+                  iay (+ (* (aget ii (+ ia9 3)) cax) (* (aget ii (+ ia9 4)) cay) (* (aget ii (+ ia9 5)) caz))
+                  iaz (+ (* (aget ii (+ ia9 6)) cax) (* (aget ii (+ ia9 7)) cay) (* (aget ii (+ ia9 8)) caz))
+                  ka (+ (* dx (- (* iay raz) (* iaz ray)))
+                        (* dy (- (* iaz rax) (* iax raz)))
+                        (* dz (- (* iax ray) (* iay rax))))
+                  cbx (- (* rby dz) (* rbz dy))
+                  cby (- (* rbz dx) (* rbx dz))
+                  cbz (- (* rbx dy) (* rby dx))
+                  ibx (+ (* (aget ii ib9) cbx) (* (aget ii (+ ib9 1)) cby) (* (aget ii (+ ib9 2)) cbz))
+                  iby (+ (* (aget ii (+ ib9 3)) cbx) (* (aget ii (+ ib9 4)) cby) (* (aget ii (+ ib9 5)) cbz))
+                  ibz (+ (* (aget ii (+ ib9 6)) cbx) (* (aget ii (+ ib9 7)) cby) (* (aget ii (+ ib9 8)) cbz))
+                  kb (+ (* dx (- (* iby rbz) (* ibz rby)))
+                        (* dy (- (* ibz rbx) (* ibx rbz)))
+                        (* dz (- (* ibx rby) (* iby rbx))))
+                  keff (+ ima imb ka kb)
+                  m (if (> keff 1e-12) (/ 1.0 keff) 0.0)
+                  lambda (* m (- target vd))
                   old (aget acc k)
-                  new (min limit (max (- limit) (- old (* mt vt))))
-                  d (- new old)]
-              (aset acc k new)
-              (apply-impulse! vel omega ii inv-mass ia ra (v/scale t d) -1.0)
-              (apply-impulse! vel omega ii inv-mass ib rb (v/scale t d) 1.0))))))))
+                  nw (min hi (max lo (+ old lambda)))
+                  d (- nw old)]
+              (aset acc k nw)
+              (when (pos? ima)
+                (aset vel ia3 (- (aget vel ia3) (* d dx ima)))
+                (aset vel (+ ia3 1) (- (aget vel (+ ia3 1)) (* d dy ima)))
+                (aset vel (+ ia3 2) (- (aget vel (+ ia3 2)) (* d dz ima)))
+                (aset omega ia3 (- (aget omega ia3) (* d iax)))
+                (aset omega (+ ia3 1) (- (aget omega (+ ia3 1)) (* d iay)))
+                (aset omega (+ ia3 2) (- (aget omega (+ ia3 2)) (* d iaz))))
+              (when (pos? imb)
+                (aset vel ib3 (+ (aget vel ib3) (* d dx imb)))
+                (aset vel (+ ib3 1) (+ (aget vel (+ ib3 1)) (* d dy imb)))
+                (aset vel (+ ib3 2) (+ (aget vel (+ ib3 2)) (* d dz imb)))
+                (aset omega ib3 (+ (aget omega ib3) (* d ibx)))
+                (aset omega (+ ib3 1) (+ (aget omega (+ ib3 1)) (* d iby)))
+                (aset omega (+ ib3 2) (+ (aget omega (+ ib3 2)) (* d ibz))))
+              ;; Friction is bounded by the normal force it rides on, so
+              ;; the normal pass hands its impulse to the two after it.
+              (recur (inc dir) (if normal? (* friction nw) limit)))))))))
 
 (defn- solve-xpbd-velocities!
   "The velocity pass XPBD needs after moving the bodies.

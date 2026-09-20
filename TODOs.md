@@ -210,7 +210,45 @@ stem is the river, the watershed is everything draining into it.
 
 ## Physics Engines
 
-- We should implement Sequential Impuse (SI) and Temporal Gauss-Seidel (TGS)
-- What other physical simulation techniques are we missing?
-- I'd like a demo where I get to shoot a 3D spherical projectile at a wall of bricks and have the physics be fast
-  - Would it make sense to use all three techniques (the above plus XPBD) to show differences?
+Sequential impulse, TGS and XPBD are in `allgo.physics.solver`, over
+contact manifolds from `allgo.physics.contact`, with the brick-wall demo
+in `allgo.demo.bricks`. All three run the same scene so they can be
+compared; the differences are in the docstrings and are real — TGS holds
+a stack at three iterations that sequential impulse lets sag, because it
+moves the bodies between iterations and re-measures.
+
+**It is not yet fast, and the reason is not the solvers.** Measured in a
+browser on a settled 9x8 wall (72 bricks, 581 contacts), a step is about
+142ms: 78ms of collision detection and 64ms of everything else. Turning
+the iteration count *down* makes it slower, because a wall that is not
+held up spreads out and touches more — which is the clearest evidence
+that the solve is not the bottleneck. About twenty bricks runs at fifty
+frames a second today.
+
+What would fix it, in order of expected return:
+
+1. **`allgo.physics.contact` on primitive doubles.** The separating axis
+   test asks fifteen questions of every touching pair, each a handful of
+   dot and cross products, and in JavaScript every one allocates a
+   three-element vector. The solve was rewritten this way and went from
+   139 microseconds a contact to a fraction of it; the collision
+   detection has not been.
+2. **A broad phase that is not every pair against every other.**
+   `allgo.spatial.hash` and `allgo.spatial.sweep` are both sitting there
+   unused.
+3. **Leaner contact preparation.** `prepare` builds a dozen typed arrays
+   per step out of lazy sequences, and computes the tangent basis and the
+   body-local anchors through persistent vectors.
+
+### Other techniques still missing
+
+- **Featherstone / articulated bodies** — reduced-coordinate chains,
+  which is what a ragdoll or a robot arm actually wants and what
+  `allgo.physics.joint` approximates with constraints.
+- **Continuous collision detection.** Everything here is discrete, so a
+  fast enough projectile passes through a brick. Speculative contacts
+  would be the cheap version and conservative advancement the thorough
+  one.
+- **Sleeping.** A settled wall is re-solved in full every frame. Islands
+  that have stopped moving should stop being solved, which is most of
+  what makes a real engine cheap on a scene that is mostly at rest.

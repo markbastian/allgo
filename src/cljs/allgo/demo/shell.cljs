@@ -10,6 +10,7 @@
             [allgo.demo.boids-viewer :as boids-2d]
             [allgo.demo.boids-voronoi :as boids-voronoi]
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
+            [allgo.demo.bricks :as bricks]
             [allgo.demo.broad-phase :as broad-phase]
             [allgo.demo.cave :as cave]
             [allgo.demo.cloth :as cloth]
@@ -56,6 +57,7 @@
    "fire"     {:start fire/start!     :stop fire/stop!}
    "water"    {:start water/start!    :stop water/stop!}
    "rigid"    {:start rigid/start!    :stop rigid/stop!}
+   "bricks"   {:start bricks/start!   :stop bricks/stop!}
    "arm"      {:start arm/start!      :stop arm/stop!}
    "human-arm" {:start human-arm/start! :stop human-arm/stop!}
    "joints"   {:start joints/start!   :stop joints/stop!}
