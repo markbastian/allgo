@@ -426,24 +426,48 @@
             ms (if gap? 1.0 mass-scale)
             is (if gap? 0.0 impulse-scale)
             va (aget approach k)
-            r-term (if (< va (- threshold)) (* (- restitution) va) 0.0)
+            ;; A gap only bounces if the surfaces actually reach each
+            ;; other before the step is out. Without the test a ball
+            ;; falling towards a floor it will not touch this step is
+            ;; still handed a restitution target, and since the margin
+            ;; is as wide as the body can travel there is always such a
+            ;; step -- the ball bounces off nothing, short of the floor.
+            arrives? (or (not gap?) (>= (* (- va) dt) sep))
+            r-term (if (and arrives? (< va (- threshold)))
+                     (* (- restitution) va)
+                     0.0)
             ;; The relax pass asks for one thing only: that the surfaces
             ;; stop closing. No push, no bounce, nothing soft. It runs
             ;; after the bodies have moved and its job is to take back the
             ;; velocity the push put in, which is the cheap and standard
             ;; alternative to carrying that push in a pseudo velocity.
-            ;; Three modes. The solve pushes overlap out and holds
-            ;; gaps open; the relax pass takes back what the push added
-            ;; and asks for nothing else; the bounce pass asks for the
-            ;; rebound alone, after the other two have finished, and
-            ;; only of a contact that actually pushed -- `pn` is the
-            ;; evidence that the surfaces met rather than merely being
-            ;; near each other.
-            normal-target (cond relax? 0.0
-                                bounce? r-term
-                                :else (+ b-term r-term))
-            ms (if (or relax? bounce?) 1.0 ms)
-            is (if (or relax? bounce?) 0.0 is)
+            ;; One inequality, four right-hand sides.
+            ;;
+            ;; A gap comes first and answers for every pass, which is
+            ;; the part that is easy to get wrong. `Do not close this
+            ;; gap faster than the step allows` is true of the solve,
+            ;; of the relax that follows it, and of a gap that is never
+            ;; reached at all -- it is a statement about geometry, not
+            ;; about which pass is asking. Letting relax override it
+            ;; with its usual zero stops a body dead the moment
+            ;; anything comes within the margin, which with a margin as
+            ;; wide as a step's travel means stopping in mid-air a
+            ;; tenth of a metre short of the floor.
+            ;;
+            ;; Otherwise: the solve pushes overlap out and adds the
+            ;; rebound, the relax pass takes back what the push added
+            ;; and asks for nothing else, and the bounce pass asks for
+            ;; the rebound alone once the other two have finished.
+            normal-target (cond
+                            bounce? r-term
+                            gap? (if (pos? r-term) r-term b-term)
+                            relax? 0.0
+                            :else (+ b-term r-term))
+            ms (if (or relax? bounce? gap?) 1.0 ms)
+            is (if (or relax? bounce? gap?) 0.0 is)
+            ;; The bounce pass is asked only of contacts that actually
+            ;; pushed: `pn` above zero is the evidence that the
+            ;; surfaces met rather than merely came near.
             skip? (and bounce? (or (zero? r-term) (<= (aget pn k) 0.0)))]
         ;; Three directions in turn -- the normal, then two tangents --
         ;; rather than a closure called three times. The closure was
@@ -885,7 +909,7 @@
   the top of the step. Cheapest per iteration, and the one that sags when
   a stack is tall or a body is turning quickly."
   [{:keys [bodies gravity iterations warm-start?] :as w} dt]
-  (let [contacts (contact/all bodies (:broad w))
+  (let [contacts (contact/all bodies (:broad w) dt)
         bodies (rouse bodies contacts)
         arrays (body-arrays bodies)
         _ (accelerate! arrays bodies gravity dt)
@@ -948,7 +972,7 @@
         solve-opts (assoc w :restitution 0.0)
         relax-opts (assoc w :relax? true)
         bounce-opts (assoc w :bounce? true)
-        contacts (contact/all bodies (:broad w))
+        contacts (contact/all bodies (:broad w) dt)
         bodies (rouse bodies contacts)]
     (loop [bodies bodies cs (prepare bodies contacts (:contacts w)) n substeps first? true]
       (if (zero? n)
@@ -984,7 +1008,7 @@
   [{:keys [bodies gravity substeps iterations] :as w} dt]
   (let [substeps (max 1 (long substeps))
         h (/ (double dt) substeps)
-        contacts (contact/all bodies (:broad w))
+        contacts (contact/all bodies (:broad w) dt)
         bodies (rouse bodies contacts)
         cs (prepare bodies contacts (:contacts w))
         slop (double (:slop w))

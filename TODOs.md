@@ -451,10 +451,32 @@ TGS stops toppling too, though it keeps its own floor, below.
 - **Featherstone / articulated bodies** — reduced-coordinate chains,
   which is what a ragdoll or a robot arm actually wants and what
   `allgo.physics.joint` approximates with constraints.
-- **Continuous collision detection.** Everything here is discrete, so a
-  fast enough projectile passes through a brick. Speculative contacts
-  would be the cheap version and conservative advancement the thorough
-  one.
+- **Continuous collision detection.** Half done. Speculative contacts
+  — the cheap version — are in: the margin out to which a gap still
+  counts as a contact is now the fixed 2cm plus how far the pair can
+  travel in the step, and the broad phase sweeps its boxes over the
+  step so the pair survives to be asked about at all. A ball fired at a
+  static slab, highest speed at which it is still stopped:
+
+      sequential impulse    26 m/s → over 2000
+      tgs                   26 m/s → over 2000
+      xpbd                  26 m/s → 120
+
+  The demo's own speed slider goes to 60, so this was reachable by
+  hand rather than theoretical. It costs nothing measurable: a settled
+  wall is untouched because a sleeping body contributes no travel, and
+  a wall being hit costs the same at 10 m/s as at 120. Firing a ball
+  past a brick rather than at it produced no deflection at any speed
+  or offset tried, because a pair whose swept boxes do not overlap is
+  never handed to the narrow phase however wide the margin is.
+
+  **Conservative advancement is what is left, and XPBD is why.** It
+  integrates the substep and only then pushes overlaps apart, so a gap
+  it has not yet reached buys it nothing and it steps over a thin slab
+  above about 120 m/s. The impulse solvers do not need it. Finding the
+  time of impact and advancing to it would fix XPBD and would also
+  replace `stopped at the surface some time within the step` with
+  `stopped at the instant of arrival`, which is what a bullet wants.
 - ~~**Sleeping.**~~ Done. An island whose bodies have all been under the
   speed thresholds for half a second is frozen: velocities zeroed, not
   integrated, not solved, and no contact generated between two bodies

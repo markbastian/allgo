@@ -144,3 +144,37 @@
       (let [statics [(rigid/box {:pos [0.0 0.0 0.0] :size [2.0 2.0 2.0]})
                      (rigid/box {:pos [0.5 0.0 0.0] :size [2.0 2.0 2.0]})]]
         (is (empty? (ct/all statics)))))))
+
+(deftest margin-test
+  (testing "a still pair is given the fixed margin and no more"
+    (let [a (box [0.0 0.0 0.0])
+          b (box [0.0 3.0 0.0])]
+      (is (= ct/speculative (ct/margin a b (/ 1.0 60.0))))))
+
+  (testing "and a moving one is given what it can cross before the next look"
+    ;; This is the whole of continuous detection's cheap half. A contact
+    ;; the pair is not near enough to be offered is a contact the solver
+    ;; never sees, and a body crossing more ground in a step than the
+    ;; margin is wide steps straight over the window.
+    (let [still (box [0.0 3.0 0.0])
+          fast  (rigid/ball {:pos [0.0 0.0 0.0] :radius 0.5 :density 1.0
+                             :vel [0.0 60.0 0.0]})
+          dt    (/ 1.0 60.0)]
+      (is (< (- (ct/margin still fast dt) (+ ct/speculative 1.0)) 1e-9))
+      ;; A body nothing can move contributes nothing, however its
+      ;; velocity field happens to read.
+      (is (= ct/speculative (ct/margin still (assoc fast :inv-mass 0.0) dt)))))
+
+  (testing "a body is offered a contact with what it is about to reach"
+    ;; A metre short of the floor and closing at sixty metres a second,
+    ;; which is a metre of travel in the step. Standing still it is a
+    ;; metre of daylight and nothing to report; moving, it is a contact
+    ;; with a negative depth -- a gap the solver is allowed to see
+    ;; coming and stop at.
+    (let [floor (rigid/box {:pos [0.0 -0.5 0.0] :size [20.0 1.0 20.0]})
+          ball  (rigid/ball {:pos [0.0 1.5 0.0] :radius 0.5 :density 1.0
+                             :vel [0.0 -60.0 0.0]})]
+      (is (empty? (ct/all [floor ball] nil 0.0)))
+      (let [cs (ct/all [floor ball] nil (/ 1.0 60.0))]
+        (is (= 1 (count cs)))
+        (is (neg? (:depth (first cs))))))))

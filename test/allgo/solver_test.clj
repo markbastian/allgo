@@ -256,3 +256,36 @@
                                                       {:iterations 4 :warm-start? warm?})))))]
         (is (> (top true) (top false))
             (str (name solver) " warm=" (top true) " cold=" (top false)))))))
+
+(deftest tunnelling-test
+  (testing "a fast ball is stopped by a wall rather than passing through it"
+    ;; A static slab, so nothing can push it aside and the only question
+    ;; is which side of it the ball ends up on. Before contacts were
+    ;; offered ahead of the touch this failed at sixty metres a second,
+    ;; which is the speed the brick demo's own slider goes up to.
+    (let [through? (fn [solver speed]
+                     (let [w (run solver
+                                  [(rigid/box {:pos [0.0 0.0 0.0] :size [20.0 20.0 0.4]})
+                                   (rigid/ball {:pos [0.0 0.0 3.0] :radius 0.2
+                                                :density 7.8
+                                                :vel [0.0 0.0 (- (double speed))]})]
+                                  40
+                                  {:friction 0.0 :restitution 0.0
+                                   :gravity [0.0 0.0 0.0]})]
+                       (neg? (double (nth (:pos (first (dynamics w))) 2)))))]
+      (doseq [solver solvers
+              speed [26 60 120]]
+        (is (not (through? solver speed))
+            (str (name solver) " let a ball through at " speed " m/s")))
+
+      ;; The impulse solvers hold at any speed worth naming. XPBD does
+      ;; not, and the reason is structural rather than a margin that
+      ;; wants widening: it integrates the substep first and only then
+      ;; pushes overlaps apart, so a gap it has not yet reached buys it
+      ;; nothing. That one wants conservative advancement.
+      (doseq [solver [:sequential-impulse :tgs]
+              speed [500 2000]]
+        (is (not (through? solver speed))
+            (str (name solver) " let a ball through at " speed " m/s")))
+      (is (through? :xpbd 2000)
+          "xpbd has started holding at 2000 m/s -- good news, update this"))))

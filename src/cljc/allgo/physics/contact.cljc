@@ -49,10 +49,28 @@
       {:a :b        body indices, normal points from `a` towards `b`
        :point       where they touch, in world coordinates
        :normal      unit, the direction to separate along
-       :depth       how far they overlap, positive}
+       :depth       signed -- positive is an overlap, negative a gap}
 
   which is what `allgo.physics.solver` consumes whichever solver it is
-  running."
+  running.
+
+  ## Contacts before the touch
+
+  A contact is offered while the two are still apart, out to `margin`,
+  and that margin is as wide as the pair can travel in the step. It is
+  what stops a fast thing going through a thin thing: detection runs
+  once a step, so a ball crossing a metre and a half between two looks
+  is never near a 2cm window and arrives on the far side of the brick
+  having been asked about nothing. The broad phase sweeps its boxes
+  over the step for the same reason -- a pair has to survive it before
+  the margin gets a chance to matter.
+
+  This is the cheap half of continuous collision detection and it is
+  not the whole of it. It puts a gap in front of the solver in time to
+  be seen; it does not find the moment of impact, so a body is stopped
+  at the surface within a step rather than at the instant it arrives,
+  and a solver that integrates before it projects can still step over
+  one. `allgo.physics.solver` says which does."
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
@@ -106,8 +124,44 @@
   depth -- a gap -- and asks the solver for something weaker than `do not
   overlap`: approach no faster than closes that gap this step. A body
   flying at a wall is then stopped exactly at the surface rather than
-  after it. Four times the solver's slop, which is Box2D's figure."
+  after it. Four times the solver's slop, which is Box2D's figure.
+
+  This is the floor, not the whole margin: what detection actually
+  allows is this plus how far the pair can travel before it looks
+  again. See `margin`."
   0.02)
+
+(defn travel
+  "How far `b` moves this step, as a bound on what detection can miss.
+
+  Linear only. A spinning body's surface moves too, but a contact is
+  missed when the *gap closes* faster than detection looks, and closing
+  is what translation does -- a brick can spin as fast as it likes about
+  its own centre without arriving anywhere. Adding the angular term
+  would widen every long box's margin for a case that does not tunnel."
+  ^double [b ^double dt]
+  (if (rigid/inert? b)
+    0.0
+    (* dt (v/length (:vel b)))))
+
+(defn margin
+  "How far apart `a` and `b` can be and still be given a contact.
+
+  The fixed margin plus everything the two of them can do to close it
+  before detection runs again. Without the second term the margin is a
+  statement about geometry when the thing it has to survive is speed: a
+  ball crossing 1.5m in a step steps clean over a 2cm window, is never
+  offered a contact at all, and arrives on the far side of the brick.
+  With it the gap is seen while it is still a gap, and the solver's
+  existing rule for gaps -- approach no faster than closes this one --
+  stops the ball at the surface.
+
+  It is bought, not free: a margin metres wide asks the separating axis
+  test for the shortest way out between two bodies that are nowhere near
+  each other, and that answer is only roughly the direction they will
+  actually meet from. See `allgo.physics.solver` on what that costs."
+  ^double [a b ^double dt]
+  (+ speculative (travel a dt) (travel b dt)))
 
 (defn- overlap-on
   "How much the two boxes overlap along `axis`.
@@ -122,17 +176,17 @@
   other have three such pairs. Reading those as separating -- which is
   what a single nil answer invites -- reports every axis-aligned box in
   the world as touching nothing."
-  [a b axis]
+  [a b axis ^double margin]
   (let [len (v/length axis)]
     (if (<= len 1e-6)
       :degenerate
       (let [n (v/scale axis (/ 1.0 len))
             d (abs (v/dot (v/sub (:pos b) (:pos a)) n))
             o (- (+ (radius-on a n) (radius-on b n)) d)]
-        ;; Within the speculative margin counts as touching. `o` comes
-        ;; back negative there and stays negative all the way to the
-        ;; solver, which is what tells it this is a gap, not an overlap.
-        (if (pos? (+ o speculative)) [o n] :separated)))))
+        ;; Within the margin counts as touching. `o` comes back negative
+        ;; there and stays negative all the way to the solver, which is
+        ;; what tells it this is a gap, not an overlap.
+        (if (pos? (+ o margin)) [o n] :separated)))))
 
 (defn- face-verts
   "The four corners of the box face whose outward normal is `axis-index`
@@ -229,8 +283,9 @@
   The reference face's four side planes bound the region the contact can
   lie in; clipping the opposing face to them and keeping what is still
   below the reference plane gives the resting polygon."
-  [ia ib ref-body inc-body ref-axis ref-sign n flip?]
-  (let [h (:half ref-body)
+  [ia ib ref-body inc-body ref-axis ref-sign n flip? margin]
+  (let [margin (double margin)
+        h (:half ref-body)
         as (:axes ref-body)
         ref-n (v/scale (nth as ref-axis) (double ref-sign))
         ref-c (v/add (:pos ref-body) (v/scale ref-n (nth h ref-axis)))
@@ -260,7 +315,7 @@
           (comp (distinct-points 1e-6)
                 (keep (fn [[p pid]]
                         (let [depth (- ref-d (v/dot ref-n p))]
-                          (when (>= depth (- speculative))
+                          (when (>= depth (- margin))
                       ;; Reported on the reference surface rather than at
                       ;; the clipped point, so both bodies agree where the
                       ;; touch is.
@@ -327,8 +382,9 @@
   "The manifold between two boxes, or an empty vector.
 
   `a` and `b` are `frame`s, not bodies."
-  [ia ib a b]
-  (let [as (:axes a)
+  [ia ib a b margin]
+  (let [margin (double margin)
+        as (:axes a)
         bs (:axes b)
         face-tests (concat (map-indexed (fn [i ax] [:a i nil ax]) as)
                            (map-indexed (fn [j ax] [:b nil j ax]) bs))
@@ -343,7 +399,7 @@
         ;; Two identical bricks stacked square on each other tie exactly,
         ;; which is the commonest case there is.
         best (reduce (fn [best [kind i j ax]]
-                       (let [r (overlap-on a b ax)]
+                       (let [r (overlap-on a b ax margin)]
                          (cond
                            (= r :separated) (reduced nil)
                            (= r :degenerate) best
@@ -364,20 +420,21 @@
                 normal)]
         (case kind
           :a (face-contacts ia ib a b i
-                            (if (pos? (v/dot (nth as i) n)) 1.0 -1.0) n false)
+                            (if (pos? (v/dot (nth as i) n)) 1.0 -1.0) n false margin)
           :b (face-contacts ia ib b a j
                             (if (pos? (v/dot (nth bs j) (v/negate n))) 1.0 -1.0)
-                            (v/negate n) true)
+                            (v/negate n) true margin)
           :edge (edge-contact ia ib a b n depth i j))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Spheres
 
-(defn sphere-sphere [ia ib a b]
-  (let [d (v/sub (:pos b) (:pos a))
+(defn sphere-sphere [ia ib a b margin]
+  (let [margin (double margin)
+        d (v/sub (:pos b) (:pos a))
         dist (v/length d)
         r (+ (double (:radius a)) (double (:radius b)))]
-    (if (or (>= dist (+ r speculative)) (< dist eps))
+    (if (or (>= dist (+ r margin)) (< dist eps))
       []
       (let [n (v/scale d (/ 1.0 dist))]
         [{:a ia :b ib
@@ -395,8 +452,9 @@
   outside. A centre that has tunnelled inside has no nearest surface
   point in that sense, and is pushed out through whichever face it is
   closest to."
-  [ia ib a b]
-  (let [local (q/rotate (:inv-rot b) (v/sub (:pos a) (:pos b)))
+  [ia ib a b margin]
+  (let [margin (double margin)
+        local (q/rotate (:inv-rot b) (v/sub (:pos a) (:pos b)))
         [hx hy hz] (half b)
         [lx ly lz] local
         clamped [(min hx (max (- hx) lx)) (min hy (max (- hy) ly)) (min hz (max (- hz) lz))]
@@ -418,7 +476,7 @@
       (let [world (v/add (q/rotate (:rot b) clamped) (:pos b))
             d (v/sub world (:pos a))
             dist (v/length d)]
-        (if (or (>= dist (+ r speculative)) (< dist eps))
+        (if (or (>= dist (+ r margin)) (< dist eps))
           []
           [{:a ia :b ib
             :point world
@@ -431,31 +489,48 @@
 
 (defn between*
   "`between`, given the boxes' `frame`s so a caller with many pairs can
-  build each body's once."
-  [ia ib a b fa fb]
-  (let [sa (:shape a) sb (:shape b)]
+  build each body's once, and the `margin` out to which a gap still
+  counts as a contact."
+  [ia ib a b fa fb margin]
+  (let [margin (double margin)
+        sa (:shape a) sb (:shape b)]
     (cond
-      (and (= sa :ball) (= sb :ball)) (sphere-sphere ia ib a b)
-      (and (= sa :ball) (= sb :box)) (sphere-box ia ib a b)
+      (and (= sa :ball) (= sb :ball)) (sphere-sphere ia ib a b margin)
+      (and (= sa :ball) (= sb :box)) (sphere-box ia ib a b margin)
       (and (= sa :box) (= sb :ball))
       (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
-            (sphere-box ib ia b a))
-      (and (= sa :box) (= sb :box)) (box-box ia ib fa fb)
+            (sphere-box ib ia b a margin))
+      (and (= sa :box) (= sb :box)) (box-box ia ib fa fb margin)
       :else [])))
 
 (defn between
   "The manifold between two bodies, whatever shapes they are.
 
   The normal always runs from `a` towards `b`, so a caller never has to
-  ask which way round the pair was tested."
-  [ia ib a b]
-  (between* ia ib a b
-            (when (= :box (:shape a)) (frame a))
-            (when (= :box (:shape b)) (frame b))))
+  ask which way round the pair was tested.
+
+  With no `dt` the two are taken as standing still, which is the fixed
+  `speculative` margin and the right question to ask of an arrangement
+  rather than a moment in a simulation."
+  ([ia ib a b] (between ia ib a b 0.0))
+  ([ia ib a b dt]
+   (between* ia ib a b
+             (when (= :box (:shape a)) (frame a))
+             (when (= :box (:shape b)) (frame b))
+             (margin a b dt))))
 
 (defn- aabb
-  "A world-axis box around the body, for the broad phase."
-  [b]
+  "A world-axis box around the body, swept over the step.
+
+  Swept, because the pair has to survive the broad phase before anything
+  can ask how far apart it is: a ball that is 1.5m short of a brick at
+  the top of the step and 1.5m past it at the bottom has an AABB that
+  never once overlaps the brick's, and the narrow phase -- however wide
+  its margin -- is never given the pair to look at.
+
+  The sweep is one-sided, the union of where the body is and where it is
+  going, rather than a symmetric pad. Same cost, half the false pairs."
+  [b ^double dt]
   (let [r (case (:shape b)
             :ball (let [rr (double (:radius b))] [rr rr rr])
             (let [{:keys [half axes]} (frame b)
@@ -464,8 +539,11 @@
                   reach (fn [k] (+ (* hx (abs (nth ax k)))
                                    (* hy (abs (nth ay k)))
                                    (* hz (abs (nth az k)))))]
-              [(reach 0) (reach 1) (reach 2)]))]
-    [(v/sub (:pos b) r) (v/add (:pos b) r)]))
+              [(reach 0) (reach 1) (reach 2)]))
+        lo (v/sub (:pos b) r)
+        hi (v/add (:pos b) r)
+        d (if (rigid/inert? b) v/zero (v/scale (:vel b) dt))]
+    [(mapv min lo (v/add lo d)) (mapv max hi (v/add hi d))]))
 
 (defn broad-phase
   "Somewhere for `all` to keep its sorted order between steps.
@@ -509,17 +587,25 @@
 
   With no `broad` given this allocates one per call, which is correct and
   slower; `allgo.physics.solver` keeps one in the world and hands it back
-  each step."
-  ([bodies] (all bodies nil))
-  ([bodies broad]
+  each step.
+
+  `dt` is the step the contacts are for, and it is what makes detection
+  survive speed: both the swept boxes of the broad phase and the margin
+  the narrow phase allows are how far the two bodies can travel in it.
+  With no `dt` nothing moves, which is the arrangement rather than the
+  step, and the fixed `speculative` margin."
+  ([bodies] (all bodies nil 0.0))
+  ([bodies broad] (all bodies broad 0.0))
+  ([bodies broad dt]
    (let [bodies (vec bodies)
+         dt (double dt)
          n (count bodies)
          broad (grow broad n)
          mins (a/f64 (* 3 n))
          maxs (a/f64 (* 3 n))
          frames (mapv #(when (= :box (:shape %)) (frame %)) bodies)]
      (dotimes [i n]
-       (let [[lo hi] (aabb (nth bodies i))]
+       (let [[lo hi] (aabb (nth bodies i) dt)]
          (dotimes [k 3]
            (aset ^doubles mins (+ (* 3 i) k) (double (nth lo k)))
            (aset ^doubles maxs (+ (* 3 i) k) (double (nth hi k))))))
@@ -535,5 +621,6 @@
                              ;; which is nearly all of detection, has
                              ;; almost nothing left to do.
                              (when-not (and (rigid/inert? a) (rigid/inert? b))
-                               (between* i j a b (nth frames i) (nth frames j)))))))
+                               (between* i j a b (nth frames i) (nth frames j)
+                                         (margin a b dt)))))))
            (sweep/overlapping-pairs (:sweep broad) mins maxs n)))))
