@@ -56,6 +56,7 @@
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.physics.rigid :as rigid]
             [allgo.spatial.sweep :as sweep]))
 
 (def ^:private eps 1e-9)
@@ -525,7 +526,14 @@
      (into []
            (comp (mapcat (fn [[i j]]
                            (let [a (nth bodies i) b (nth bodies j)]
-                             (when-not (and (zero? (double (:inv-mass a)))
-                                            (zero? (double (:inv-mass b))))
+                             ;; Neither of them is going to move this
+                             ;; step -- both static, both asleep, or one
+                             ;; of each -- so there is nothing a contact
+                             ;; between them could be used for. This is
+                             ;; where sleeping pays: a settled wall stops
+                             ;; being asked about, and the narrow phase,
+                             ;; which is nearly all of detection, has
+                             ;; almost nothing left to do.
+                             (when-not (and (rigid/inert? a) (rigid/inert? b))
                                (between* i j a b (nth frames i) (nth frames j)))))))
            (sweep/overlapping-pairs (:sweep broad) mins maxs n)))))

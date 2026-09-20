@@ -323,14 +323,16 @@ TGS stops toppling too, though it keeps its own floor, below.
   asymmetry, a millimetre a second or so, and an unstable equilibrium
   amplifies whatever it is given.
 
-  The answer every shipping engine uses is **sleeping**, and it is the
-  next thing to build. An island whose bodies stay under a velocity
-  threshold for half a second is frozen: velocities zeroed, no
-  integration, no solve, nothing generated against it until something
-  touches it. A settled column then cannot topple, because nothing is
-  perturbing it any more — and a settled wall stops costing anything,
-  which is the other half of why engines do it. It is listed below as
-  missing; it should be listed first.
+  Sleeping is in now, and it is the answer for a column that *reaches*
+  rest: a six course one is asleep two seconds in and then does not move
+  at all, ever, because it is not being integrated. It is not the answer
+  for one that never gets there. Twenty courses are still shedding bricks
+  at half a second, well inside the half second of stillness sleeping
+  asks for, so the clock never starts on the part that matters. What
+  would help is the settling itself being quicker — the compression wave
+  from twenty bricks landing on each other takes about two seconds to die
+  out, and every course above the one that is still moving has to wait
+  for it.
 
 - **Sequential impulse does not substep, so it got none of this.** The
   small-steps rework is `step-tgs` alone. Sequential impulse keeps its
@@ -375,6 +377,44 @@ TGS stops toppling too, though it keeps its own floor, below.
   geometry per substep rather than `depth0` plus the anchor drift, which
   is a linearisation that goes stale as the bricks turn.
 
+### Tried and not kept
+
+- **Manifold reduction to four points.** Standard practice — Box2D and
+  Bullet both cap — and it works as advertised: a settled 9x8 wall went
+  from 669 contact points to 556, with every pair at four, and the four
+  chosen are the right four (the corners of the overlap region, picked by
+  spread from a stable anchor; choosing by *depth* instead is the obvious
+  thing and is wrong, because across a resting face the depths differ by
+  microns while the points differ by centimetres, so noise picks a
+  different four every step and warm starting loses its history).
+
+  It still costs stack depth, and the reason is worth knowing: with soft
+  contacts the point count is doing double duty. Six points on a pair is
+  six constraint rows, which is half again as much solving for that pair
+  per sweep as four. Removing the two surplus rows at the same iteration
+  count is a real loss of convergence, and a fourteen course column went
+  from three bricks standing to two.
+
+  It can be paid for with stiffness — `contact-hertz` 45 instead of 30
+  makes the fourteen course column stand *fully*, with or without the
+  reduction. But that stiffness is not free either: it breaks
+  `stays-put-test` and `restitution-test`, which is to say it buys stack
+  depth by spending the stillness. Sitting on the clamp (60, a quarter of
+  the substep rate) is worse still — marginal by construction, and it
+  showed, with a settled column that would not stop and a suite three
+  times slower for the contacts a shivering wall makes.
+
+  So: reduction is correct, cheap, and a wash at the stiffness that keeps
+  a stack still. Revisit it together with per-pair stiffness rather than
+  on its own.
+
+- **Ordering contacts for Gauss-Seidel.** The claim is that solving a
+  stack bottom-up lets one sweep carry the floor's support to the top.
+  Measured: forcing bottom-up is *identical* to what we already do, and
+  top-down is slightly worse. Sweep and prune already sorts along the
+  axis the scene is most spread along, so a column is visited bottom-up
+  for free. Nothing there to win.
+
 ### Other techniques still missing
 
 - **Featherstone / articulated bodies** — reduced-coordinate chains,
@@ -384,6 +424,20 @@ TGS stops toppling too, though it keeps its own floor, below.
   fast enough projectile passes through a brick. Speculative contacts
   would be the cheap version and conservative advancement the thorough
   one.
-- **Sleeping.** A settled wall is re-solved in full every frame. Islands
-  that have stopped moving should stop being solved, which is most of
-  what makes a real engine cheap on a scene that is mostly at rest.
+- ~~**Sleeping.**~~ Done. An island whose bodies have all been under the
+  speed thresholds for half a second is frozen: velocities zeroed, not
+  integrated, not solved, and no contact generated between two bodies
+  that are both inert. It wakes when something awake is found touching
+  it, in the same step rather than the next, because a step late is a
+  ball halfway through a wall.
+
+      settled wall      5x4     9x8
+      before (ms)      2.198   8.968
+      asleep (ms)      0.198   0.599
+
+  The scene that never settles pays about five percent for asking --
+  a 16x16 wall, which topples rather than resting, went from 32.2ms to
+  34.0ms. Most of that was bought back with an early-out: an island
+  sleeps on the clock of whichever member has been still least long, so
+  if no body anywhere has reached the threshold then no island can, and
+  the union-find is work with a known answer.

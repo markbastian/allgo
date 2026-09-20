@@ -100,7 +100,26 @@
    ;; Below this closing speed a contact is treated as resting and does
    ;; not bounce, however elastic the material.
    :restitution-threshold 1.0
-   :warm-start? true})
+   :warm-start? true
+   ;; Sleeping. A body still for `time-to-sleep` stops being simulated at
+   ;; all, and wakes when something awake comes to touch it.
+   :allow-sleep? true
+   :time-to-sleep 0.5
+   :linear-sleep-speed 0.01
+   :angular-sleep-speed 0.035})
+
+(defn- awake?
+  "A body the step should move: not static, not asleep."
+  [b]
+  (not (rigid/inert? b)))
+
+(defn- dynamic?
+  "Anything that can move, whether or not it is moving now.
+
+  Which is what islands are built from: a sleeping brick is still part of
+  the group it settled with, and has to wake with it."
+  [b]
+  (not (rigid/static? b)))
 
 ;; ---------------------------------------------------------------------------
 ;; The solve's own view of the bodies
@@ -581,12 +600,14 @@
 ;; ---------------------------------------------------------------------------
 ;; Moving the bodies
 
-(defn- accelerate! [{:keys [vel]} bodies gravity dt]
+(defn- accelerate!
+  "Gravity, over `dt`, on everything that is awake and can move."
+  [{:keys [vel]} bodies gravity dt]
   (let [^doubles vel vel
         [gx gy gz] gravity
         dt (double dt)]
     (dotimes [i (count bodies)]
-      (when-not (rigid/static? (nth bodies i))
+      (when (awake? (nth bodies i))
         (let [b3 (* i 3)]
           (aset vel b3 (+ (aget vel b3) (* (double gx) dt)))
           (aset vel (+ b3 1) (+ (aget vel (+ b3 1)) (* (double gy) dt)))
@@ -596,7 +617,7 @@
   "Puts the solved velocities back on the bodies."
   [bodies {:keys [vel omega]}]
   (mapv (fn [i b]
-          (if (rigid/static? b)
+          (if-not (awake? b)
             b
             (assoc b :vel (vec3-at ^doubles vel i) :omega (vec3-at ^doubles omega i))))
         (range (count bodies))
@@ -607,7 +628,7 @@
   [bodies dt]
   (let [dt (double dt)]
     (mapv (fn [{:keys [pos rot vel omega damping angular-damping] :as b}]
-            (if (rigid/static? b)
+            (if-not (awake? b)
               b
               (let [lin (max 0.0 (- 1.0 (* (double (or damping 0.0)) dt)))
                     ang (max 0.0 (- 1.0 (* (double (or angular-damping 0.0)) dt)))
@@ -691,6 +712,113 @@
             bodies
             (range (long (:n cs))))))
 
+(defn- roots
+  "Union-find over the contacts: which dynamic bodies move together.
+
+  Static bodies join nothing. The floor touches every brick in the scene,
+  and an island that included it would be the whole scene -- one group
+  that can only sleep when the last thing in it has stopped, which on a
+  wall with a ball still rolling somewhere is never."
+  [bodies contacts]
+  (let [n (count bodies)
+        ^ints parent (a/i32 (range n))
+        find (fn find [^long i]
+               (let [p (aget parent i)]
+                 (if (= p i)
+                   i
+                   (let [r (find p)]
+                     (aset parent i (int r))
+                     r))))]
+    (doseq [c contacts]
+      (let [a (long (:a c)) b (long (:b c))]
+        (when (and (dynamic? (nth bodies a)) (dynamic? (nth bodies b)))
+          (let [ra (find a) rb (find b)]
+            (when-not (= ra rb) (aset parent (int ra) (int rb)))))))
+    (mapv (fn [i] (if (dynamic? (nth bodies i)) (find i) -1)) (range n))))
+
+(defn- settle
+  "Sleeps whole islands, and wakes any island something has disturbed.
+
+  Two halves, and both are necessary. A body under the speed thresholds
+  accumulates time on its own clock; one over them puts its clock back to
+  zero. But a body cannot sleep on its own account -- it sleeps when
+  every body it is touching has also been still long enough, which is
+  what the union-find is for. A brick resting on a brick that is still
+  rolling has to stay awake, and it looks perfectly still while doing it.
+
+  This is what makes a settled scene actually settle. A stack that has
+  stopped is not nearly stopped: it is carrying the solver's own residual,
+  a millimetre a second of it, and an unstable arrangement amplifies that
+  until it falls over. Sleeping is the only thing that takes the residual
+  to zero, and it is why a wall in any shipping engine stands overnight."
+  [bodies contacts dt opts]
+  (if-not (:allow-sleep? opts)
+    bodies
+    (let [dt (double dt)
+          lin (double (:linear-sleep-speed opts))
+          ang (double (:angular-sleep-speed opts))
+          wait (double (:time-to-sleep opts))
+          still? (fn [b] (and (< (v/length (:vel b)) lin)
+                              (< (v/length (:omega b)) ang)))
+          ;; Each body's own clock first.
+          ticked (mapv (fn [b]
+                         (if (rigid/static? b)
+                           b
+                           (assoc b :sleep-time
+                                  (if (still? b)
+                                    (+ (double (or (:sleep-time b) 0.0)) dt)
+                                    0.0))))
+                       bodies)
+          ;; An island sleeps on the clock of whichever member has been
+          ;; still for the least time, so if nothing has reached the
+          ;; threshold then no island can, and the whole of the rest of
+          ;; this -- the union-find and the pass over it -- is work with a
+          ;; known answer. A scene in motion never gets past here.
+          group (when (some #(>= (double (or (:sleep-time %) 0.0)) wait) ticked)
+                  (roots ticked contacts))
+          ;; An island sleeps on the clock of whichever member has been
+          ;; still for the least time.
+          youngest (when group
+                     (reduce (fn [m i]
+                               (let [r (nth group i)]
+                                 (if (neg? (long r))
+                                   m
+                                   (assoc m r (min (double (get m r ##Inf))
+                                                   (double (or (:sleep-time (nth ticked i)) 0.0)))))))
+                             {}
+                             (range (count ticked))))]
+      (if-not group
+        ticked
+        (mapv (fn [i b]
+                (let [r (nth group i)]
+                  (if (neg? (long r))
+                    b
+                    (let [asleep? (>= (double (get youngest r 0.0)) wait)]
+                      (if asleep?
+                        (assoc b :sleeping? true :vel v/zero :omega v/zero)
+                        (assoc b :sleeping? false))))))
+              (range (count ticked))
+              ticked)))))
+
+(defn- rouse
+  "Wakes anything asleep that an awake body has come to touch.
+
+  Run before the solve, on this step's contacts, so a sleeping stack is
+  awake and solved in the same step the ball reaches it rather than the
+  one after -- a step late is a ball halfway through a wall."
+  [bodies contacts]
+  (let [disturbed (into #{}
+                        (mapcat (fn [c]
+                                  (let [a (nth bodies (:a c)) b (nth bodies (:b c))]
+                                    (cond
+                                      (and (rigid/sleeping? a) (awake? b)) [(:a c)]
+                                      (and (rigid/sleeping? b) (awake? a)) [(:b c)]
+                                      :else []))))
+                        contacts)]
+    (if (empty? disturbed)
+      bodies
+      (reduce (fn [bs i] (update bs i rigid/wake)) bodies disturbed))))
+
 (defn- step-sequential-impulse
   "Linearise once, solve velocities, then move.
 
@@ -698,15 +826,18 @@
   the top of the step. Cheapest per iteration, and the one that sags when
   a stack is tall or a body is turning quickly."
   [{:keys [bodies gravity iterations warm-start?] :as w} dt]
-  (let [arrays (body-arrays bodies)
+  (let [contacts (contact/all bodies (:broad w))
+        bodies (rouse bodies contacts)
+        arrays (body-arrays bodies)
         _ (accelerate! arrays bodies gravity dt)
-        cs (prepare bodies (contact/all bodies (:broad w)) (:contacts w))]
+        cs (prepare bodies contacts (:contacts w))]
     (record-approach! arrays cs)
     (when warm-start? (warm-start! arrays cs))
     (dotimes [_ (long iterations)]
       (solve-velocities! arrays cs dt w))
     (assoc w
-           :bodies (-> bodies (write-back arrays) (advance dt))
+           :bodies (-> bodies (write-back arrays) (advance dt)
+                       (settle contacts dt w))
            :contacts (contact-state cs))))
 
 (defn- step-tgs
@@ -747,10 +878,13 @@
         h (/ (double dt) substeps)
         per (max 1 (quot (long iterations) substeps))
         relax-opts (assoc w :relax? true)
-        contacts (contact/all bodies (:broad w))]
+        contacts (contact/all bodies (:broad w))
+        bodies (rouse bodies contacts)]
     (loop [bodies bodies cs (prepare bodies contacts (:contacts w)) n substeps first? true]
       (if (zero? n)
-        (assoc w :bodies bodies :contacts (contact-state cs))
+        (assoc w
+               :bodies (settle bodies contacts dt w)
+               :contacts (contact-state cs))
         (let [arrays (body-arrays bodies)
               _ (accelerate! arrays bodies gravity h)
               _ (refresh-anchors! bodies cs)
@@ -777,17 +911,20 @@
   (let [substeps (max 1 (long substeps))
         h (/ (double dt) substeps)
         contacts (contact/all bodies (:broad w))
+        bodies (rouse bodies contacts)
         cs (prepare bodies contacts (:contacts w))
         slop (double (:slop w))
         ^doubles lambda (:lambda cs)
         passes (max 1 (quot (long iterations) substeps))]
     (loop [bodies bodies n substeps]
       (if (zero? n)
-        (assoc w :bodies bodies :contacts (contact-state cs))
+        (assoc w
+               :bodies (settle bodies contacts dt w)
+               :contacts (contact-state cs))
         (let [;; Only this substep's multipliers are wanted, so they start
               ;; again each time round.
               _ (dotimes [k (long (:n cs))] (aset lambda k 0.0))
-              bodies (mapv #(rigid/integrate % h gravity) bodies)
+              bodies (mapv #(if (awake? %) (rigid/integrate % h gravity) %) bodies)
               _ (refresh-anchors! bodies cs)
               ;; How fast the surfaces were closing before the solve.
               ;; Restitution is measured against this; after the position
@@ -796,7 +933,7 @@
               bodies (reduce (fn [bs _] (project-contacts bs cs slop h))
                              bodies
                              (range passes))
-              bodies (mapv #(rigid/update-velocities % h) bodies)
+              bodies (mapv #(if (awake? %) (rigid/update-velocities % h) %) bodies)
               ;; The velocity pass belongs *inside* the substep, not once
               ;; at the end of the frame. It is the only thing that takes
               ;; energy back out -- restitution and friction both -- and

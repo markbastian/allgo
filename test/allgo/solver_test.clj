@@ -129,6 +129,47 @@
             (str (name solver) " wandered: "
                  (vec (map v/distance where (map :pos (dynamics later))))))))))
 
+(deftest sleeping-test
+  (testing "a settled stack goes to sleep, and is then exactly still"
+    ;; Exactly is the word. Everything else in this file measures how
+    ;; little a stack moves; a sleeping one does not move, because it is
+    ;; not being integrated at all. That is the only thing that takes the
+    ;; solver's own residual to zero, and the residual is what an
+    ;; unstable arrangement amplifies until it falls over.
+    (doseq [solver solvers]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 5)]
+                                (brick [0.0 (+ 0.25 (* i 0.5)) 0.0]))))
+            w (run solver bodies 300)
+            bs (dynamics w)]
+        (is (every? rigid/sleeping? bs)
+            (str (name solver) " still awake after five seconds"))
+        (is (every? #(zero? (double (speed %))) bs) (name solver))
+        (let [where (mapv :pos bs)
+              later (loop [w w i 0] (if (= i 300) w (recur (s/step w dt) (inc i))))]
+          (is (= where (mapv :pos (dynamics later)))
+              (str (name solver) " moved in its sleep"))))))
+
+  (testing "and wakes when something runs into it"
+    (doseq [solver solvers]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 5)]
+                                (brick [0.0 (+ 0.25 (* i 0.5)) 0.0]))))
+            settled (run solver bodies 300)
+            ;; A ball, fired along the ground at the foot of the stack.
+            fired (update settled :bodies conj
+                          (rigid/ball {:pos [4.0 0.3 0.0] :radius 0.3
+                                       :density 4.0 :vel [-18.0 0.0 0.0]}))
+            hit (loop [w fired i 0] (if (= i 40) w (recur (s/step w dt) (inc i))))]
+        (is (not-any? rigid/sleeping? (dynamics hit))
+            (str (name solver) " slept through being hit"))
+        (is (every? finite? (dynamics hit)) (name solver)))))
+
+  (testing "and does not sleep when it is told not to"
+    (let [bodies (vec (cons (floor) [(brick [0.0 0.25 0.0])]))
+          w (run :sequential-impulse bodies 300 {:allow-sleep? false})]
+      (is (not-any? rigid/sleeping? (dynamics w))))))
+
 (deftest restitution-test
   (testing "a bouncy ball bounces and a dead one does not"
     (doseq [solver solvers]

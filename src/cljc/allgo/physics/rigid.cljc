@@ -107,6 +107,30 @@
   [{:keys [inv-mass]}]
   (zero? (double inv-mass)))
 
+(defn sleeping?
+  "A body that has settled and been taken out of the simulation.
+
+  `allgo.physics.solver` puts bodies to sleep and wakes them; the flag
+  lives here because it is a fact about the body, and because collision
+  detection needs to read it too -- a pair of sleeping bricks is a pair
+  nothing need be asked about."
+  [b]
+  (true? (:sleeping? b)))
+
+(defn inert?
+  "A body that will not move this step, whether it cannot or need not."
+  [b]
+  (or (static? b) (sleeping? b)))
+
+(defn wake
+  "Puts a body back in the simulation, with its sleep clock reset.
+
+  Anything moving a body from outside the step -- placing it, giving it a
+  velocity, firing it at a wall -- has to do this, or it will be ignored
+  until something bumps into it."
+  [b]
+  (assoc b :sleeping? false :sleep-time 0.0))
+
 (defn local->world [{:keys [pos rot]} p] (v/add (q/rotate rot p) pos))
 
 (defn world->local [{:keys [pos inv-rot]} p] (q/rotate inv-rot (v/sub p pos)))
