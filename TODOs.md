@@ -211,11 +211,25 @@ stem is the river, the watershed is everything draining into it.
 ## Physics Engines
 
 Sequential impulse, TGS and XPBD are in `allgo.physics.solver`, over
-contact manifolds from `allgo.physics.contact`, with the brick-wall demo
-in `allgo.demo.bricks`. All three run the same scene so they can be
+contact manifolds from `allgo.physics.contact`, with the brick demo in
+`allgo.demo.bricks`. All three run the same scene so they can be
 compared; the differences are in the docstrings and are real — TGS holds
 a stack at three iterations that sequential impulse lets sag, because it
 moves the bodies between iterations and re-measures.
+
+There are four scenes now, because one was answering one question. A
+running-bond **wall** asks how much weight a solver holds up; a
+**column** of single bricks asks how straight it can stand something
+that has no business standing at all; a **Jenga** tower asks how quiet
+it is once nothing is happening; a **keep** inside a semicircular
+rampart asks all of that again about rings of boxes, where no two faces
+in contact are parallel.
+
+They do not agree, which is the useful part. TGS settles the Jenga
+tower in two seconds and XPBD never does; on the keep it is the other
+way round. Sequential impulse is last in every one of them. Anything
+claiming a solver is simply better than another should have to explain
+both of those.
 
 **It is not yet fast, and the reason is not the solvers.** Measured in a
 browser on a settled 9x8 wall (72 bricks, 581 contacts), a step is about
