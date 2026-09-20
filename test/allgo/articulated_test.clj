@@ -3,6 +3,7 @@
             [allgo.geometry.vec3 :as v]
             [allgo.numerics.linear :as lin]
             [allgo.physics.articulated :as ab]
+            [allgo.physics.rigid :as rigid]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private g [0.0 -9.81 0.0])
@@ -288,3 +289,136 @@
       (is (< (v/distance (v/sub (:angular m1) (:angular m0))
                          (v/cross p (v/scale dir mag)))
              1e-12)))))
+
+;; ---------------------------------------------------------------------------
+;; Shapes, and the ground
+
+(def ^:private floor
+  (rigid/box {:pos [0.0 -0.5 0.0] :size [40.0 1.0 40.0]}))
+
+(defn- crate
+  "A free box, its shape centred on its own frame rather than on a
+  centre of mass somewhere else."
+  [[sx sy sz] m]
+  (let [f (/ (double m) 12.0)]
+    {:base {:mass m :com [0.0 0.0 0.0]
+            :inertia [[(* f (+ (* sy sy) (* sz sz))) 0.0 0.0]
+                      [0.0 (* f (+ (* sx sx) (* sz sz))) 0.0]
+                      [0.0 0.0 (* f (+ (* sx sx) (* sy sy)))]]
+            :shape :box :size [sx sy sz]
+            :shape-pose {:rot [0.0 0.0 0.0 1.0] :pos [0.0 0.0 0.0]}}
+     :links []}))
+
+(defn- shaped-rod
+  "A rod that can also be collided with."
+  [parent L m]
+  (assoc (rod parent L m) :shape :box :size [L 0.12 0.12]))
+
+(defn- fall
+  "`n` steps of `dt`, under gravity, against `obstacles`."
+  [model state n dt obstacles & [more]]
+  (reduce (fn [s _] (ab/step s model dt (merge {:gravity g :obstacles obstacles} more)))
+          state
+          (range n)))
+
+(defn- resting [y] {:q [] :qd [] :base {:rot [0.0 0.0 0.0 1.0] :pos [0.0 y 0.0]
+                                        :vel [0.0 0.0 0.0 0.0 0.0 0.0]}})
+
+(defn- base-y [s] (double (second (:pos (:base s)))))
+(defn- base-speed [s] (v/length (subvec (vec (:vel (:base s))) 3 6)))
+
+(deftest ground-contact-test
+  (testing "a dropped box comes to rest on the floor and stays there"
+    (let [model (crate [0.6 0.4 0.5] 2.0)
+          landed (fall model (resting 2.0) 240 (/ 1.0 120.0) [floor])
+          later (fall model landed 480 (/ 1.0 120.0) [floor])]
+      ;; Half the box's height, less the slop a soft contact keeps.
+      (is (close? (base-y landed) 0.2 0.01) (str "landed at " (base-y landed)))
+      (is (< (base-speed landed) 0.01))
+      (is (close? (base-y later) (base-y landed) 1e-3) "it did not creep")))
+
+  (testing "and one that starts on the floor does not sink into it"
+    (let [model (crate [0.6 0.4 0.5] 2.0)
+          s (fall model (resting 0.2) 600 (/ 1.0 120.0) [floor])]
+      (is (> (base-y s) 0.19) (str "sank to " (base-y s)))))
+
+  (testing "nothing ends up buried"
+    ;; Contacts are offered before the touch, so a settled body sits in
+    ;; a gap rather than in a hole. Every depth here should be negative
+    ;; or within the slop; a positive one means the solver let something
+    ;; through and pushed it back out afterwards.
+    (let [model (crate [0.6 0.4 0.5] 2.0)
+          s (fall model (resting 2.0) 360 (/ 1.0 120.0) [floor])
+          depths (map :depth (ab/contacts-with model (:q s) (:base s) [floor]))]
+      (is (seq depths) "it should be touching the floor at all")
+      (is (every? #(< (double %) 0.01) depths) (str depths))))
+
+  (testing "a link with no shape is not collided with"
+    (let [bare (assoc-in (crate [0.6 0.4 0.5] 2.0) [:base :shape] nil)]
+      (is (empty? (ab/collision-bodies bare [] (:base (resting 1.0)))))
+      (is (empty? (ab/contacts-with bare [] (:base (resting 0.0)) [floor])))))
+
+  (testing "the normal points the way the body has to be pushed"
+    ;; Out of the floor, not into it. Stating it in the direction the
+    ;; solver uses is what keeps the sign in one place.
+    (let [model (crate [0.6 0.4 0.5] 2.0)
+          cs (ab/contacts-with model [] (:base (resting 0.2)) [floor])]
+      (is (seq cs))
+      (is (every? #(> (double (second (:normal %))) 0.9) cs) (str (map :normal cs))))))
+
+(deftest friction-test
+  (testing "a box on a slope slides when it is slippery and grips when it is not"
+    (let [tilt (q/from-euler 0.0 0.0 -0.35)
+          ramp (rigid/box {:pos [0.0 -0.5 0.0] :size [40.0 1.0 40.0] :rot tilt})
+          model (crate [0.6 0.4 0.5] 2.0)
+          travel (fn [mu]
+                   (let [st {:q [] :qd []
+                             :base {:rot tilt :pos (q/rotate tilt [0.0 0.21 0.0])
+                                    :vel [0.0 0.0 0.0 0.0 0.0 0.0]}}]
+                     (abs (double (first (:pos (:base (fall model st 240 (/ 1.0 120.0)
+                                                            [ramp] {:friction mu}))))))))]
+      (is (> (travel 0.0) 2.0) "a frictionless box should be well down the slope")
+      (is (< (travel 1.2) 0.2) "a gripping one should barely move")
+      (is (> (travel 0.0) (travel 1.2))))))
+
+(deftest bounce-test
+  (testing "restitution returns a dropped box to the height it should"
+    ;; Falls 0.8 m, so an ideal bounce comes back to 0.2 + 0.8 e^2.
+    ;; Measured after the first descent bottoms out, because the drop
+    ;; itself starts higher than any of these rebounds.
+    (let [model (crate [0.4 0.4 0.4] 2.0)
+          rebound (fn [e]
+                    (let [ys (map base-y
+                                  (take 600 (iterate #(ab/step % model (/ 1.0 240.0)
+                                                               {:gravity g :obstacles [floor]
+                                                                :restitution e})
+                                                     (resting 1.0))))
+                          low (apply min (take 130 ys))]
+                      (apply max (take 400 (drop-while #(> (double %) (+ low 1e-9)) ys)))))]
+      (doseq [e [0.0 0.5 0.9]]
+        (is (close? (rebound e) (+ 0.2 (* 0.8 e e)) 0.02)
+            (str "e=" e " came back to " (rebound e)))))))
+
+(deftest chain-on-the-ground-test
+  (testing "a chain on a free root falls over, settles, and stays settled"
+    ;; The thing all of this was for. Nothing here is a special case:
+    ;; the root is collided with like any link, the joints take whatever
+    ;; the floor does to the links through the same inverse inertia, and
+    ;; it comes to rest.
+    (let [model {:base {:mass 2.0 :com [0.0 0.0 0.0]
+                        :inertia [[0.03 0.0 0.0] [0.0 0.03 0.0] [0.0 0.0 0.03]]
+                        :shape :box :size [0.3 0.3 0.3]}
+                 :links [(shaped-rod -1 0.6 0.8) (shaped-rod 0 0.6 0.8)]}
+          st0 {:q [-0.4 -0.7] :qd [0.0 0.0]
+               :base {:rot [0.0 0.0 0.0 1.0] :pos [0.0 1.5 0.0]
+                      :vel [0.0 0.0 0.0 0.0 0.0 0.0]}}
+          landed (fall model st0 480 (/ 1.0 120.0) [floor])
+          later (fall model landed 720 (/ 1.0 120.0) [floor])]
+      (is (< (base-speed landed) 0.05) (str "still moving at " (base-speed landed)))
+      (is (close? (base-y later) (base-y landed) 0.01) "it drifted after settling")
+      (is (every? #(> (double (second (:pos %))) -0.05)
+                  (ab/poses model (:q later) (:base later)))
+          "a link ended up under the floor")
+      ;; And the joints have stopped turning, which is the part a
+      ;; constraint formulation has to be talked into.
+      (is (every? #(< (abs (double %)) 0.05) (:qd later)) (str (:qd later))))))

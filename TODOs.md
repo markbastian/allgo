@@ -482,21 +482,33 @@ TGS stops toppling too, though it keeps its own floor, below.
   being applied in the world's frame rather than the root's, which is
   invisible until the root both falls and spins. What is left:
 
-  - **Contacts.** Half done. What a contact solver asks of a body is two
-    questions -- how much velocity does a push here buy, and please take
-    this impulse -- and both now have answers: `impulse-at` gives the
-    effective mass at a world point in a direction, `apply-impulse`
-    takes one. Both come out of `H^-1`, which the articulated body
-    algorithm hands over a column at a time. An impulse on a free model
-    changes its momentum by exactly that impulse, to 5e-16.
+  - ~~**Contacts.**~~ Done, against static geometry. A part with a
+    `:shape` is handed to `allgo.physics.contact` where it is, and
+    `solve-contacts` runs the same sequential impulse loop the rigid
+    solvers do -- it can, because a contact solver only ever asks how
+    much velocity a push buys and then pushes, and both answers come out
+    of `H^-1`. A box comes to rest at half its own height and stays
+    there, a slope is slid down when slippery and not when gripping, and
+    a bounce returns to `0.2 + 0.8 e^2` to within two centimetres.
 
-    What is missing is the other end: the links have no shapes, so
-    nothing generates the contacts in the first place. That wants a
-    collision shape per link, poses handed to `allgo.physics.contact`,
-    and a solve loop over the manifold it returns.
+    Still missing: self-collision between links, and contact against
+    things that can move back.
   - **Multi-degree-of-freedom joints.** A shoulder is a ball joint;
     today it has to be spelled as three hinges with massless links
     between them.
+  - **Speed.** This is now the thing in the way. A step with ground
+    contacts, on the JVM:
+
+        links    0      2      4      8     16
+        ms    0.71   4.92  12.19  29.85  154.1
+
+    A ragdoll is around sixteen links, so that is six frames a second
+    before a browser has been asked to run it. The algorithms are the
+    right ones; the arithmetic under them is not. Every 6x6 is a vector
+    of vectors, and `inverse-mass-matrix` rebuilds every link transform
+    and every pose once per column -- (n+6) times a step, for data that
+    depends only on where the joints are.
+
   - **A ragdoll demo**, which is what all of the above is for.
 - **Continuous collision detection.** Half done. Speculative contacts
   — the cheap version — are in: the margin out to which a gap still

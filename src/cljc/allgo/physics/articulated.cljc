@@ -38,6 +38,19 @@
   What it gives up is being able to come apart or close a loop: a tree of
   joints is the whole of what it can describe.
 
+  ## Shapes
+
+  A part gains geometry by being given a `:shape` -- `:box` with a
+  `:size` or `:ball` with a `:radius` -- and it sits at the part's
+  centre of mass unless `:shape-pose` says otherwise. A link's frame is
+  at its *joint*, not in the middle of it, so a shape left at the frame
+  origin would stick out of the elbow.
+
+  A part with no shape collides with nothing, which is what a link that
+  exists only to carry a degree of freedom wants -- the middle of three
+  stacked hinges standing in for a shoulder is not a thing that can be
+  hit.
+
   ## Being hit
 
   It can be hit, though, which took one more thing. A contact solver
@@ -76,6 +89,28 @@
   Jacobian, the inverse inertia and the momentum sum, three separate
   pieces of arithmetic, all agree. They do, to about 5e-16, for a
   rotated base and an oblique push on a middle link.
+
+  On the ground there is no exact answer to check against, so the checks
+  are the ones a person would make by eye if eyes were precise: a box
+  comes to rest at half its own height and stays there; nothing ends up
+  buried; a slope is slid down when it is slippery and not when it
+  grips; and a bounce returns to `0.2 + 0.8 e^2` from the height it was
+  dropped, to within two centimetres across the range of `e`.
+
+  ## What it costs
+
+  More than it should. A step with ground contacts, on the JVM:
+
+      links    0      2      4      8     16
+      ms    0.71   4.92  12.19  29.85  154.1
+
+  A ragdoll is around sixteen, so this is six frames a second before a
+  browser has been asked to run it. The algorithms are the right ones --
+  the articulated body algorithm is linear in the links -- and the cost
+  is all in the arithmetic under them: every 6x6 here is a vector of
+  vectors, and `inverse-mass-matrix` rebuilds every link transform and
+  every pose once per column. That is the same fix `allgo.physics.contact`
+  wants and for the same reason.
 
   ## Spatial vectors
 
@@ -147,7 +182,9 @@
   something."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
-            [allgo.numerics.linear :as lin]))
+            [allgo.numerics.linear :as lin]
+            [allgo.physics.contact :as contact]
+            [allgo.physics.rigid :as rigid]))
 
 ;; ---------------------------------------------------------------------------
 ;; Spatial algebra
@@ -522,14 +559,51 @@
 ;; ---------------------------------------------------------------------------
 ;; Moving it
 
+(declare solve-contacts contacts-with velocity with-velocity)
+
+(defn- advance-positions
+  "Move by whatever the velocities now are."
+  [model state ^double dt]
+  (let [root (base model)
+        b (:base state)
+        q' (mapv (fn [a c] (+ (double a) (* dt (double c)))) (:q state) (:qd state))]
+    (if-not root
+      (assoc state :q q')
+      (let [v (vec (:vel b))
+            rot (or (:rot b) q/identity-q)
+            pos (or (:pos b) v/zero)
+            ;; Both halves of the spatial velocity are in the base's own
+            ;; frame, so both are turned into the world before they move
+            ;; anything.
+            w (q/rotate rot (subvec v 0 3))
+            u (q/rotate rot (subvec v 3 6))
+            ;; rot += dt/2 (omega, 0) rot, then back onto the unit
+            ;; sphere -- the same first-order step `allgo.physics.rigid`
+            ;; takes, and it walks off for the same reason.
+            [dx dy dz dw] (q/mul [(w 0) (w 1) (w 2) 0.0] rot)
+            [rx ry rz rw] rot
+            h (* 0.5 dt)]
+        (assoc state
+               :q q'
+               :base (assoc b
+                            :rot (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
+                                               (+ rz (* h dz)) (+ rw (* h dw))])
+                            :pos (v/add-scaled pos u dt)))))))
+
 (defn step
   "One semi-implicit Euler step of `{:q :qd}`, and `:base` if there is
   one, under `tau`.
 
-  Velocity first and then position, which is the same choice
-  `allgo.physics.rigid` makes and for the same reason: it costs nothing
-  and it does not pump energy into an oscillation the way explicit Euler
-  does.
+  Velocity first, then contacts, then position. The order is the whole
+  of what makes a contact hold: the velocities are corrected before
+  anything moves, so a body that was about to be driven into the floor
+  never is, rather than being pulled back out afterwards.
+
+  Contacts come either ready-made as `:contacts` or, more usually, from
+  `:obstacles` -- static `allgo.physics.rigid` bodies this model is to
+  be generated against. They are found at the configuration the step
+  *starts* from, which is where the model actually is when the question
+  is asked.
 
   The base's state is a pose and a spatial velocity in its own frame,
   not six more coordinates. Three reasons, and the third is the one that
@@ -538,36 +612,22 @@
   speaks; and a velocity in body coordinates is what the algorithms
   already produce, so nothing has to be converted on the way in."
   ([state model dt] (step state model dt nil))
-  ([{:keys [q qd] :as state} model ^double dt {:keys [tau] :as opts}]
+  ([{:keys [q qd] :as state} model ^double dt {:keys [tau contacts obstacles] :as opts}]
    (let [root (base model)
          b (:base state)
          tau (or tau (vec (repeat (dof model) 0.0)))
          {:keys [qdd base-acc]} (forward-dynamics model q qd tau
                                                   (cond-> opts root (assoc :base b)))
-         qd' (mapv (fn [a c] (+ (double a) (* dt (double c)))) qd qdd)
-         q' (mapv (fn [a c] (+ (double a) (* dt (double c)))) q qd')]
-     (if-not root
-       {:q q' :qd qd'}
-       (let [v (vec (or (:vel b) (repeat 6 0.0)))
-             v' (mapv (fn [a c] (+ (double a) (* dt (double c)))) v base-acc)
-             rot (or (:rot b) q/identity-q)
-             pos (or (:pos b) v/zero)
-             ;; Both halves of the spatial velocity are in the base's own
-             ;; frame, so both are turned into the world before they move
-             ;; anything.
-             w (q/rotate rot (subvec v' 0 3))
-             u (q/rotate rot (subvec v' 3 6))
-             ;; rot += dt/2 (omega, 0) rot, then back onto the unit
-             ;; sphere -- the same first-order step `allgo.physics.rigid`
-             ;; takes, and it walks off for the same reason.
-             [dx dy dz dw] (q/mul [(w 0) (w 1) (w 2) 0.0] rot)
-             [rx ry rz rw] rot
-             h (* 0.5 dt)]
-         {:q q' :qd qd'
-          :base {:rot (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
-                                    (+ rz (* h dz)) (+ rw (* h dw))])
-                 :pos (v/add-scaled pos u dt)
-                 :vel v'}})))))
+         accel (if root (vec (concat base-acc qdd)) (vec qdd))
+         moving (with-velocity model state
+                  (mapv (fn [a c] (+ (double a) (* dt (double c))))
+                        (velocity model state)
+                        accel))
+         cs (or contacts
+                (when (seq obstacles) (contacts-with model q b obstacles)))]
+     (advance-positions model
+                        (if (seq cs) (solve-contacts model moving cs dt opts) moving)
+                        dt))))
 
 ;; ---------------------------------------------------------------------------
 ;; Where the links are
@@ -801,3 +861,210 @@
                                          (take 6 scaled-delta)))
           (update :qd #(mapv + % (drop 6 scaled-delta))))
       (update state :qd #(mapv + % (take n scaled-delta))))))
+
+;; ---------------------------------------------------------------------------
+;; Generalised velocity
+
+(defn velocity
+  "The model's generalised velocity: the root's spatial six, then one per
+  joint. A bolted model has only the joints'."
+  [model state]
+  (if (base model)
+    (vec (concat (or (:vel (:base state)) (repeat 6 0.0)) (:qd state)))
+    (vec (:qd state))))
+
+(defn with-velocity
+  "`state` moving at the generalised velocity `u`."
+  [model state u]
+  (if (base model)
+    (-> state
+        (assoc :base (assoc (:base state) :vel (vec (take 6 u))))
+        (assoc :qd (vec (drop 6 u))))
+    (assoc state :qd (vec u))))
+
+;; ---------------------------------------------------------------------------
+;; Shapes, and what they run into
+
+(defn- shape-pose
+  "Where a part's collision shape sits in that part's own frame.
+
+  Centred on the centre of mass unless told otherwise, which is right
+  for a limb and saves every model repeating it. A link's frame is at
+  its *joint*, not in the middle of it, so a shape left at the origin
+  would stick out of the elbow."
+  [part]
+  (or (:shape-pose part) {:rot q/identity-q :pos (:com part)}))
+
+(defn- part-body
+  "A part's collision shape as an `allgo.physics.rigid` body, placed
+  where the part is now, or nil if it was never given one."
+  [part frame]
+  (when-let [kind (:shape part)]
+    (let [{srot :rot spos :pos} (shape-pose part)
+          rot (q/mul (:rot frame) (or srot q/identity-q))
+          pos (v/add (:pos frame) (q/rotate (:rot frame) (or spos v/zero)))
+          common {:pos pos :rot rot :density 1.0}]
+      (case kind
+        :box (rigid/box (assoc common :size (:size part)))
+        :ball (rigid/ball (assoc common :radius (:radius part)))))))
+
+(defn collision-bodies
+  "Every shaped part of the model, as `[{:link i :body b} ...]`.
+
+  `-1` is the free root. Parts with no `:shape` are not here: a link
+  that is only there to carry a degree of freedom -- the middle of three
+  stacked hinges standing in for a shoulder -- has no geometry and
+  should collide with nothing."
+  [model q-vec root-state]
+  (let [ls (chain model)
+        root (base model)]
+    (into (if-let [b (and root (part-body root (frame-of model q-vec root-state -1)))]
+            [{:link -1 :body b}]
+            [])
+          (keep (fn [i]
+                  (when-let [b (part-body (nth ls i)
+                                          (nth (poses model q-vec root-state) i))]
+                    {:link i :body b})))
+          (range (count ls)))))
+
+(defn contacts-with
+  "Every contact between the model's shapes and the static `obstacles`.
+
+  `obstacles` are ordinary `allgo.physics.rigid` bodies -- a floor, a
+  ramp, scenery. Nothing is applied back to them, which is what makes
+  them static and what makes this the easy half: one side of every
+  contact has no degrees of freedom to account for.
+
+  The normal points the way the link has to be pushed, which is the
+  opposite of what `allgo.physics.contact` reports for the pair. Stating
+  it in the direction the solver will use it saves a negation at every
+  later step and a sign error at one of them."
+  [model q-vec root-state obstacles]
+  (into []
+        (for [{:keys [link body]} (collision-bodies model q-vec root-state)
+              ob obstacles
+              c (contact/between 0 1 body ob)]
+          {:link link
+           :point (:point c)
+           :normal (v/negate (:normal c))
+           :depth (:depth c)})))
+
+;; ---------------------------------------------------------------------------
+;; Solving them
+
+(def default-contact
+  "Settings for `solve-contacts`, matching `allgo.physics.solver`'s where
+  they mean the same thing."
+  {:iterations 8
+   :friction 0.6
+   :restitution 0.0
+   :slop 0.005
+   :bias-factor 0.2
+   :max-push-speed 3.0})
+
+(defn- tangents
+  "Two unit directions across `n`, any two."
+  [n]
+  (let [a (if (< (abs (double (nth n 0))) 0.9) [1.0 0.0 0.0] [0.0 1.0 0.0])
+        t1 (v/normalize (v/cross n a))]
+    [t1 (v/cross n t1)]))
+
+(defn solve-contacts
+  "`state` with its velocities corrected so the contacts are not being
+  driven into.
+
+  Sequential impulse, the same as `allgo.physics.solver` runs, over the
+  same kind of accumulated clamped impulses -- and the reason it can be
+  the same is the point of the previous section. A contact solver only
+  ever asks a body how much velocity a push buys and then pushes; it
+  does not care that the answer came through a chain of joints.
+
+  What is different is where the work goes. `H^-1` depends only on where
+  the joints are, so it is built once for the step and not once per
+  contact per iteration; each contact's three directions turn into a
+  generalised force `g = J^T d` and a response `H^-1 g` once, and after
+  that an iteration is dot products. Otherwise a ragdoll would spend its
+  frame rebuilding the same matrix eighty times."
+  [model state cs dt opts]
+  (let [{:keys [iterations friction restitution slop bias-factor max-push-speed]}
+        (merge default-contact opts)
+        dt (double dt)
+        q (:q state)
+        root-state (:base state)
+        hinv (inverse-mass-matrix model q)
+        u0 (velocity model state)
+        prep (mapv (fn [c]
+                     (let [jt (lin/transpose
+                               (point-jacobian model q root-state (:link c) (:point c)))
+                           n (v/normalize (:normal c))
+                           [t1 t2] (tangents n)
+                           along (fn [d]
+                                   (let [g (lin/mat-vec jt d)
+                                         delta (lin/mat-vec hinv g)
+                                         w (reduce + (map * g delta))]
+                                     ;; An effective mass of zero, not
+                                     ;; infinity: this is the number an
+                                     ;; impulse is multiplied by, and a
+                                     ;; direction nothing can move in is
+                                     ;; a direction no impulse is worth
+                                     ;; applying.
+                                     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
+                           dirs {:n (along n) :t1 (along t1) :t2 (along t2)}]
+                       (assoc dirs
+                              ;; The closing speed as the step began.
+                              ;; Restitution is measured against this and
+                              ;; nothing later, for the same reason the
+                              ;; rigid solvers record it once.
+                              :approach (reduce + (map * (:g (:n dirs)) u0))
+                              :bias (min (double max-push-speed)
+                                         (/ (* (double bias-factor)
+                                               (max 0.0 (- (double (:depth c))
+                                                           (double slop))))
+                                            dt)))))
+                   cs)
+        k (count prep)]
+    (if (zero? k)
+      state
+      (with-velocity
+        model state
+        (loop [u u0
+               acc (vec (repeat k [0.0 0.0 0.0]))
+               iter 0]
+          (if (= iter (long iterations))
+            u
+            (let [[u acc]
+                  (reduce
+                   (fn [[u acc] i]
+                     (let [{:keys [n t1 t2 approach bias]} (nth prep i)
+                           [an at1 at2] (nth acc i)
+                           ;; Normal first: friction is bounded by the
+                           ;; force it rides on, so it needs this
+                           ;; iteration's answer and not last one's.
+                           target (max (double bias)
+                                       (if (< (double approach) -0.5)
+                                         (* (- (double restitution)) (double approach))
+                                         0.0))
+                           vn (reduce + (map * (:g n) u))
+                           dn (* (double (:m n)) (- target vn))
+                           an' (max 0.0 (+ (double an) dn))
+                           u (mapv #(+ (double %1) (* (double %2) (- an' (double an))))
+                                   u (:delta n))
+                           limit (* (double friction) an')
+                           [u at1'] (let [vt (reduce + (map * (:g t1) u))
+                                          d (* (double (:m t1)) (- vt))
+                                          a' (min limit (max (- limit) (+ (double at1) d)))]
+                                      [(mapv #(+ (double %1)
+                                                 (* (double %2) (- a' (double at1))))
+                                             u (:delta t1))
+                                       a'])
+                           [u at2'] (let [vt (reduce + (map * (:g t2) u))
+                                          d (* (double (:m t2)) (- vt))
+                                          a' (min limit (max (- limit) (+ (double at2) d)))]
+                                      [(mapv #(+ (double %1)
+                                                 (* (double %2) (- a' (double at2))))
+                                             u (:delta t2))
+                                       a'])]
+                       [u (assoc acc i [an' at1' at2'])]))
+                   [u acc]
+                   (range k))]
+              (recur u acc (inc iter)))))))))
