@@ -240,6 +240,56 @@ What would fix it, in order of expected return:
    per step out of lazy sequences, and computes the tangent basis and the
    body-local anchors through persistent vectors.
 
+### What still makes a wall fall over on its own
+
+Leave the demo running and the wall comes down by itself. Three separate
+things, measured headlessly on a running-bond wall with no projectile:
+
+- **XPBD had no friction at rest, and that is fixed.** The velocity pass
+  bounded friction by the approach speed, which is zero for anything
+  settled, so nothing removed the sideways and angular velocity the
+  position solve hands back — and it hands it back divided by the
+  substep, so a millimetre is a quarter of a metre a second. It bounded
+  by the position solve's own multiplier now (`mu * lambda / h`), the
+  velocity pass runs inside the substep rather than once a frame, and the
+  angular half of each contact correction is relaxed by half. A six brick
+  column went from 29 m/s at five seconds to 5 mm/s indefinitely, and a
+  twelve course double-thick wall now settles dead. `left-alone-test`
+  covers it; the old `stack-test` stopped at three seconds and the
+  wind-up was still at four millimetres a second there.
+
+- **XPBD still gives out somewhere around fourteen courses.** Sixteen
+  blows up within five seconds however it is tuned, and *more* substeps
+  or passes make it worse rather than better — which says the trouble is
+  the velocity read-back amplifying corrections that never settle, not
+  convergence. The honest fix is a penetration that is re-measured
+  against the geometry per substep rather than `depth0` plus the anchor
+  drift, which is a linearisation that goes stale as the bricks turn.
+
+- **TGS leaves a velocity floor of about one substep of gravity.** Its
+  Baumgarte bias is `bias/h` rather than `bias/dt`, so with four substeps
+  it pushes four times as hard, and the separating velocity it invents to
+  do that stays in the body afterwards. A settled wall under TGS never
+  gets below ~0.05 m/s, drifts sideways a millimetre or two a second, and
+  topples after fifteen to thirty seconds. Sequential impulse has the
+  same defect a quarter as strong. The fix is the standard one: solve the
+  bias into a pseudo-velocity that moves positions and is thrown away, or
+  go to soft constraints, so the penetration correction never becomes
+  real momentum.
+
+- **Friction is never warm started.** `prepare` restores the normal
+  impulse from last step and quietly drops the tangential ones — they are
+  stored by `contact-state` and never read back. Restoring them makes the
+  wall dramatically better (sequential impulse settles to *zero* and
+  stands for a minute where it collapsed at thirty-three seconds) and
+  makes a plain column worse, because the manifold has no feature
+  identity: contacts are matched by rounding the contact point to two
+  centimetres, which misses five to eight percent of the time, and in a
+  column the tangential impulses being remembered are mostly friction
+  fighting contact-point jitter — a third of them are at the cone limit
+  with no sideways load at all. Contact feature IDs come first; then this
+  is a one-line win.
+
 ### Other techniques still missing
 
 - **Featherstone / articulated bodies** — reduced-coordinate chains,

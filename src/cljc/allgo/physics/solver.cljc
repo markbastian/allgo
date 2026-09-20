@@ -223,6 +223,10 @@
                      contacts))
      :p1 (a/f64 n)
      :p2 (a/f64 n)
+     ;; What the XPBD position solve had to push with to keep this contact
+     ;; apart, summed over the last substep. Only that solver fills it,
+     ;; and it is what bounds friction there.
+     :lambda (a/f64 n)
      ;; The closing speed as the step began, which is what restitution is
      ;; measured against -- after an iteration or two it is gone.
      :approach (a/f64 n)
@@ -389,40 +393,61 @@
   impulse solvers there is no non-negative clamp, because the correction
   wanted here is usually negative -- it is taking energy the position
   solve put in."
-  [{:keys [vel omega ii inv-mass]} cs opts]
+  [{:keys [vel omega ii inv-mass]} cs h opts]
   (let [^doubles normal (:normal cs)
         ^doubles t1 (:t1 cs) ^doubles t2 (:t2 cs)
         ^doubles ra-arr (:ra cs) ^doubles rb-arr (:rb cs)
         ^doubles approach (:approach cs)
+        ^doubles lambda (:lambda cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)
+        h (double h)
         e (double (:restitution opts))
         threshold (double (:restitution-threshold opts))
         friction (double (:friction opts))]
     (dotimes [k (long (:n cs))]
-      (let [ia (aget ia-arr k) ib (aget ib-arr k)
-            ra (vec3-at ra-arr k) rb (vec3-at rb-arr k)
-            n (vec3-at normal k)
-            pre (aget approach k)
-            rv (relative-velocity vel omega ia ib ra rb)
-            vn (v/dot rv n)
-            target (if (< pre (- threshold)) (* (- e) pre) 0.0)
-            dv (- target vn)
-            m (effective-mass ii inv-mass ia ib ra rb n)
-            p (v/scale n (* m dv))]
-        (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
-        (apply-impulse! vel omega ii inv-mass ib rb p 1.0)
-        ;; Friction against whatever normal force held this contact,
-        ;; approximated by the impulse that would have.
-        (let [limit (* friction (abs (* m (max 0.0 (- pre)))))
-              rv (relative-velocity vel omega ia ib ra rb)]
-          (doseq [tarr [t1 t2]]
-            (let [t (vec3-at ^doubles tarr k)
-                  vt (v/dot rv t)
-                  mt (effective-mass ii inv-mass ia ib ra rb t)
-                  j (max (- limit) (min limit (* mt (- vt))))
-                  p (v/scale t j)]
-              (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
-              (apply-impulse! vel omega ii inv-mass ib rb p 1.0))))))))
+      ;; Only contacts the position solve actually pushed on. A pair that
+      ;; collision detection reported at the top of the frame but that is
+      ;; apart by the time this runs has nothing to correct -- and since
+      ;; the normal velocity here is *set* rather than pushed at, touching
+      ;; one would brake a body that is legitimately flying away from it.
+      ;; That is what killed the bounce: the substep after the impact, the
+      ;; ball was leaving at four metres a second and this pass set it to
+      ;; nothing.
+      (when (pos? (aget lambda k))
+        (let [ia (aget ia-arr k) ib (aget ib-arr k)
+              ra (vec3-at ra-arr k) rb (vec3-at rb-arr k)
+              n (vec3-at normal k)
+              pre (aget approach k)
+              rv (relative-velocity vel omega ia ib ra rb)
+              vn (v/dot rv n)
+              target (if (< pre (- threshold)) (* (- e) pre) 0.0)
+              dv (- target vn)
+              m (effective-mass ii inv-mass ia ib ra rb n)
+              p (v/scale n (* m dv))]
+          (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
+          (apply-impulse! vel omega ii inv-mass ib rb p 1.0)
+          ;; Friction against the normal force that actually held this
+          ;; contact -- the multiplier the position solve needed, over the
+          ;; substep: `mu * lambda / h`.
+          ;;
+          ;; It used to be bounded by the approach speed instead, and that
+          ;; is zero for anything at rest, so a settled stack had no
+          ;; friction at all. Nothing then removed the sideways and
+          ;; angular velocity the position solve hands back -- it reads
+          ;; velocity off the correction at the substep rate, so a
+          ;; millimetre of pushout is a quarter of a metre a second -- and
+          ;; a six brick column wound itself from 6mm/s to 29m/s in five
+          ;; seconds.
+          (let [limit (* friction (/ (abs (aget lambda k)) h))
+                rv (relative-velocity vel omega ia ib ra rb)]
+            (doseq [tarr [t1 t2]]
+              (let [t (vec3-at ^doubles tarr k)
+                    vt (v/dot rv t)
+                    mt (effective-mass ii inv-mass ia ib ra rb t)
+                    j (max (- limit) (min limit (* mt (- vt))))
+                    p (v/scale t j)]
+                (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
+                (apply-impulse! vel omega ii inv-mass ib rb p 1.0)))))))))
 
 (defn- warm-start! [{:keys [vel omega ii inv-mass]} cs]
   (let [^doubles normal (:normal cs)
@@ -548,12 +573,24 @@
   `allgo.physics.rigid/correct` already knows how to share a correction
   between two bodies by how much each gives at the point it acts -- which
   is the same question a contact asks, so there is nothing to add here
-  but the error vector."
+  but the error vector, and the multiplier it needed on the way back.
+
+  The angular half of each correction is relaxed by half, which
+  `allgo.physics.joint` also asks for and for the same reason. A brick in
+  a wall carries eight or ten contact points at once and each one turns
+  it the whole way on its own; they fight, the substep ends somewhere
+  none of them asked for, and that leftover displacement comes back as
+  velocity divided by `h`. Relaxed, a twelve course wall settles dead;
+  unrelaxed it was doing twenty metres a second within a second, and
+  solving it harder -- more passes, more substeps -- made it worse, which
+  is what says the trouble is the read-back and not convergence."
   [bodies cs slop dt]
   (let [^doubles normal (:normal cs)
         ^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
         ^doubles depth0 (:depth0 cs)
-        ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)]
+        ^doubles lambda (:lambda cs)
+        ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)
+        dt (double dt)]
     (reduce (fn [bs k]
               (let [ia (aget ia-arr k) ib (aget ib-arr k)
                     a (nth bs ia) b (nth bs ib)
@@ -563,9 +600,18 @@
                     pen (+ (aget depth0 k) (v/dot (v/sub pa pb) n))
                     c (- pen (double slop))]
                 (if (pos? c)
-                  (:bodies (rigid/correct bs {:a ia :b ib
-                                              :corr (v/scale n (- c))
-                                              :at pa :other-at pb :dt dt}))
+                  (let [{:keys [bodies force]}
+                        (rigid/correct bs {:a ia :b ib
+                                           :corr (v/scale n (- c))
+                                           :at pa :other-at pb :dt dt
+                                           :angular-relaxation 0.5})]
+                    ;; `correct` reports the force; the multiplier behind
+                    ;; it is that over dt squared, and summing it is how
+                    ;; the velocity pass learns how hard this contact was
+                    ;; pushing.
+                    (aset lambda k (+ (aget lambda k)
+                                      (abs (* (double force) dt dt))))
+                    bodies)
                   bs)))
             bodies
             (range (long (:n cs))))))
@@ -624,24 +670,34 @@
         h (/ (double dt) substeps)
         contacts (contact/all bodies)
         cs (prepare bodies contacts (:contacts w))
-        slop (double (:slop w))]
-    ;; How fast the surfaces were closing before anything was solved.
-    ;; Restitution is measured against this, and it has to be taken now --
-    ;; after the position solve it is whatever the pushout left behind.
-    (record-approach! (body-arrays bodies) cs)
+        slop (double (:slop w))
+        ^doubles lambda (:lambda cs)
+        passes (max 1 (quot (long iterations) substeps))]
     (loop [bodies bodies n substeps]
       (if (zero? n)
-        (let [arrays (body-arrays bodies)]
-          (refresh-anchors! bodies cs)
-          (solve-xpbd-velocities! arrays cs w)
-          (assoc w :bodies (write-back bodies arrays) :contacts (contact-state cs)))
-        (let [bodies (mapv #(rigid/integrate % h gravity) bodies)
+        (assoc w :bodies bodies :contacts (contact-state cs))
+        (let [;; Only this substep's multipliers are wanted, so they start
+              ;; again each time round.
+              _ (dotimes [k (long (:n cs))] (aset lambda k 0.0))
+              bodies (mapv #(rigid/integrate % h gravity) bodies)
               _ (refresh-anchors! bodies cs)
+              ;; How fast the surfaces were closing before the solve.
+              ;; Restitution is measured against this; after the position
+              ;; solve it is whatever the pushout left behind.
+              _ (record-approach! (body-arrays bodies) cs)
               bodies (reduce (fn [bs _] (project-contacts bs cs slop h))
                              bodies
-                             (range (max 1 (quot (long iterations) substeps))))
-              bodies (mapv #(rigid/update-velocities % h) bodies)]
-          (recur bodies (dec n)))))))
+                             (range passes))
+              bodies (mapv #(rigid/update-velocities % h) bodies)
+              ;; The velocity pass belongs *inside* the substep, not once
+              ;; at the end of the frame. It is the only thing that takes
+              ;; energy back out -- restitution and friction both -- and
+              ;; running it once per frame left three substeps' worth of
+              ;; sideways motion to accumulate unopposed.
+              arrays (body-arrays bodies)
+              _ (refresh-anchors! bodies cs)
+              _ (solve-xpbd-velocities! arrays cs h w)]
+          (recur (write-back bodies arrays) (dec n)))))))
 
 (defn step
   "One step of the world, by whichever `:solver` it carries."

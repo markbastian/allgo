@@ -76,6 +76,27 @@
                (+ 0.05 (apply max (map y-of (dynamics settled)))))
             (name solver))))))
 
+(deftest left-alone-test
+  (testing "a settled stack is still settled a long time later"
+    ;; The failure this exists for does not show up in the first second.
+    ;; XPBD reads velocity back off the position correction, at the
+    ;; substep rate, so anything the position solve leaves behind is
+    ;; multiplied by 240 -- and with nothing to take it out again it
+    ;; compounds. A six brick column sat at six millimetres a second for
+    ;; four seconds and was doing twenty nine metres a second at five.
+    ;; Any test that stops at three seconds calls that stable.
+    (doseq [solver solvers]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 5)]
+                                (brick [0.0 (+ 0.25 (* i 0.5)) 0.0]))))
+            w (run solver bodies 600)]
+        (is (every? finite? (dynamics w)) (name solver))
+        (is (< (apply max (map speed (dynamics w))) 0.3)
+            (str (name solver) " wound itself up: "
+                 (vec (map speed (dynamics w)))))
+        (is (every? #(< (abs (nth (:pos %) 0)) 0.3) (dynamics w))
+            (str (name solver) " walked sideways"))))))
+
 (deftest restitution-test
   (testing "a bouncy ball bounces and a dead one does not"
     (doseq [solver solvers]
