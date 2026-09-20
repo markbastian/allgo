@@ -482,10 +482,18 @@ TGS stops toppling too, though it keeps its own floor, below.
   being applied in the world's frame rather than the root's, which is
   invisible until the root both falls and spins. What is left:
 
-  - **Contacts.** The reason the constraint formulation is still the
-    right shape for a pile of bricks is that a contact and a joint go
-    through the same solver. A reduced-coordinate ragdoll that cannot be
-    hit is not much of a ragdoll. This is the big one.
+  - **Contacts.** Half done. What a contact solver asks of a body is two
+    questions -- how much velocity does a push here buy, and please take
+    this impulse -- and both now have answers: `impulse-at` gives the
+    effective mass at a world point in a direction, `apply-impulse`
+    takes one. Both come out of `H^-1`, which the articulated body
+    algorithm hands over a column at a time. An impulse on a free model
+    changes its momentum by exactly that impulse, to 5e-16.
+
+    What is missing is the other end: the links have no shapes, so
+    nothing generates the contacts in the first place. That wants a
+    collision shape per link, poses handed to `allgo.physics.contact`,
+    and a solve loop over the manifold it returns.
   - **Multi-degree-of-freedom joints.** A shoulder is a ball joint;
     today it has to be spelled as three hinges with massless links
     between them.

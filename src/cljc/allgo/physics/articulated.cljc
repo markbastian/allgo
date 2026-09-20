@@ -35,11 +35,28 @@
   working out how it accelerates. That is what this does, in time linear
   in the number of links.
 
-  What it gives up is everything the constraint formulation was good at.
-  A reduced-coordinate chain cannot be hit by a brick, cannot be taken
-  apart, and cannot close a loop -- a tree of joints is the whole of what
-  it can describe. Contacts are the interesting half of that and are not
-  here yet.
+  What it gives up is being able to come apart or close a loop: a tree of
+  joints is the whole of what it can describe.
+
+  ## Being hit
+
+  It can be hit, though, which took one more thing. A contact solver
+  asks a body two questions -- how much velocity does a push here buy,
+  and please take this impulse -- and neither has an obvious answer for
+  a body whose motion is described by joint angles.
+
+  Both come out of `H^-1`, the generalised inverse inertia, which the
+  articulated body algorithm hands over a column at a time: nothing
+  moving, no gravity, one unit of generalised force, and the
+  accelerations that result *are* that column. With a Jacobian for the
+  contact point, `1 / (d^T J H^-1 J^T d)` is the mass felt there and
+  `H^-1 J^T d` is what an impulse does to the joint rates.
+
+  That number is the interesting one. A hand on the end of an
+  outstretched arm is light; the same hand with the arm folded against
+  the chest is most of a torso. The constraint formulation gets this
+  right too, eventually, by iterating; here it is one matrix product
+  and it is exact.
 
   ## Knowing it is right
 
@@ -52,6 +69,13 @@
   than to any link, so a sign lost anywhere in the recursion shows up
   there even when every link looks plausible on its own. It is what
   caught gravity being added in the wrong frame.
+
+  The same measure covers being hit. An impulse on a free model must
+  change its linear momentum by exactly that impulse and its angular
+  momentum by exactly that impulse's moment -- which holds only if the
+  Jacobian, the inverse inertia and the momentum sum, three separate
+  pieces of arithmetic, all agree. They do, to about 5e-16, for a
+  rotated base and an oblique push on a middle link.
 
   ## Spatial vectors
 
@@ -257,6 +281,20 @@
 
 (defn- scaled [s ^double x] (mapv #(* (double %) x) s))
 
+(defn- spatial-velocities
+  "Every link's spatial velocity, in its own coordinates.
+
+  Linear in `(v0, qd)` and used three ways because of it: to say what a
+  model is doing now, and -- one unit of generalised velocity at a time
+  -- to build the Jacobian of any point on it."
+  [ls v0 qd]
+  (reduce (fn [acc i]
+            (let [{:keys [xup s parent]} (nth ls i)
+                  vp (if (neg? (long parent)) v0 (nth acc parent))]
+              (conj acc (mapv + (lin/mat-vec xup vp) (scaled s (nth qd i))))))
+          []
+          (range (count ls))))
+
 (defn- base-acceleration
   "The base's spatial acceleration, which is how gravity gets in.
 
@@ -369,7 +407,8 @@
   on it, so its acceleration is whatever makes that sum vanish. The
   bolted case is the same equation with the answer already known."
   ([model q-vec qd tau] (forward-dynamics model q-vec qd tau nil))
-  ([model q-vec qd tau {gravity :gravity root-state :base}]
+  ([model q-vec qd tau {gravity :gravity root-state :base
+                        ext :external root-force :base-force}]
    (let [ls (links model q-vec)
          n (count ls)
          root (base model)
@@ -400,11 +439,19 @@
                         inertia (:i (nth ls i))
                         vj (scaled s (nth qd i))
                         vp (if (neg? parent) v0 (:v (nth acc parent)))
-                        vi (mapv + (lin/mat-vec xup vp) vj)]
+                        vi (mapv + (lin/mat-vec xup vp) vj)
+                        ;; An outside force on a link reduces the bias
+                        ;; force the link needs of its parent by exactly
+                        ;; itself, which is the whole of how anything
+                        ;; external gets in -- a contact, a thruster, a
+                        ;; hand pushing.
+                        f (when ext (nth ext i nil))]
                     (conj acc {:v vi
                                :c (lin/mat-vec (crm vi) vj)
                                :ia inertia
-                               :pa (lin/mat-vec (crf vi) (lin/mat-vec inertia vi))})))
+                               :pa (let [bias (lin/mat-vec (crf vi)
+                                                           (lin/mat-vec inertia vi))]
+                                     (if f (mapv - bias f) bias))})))
                 []
                 (range n))
          ;; Pass two, inward: what the subtree beyond each joint looks
@@ -439,7 +486,8 @@
                 {:links pass1
                  :ia0 root-i
                  :pa0 (when root
-                        (lin/mat-vec (crf v0) (lin/mat-vec root-i v0)))}
+                        (let [bias (lin/mat-vec (crf v0) (lin/mat-vec root-i v0))]
+                          (if root-force (mapv - bias root-force) bias)))}
                 (reverse (range n)))
          solved (:links pass2)
          ;; The root, if it is free: force-free in the falling frame.
@@ -566,12 +614,7 @@
          ls (links model q)
          fs (poses model q b)
          v0 (if root (vec (or (:vel b) (repeat 6 0.0))) (vec (repeat 6 0.0)))
-         vels (reduce (fn [acc i]
-                        (let [{:keys [xup s parent]} (nth ls i)
-                              vp (if (neg? parent) v0 (nth acc parent))]
-                          (conj acc (mapv + (lin/mat-vec xup vp) (scaled s (nth qd i))))))
-                      []
-                      (range (count ls)))
+         vels (spatial-velocities ls v0 qd)
          part (fn [inertia vi rot pos mass com]
                 (let [ke (* 0.5 (reduce + (map * vi (lin/mat-vec inertia vi))))
                       c (v/add pos (q/rotate rot com))]
@@ -602,12 +645,7 @@
         ls (links model q)
         fs (poses model q b)
         v0 (if root (vec (or (:vel b) (repeat 6 0.0))) (vec (repeat 6 0.0)))
-        vels (reduce (fn [acc i]
-                       (let [{:keys [xup s parent]} (nth ls i)
-                             vp (if (neg? parent) v0 (nth acc parent))]
-                         (conj acc (mapv + (lin/mat-vec xup vp) (scaled s (nth qd i))))))
-                     []
-                     (range (count ls)))
+        vels (spatial-velocities ls v0 qd)
         ;; Each body's spatial momentum `I v` is in its own frame and
         ;; about its own origin. Both have to be carried to the world
         ;; before they can be added up.
@@ -624,3 +662,142 @@
                                  :pos (or (:pos b) v/zero)})))]
     {:linear (reduce v/add v/zero (map first parts))
      :angular (reduce v/add v/zero (map second parts))}))
+
+;; ---------------------------------------------------------------------------
+;; Being pushed
+
+(defn generalised-dof
+  "How many numbers it takes to say how fast the whole model is moving:
+  one per joint, plus six for a root that is free to move."
+  [model]
+  (+ (dof model) (if (base model) 6 0)))
+
+(defn- split
+  "A generalised velocity back into the base's six and the joints' rest."
+  [model u]
+  (if (base model)
+    [(vec (take 6 u)) (vec (drop 6 u))]
+    [(vec (repeat 6 0.0)) (vec u)]))
+
+(defn frame-of
+  "Where body `i` is, in world terms. `-1` is the free root itself."
+  [model q-vec root-state i]
+  (if (neg? (long i))
+    {:rot (or (:rot root-state) q/identity-q) :pos (or (:pos root-state) v/zero)}
+    (nth (poses model q-vec root-state) i)))
+
+(defn- velocity-at
+  "The world velocity of the point of body `i` at `p`, given every body's
+  spatial velocity and where they are."
+  [vels v0 {:keys [rot pos]} i p]
+  (let [vi (vec (if (neg? (long i)) v0 (nth vels i)))
+        w (q/rotate rot (subvec vi 0 3))
+        at-origin (q/rotate rot (subvec vi 3 6))]
+    (v/add at-origin (v/cross w (v/sub p pos)))))
+
+(defn point-velocity
+  "How fast the point of body `i` that is at world position `p` is moving.
+  `-1` is the free root itself.
+
+  A point *fixed to the body*, not a point in space: the body's own
+  material carries it, so it moves with its spin as well as its travel."
+  [model q-vec state i p]
+  (let [ls (links model q-vec)
+        root-state (:base state)
+        v0 (vec (or (:vel root-state) (repeat 6 0.0)))
+        vels (spatial-velocities ls v0 (:qd state))]
+    (velocity-at vels v0 (frame-of model q-vec root-state i) i p)))
+
+(defn point-jacobian
+  "The 3 by `generalised-dof` matrix taking a generalised velocity to the
+  world velocity of the point of link `i` at `p`.
+
+  Built a column at a time, by asking what one unit of each generalised
+  velocity on its own does. That is not an approximation -- the map is
+  linear, which is the whole reason a Jacobian exists -- and it costs a
+  velocity recursion per column where a purpose-built one would walk the
+  path from the root once. At a ragdoll's twenty-odd degrees of freedom
+  the difference is not worth the second implementation to get wrong."
+  [model q-vec root-state i p]
+  (let [ls (links model q-vec)
+        n (generalised-dof model)
+        frame (frame-of model q-vec root-state i)
+        column (fn [j]
+                 (let [u (assoc (vec (repeat n 0.0)) j 1.0)
+                       [v0 qd] (split model u)]
+                   (velocity-at (spatial-velocities ls v0 qd) v0 frame i p)))]
+    (lin/transpose (mapv column (range n)))))
+
+(defn inverse-mass-matrix
+  "`H^-1`, the generalised inverse inertia, a column at a time out of the
+  articulated body algorithm.
+
+  Nothing is moving and there is no gravity, so the accelerations a unit
+  generalised force produces *are* that column of the inverse. The
+  inverse rather than the matrix itself because everything asked of it
+  here -- how hard is this point to push, what does an impulse do -- is
+  a question about the inverse, and forming H only to factor it again
+  would be work in both directions."
+  [model q-vec]
+  (let [n (generalised-dof model)
+        root (base model)
+        nj (dof model)
+        zero-q (vec (repeat nj 0.0))
+        free {:gravity [0.0 0.0 0.0]}
+        column (fn [j]
+                 (let [{:keys [qdd base-acc]}
+                       (if (and root (< j 6))
+                         (forward-dynamics model q-vec zero-q zero-q
+                                           (assoc free
+                                                  :base-force (assoc (vec (repeat 6 0.0)) j 1.0)
+                                                  :base {:vel (vec (repeat 6 0.0))}))
+                         (forward-dynamics model q-vec zero-q
+                                           (assoc zero-q (- j (if root 6 0)) 1.0)
+                                           (cond-> free
+                                             root (assoc :base {:vel (vec (repeat 6 0.0))}))))]
+                   (if root (vec (concat base-acc qdd)) (vec qdd))))]
+    (lin/transpose (mapv column (range n)))))
+
+(defn impulse-at
+  "What a unit impulse at world point `p` on body `i`, along `dir`, does.
+  `-1` is the free root itself.
+
+  Returns `{:delta-u :effective-mass}`: the change in generalised
+  velocity per unit of impulse, and the mass the impulse feels there.
+
+  The second is `1 / (d^T J H^-1 J^T d)`, and it is the number a contact
+  solver actually wants -- how much velocity a given push buys at this
+  point in this direction, with the whole articulated body hanging off
+  it. A hand on the end of an outstretched arm is light; the same hand
+  with the arm folded against the chest is most of a torso."
+  [model q-vec root-state i p dir]
+  (let [j (point-jacobian model q-vec root-state i p)
+        hinv (inverse-mass-matrix model q-vec)
+        ;; J^T d: the generalised force a unit impulse along `dir` makes.
+        jtd (lin/mat-vec (lin/transpose j) (vec dir))
+        delta (lin/mat-vec hinv jtd)
+        w (reduce + (map * jtd delta))]
+    {:delta-u delta
+     :effective-mass (if (> w 1e-12) (/ 1.0 w) ##Inf)}))
+
+(defn apply-impulse
+  "`state` after an impulse of `magnitude` at world point `p` on body
+  `i`, along `dir`. `-1` is the free root itself.
+
+  Positions do not move -- an impulse is instantaneous by definition --
+  so only the velocities change, and they change by `H^-1 J^T d` times
+  the magnitude. This is the whole of what a contact solver needs of an
+  articulated body, and it is why contacts can be added to one without
+  the dynamics knowing anything about them."
+  [model state i p dir magnitude]
+  (let [magnitude (double magnitude)
+        {:keys [delta-u]} (impulse-at model (:q state) (:base state) i p dir)
+        root (base model)
+        n (dof model)
+        scaled-delta (mapv #(* (double %) magnitude) delta-u)]
+    (if root
+      (-> state
+          (update-in [:base :vel] #(mapv + (vec (or % (repeat 6 0.0)))
+                                         (take 6 scaled-delta)))
+          (update :qd #(mapv + % (drop 6 scaled-delta))))
+      (update state :qd #(mapv + % (take n scaled-delta))))))

@@ -209,3 +209,82 @@
                          (:linear m1))
              1e-2)
           (str (:linear m0) " -> " (:linear m1))))))
+
+;; ---------------------------------------------------------------------------
+;; Being pushed
+
+(defn- sphere-ish
+  "A free body whose centre of mass is at its frame origin and whose
+  inertia is the same about every axis, so the textbook formulae for
+  being hit apply without any further care."
+  [m i]
+  {:base {:mass m :com [0.0 0.0 0.0]
+          :inertia [[i 0.0 0.0] [0.0 i 0.0] [0.0 0.0 i]]}
+   :links []})
+
+(deftest impulse-test
+  (testing "through the centre of mass, a free body weighs what it weighs"
+    (let [m 2.5]
+      (is (close? (:effective-mass (ab/impulse-at (sphere-ish m 0.7) [] at-rest -1
+                                                  [0.0 0.0 0.0] [1.0 0.0 0.0]))
+                  m 1e-12))))
+
+  (testing "off the centre of mass it weighs less, by the textbook amount"
+    ;; 1/m_eff = 1/m + (r x d) . I^-1 (r x d). An impulse that can spin
+    ;; the body as well as move it meets less resistance.
+    (let [m 2.5 i 0.7
+          r [0.0 0.4 0.0] dir [1.0 0.0 0.0]
+          rn (v/cross r dir)
+          exact (/ 1.0 (+ (/ 1.0 m) (/ (v/dot rn rn) i)))]
+      (is (close? (:effective-mass (ab/impulse-at (sphere-ish m i) [] at-rest -1 r dir))
+                  exact 1e-12))))
+
+  (testing "at the tip of a hinged rod it weighs what the hinge leaves"
+    ;; A transverse impulse P at the tip gives qd = P L / I_pivot, so the
+    ;; mass felt there is I_pivot / L^2 -- less than the rod's own mass,
+    ;; because the far end is what moves.
+    (let [L 1.3 m 2.4
+          i-pivot (* (/ 1.0 3.0) m L L)
+          {:keys [effective-mass delta-u]}
+          (ab/impulse-at [(rod -1 L m)] [0.0] nil 0 [L 0.0 0.0] [0.0 1.0 0.0])]
+      (is (close? effective-mass (/ i-pivot (* L L)) 1e-12))
+      (is (close? (first delta-u) (/ L i-pivot) 1e-12))))
+
+  (testing "and along the rod it cannot be pushed at all"
+    ;; The hinge takes the whole of it. An infinite effective mass is the
+    ;; right answer and a contact solver has to be able to receive it.
+    (let [{:keys [effective-mass delta-u]}
+          (ab/impulse-at [(rod -1 1.3 2.4)] [0.0] nil 0 [1.3 0.0 0.0] [1.0 0.0 0.0])]
+      (is (zero? (double (first delta-u))))
+      (is (infinite? effective-mass))))
+
+  (testing "the inverse mass matrix is the inverse of the mass matrix"
+    ;; One comes from the articulated body algorithm without ever forming
+    ;; a matrix, the other from inverse dynamics a column at a time.
+    (doseq [n [1 2 4 6]]
+      (let [model (chain n 0.8 1.7)
+            q (mapv #(* 0.41 (inc (long %))) (range n))
+            prod (lin/mat-mul (ab/inverse-mass-matrix model q) (ab/mass-matrix model q))]
+        (is (every? #(< (abs (double %)) 1e-12)
+                    (flatten (lin/mat-sub prod (lin/eye n))))
+            (str "n=" n)))))
+
+  (testing "an impulse on a free model changes its momentum by exactly that impulse"
+    ;; The one that ties everything together. The Jacobian, the inverse
+    ;; mass matrix and the momentum sum are three separate pieces of
+    ;; arithmetic, and this holds only if all three agree -- for a
+    ;; rotated base, an impulse on a middle link, and an oblique
+    ;; direction, none of which are special-cased anywhere.
+    (let [model (floating [(rod -1 0.7 1.1) (rod 0 0.7 1.1)])
+          st {:q [0.3 -0.5] :qd [0.0 0.0]
+              :base {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6)
+                     :pos [0.3 -0.2 0.5] :vel [0.0 0.0 0.0 0.0 0.0 0.0]}}
+          p [1.0 0.5 -0.2]
+          dir (v/normalize [0.3 1.0 -0.4])
+          mag 2.7
+          m0 (ab/momentum model st)
+          m1 (ab/momentum model (ab/apply-impulse model st 1 p dir mag))]
+      (is (< (v/distance (v/sub (:linear m1) (:linear m0)) (v/scale dir mag)) 1e-12))
+      (is (< (v/distance (v/sub (:angular m1) (:angular m0))
+                         (v/cross p (v/scale dir mag)))
+             1e-12)))))
