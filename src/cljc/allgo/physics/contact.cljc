@@ -88,6 +88,24 @@
        (* hy (abs (v/dot ay axis)))
        (* hz (abs (v/dot az axis))))))
 
+(def speculative
+  "How far apart two bodies can be and still be given a contact.
+
+  A contact that only exists once the bodies already overlap can only
+  ever clean up after a collision it was too late to prevent: the solver
+  is handed a penetration and has to push it out, and if the stack is
+  deep enough that it cannot push it all out in the iterations it has,
+  the overlap grows until the separating axis test picks a different axis
+  and the two pass through each other. That is how a twenty brick column
+  telescopes into the floor.
+
+  A speculative contact is made *before* the touch, carries a negative
+  depth -- a gap -- and asks the solver for something weaker than `do not
+  overlap`: approach no faster than closes that gap this step. A body
+  flying at a wall is then stopped exactly at the surface rather than
+  after it. Four times the solver's slop, which is Box2D's figure."
+  0.02)
+
 (defn- overlap-on
   "How much the two boxes overlap along `axis`.
 
@@ -108,7 +126,10 @@
       (let [n (v/scale axis (/ 1.0 len))
             d (abs (v/dot (v/sub (:pos b) (:pos a)) n))
             o (- (+ (radius-on a n) (radius-on b n)) d)]
-        (if (pos? o) [o n] :separated)))))
+        ;; Within the speculative margin counts as touching. `o` comes
+        ;; back negative there and stays negative all the way to the
+        ;; solver, which is what tells it this is a gap, not an overlap.
+        (if (pos? (+ o speculative)) [o n] :separated)))))
 
 (defn- face-verts
   "The four corners of the box face whose outward normal is `axis-index`
@@ -236,7 +257,7 @@
           (comp (distinct-points 1e-6)
                 (keep (fn [[p pid]]
                         (let [depth (- ref-d (v/dot ref-n p))]
-                          (when (>= depth (- eps))
+                          (when (>= depth (- speculative))
                       ;; Reported on the reference surface rather than at
                       ;; the clipped point, so both bodies agree where the
                       ;; touch is.
@@ -251,7 +272,9 @@
                        ;; body was the reference, and that decides what
                        ;; the rest of the id means.
                              :id [(boolean flip?) ref-axis ref-sign inc-axis inc-sign pid]
-                             :depth (max 0.0 depth)})))))
+                             ;; Signed: positive is an overlap, negative
+                             ;; a gap the solver is allowed to see coming.
+                             :depth depth})))))
           clipped)))
 
 (defn- closest-on-segments
@@ -351,7 +374,7 @@
   (let [d (v/sub (:pos b) (:pos a))
         dist (v/length d)
         r (+ (double (:radius a)) (double (:radius b)))]
-    (if (or (>= dist r) (< dist eps))
+    (if (or (>= dist (+ r speculative)) (< dist eps))
       []
       (let [n (v/scale d (/ 1.0 dist))]
         [{:a ia :b ib
@@ -392,7 +415,7 @@
       (let [world (v/add (q/rotate (:rot b) clamped) (:pos b))
             d (v/sub world (:pos a))
             dist (v/length d)]
-        (if (or (>= dist r) (< dist eps))
+        (if (or (>= dist (+ r speculative)) (< dist eps))
           []
           [{:a ia :b ib
             :point world

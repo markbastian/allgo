@@ -289,38 +289,60 @@ TGS stops toppling too, though it keeps its own floor, below.
 
 ### What is still wrong
 
-- **A column deeper than about eight courses telescopes.** Ten bricks
-  and up, every solver, before this work and after: the stack sinks into
-  itself until the boxes are more than half overlapped, at which point
-  the separating axis test picks a different axis, the normal flips, and
-  they pass through each other. More iterations do not fix it — sixty is
-  no better than eight — so it is not the solve converging too slowly on
-  its own terms. Two things to try, in order: substepping proper (Macklin's
-  *Small Steps in Physics Simulation* — several small steps each solved
-  once beats one step solved many times, and it is what XPBD and TGS are
-  built on), and a contact that refuses to flip its normal once it has one,
-  which is what a persistent manifold buys beyond warm starting.
+- **A tall column topples, and by now that is mostly honest.** The
+  telescoping is gone. A stack used to sink into itself until the boxes
+  were more than half overlapped, at which point the separating axis test
+  picked a different axis, the normal flipped, and they passed through
+  each other. Speculative contacts stopped that — the solver is told
+  about a touch before it is a penetration — and small steps hold the
+  rest. Courses still standing after twenty seconds, TGS:
 
-- **TGS leaves a velocity floor of about one substep of gravity, and it
-  is starvation rather than Baumgarte.** Every brick in a settled wall
-  under TGS is falling at 0.03 to 0.05 m/s — downward, and more of it the
-  higher up the wall, which is the shape of a Gauss-Seidel correction
-  that has not reached the top. `per` is `(quot iterations substeps)`, so
-  the demo's defaults give each substep *two* sweeps to cancel the
-  gravity that substep just added, and two sweeps carry the floor's
-  correction up two courses of five. The floor tracks that budget and
-  nothing else:
+      column of          6    10    14    20
+      before             6     3     2     2
+      after              6    10     3     8
+
+  What remains is a real toppling mode rather than a numerical one. A
+  nine metre column half a metre thick is an unstable equilibrium, and
+  the lean grows as `e^(0.4 t)` — *slower* than the `e^(1.05 t)` an
+  inverted pendulum that tall would manage, so friction is doing its work
+  and the solver is not adding to it. What nothing here does is damp the
+  perturbation to nothing, and nothing will: the seed is the solve's own
+  asymmetry, a millimetre a second or so, and an unstable equilibrium
+  amplifies whatever it is given.
+
+  The answer every shipping engine uses is **sleeping**, and it is the
+  next thing to build. An island whose bodies stay under a velocity
+  threshold for half a second is frozen: velocities zeroed, no
+  integration, no solve, nothing generated against it until something
+  touches it. A settled column then cannot topple, because nothing is
+  perturbing it any more — and a settled wall stops costing anything,
+  which is the other half of why engines do it. It is listed below as
+  missing; it should be listed first.
+
+- **Sequential impulse does not substep, so it got none of this.** The
+  small-steps rework is `step-tgs` alone. Sequential impulse keeps its
+  one linearisation per step deliberately — that is what it *is*, and
+  comparing the three is the point of having three — so its column limit
+  is still about six courses. If the demo wants a default that stacks,
+  the default should be TGS, which it already is.
+
+- **TGS's velocity floor is gone, and the relax pass is why.** It used to
+  leave about one substep of gravity in every body — 0.05 m/s, downward,
+  more of it the higher up the wall, which is the shape of a Gauss-Seidel
+  correction that has not reached the top. What fixed it was not more
+  sweeps but the right ones: warm starting every substep instead of only
+  the first, and a relax pass after the positions move that solves for
+  nothing but *stop closing*, taking back the velocity the push put in.
+  That pass is the cheap standard alternative to a pseudo velocity, and
+  unlike a pseudo velocity it goes through the friction solve. The cost
+  is real — a settled 5x4 wall went from 1.5ms a step to 2.3ms.
+
+  For the record, since establishing it cost a day: the floor was never
+  Baumgarte. It was flat against the old `bias` — 0.2, 0.1 and 0.05 all
+  gave 0.049 — and it tracked the sweep budget exactly:
 
       sweeps per substep   8     4     2     1
       floor (m/s)          0.011 0.035 0.049 0.058
-
-  It was flat against the old `bias` too — 0.2, 0.1 and 0.05 all gave
-  0.049 — which is what ruled Baumgarte out. Sequential impulse gets the
-  whole budget in one go. The fix is sweeps, and the question is what
-  `iterations` should mean: PhysX substeps are full solves, this one
-  divides a fixed budget so the three solvers can be compared at equal
-  cost. Right for a demo about comparing them, wrong for a wall that is
-  meant to stand.
 
 - **Split impulse was tried and does not pay.** Written and measured:
   the bias solved into a pseudo velocity of its own, cleared every

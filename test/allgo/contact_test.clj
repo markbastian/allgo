@@ -41,11 +41,26 @@
     (is (empty? (ct/between 0 1 (box [0.0 0.0 0.0]) (box [0.0 3.0 0.0]))))
     (is (empty? (ct/between 0 1 (box [0.0 0.0 0.0]) (box [2.5 0.0 0.0])))))
 
-  (testing "boxes exactly abutting do not overlap either"
-    ;; Touching is not penetrating. Bodies laid out edge to edge report
-    ;; nothing until gravity presses them together, which is correct and
-    ;; is worth knowing when a scene looks inert on its first frame.
-    (is (empty? (ct/between 0 1 (box [0.0 0.0 0.0]) (box [0.0 1.0 0.0])))))
+  (testing "boxes exactly abutting touch, at zero depth"
+    ;; They are not penetrating, and they still get a contact: the solver
+    ;; is told about a touch it can hold rather than a penetration it has
+    ;; to undo. A stack laid out brick on brick is in contact on its
+    ;; first frame, before gravity has pressed anything together, which
+    ;; is the difference between a column that settles and one that free
+    ;; falls a frame and then has to be caught.
+    (let [cs (ct/between 0 1 (box [0.0 0.0 0.0]) (box [0.0 1.0 0.0]))]
+      (is (= 4 (count cs)))
+      (is (every? #(zero? (:depth %)) cs))))
+
+  (testing "and a gap inside the speculative margin is reported as a gap"
+    ;; Negative depth is the signal: these are apart by that much, and
+    ;; the solver may let them close it but no faster.
+    (let [gap (* 0.5 ct/speculative)
+          cs  (ct/between 0 1 (box [0.0 0.0 0.0]) (box [0.0 (+ 1.0 gap) 0.0]))]
+      (is (seq cs))
+      (is (every? #(< (abs (- (- gap) (:depth %))) 1e-9) cs)))
+    (is (empty? (ct/between 0 1 (box [0.0 0.0 0.0])
+                            (box [0.0 (+ 1.0 (* 2.0 ct/speculative)) 0.0])))))
 
   (testing "a rotated box that clears the corner is separated"
     ;; Diagonally offset far enough that an edge-edge axis separates
@@ -108,9 +123,12 @@
     (testing "a wall of bricks produces contacts everywhere it touches"
       (is (> (count cs) 100)))
 
-    (testing "every normal is a unit vector and every depth is positive"
+    (testing "every normal is a unit vector, and no depth is a tunnel"
       (is (every? #(unit? (:normal %)) cs))
-      (is (every? #(pos? (:depth %)) cs)))
+      ;; Depth is signed now: an overlap is positive, and a gap inside
+      ;; the speculative margin is negative but never further away than
+      ;; the margin itself.
+      (is (every? #(> (:depth %) (- ct/speculative)) cs)))
 
     (testing "nothing is reported as deeply buried in a resting wall"
       (is (every? #(< (:depth %) 0.2) cs)))

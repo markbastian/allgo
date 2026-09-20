@@ -318,6 +318,7 @@
         slop (double slop)
         restitution (double restitution)
         threshold (double (:restitution-threshold opts))
+        relax? (boolean (:relax? opts))
         ;; The spring, as three numbers the solve can use directly. A
         ;; contact cannot be stiffer than the step can represent, so the
         ;; frequency is capped at a quarter of the step rate -- above that
@@ -341,11 +342,29 @@
             rbx (aget rb-arr k3) rby (aget rb-arr (+ k3 1)) rbz (aget rb-arr (+ k3 2))
             ia3 (* 3 ia) ib3 (* 3 ib) ia9 (* 9 ia) ib9 (* 9 ib)
             ima (aget inv-mass ia) imb (aget inv-mass ib)
-            pen (- (aget depth k) slop)
-            b-term (if (pos? pen) (min (* bias-rate pen) max-push) 0.0)
+            ;; Positive is a gap, negative is an overlap -- the sign
+            ;; convention the speculative margin brings with it.
+            sep (- slop (aget depth k))
+            gap? (pos? sep)
+            ;; A gap asks only that the two not close it faster than this
+            ;; step can afford, so they meet at the surface instead of
+            ;; inside it, and it asks that rigidly -- there is nothing
+            ;; soft about arriving. An overlap is the spring.
+            b-term (if gap?
+                     (- (/ sep dt))
+                     (min (* bias-rate (- sep)) max-push))
+            ms (if gap? 1.0 mass-scale)
+            is (if gap? 0.0 impulse-scale)
             va (aget approach k)
             r-term (if (< va (- threshold)) (* (- restitution) va) 0.0)
-            normal-target (+ b-term r-term)]
+            ;; The relax pass asks for one thing only: that the surfaces
+            ;; stop closing. No push, no bounce, nothing soft. It runs
+            ;; after the bodies have moved and its job is to take back the
+            ;; velocity the push put in, which is the cheap and standard
+            ;; alternative to carrying that push in a pseudo velocity.
+            normal-target (if relax? 0.0 (+ b-term r-term))
+            ms (if relax? 1.0 ms)
+            is (if relax? 0.0 is)]
         ;; Three directions in turn -- the normal, then two tangents --
         ;; rather than a closure called three times. The closure was
         ;; allocated per contact per sweep, two and a half thousand of
@@ -402,7 +421,7 @@
                   ;; rigid, and `mass-scale` 1 with `impulse-scale` 0 is
                   ;; exactly the hard solve they had before.
                   lambda (if normal?
-                           (- (* m mass-scale (- target vd)) (* impulse-scale old))
+                           (- (* m ms (- target vd)) (* is old))
                            (* m (- target vd)))
                   nw (min hi (max lo (+ old lambda)))
                   d (- nw old)]
@@ -683,28 +702,61 @@
            :contacts (contact-state cs))))
 
 (defn- step-tgs
-  "Solve, move a little, re-measure, solve again.
+  "Small steps: several short steps, each solved and each moved.
 
-  Collision detection still runs once per step -- it is far too expensive
-  to repeat -- but the anchors are kept in body space, so after each
-  substep the contact's lever arms and overlap can be recovered from
-  where the bodies now are. That is what the later iterations are solving
-  against, and it is the whole difference from sequential impulse."
+  The shape is the one Box2D v3 and PhysX's TGS Soft use, and Macklin's
+  *Small Steps in Physics Simulation* is the argument for it -- several
+  small steps solved once beats one step solved many times, because every
+  substep re-integrates and the constraint is solved against where the
+  bodies now are rather than where they were.
+
+  Per substep, in this order and for these reasons:
+
+    integrate velocities   gravity, over the substep
+    refresh anchors        lever arms and separation from where the
+                           bodies are now. Collision detection itself
+                           runs once for the whole step -- it costs more
+                           than the entire solve -- but the anchors are
+                           kept in body space, so this recovers the
+                           geometry without it. That is the whole trick.
+    warm start             apply the impulses this contact needed last
+                           time. Every substep, not just the first: the
+                           accumulated impulse is a force over a substep,
+                           and a force that held the stack up a moment
+                           ago is the best guess there is for now.
+    solve, with bias       the soft contact, pushing overlap out and
+                           holding gaps open
+    integrate positions    move by the velocity just solved
+    relax, without bias    solve again with no push and no bounce, which
+                           takes back the velocity the push added. This
+                           is what stops a settled stack from breathing,
+                           and it is why no pseudo velocity is needed.
+
+  Restitution is measured once, against the closing speed as the step
+  began -- after a substep of solving it is gone."
   [{:keys [bodies gravity iterations substeps warm-start?] :as w} dt]
   (let [substeps (max 1 (long substeps))
         h (/ (double dt) substeps)
         per (max 1 (quot (long iterations) substeps))
+        relax-opts (assoc w :relax? true)
         contacts (contact/all bodies)]
     (loop [bodies bodies cs (prepare bodies contacts (:contacts w)) n substeps first? true]
       (if (zero? n)
         (assoc w :bodies bodies :contacts (contact-state cs))
-        (let [arrays (body-arrays bodies)]
-          (accelerate! arrays bodies gravity h)
-          (refresh-anchors! bodies cs)
-          (when first? (record-approach! arrays cs))
-          (when (and warm-start? first?) (warm-start! arrays cs))
-          (dotimes [_ per] (solve-velocities! arrays cs h w))
-          (recur (-> bodies (write-back arrays) (advance h)) cs (dec n) false))))))
+        (let [arrays (body-arrays bodies)
+              _ (accelerate! arrays bodies gravity h)
+              _ (refresh-anchors! bodies cs)
+              _ (when first? (record-approach! arrays cs))
+              _ (when warm-start? (warm-start! arrays cs))
+              _ (dotimes [_ per] (solve-velocities! arrays cs h w))
+              moved (-> bodies (write-back arrays) (advance h))
+              ;; The relax pass sees the bodies where the substep left
+              ;; them, so the anchors are measured again first.
+              relaxed (let [arrays (body-arrays moved)]
+                        (refresh-anchors! moved cs)
+                        (solve-velocities! arrays cs h relax-opts)
+                        (write-back moved arrays))]
+          (recur relaxed cs (dec n) false))))))
 
 (defn- step-xpbd
   "Do not solve velocities: move the bodies until they no longer overlap,
