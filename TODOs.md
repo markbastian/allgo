@@ -571,23 +571,38 @@ TGS stops toppling too, though it keeps its own floor, below.
     withdrawn rather than corrected -- see the note on measuring from a
     backgrounded tab, above. The `joint limits` toggle is the one worth
     trying: off, the figure settles into a pile of sticks.
-- **An articulated model can only be hit by scenery.** `contacts-with`
-  takes static `allgo.physics.rigid` bodies, so a ragdoll can fall down
-  stairs and cannot knock a brick off a wall. The two halves of this
-  library have never met.
+- ~~**An articulated model can only be hit by scenery.**~~ Done, in
+  `allgo.physics.world`: a scene of loose rigid bodies and jointed
+  models that collide with each other. A ragdoll can knock a brick off
+  a wall now, which is the first thing either half of this library has
+  done that the other could not.
 
-  The interface for it exists on the articulated side already, because
-  the contact work was built that way: `impulse-at` answers how much
-  velocity a push at a world point buys, and `apply-impulse` takes one.
-  What does not fit is the other side. `allgo.physics.solver`'s sweep
-  is written around flat per-body arrays of velocity, inverse mass and
-  inverse inertia — deliberately, and it is most of why it is fast —
-  and an articulated model has no `1/m` to put in them. Its answer to
-  the same question is a walk through a tree.
+  The shape it took is the part worth keeping. It is not a connector
+  between the two solvers, because `allgo.physics.solver`'s sweep is
+  written around flat per-body arrays of inverse mass and inverse
+  inertia and an articulated model has no `1/m` to put in one. The
+  split that works is per *contact*: a contact knows what is on each
+  side of it, and every kind of body can answer the same three
+  questions -- how fast is the surface here, what does a unit impulse
+  buy, take this impulse. A rigid body answers from its inverse
+  inertia, an articulated link from a walk of its tree, a static body
+  answers nothing. One Gauss-Seidel sweep covers all of them together,
+  which is what makes a brick pushed by both a hand and the brick below
+  it see both pushes in the same iteration.
 
-  So this is a third solve path over mixed contacts rather than a
-  connector between two existing ones, and the thing to be careful of
-  is not paying for it on the contacts that are rigid on both sides.
+  Measured: a limb swung at 4 rad/s into a loose brick is slowed to
+  0.67 and sends the brick off at 1.3 m/s; with nothing there it keeps
+  4.0 exactly. A model alone in a world moves identically to the same
+  model under `allgo.physics.articulated/step`, to 1e-12 -- the world
+  adds nothing when there is nothing to add. And the exchange loses
+  momentum only as fast as the integrator does, which is first order:
+  halve the step and the loss halves.
+
+  What it is not: sequential impulse only, with no substepping, no
+  XPBD, no sleeping, and warm starting that lasts a step rather than
+  crossing between them. `allgo.physics.solver` keeps all of those and
+  is still the thing for a scene that is only bricks. Two articulated
+  models cannot touch each other yet; one can touch itself.
 
 - **Continuous collision detection.** Half done. Speculative contacts
   — the cheap version — are in: the margin out to which a gap still

@@ -1217,6 +1217,16 @@
                                                (+ rz (* h dz)) (+ rw (* h dw))])
                             :pos (v/add-scaled pos u dt)))))))
 
+(defn advance
+  "Move by whatever the velocities already are, and change nothing else.
+
+  `step` is accelerate, then contacts, then this. A caller that has done
+  its own accelerating and its own contacts -- `allgo.physics.world`,
+  which has other bodies to account for in the same sweep -- wants only
+  the last of the three."
+  [state model dt]
+  (advance-positions model state dt))
+
 (defn step
   "One semi-implicit Euler step of `{:q :qd}`, and `:base` if there is
   one, under `tau`.
@@ -1727,6 +1737,53 @@
         delta (pair-delta model ls ai i f j f')
         w (dot-n g delta)]
     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
+
+(defn configuration
+  "Everything about where a model is that a step's worth of questions
+  can share: each link's transform and inertia, what every joint weighs
+  from above, and where every part has ended up.
+
+  All of it depends only on `q` and the root's pose, so it is built once
+  and handed to `response-at` as many times as the contacts need. Opaque
+  -- the shapes inside are this namespace's business."
+  [model q-vec root-state]
+  (let [ls (links model q-vec)]
+    {:ls ls
+     :ai (articulated-inertias model ls)
+     :frames (poses model q-vec root-state)
+     :q q-vec
+     :root root-state}))
+
+(defn response-at
+  "How a unit impulse at world point `p` on body `i` along `dir` is felt,
+  given a `configuration`.
+
+  `{:force :delta :mass}` -- the generalised force the impulse makes, so
+  that the closing speed along `dir` is `force . u`; what it does to
+  `u`; and the mass it meets there. Both vectors are flat arrays as long
+  as `generalised-dof`, which is raw for a public interface and is the
+  point: this is what a contact solver holds per contact per direction
+  and iterates over, and boxing it would undo the reason it is fast.
+
+  `mass` is zero rather than infinite where nothing can move that way --
+  it is the number an impulse gets multiplied by."
+  [model cfg i p dir]
+  (let [{:keys [ls ai frames q root]} cfg]
+    (response model ls ai (frame-of model q root i frames) i p (v/normalize dir))))
+
+(defn pair-response-at
+  "The same, for an impulse between two bodies of the *same* model --
+  `i` pushed along `dir` and `j` the other way.
+
+  Not the same as asking twice. The two responses interact through
+  everything the pair have in common, which is at least the root, and
+  the mass it meets is a reduced mass rather than either body's own."
+  [model cfg i j p dir]
+  (let [{:keys [ls ai frames q root]} cfg]
+    (pair-response model ls ai
+                   (frame-of model q root i frames) i
+                   (frame-of model q root j frames) j
+                   p (v/normalize dir))))
 
 (defn impulse-at
   "What a unit impulse at world point `p` on body `i`, along `dir`, does.
