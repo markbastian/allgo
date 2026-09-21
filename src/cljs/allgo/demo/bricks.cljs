@@ -154,29 +154,40 @@
 
   The wall starts small because this is not yet fast, and it is worth
   being exact about why rather than leaving it to be rediscovered.
-  Measured in a browser on a settled nine-by-eight wall -- 72 bricks, 581
-  contacts -- a step costs about 142ms, and it splits:
+  Measured on the JVM on a settled sixteen-by-sixteen wall -- 257 bodies,
+  around 2,400 contacts -- a step and where it goes:
 
-      collision detection   78ms
-      everything else       64ms
+                            sequential impulse    tgs    xpbd
+      total (ms)                         14.7   19.6    32.9
+      collision detection                 6.8    6.8     7.5
+      the constraint solve                2.2    3.0    16.4
+      everything else                     5.7    9.8     9.0
 
-  So it is `allgo.physics.contact` rather than any of the solvers. The
-  separating axis test asks fifteen questions of every touching pair and
-  each is a handful of dot and cross products, which on the JVM the
-  escape analysis makes nearly free and in JavaScript allocates a
-  three-element vector apiece. The solve itself is already written in
-  primitive doubles for that reason; the collision detection is not.
+  So it is `allgo.physics.contact` rather than any of the solvers -- the
+  solve is a sixth of a sequential impulse step. The separating axis test
+  asks fifteen questions of every touching pair and each is a handful of
+  dot and cross products, which on the JVM the escape analysis makes
+  nearly free and in JavaScript allocates a three-element vector apiece.
+  The solve is already written in primitive doubles for that reason; the
+  collision detection is not, and that is the next thing.
+
+  It was not always the top of the list. Until recently most of a step
+  was neither detection nor solve but the cost of carrying bodies and
+  contacts through persistent maps and vectors -- the XPBD position pass
+  rebuilding a 257 element vector of body maps twice per contact, most of
+  all. `allgo.physics.solver` keeps the poses in flat arrays now and the
+  three solvers went from 19.9 / 32.9 / 91.0 ms to the table above.
 
   Turning the iteration count down does not help -- it makes things
   *slower*, because a wall that is not held up spreads out and touches
   more. That is the clearest evidence that the solver is not the
   bottleneck.
 
-  About twenty bricks runs at fifty frames a second, and the sliders go
-  up from there if you want to watch it struggle. What would fix it is
-  the same treatment the solve already had, plus a broad phase that is
-  not every pair against every other -- `allgo.spatial.hash` and
-  `allgo.spatial.sweep` are both sitting there unused."
+  These are JVM numbers, from `make test`'s JDK rather than from a
+  browser. The browser is slower and has not been re-measured since; a
+  tab that is not in front is throttled about sixteenfold, so anything
+  timed there has to be taken as a ratio against a calibration loop
+  rather than read off the clock."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.quaternion :as q]
             [allgo.physics.rigid :as rigid]

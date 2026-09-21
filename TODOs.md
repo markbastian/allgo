@@ -231,23 +231,46 @@ way round. Sequential impulse is last in every one of them. Anything
 claiming a solver is simply better than another should have to explain
 both of those.
 
-**It is not yet fast, and the reason is not the solvers.** Measured in a
-browser on a settled 9x8 wall (72 bricks, 581 contacts), a step is about
-142ms: 78ms of collision detection and 64ms of everything else. Turning
-the iteration count *down* makes it slower, because a wall that is not
-held up spreads out and touches more — which is the clearest evidence
-that the solve is not the bottleneck. About twenty bricks runs at fifty
-frames a second today.
+**It is not yet fast, and the reason is not the solvers.** Turning the
+iteration count *down* makes it slower, because a wall that is not held
+up spreads out and touches more — which is the clearest evidence that
+the solve is not the bottleneck.
+
+On a settled 16x16 wall (257 bodies, ~2,400 contacts) on the JVM, a step
+and where it goes:
+
+                          sequential impulse    tgs    xpbd
+    total (ms)                         14.7   19.6    32.9
+    collision detection                 6.8    6.8     7.5
+    the constraint solve                2.2    3.0    16.4
+    everything else                     5.7    9.8     9.0
+
+The solve is a sixth of a sequential impulse step and a seventh of a TGS
+one. What the other five sixths were, until recently, was the cost of
+carrying bodies and contacts through persistent maps and vectors: the
+XPBD position pass rebuilt a 257-element vector of body maps twice per
+contact, `refresh-anchors!` read four keyword lookups and allocated
+three vectors per contact twice a substep, and `prepare` built a dozen
+typed arrays out of lazy sequences of boxed doubles. Moving those onto
+`body-arrays` took the three solvers from 19.9 / 32.9 / 91.0 ms.
+
+So the ranking below is the *current* one, and collision detection is at
+the top of it now for the first time honestly rather than by default.
 
 What would fix it, in order of expected return:
 
-1. **`allgo.physics.contact` on primitive doubles.** The separating axis
+1. **XPBD's velocity pass.** `solve-xpbd-velocities!` is 12ms of a 33ms
+   step — a third, and twelve times what a TGS sweep costs for the same
+   contacts. It is the last thing in the solver still working through
+   persistent vectors, and it is a much smaller job than the two that
+   were just fixed.
+2. **`allgo.physics.contact` on primitive doubles.** The separating axis
    test asks fifteen questions of every touching pair, each a handful of
    dot and cross products, and in JavaScript every one allocates a
    three-element vector. The solve was rewritten this way and went from
    139 microseconds a contact to a fraction of it; the collision
    detection has not been.
-2. ~~**A broad phase that is not every pair against every other.**~~
+3. ~~**A broad phase that is not every pair against every other.**~~
    Done: `allgo.physics.contact/all` sweeps and prunes through
    `allgo.spatial.sweep`, keeping the sorted order in the world between
    steps, which is what makes it cost about `n` rather than `n log n` on
@@ -261,11 +284,22 @@ What would fix it, in order of expected return:
    not larger at small sizes because there was already an axis-aligned box
    rejection in front of the exact test -- what sweep removes is the `n^2`
    box comparisons, not the exact tests, and those were already few. Which
-   means the narrow phase is now nearly all of it, and item 1 is the
+   means the narrow phase is now nearly all of it, and item 2 is the
    remaining lever.
-3. **Leaner contact preparation.** `prepare` builds a dozen typed arrays
-   per step out of lazy sequences, and computes the tangent basis and the
-   body-local anchors through persistent vectors.
+4. ~~**Leaner contact preparation.**~~ Done. `prepare` is one pass
+   writing the arrays directly, and takes the poses off `body-arrays`
+   rather than the body maps; the world lever arm and the body-local
+   anchor now come out of one subtraction instead of four vector
+   operations and two `nth`s. 5.4ms to 2.3ms.
+5. **Persistent manifolds.** The separating axis test runs from scratch
+   every step, and so does the `{[a b id] -> impulses}` map that matches
+   this step's contacts to last step's for warm starting. Real engines
+   keep the manifold across frames and refresh it, which removes both:
+   the narrow phase only re-runs for pairs that have moved, and warm
+   starting becomes identity rather than a hash lookup.
+6. **SIMD and graph colouring.** What Box2D v3 does to solve four or
+   eight contacts at once. Last, deliberately: it attacks the sixth of
+   the step that is the solve, and there are two larger sixths above it.
 
 ### Standing still
 
