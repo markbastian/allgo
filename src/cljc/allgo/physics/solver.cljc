@@ -268,161 +268,6 @@
                          :contacts []
                          :broad (contact/broad-phase (count bodies))})))
 
-(defn- contact-key
-  "What counts as the same contact as last step, for warm starting.
-
-  The pair, and the feature id `allgo.physics.contact` stamps on the
-  point -- which corner of which face is pressed into which face. It used
-  to be the contact point rounded to two centimetres, and that is a fine
-  key for a stack that is already still and a bad one for a stack that is
-  moving: the points slide across the rounding and the match is lost
-  exactly when the impulse history is most needed. A twenty brick column
-  matched a quarter of its contacts that way and fell over; on ids it
-  matches all of them."
-  [c]
-  [(:a c) (:b c) (:id c)])
-
-(defn- prepare
-  "Turns a frame's contacts into the solver's own arrays.
-
-  Anchors are stored in each body's frame as well as the world's. TGS and
-  XPBD move the bodies mid-solve and need to know where the contact went;
-  sequential impulse does not and ignores them."
-  [bodies contacts previous]
-  (let [n (count contacts)
-        ;; Last step's impulses for the same contact, which is the guess
-        ;; warm starting rests on.
-        old (reduce (fn [m c] (assoc m (contact-key c) [(:pn c) (:p1 c) (:p2 c)]))
-                    {}
-                    previous)
-        remembered (mapv (fn [c] (or (get old (contact-key c)) [0.0 0.0 0.0])) contacts)]
-    {:n n
-     :a (a/i32 (map :a contacts))
-     :b (a/i32 (map :b contacts))
-     :normal (a/f64 (mapcat :normal contacts))
-     :t1 (a/f64 (mapcat #(first (tangents (:normal %))) contacts))
-     :t2 (a/f64 (mapcat #(second (tangents (:normal %))) contacts))
-     :depth (a/f64 (map :depth contacts))
-     ;; The overlap as collision detection found it, kept so that
-     ;; `refresh-anchors!` can add the drift to it rather than to a value
-     ;; the last substep already moved.
-     :depth0 (a/f64 (map :depth contacts))
-     :ra (a/f64 (mapcat (fn [c] (v/sub (:point c) (:pos (nth bodies (:a c))))) contacts))
-     :rb (a/f64 (mapcat (fn [c] (v/sub (:point c) (:pos (nth bodies (:b c))))) contacts))
-     :ra-local (a/f64 (mapcat (fn [c] (rigid/world->local (nth bodies (:a c)) (:point c)))
-                              contacts))
-     :rb-local (a/f64 (mapcat (fn [c] (rigid/world->local (nth bodies (:b c)) (:point c)))
-                              contacts))
-     :pn (a/f64 (map #(nth % 0) remembered))
-     ;; The tangential impulses come back too, now that the match is
-     ;; exact. They were being dropped -- stored by `contact-state` every
-     ;; step and never read -- so friction began each step from nothing
-     ;; and had to be rediscovered in the iterations it had left, which
-     ;; is what let a stack creep sideways while it stood.
-     :p1 (a/f64 (map #(nth % 1) remembered))
-     :p2 (a/f64 (map #(nth % 2) remembered))
-     ;; What the XPBD position solve had to push with to keep this contact
-     ;; apart, summed over the last substep. Only that solver fills it,
-     ;; and it is what bounds friction there.
-     :lambda (a/f64 n)
-     ;; The closing speed as the step began, which is what restitution is
-     ;; measured against -- after an iteration or two it is gone.
-     :approach (a/f64 n)
-     :contacts (vec contacts)}))
-
-(defn- body-arrays
-  "The bodies as flat arrays, in one pass over the maps.
-
-  Velocity and world inertia are what the impulse solvers work in. The
-  pose is here too -- position, orientation, and the inverse orientation
-  that takes a world direction into the body's frame -- because the
-  position solve moves the bodies *during* the solve, and doing that
-  through the body vector means rebuilding a 257 element vector of maps
-  once per contact. On a sixteen course wall that was twenty thousand
-  rebuilds a substep and half of XPBD's step.
-
-  `inv-inertia` is the body frame diagonal rather than the world tensor
-  in `ii`, because the position solve turns the bodies as it goes and a
-  world tensor built at the top of the substep would be stale by the
-  second contact.
-
-  `movable` is what a correction may touch: anything not static. Not
-  `awake?` -- a sleeping body is still pushed out of an overlap, and
-  only its velocity read-back is skipped."
-  [bodies]
-  (let [n (count bodies)
-        vel (a/f64 (* n 3))
-        omega (a/f64 (* n 3))
-        inv-mass (a/f64 n)
-        ii (a/f64 (* n 9))
-        pos (a/f64 (* n 3))
-        rot (a/f64 (* n 4))
-        inv-rot (a/f64 (* n 4))
-        inv-inertia (a/f64 (* n 3))
-        ^ints movable (a/i32 n)]
-    (dotimes [i n]
-      (let [b (nth bodies i)
-            [vx vy vz] (:vel b)
-            [wx wy wz] (:omega b)
-            [px py pz] (:pos b)
-            [rx ry rz rw] (:rot b)
-            [qx qy qz qw] (:inv-rot b)
-            [ax ay az] (:inv-inertia b)
-            i3 (* i 3)
-            i4 (* i 4)]
-        (aset vel i3 (double vx))
-        (aset vel (+ i3 1) (double vy))
-        (aset vel (+ i3 2) (double vz))
-        (aset omega i3 (double wx))
-        (aset omega (+ i3 1) (double wy))
-        (aset omega (+ i3 2) (double wz))
-        (aset pos i3 (double px))
-        (aset pos (+ i3 1) (double py))
-        (aset pos (+ i3 2) (double pz))
-        (aset rot i4 (double rx))
-        (aset rot (+ i4 1) (double ry))
-        (aset rot (+ i4 2) (double rz))
-        (aset rot (+ i4 3) (double rw))
-        (aset inv-rot i4 (double qx))
-        (aset inv-rot (+ i4 1) (double qy))
-        (aset inv-rot (+ i4 2) (double qz))
-        (aset inv-rot (+ i4 3) (double qw))
-        (aset inv-inertia i3 (double ax))
-        (aset inv-inertia (+ i3 1) (double ay))
-        (aset inv-inertia (+ i3 2) (double az))
-        (aset inv-mass i (double (:inv-mass b)))
-        (aset movable i (if (rigid/static? b) 0 1))
-        (inverse-inertia-world ii i (:rot b) (:inv-inertia b))))
-    {:n n :vel vel :omega omega :inv-mass inv-mass :ii ii
-     :pos pos :rot rot :inv-rot inv-rot :inv-inertia inv-inertia
-     :movable movable}))
-
-(defn- write-poses
-  "Puts the moved poses back on the bodies.
-
-  `prev-pos` and `prev-rot` are left alone: XPBD reads its velocity off
-  the difference between them and where the substep ended, so the pose
-  the substep started from has to survive the solve."
-  [bodies {:keys [pos rot inv-rot movable]}]
-  (let [^doubles pos pos ^doubles rot rot ^doubles inv-rot inv-rot
-        ^ints movable movable]
-    (mapv (fn [i b]
-            (let [i (long i)]
-              (if (zero? (aget movable i))
-                b
-                (let [i3 (* i 3) i4 (* i 4)]
-                  (assoc b
-                         :pos [(aget pos i3) (aget pos (+ i3 1)) (aget pos (+ i3 2))]
-                         :rot [(aget rot i4) (aget rot (+ i4 1))
-                               (aget rot (+ i4 2)) (aget rot (+ i4 3))]
-                         :inv-rot [(aget inv-rot i4) (aget inv-rot (+ i4 1))
-                                   (aget inv-rot (+ i4 2)) (aget inv-rot (+ i4 3))])))))
-          (range (count bodies))
-          bodies)))
-
-(defn- vec3-at [^doubles arr ^long i]
-  [(aget arr (* i 3)) (aget arr (+ (* i 3) 1)) (aget arr (+ (* i 3) 2))])
-
 ;; ---------------------------------------------------------------------------
 ;; Pose arithmetic on the flat arrays
 ;;
@@ -538,6 +383,217 @@
     (aset out 1 (aget src (+ k3 1)))
     (aset out 2 (aget src (+ k3 2)))
     out))
+
+;; ---------------------------------------------------------------------------
+;; The contacts' own arrays
+
+(defn- contact-key
+  "What counts as the same contact as last step, for warm starting.
+
+  The pair, and the feature id `allgo.physics.contact` stamps on the
+  point -- which corner of which face is pressed into which face. It used
+  to be the contact point rounded to two centimetres, and that is a fine
+  key for a stack that is already still and a bad one for a stack that is
+  moving: the points slide across the rounding and the match is lost
+  exactly when the impulse history is most needed. A twenty brick column
+  matched a quarter of its contacts that way and fell over; on ids it
+  matches all of them."
+  [c]
+  [(:a c) (:b c) (:id c)])
+
+(defn- prepare
+  "Turns a frame's contacts into the solver's own arrays.
+
+  Anchors are stored in each body's frame as well as the world's. TGS and
+  XPBD move the bodies mid-solve and need to know where the contact went;
+  sequential impulse does not and ignores them.
+
+  One pass, writing into the arrays directly. It used to be a dozen
+  `mapcat`s over the contacts, one per array: a dozen lazy sequences of
+  boxed doubles, `tangents` called twice per contact for the two halves
+  of the basis it computes in one go, and a `nth` into the body vector
+  four times over. That came to 5.4ms of a 32ms step on a 16x16 wall,
+  which is more than the constraint solve it was preparing for."
+  [arrays contacts previous]
+  (let [contacts (vec contacts)
+        n (count contacts)
+        ;; Last step's impulses for the same contact, which is the guess
+        ;; warm starting rests on.
+        old (reduce (fn [m c] (assoc m (contact-key c) c)) {} previous)
+        ^doubles pos (:pos arrays)
+        ^doubles inv-rot (:inv-rot arrays)
+        ^ints a-arr (a/i32 n) ^ints b-arr (a/i32 n)
+        normal (a/f64 (* n 3)) t1-arr (a/f64 (* n 3)) t2-arr (a/f64 (* n 3))
+        depth (a/f64 n) depth0 (a/f64 n)
+        ra (a/f64 (* n 3)) rb (a/f64 (* n 3))
+        ral (a/f64 (* n 3)) rbl (a/f64 (* n 3))
+        pn (a/f64 n) p1 (a/f64 n) p2 (a/f64 n)
+        t0 (a/f64 3) s0 (a/f64 3)]
+    (dotimes [k n]
+      (let [c (nth contacts k)
+            ia (long (:a c)) ib (long (:b c))
+            nrm (:normal c)
+            [nx ny nz] nrm
+            [qx qy qz] (:point c)
+            ;; One call, both directions. Friction needs a basis for the
+            ;; contact plane and `tangents` builds the whole of it.
+            [[ax ay az] [bx by bz]] (tangents nrm)
+            k3 (* k 3) ia3 (* ia 3) ib3 (* ib 3)]
+        (aset a-arr k (int ia))
+        (aset b-arr k (int ib))
+        (aset normal k3 (double nx))
+        (aset normal (+ k3 1) (double ny))
+        (aset normal (+ k3 2) (double nz))
+        (aset t1-arr k3 (double ax))
+        (aset t1-arr (+ k3 1) (double ay))
+        (aset t1-arr (+ k3 2) (double az))
+        (aset t2-arr k3 (double bx))
+        (aset t2-arr (+ k3 1) (double by))
+        (aset t2-arr (+ k3 2) (double bz))
+        (aset depth k (double (:depth c)))
+        ;; The overlap as collision detection found it, kept so that
+        ;; `refresh-anchors!` can add the drift to it rather than to a
+        ;; value the last substep already moved.
+        (aset depth0 k (double (:depth c)))
+        ;; The lever arm in the world is the point less the centre, and
+        ;; the anchor in the body's own frame is that turned back by the
+        ;; body's orientation -- so the world arm is what `world->local`
+        ;; wanted anyway and is computed once for both.
+        (let [rx (- (double qx) (aget pos ia3))
+              ry (- (double qy) (aget pos (+ ia3 1)))
+              rz (- (double qz) (aget pos (+ ia3 2)))]
+          (aset ra k3 rx) (aset ra (+ k3 1) ry) (aset ra (+ k3 2) rz)
+          (aset t0 0 rx) (aset t0 1 ry) (aset t0 2 rz)
+          (qrot! inv-rot ia t0 s0)
+          (aset ral k3 (aget s0 0))
+          (aset ral (+ k3 1) (aget s0 1))
+          (aset ral (+ k3 2) (aget s0 2)))
+        (let [rx (- (double qx) (aget pos ib3))
+              ry (- (double qy) (aget pos (+ ib3 1)))
+              rz (- (double qz) (aget pos (+ ib3 2)))]
+          (aset rb k3 rx) (aset rb (+ k3 1) ry) (aset rb (+ k3 2) rz)
+          (aset t0 0 rx) (aset t0 1 ry) (aset t0 2 rz)
+          (qrot! inv-rot ib t0 s0)
+          (aset rbl k3 (aget s0 0))
+          (aset rbl (+ k3 1) (aget s0 1))
+          (aset rbl (+ k3 2) (aget s0 2)))
+        (when-let [was (get old (contact-key c))]
+          (aset pn k (double (:pn was)))
+          ;; The tangential impulses come back too, now that the match is
+          ;; exact. They were being dropped -- stored by `contact-state`
+          ;; every step and never read -- so friction began each step
+          ;; from nothing and had to be rediscovered in the iterations it
+          ;; had left, which is what let a stack creep sideways while it
+          ;; stood.
+          (aset p1 k (double (:p1 was)))
+          (aset p2 k (double (:p2 was))))))
+    {:n n
+     :a a-arr :b b-arr
+     :normal normal :t1 t1-arr :t2 t2-arr
+     :depth depth :depth0 depth0
+     :ra ra :rb rb :ra-local ral :rb-local rbl
+     :pn pn :p1 p1 :p2 p2
+     ;; What the XPBD position solve had to push with to keep this contact
+     ;; apart, summed over the last substep. Only that solver fills it,
+     ;; and it is what bounds friction there.
+     :lambda (a/f64 n)
+     ;; The closing speed as the step began, which is what restitution is
+     ;; measured against -- after an iteration or two it is gone.
+     :approach (a/f64 n)
+     :contacts contacts}))
+
+(defn- body-arrays
+  "The bodies as flat arrays, in one pass over the maps.
+
+  Velocity and world inertia are what the impulse solvers work in. The
+  pose is here too -- position, orientation, and the inverse orientation
+  that takes a world direction into the body's frame -- because the
+  position solve moves the bodies *during* the solve, and doing that
+  through the body vector means rebuilding a 257 element vector of maps
+  once per contact. On a sixteen course wall that was twenty thousand
+  rebuilds a substep and half of XPBD's step.
+
+  `inv-inertia` is the body frame diagonal rather than the world tensor
+  in `ii`, because the position solve turns the bodies as it goes and a
+  world tensor built at the top of the substep would be stale by the
+  second contact.
+
+  `movable` is what a correction may touch: anything not static. Not
+  `awake?` -- a sleeping body is still pushed out of an overlap, and
+  only its velocity read-back is skipped."
+  [bodies]
+  (let [n (count bodies)
+        vel (a/f64 (* n 3))
+        omega (a/f64 (* n 3))
+        inv-mass (a/f64 n)
+        ii (a/f64 (* n 9))
+        pos (a/f64 (* n 3))
+        rot (a/f64 (* n 4))
+        inv-rot (a/f64 (* n 4))
+        inv-inertia (a/f64 (* n 3))
+        ^ints movable (a/i32 n)]
+    (dotimes [i n]
+      (let [b (nth bodies i)
+            [vx vy vz] (:vel b)
+            [wx wy wz] (:omega b)
+            [px py pz] (:pos b)
+            [rx ry rz rw] (:rot b)
+            [qx qy qz qw] (:inv-rot b)
+            [ax ay az] (:inv-inertia b)
+            i3 (* i 3)
+            i4 (* i 4)]
+        (aset vel i3 (double vx))
+        (aset vel (+ i3 1) (double vy))
+        (aset vel (+ i3 2) (double vz))
+        (aset omega i3 (double wx))
+        (aset omega (+ i3 1) (double wy))
+        (aset omega (+ i3 2) (double wz))
+        (aset pos i3 (double px))
+        (aset pos (+ i3 1) (double py))
+        (aset pos (+ i3 2) (double pz))
+        (aset rot i4 (double rx))
+        (aset rot (+ i4 1) (double ry))
+        (aset rot (+ i4 2) (double rz))
+        (aset rot (+ i4 3) (double rw))
+        (aset inv-rot i4 (double qx))
+        (aset inv-rot (+ i4 1) (double qy))
+        (aset inv-rot (+ i4 2) (double qz))
+        (aset inv-rot (+ i4 3) (double qw))
+        (aset inv-inertia i3 (double ax))
+        (aset inv-inertia (+ i3 1) (double ay))
+        (aset inv-inertia (+ i3 2) (double az))
+        (aset inv-mass i (double (:inv-mass b)))
+        (aset movable i (if (rigid/static? b) 0 1))
+        (inverse-inertia-world ii i (:rot b) (:inv-inertia b))))
+    {:n n :vel vel :omega omega :inv-mass inv-mass :ii ii
+     :pos pos :rot rot :inv-rot inv-rot :inv-inertia inv-inertia
+     :movable movable}))
+
+(defn- write-poses
+  "Puts the moved poses back on the bodies.
+
+  `prev-pos` and `prev-rot` are left alone: XPBD reads its velocity off
+  the difference between them and where the substep ended, so the pose
+  the substep started from has to survive the solve."
+  [bodies {:keys [pos rot inv-rot movable]}]
+  (let [^doubles pos pos ^doubles rot rot ^doubles inv-rot inv-rot
+        ^ints movable movable]
+    (mapv (fn [i b]
+            (let [i (long i)]
+              (if (zero? (aget movable i))
+                b
+                (let [i3 (* i 3) i4 (* i 4)]
+                  (assoc b
+                         :pos [(aget pos i3) (aget pos (+ i3 1)) (aget pos (+ i3 2))]
+                         :rot [(aget rot i4) (aget rot (+ i4 1))
+                               (aget rot (+ i4 2)) (aget rot (+ i4 3))]
+                         :inv-rot [(aget inv-rot i4) (aget inv-rot (+ i4 1))
+                                   (aget inv-rot (+ i4 2)) (aget inv-rot (+ i4 3))])))))
+          (range (count bodies))
+          bodies)))
+
+(defn- vec3-at [^doubles arr ^long i]
+  [(aget arr (* i 3)) (aget arr (+ (* i 3) 1)) (aget arr (+ (* i 3) 2))])
 
 ;; ---------------------------------------------------------------------------
 ;; The velocity solve, shared by sequential impulse and TGS
@@ -839,27 +895,38 @@
   This is TGS. Sequential impulse never calls it, and that single
   difference is the whole of what TGS buys: its later iterations are
   solving the problem as it stands rather than as it was linearised at
-  the top of the step."
-  [bodies cs]
+  the top of the step.
+
+  It runs twice a substep, over every contact, which on a sixteen course
+  wall is eighteen thousand times a step -- so it reads the poses out of
+  `body-arrays` rather than the body maps. Through the maps it was a
+  `nth` into a persistent vector, four keyword lookups and three
+  allocated vectors per contact, and a quarter of the whole TGS step."
+  [arrays cs]
   (let [^doubles ra-arr (:ra cs) ^doubles rb-arr (:rb cs)
         ^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
         ^doubles depth (:depth cs) ^doubles normal (:normal cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)
-        ^doubles depth0 (:depth0 cs)]
+        ^doubles depth0 (:depth0 cs)
+        ^doubles pos (:pos arrays)
+        pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3)]
     (dotimes [k (long (:n cs))]
-      (let [a (nth bodies (aget ia-arr k))
-            b (nth bodies (aget ib-arr k))
-            pa (rigid/local->world a (vec3-at ral k))
-            pb (rigid/local->world b (vec3-at rbl k))
-            n (vec3-at normal k)
-            ra (v/sub pa (:pos a))
-            rb (v/sub pb (:pos b))]
-        (dotimes [c 3]
-          (aset ra-arr (+ (* k 3) c) (double (nth ra c)))
-          (aset rb-arr (+ (* k 3) c) (double (nth rb c))))
+      (let [ia (aget ia-arr k) ib (aget ib-arr k)
+            _ (anchor! arrays ia (load3! ral k t0) pa)
+            _ (anchor! arrays ib (load3! rbl k t0) pb)
+            k3 (* k 3) ia3 (* ia 3) ib3 (* ib 3)]
+        (aset ra-arr k3 (- (aget pa 0) (aget pos ia3)))
+        (aset ra-arr (+ k3 1) (- (aget pa 1) (aget pos (+ ia3 1))))
+        (aset ra-arr (+ k3 2) (- (aget pa 2) (aget pos (+ ia3 2))))
+        (aset rb-arr k3 (- (aget pb 0) (aget pos ib3)))
+        (aset rb-arr (+ k3 1) (- (aget pb 1) (aget pos (+ ib3 1))))
+        (aset rb-arr (+ k3 2) (- (aget pb 2) (aget pos (+ ib3 2))))
         ;; How far the two anchors have drifted along the normal since
         ;; the contact was found, added to the overlap it had then.
-        (aset depth k (+ (aget depth0 k) (v/dot (v/sub pa pb) n)))))))
+        (aset depth k (+ (aget depth0 k)
+                         (* (- (aget pa 0) (aget pb 0)) (aget normal k3))
+                         (* (- (aget pa 1) (aget pb 1)) (aget normal (+ k3 1)))
+                         (* (- (aget pa 2) (aget pb 2)) (aget normal (+ k3 2)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Moving the bodies
@@ -1183,7 +1250,7 @@
         bodies (rouse bodies contacts)
         arrays (body-arrays bodies)
         _ (accelerate! arrays bodies gravity dt)
-        cs (prepare bodies contacts (:contacts w))]
+        cs (prepare arrays contacts (:contacts w))]
     (record-approach! arrays cs)
     (when warm-start? (warm-start! arrays cs))
     (dotimes [_ (long iterations)]
@@ -1244,10 +1311,13 @@
         bounce-opts (assoc w :bounce? true)
         contacts (contact/all bodies (:broad w) dt)
         bodies (rouse bodies contacts)]
-    (loop [bodies bodies cs (prepare bodies contacts (:contacts w)) n substeps first? true]
+    (loop [bodies bodies
+           cs (prepare (body-arrays bodies) contacts (:contacts w))
+           n substeps
+           first? true]
       (if (zero? n)
         (let [bounced (let [arrays (body-arrays bodies)]
-                        (refresh-anchors! bodies cs)
+                        (refresh-anchors! arrays cs)
                         (solve-velocities! arrays cs h bounce-opts)
                         (write-back bodies arrays))]
           (assoc w
@@ -1255,7 +1325,7 @@
                  :contacts (contact-state cs)))
         (let [arrays (body-arrays bodies)
               _ (accelerate! arrays bodies gravity h)
-              _ (refresh-anchors! bodies cs)
+              _ (refresh-anchors! arrays cs)
               _ (when first? (record-approach! arrays cs))
               _ (when warm-start? (warm-start! arrays cs))
               _ (dotimes [_ per] (solve-velocities! arrays cs h solve-opts))
@@ -1263,7 +1333,7 @@
               ;; The relax pass sees the bodies where the substep left
               ;; them, so the anchors are measured again first.
               relaxed (let [arrays (body-arrays moved)]
-                        (refresh-anchors! moved cs)
+                        (refresh-anchors! arrays cs)
                         (solve-velocities! arrays cs h relax-opts)
                         (write-back moved arrays))]
           (recur relaxed cs (dec n) false))))))
@@ -1346,7 +1416,7 @@
         h (/ (double dt) substeps)
         contacts (contact/all bodies (:broad w) dt)
         bodies (rouse bodies contacts)
-        cs (prepare bodies contacts (:contacts w))
+        cs (prepare (body-arrays bodies) contacts (:contacts w))
         slop (double (:slop w))
         ;; The furthest a contact may push in one substep is bounded --
         ;; the impulse solvers have had this since they were written and
@@ -1377,7 +1447,7 @@
               ;; The passes move the poses in these arrays and the body
               ;; vector is rebuilt once, below.
               posed (body-arrays bodies)
-              _ (refresh-anchors! bodies cs)
+              _ (refresh-anchors! posed cs)
               ;; How fast the surfaces were closing before the solve.
               ;; Restitution is measured against this; after the position
               ;; solve it is whatever the pushout left behind.
@@ -1391,7 +1461,7 @@
               ;; running it once per frame left three substeps' worth of
               ;; sideways motion to accumulate unopposed.
               arrays (body-arrays bodies)
-              _ (refresh-anchors! bodies cs)
+              _ (refresh-anchors! arrays cs)
               _ (solve-xpbd-velocities! arrays cs h w)]
           (recur (write-back bodies arrays) (- remaining h) (inc slices)))))))
 
