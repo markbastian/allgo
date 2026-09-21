@@ -448,11 +448,17 @@ TGS stops toppling too, though it keeps its own floor, below.
 
 ### Other techniques still missing
 
-- **Featherstone / articulated bodies** — started.
+- ~~**Featherstone / articulated bodies**~~ — done, and demonstrated.
   `allgo.physics.articulated` has the spatial algebra, the recursive
   Newton-Euler algorithm for inverse dynamics and the articulated body
-  algorithm for forward dynamics, over a tree of one degree of freedom
-  joints on a fixed base.
+  algorithm for forward dynamics, over a tree of hinges, sliders and
+  ball joints on a base that is bolted or free, with joint limits,
+  contacts against static geometry and against the model's own limbs.
+  `allgo.demo.ragdoll` drops a figure on the floor with it.
+
+  What it still cannot do: close a loop, which is what a tree means,
+  and touch anything that can move back. That second one is the
+  interesting gap and has its own entry below.
 
   Why it exists, measured rather than asserted: two metre-long links off
   a fixed base, the lower heavier than the upper, worst separation
@@ -559,10 +565,30 @@ TGS stops toppling too, though it keeps its own floor, below.
 
   - ~~**A ragdoll demo.**~~ `allgo.demo.ragdoll`: eleven boxes, ten
     joints, twenty-eight degrees of freedom, a floor and a tilted slab
-    to fall off. In a browser a step is about 4ms in flight and 8.5ms
-    once it has landed on eighteen contacts, so one substep a frame,
-    which is stable. The `joint limits` toggle is the one worth
-    trying -- off, the figure settles into a pile of sticks.
+    to fall off. On the JVM a step is 0.17ms in flight and 1.3ms once
+    it has landed on eighteen contacts, so one substep a frame, which
+    is stable. The browser figure that used to be quoted here has been
+    withdrawn rather than corrected -- see the note on measuring from a
+    backgrounded tab, above. The `joint limits` toggle is the one worth
+    trying: off, the figure settles into a pile of sticks.
+- **An articulated model can only be hit by scenery.** `contacts-with`
+  takes static `allgo.physics.rigid` bodies, so a ragdoll can fall down
+  stairs and cannot knock a brick off a wall. The two halves of this
+  library have never met.
+
+  The interface for it exists on the articulated side already, because
+  the contact work was built that way: `impulse-at` answers how much
+  velocity a push at a world point buys, and `apply-impulse` takes one.
+  What does not fit is the other side. `allgo.physics.solver`'s sweep
+  is written around flat per-body arrays of velocity, inverse mass and
+  inverse inertia — deliberately, and it is most of why it is fast —
+  and an articulated model has no `1/m` to put in them. Its answer to
+  the same question is a walk through a tree.
+
+  So this is a third solve path over mixed contacts rather than a
+  connector between two existing ones, and the thing to be careful of
+  is not paying for it on the contacts that are rigid on both sides.
+
 - **Continuous collision detection.** Half done. Speculative contacts
   — the cheap version — are in: the margin out to which a gap still
   counts as a contact is now the fixed 2cm plus how far the pair can
