@@ -30,6 +30,7 @@
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.planet :as planet]
+            [allgo.demo.ragdoll :as ragdoll]
             [allgo.demo.rigid :as rigid]
             [allgo.demo.satellite :as satellite]
             [allgo.demo.skinning :as skinning]
@@ -58,6 +59,7 @@
    "water"    {:start water/start!    :stop water/stop!}
    "rigid"    {:start rigid/start!    :stop rigid/stop!}
    "bricks"   {:start bricks/start!   :stop bricks/stop!}
+   "ragdoll"  {:start ragdoll/start!  :stop ragdoll/stop!}
    "arm"      {:start arm/start!      :stop arm/stop!}
    "human-arm" {:start human-arm/start! :stop human-arm/stop!}
    "joints"   {:start joints/start!   :stop joints/stop!}

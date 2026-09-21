@@ -532,7 +532,12 @@ TGS stops toppling too, though it keeps its own floor, below.
   - **Self-collision between links**, which is the last thing missing: a
     forearm can pass through a thigh.
 
-  - **A ragdoll demo**, which is what all of the above is for.
+  - ~~**A ragdoll demo.**~~ `allgo.demo.ragdoll`: eleven boxes, ten
+    joints, twenty-eight degrees of freedom, a floor and a tilted slab
+    to fall off. In a browser a step is about 4ms in flight and 8.5ms
+    once it has landed on eighteen contacts, so one substep a frame,
+    which is stable. The `joint limits` toggle is the one worth
+    trying -- off, the figure settles into a pile of sticks.
 - **Continuous collision detection.** Half done. Speculative contacts
   — the cheap version — are in: the margin out to which a gap still
   counts as a contact is now the fixed 2cm plus how far the pair can
