@@ -40,23 +40,38 @@
   and a quaternion of configuration -- three stacked hinges would gimbal
   lock, and a tumbling figure finds the orientation where they do.
 
-  **Limbs pass through each other.** Nothing here collides a forearm
-  with a thigh: the figure is checked against the floor and the slab,
-  and against nothing of its own. It is the obvious next thing and it is
-  not done.
+  **Limbs collide with each other**, and `self collision` turns that
+  off. The difference is easier to count than to see: left to settle on
+  the floor, the figure comes to rest with thirty-two contact points'
+  worth of limb inside other limb when it is off, and two when it is
+  on. An arm inside the ribcage is the one that shows.
+
+  A link and its parent are never tested against each other -- they meet
+  at the joint and overlap there by construction, so a contact between
+  them would be permanent and would push the figure apart from the
+  inside. Everything else is fair game, and the shoulders sit two
+  centimetres wider than the ribcage for the same reason: a forearm
+  resting five millimetres inside the chest at the start is a contact
+  that never goes away.
 
   ## What it costs
 
-  Eleven bodies, twenty-eight degrees of freedom. In this browser, a
-  step is about 4ms in flight and 8.5ms once it has landed and is
-  carrying eighteen contacts -- so one substep a frame, which is what it
-  starts on, and which is stable: at a sixtieth of a second the figure
-  still lands and stops. Turn `substeps` up for a firmer pile at twice
-  the cost.
+  Eleven bodies, twenty-eight degrees of freedom. On the JVM a step is
+  0.17ms in flight and 1.3ms once it has landed on eighteen contacts;
+  self collision adds about half of the first and nothing at all to the
+  second, because a figure whose limbs are not inside each other is a
+  figure with fewer contacts to solve.
 
-  On the JVM the same step is 2.1ms, and the first version of this code
-  was 150 times slower again. Both of those are recorded where they
-  happened rather than here."
+  In a browser it is a good deal slower, and this docstring used to
+  name a figure for that which should not have been trusted -- it was
+  measured in an automated tab, which Chrome backgrounds and gives less
+  of a processor, and the same measurement taken twice varied by half.
+  What is worth saying without a number is *why* it is slower. The
+  arithmetic is on flat arrays but the recursion walking over it is
+  not: `(nth ls j)`, a map destructured by keyword, a `conj` onto a
+  vector, once per link per direction per contact. On a JVM that is
+  nearly free beside the floating point. In JavaScript it is most of
+  the cost. The frame counter is in the corner."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.quaternion :as q]
             [allgo.physics.articulated :as ab]
@@ -115,10 +130,10 @@
      :links
      [(b (ball (bone up -1 :spherical nil [0.0 0.10 0.0] [0.34 0.42 0.20] 25.0) 25 35))
       (b (ball (bone up 0 :spherical nil [0.0 0.42 0.0] [0.20 0.22 0.20] 5.0) 40 60))
-      (b (ball (bone down 0 :spherical nil [0.21 0.38 0.0] [0.10 0.28 0.10] 2.5) 85 70))
+      (b (ball (bone down 0 :spherical nil [0.23 0.38 0.0] [0.10 0.28 0.10] 2.5) 85 70))
       (b (hinge (bone down 2 :revolute [1.0 0.0 0.0] [0.0 -0.28 0.0]
                       [0.09 0.26 0.09] 1.8) 0 150))
-      (b (ball (bone down 0 :spherical nil [-0.21 0.38 0.0] [0.10 0.28 0.10] 2.5) 85 70))
+      (b (ball (bone down 0 :spherical nil [-0.23 0.38 0.0] [0.10 0.28 0.10] 2.5) 85 70))
       (b (hinge (bone down 4 :revolute [1.0 0.0 0.0] [0.0 -0.28 0.0]
                       [0.09 0.26 0.09] 1.8) 0 150))
       (b (ball (bone down -1 :spherical nil [0.09 -0.10 0.0] [0.14 0.40 0.14] 8.0) 60 35))
@@ -142,6 +157,7 @@
        :tilt 18
        :obstacle true
        :limits true
+       :selfCollide true
        :friction 0.7
        :restitution 0.0
        :iterations 8
@@ -253,7 +269,8 @@
                  :obstacles (obstacles)
                  :friction (.-friction controls)
                  :restitution (.-restitution controls)
-                 :iterations (long (.-iterations controls))})
+                 :iterations (long (.-iterations controls))
+                 :self-collide? (boolean (.-selfCollide controls))})
               (on-resize []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (when (and (pos? w) (pos? h))
@@ -285,6 +302,7 @@
             (.add controls "drop")
             (.add controls "shove")
             (-> (.add controls "limits") (.name "joint limits") (.onChange rebuild!))
+            (-> (.add controls "selfCollide") (.name "self collision"))
             (-> (.add controls "obstacle") (.onChange sync-prop!))
             (-> (.add controls "tilt" 0 40 1) (.onChange sync-prop!))
             (-> (.add controls "friction" 0.0 1.5 0.05))

@@ -669,3 +669,142 @@
                   (map #(swung (first model) (first (:q %))))
                   (apply max))
              27.0)))))
+
+;; ---------------------------------------------------------------------------
+;; Self-collision
+
+(defn- shaped-limb
+  "A limb that can be collided with, hanging from `origin`."
+  [parent origin]
+  {:parent parent :joint :spherical :origin {:rot nil :pos origin}
+   :mass 1.5 :com [0.0 -0.25 0.0]
+   :inertia (let [f (/ 1.5 12.0)]
+              [[(* f (+ (* 0.5 0.5) (* 0.1 0.1))) 0.0 0.0]
+               [0.0 (* f (+ (* 0.1 0.1) (* 0.1 0.1))) 0.0]
+               [0.0 0.0 (* f (+ (* 0.1 0.1) (* 0.5 0.5)))]])
+   :shape :box :size [0.1 0.5 0.1]})
+
+(defn- two-armed
+  "A free root with two limbs hanging off it, `reach` apart."
+  [reach]
+  {:base {:mass 4.0 :com [0.0 0.0 0.0]
+          :inertia [[0.05 0.0 0.0] [0.0 0.08 0.0] [0.0 0.0 0.08]]
+          :shape :box :size [0.4 0.2 0.2]
+          :shape-pose {:rot [0.0 0.0 0.0 1.0] :pos [0.0 0.0 0.0]}}
+   :links [(shaped-limb -1 [reach 0.0 0.0]) (shaped-limb -1 [(- reach) 0.0 0.0])]})
+
+(def ^:private posed
+  {:q [[0.0 0.0 0.0 1.0] [0.0 0.0 0.0 1.0]]
+   :qd [0.0 0.0 0.0 0.0 0.0 0.0]
+   :base {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6) :pos [0.3 -0.2 0.5]
+          :vel [0.0 0.0 0.0 0.0 0.0 0.0]}})
+
+(deftest internal-impulse-test
+  (testing "a push between two of a model's own parts changes no momentum"
+    ;; The sharpest check there is that the two halves of the push really
+    ;; are equal and opposite. Nothing outside the model is touched, so
+    ;; both momenta have to come out exactly as they went in -- while
+    ;; something inside it does move.
+    (let [model (two-armed 0.25)
+          p [0.4 -0.3 0.5]
+          dir (v/normalize [0.3 -0.8 0.5])
+          m0 (ab/momentum model posed)
+          after (ab/apply-pair-impulse model posed 0 1 p dir 3.0)
+          m1 (ab/momentum model after)]
+      (is (< (v/distance (:linear m0) (:linear m1)) 1e-12))
+      (is (< (v/distance (:angular m0) (:angular m1)) 1e-12))
+      (is (> (v/length (mapv - (:qd after) (:qd posed))) 1.0)
+          "and it should actually have done something")))
+
+  (testing "the mass it meets is a reduced mass"
+    ;; Smaller than either body's alone, which sounds backwards and is
+    ;; not: both ends of this push give, where a contact with the floor
+    ;; has one end that does not. With a root heavy enough to make the
+    ;; two limbs independent it is the textbook identity exactly.
+    (let [model (-> (two-armed 0.25)
+                    (assoc-in [:base :mass] 100000.0)
+                    (assoc-in [:base :inertia]
+                              [[3000.0 0.0 0.0] [0.0 5000.0 0.0] [0.0 0.0 5000.0]]))
+          p [0.4 -0.3 0.5]
+          dir [1.0 0.0 0.0]
+          mi (:effective-mass (ab/impulse-at model (:q posed) (:base posed) 0 p dir))
+          mj (:effective-mass (ab/impulse-at model (:q posed) (:base posed) 1 p dir))
+          mp (:effective-mass (ab/pair-impulse-at model (:q posed) (:base posed) 0 1 p dir))]
+      (is (< mp (min mi mj)))
+      (is (close? (/ 1.0 mp) (+ (/ 1.0 mi) (/ 1.0 mj)) 1e-4)))))
+
+(deftest self-contact-pairs-test
+  (testing "parts that are nowhere near each other make no contacts"
+    (let [model (two-armed 0.25)]
+      (is (empty? (ab/self-contacts model (:q posed) (:base posed)
+                                    (ab/poses model (:q posed) (:base posed)))))))
+
+  (testing "a link and its parent never collide, however much they overlap"
+    ;; They meet at the joint and overlap there by construction. A
+    ;; contact between them would be permanent and would push the model
+    ;; apart from the inside.
+    (let [chainy {:base (:base (two-armed 0.25))
+                  :links [(shaped-limb -1 [0.0 0.0 0.0])
+                          (shaped-limb 0 [0.0 -0.25 0.0])]}
+          st {:q [[0.0 0.0 0.0 1.0] [0.0 0.0 0.0 1.0]] :qd (vec (repeat 6 0.0))
+              :base {:rot [0.0 0.0 0.0 1.0] :pos [0.0 0.0 0.0]
+                     :vel (vec (repeat 6 0.0))}}]
+      (is (empty? (ab/self-contacts chainy (:q st) (:base st)
+                                    (ab/poses chainy (:q st) (:base st)))))))
+
+  (testing "and `:no-collide` keeps a named pair apart too"
+    (let [overlapping (two-armed 0.04)
+          st {:q [[0.0 0.0 0.0 1.0] [0.0 0.0 0.0 1.0]] :qd (vec (repeat 6 0.0))
+              :base {:rot [0.0 0.0 0.0 1.0] :pos [0.0 0.0 0.0]
+                     :vel (vec (repeat 6 0.0))}}
+          muted (assoc-in overlapping [:links 0 :no-collide] #{1})]
+      (is (seq (ab/self-contacts overlapping (:q st) (:base st)
+                                 (ab/poses overlapping (:q st) (:base st)))))
+      (is (empty? (ab/self-contacts muted (:q st) (:base st)
+                                    (ab/poses muted (:q st) (:base st))))))))
+
+(deftest self-collision-test
+  (testing "two limbs swung together stop instead of passing through"
+    (let [model (two-armed 0.06)
+          st0 {:q [(q/from-axis-angle [0.0 0.0 1.0] -0.9)
+                   (q/from-axis-angle [0.0 0.0 1.0] 0.9)]
+               :qd [0.0 0.0 -4.0 0.0 0.0 4.0]
+               :base {:rot [0.0 0.0 0.0 1.0] :pos [0.0 2.0 0.0]
+                      :vel (vec (repeat 6 0.0))}}
+          tips-closest
+          (fn [self?]
+            (let [o {:gravity [0.0 0.0 0.0] :self-collide? self? :iterations 10}]
+              (->> (iterate #(ab/step % model (/ 1.0 240.0) o) st0)
+                   (take 200)
+                   (map (fn [s]
+                          (let [fs (ab/poses model (:q s) (:base s))
+                                tip #(let [{:keys [rot pos]} (nth fs %)]
+                                       (v/add pos (q/rotate rot [0.0 -0.5 0.0])))]
+                            (v/distance (tip 0) (tip 1)))))
+                   (apply min))))]
+      ;; Without it they end up in the same place.
+      (is (< (tips-closest false) 0.02))
+      ;; With it they never get closer than their own width.
+      (is (> (tips-closest true) 0.1)))))
+
+(deftest flat-algebra-agrees-test
+  (testing "the flat spatial algebra says what the readable one says"
+    ;; The section above is the statement of what a Plucker transform and
+    ;; a spatial inertia are, and the tests elsewhere check it. The flat
+    ;; builders are what actually runs, for speed, and this is the only
+    ;; thing tying the two together -- without it they are free to drift.
+    (let [flat36 (fn [m] (vec (mapcat identity m)))
+          near (fn [a b] (every? #(< (abs (double %)) 1e-12) (map - a b)))]
+      (doseq [pose [{:rot nil :pos nil}
+                    {:rot nil :pos [0.3 -0.7 1.1]}
+                    {:rot (q/from-axis-angle [0.2 0.9 -0.3] 1.1) :pos [0.0 0.0 0.0]}
+                    {:rot (q/from-axis-angle [0.7 -0.1 0.4] -2.3) :pos [-1.2 0.4 0.8]}]]
+        (is (near (flat36 (ab/transform pose)) (seq (#'ab/transform-flat pose)))
+            (str pose)))
+      (doseq [[m com inertia]
+              [[2.5 [0.0 0.0 0.0] (lin/eye 3)]
+               [3.1 [0.4 -0.2 0.9] [[0.3 0.0 0.0] [0.0 0.5 0.0] [0.0 0.0 0.7]]]
+               [0.7 [-1.1 0.6 0.2] [[0.2 0.03 -0.01] [0.03 0.4 0.05] [-0.01 0.05 0.6]]]]]
+        (is (near (flat36 (ab/spatial-inertia m com inertia))
+                  (seq (#'ab/spatial-inertia-flat m com inertia)))
+            (str m " " com))))))

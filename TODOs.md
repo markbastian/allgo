@@ -529,8 +529,15 @@ TGS stops toppling too, though it keeps its own floor, below.
     floor, and the impulse response does not need to know which. Held
     to within half a degree of the limit in every direction tested.
 
-  - **Self-collision between links**, which is the last thing missing: a
-    forearm can pass through a thigh.
+  - ~~**Self-collision between links.**~~ Done. `:self-collide?` adds
+    the model's own parts against each other; a link and its parent are
+    never tested, since they overlap at the joint by construction, and
+    `:no-collide` names any other pair to leave alone. The settled
+    ragdoll goes from thirty-two contact points' worth of limb inside
+    other limb to two. An internal impulse leaves both momenta exactly
+    where they were, to 1e-12, and the mass it meets is a reduced mass
+    -- `1/m_pair = 1/m_i + 1/m_j` to four digits when the two limbs are
+    made independent.
 
   - ~~**A ragdoll demo.**~~ `allgo.demo.ragdoll`: eleven boxes, ten
     joints, twenty-eight degrees of freedom, a floor and a tilted slab

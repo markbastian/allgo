@@ -38,6 +38,22 @@
   What it gives up is being able to come apart or close a loop: a tree of
   joints is the whole of what it can describe.
 
+  ## Hitting itself
+
+  `:self-collide?` adds the model's own parts against each other, which
+  is what stops a forearm passing through a thigh. A link and its
+  parent are never tested -- they meet at the joint and overlap there by
+  construction, so a contact between them would be permanent and would
+  push the model apart from the inside -- and `:no-collide` on a link
+  names any other pair to leave alone.
+
+  The impulse is between two bodies that can both move, so what it
+  meets is a *reduced* mass, smaller than either body's own and not
+  larger: both ends of the push give, where a contact with the floor
+  has one end that does not. Nothing outside the model is touched by
+  it, which is the sharp check -- an internal impulse leaves both
+  momenta exactly where they were.
+
   ## Shapes
 
   A part gains geometry by being given a `:shape` -- `:box` with a
@@ -134,6 +150,20 @@
   because three type hints were missing and reflective `aget` costs two
   orders of magnitude. `make reflect` is a build step for this reason
   and it is worth running before believing any measurement.
+
+  Two more of those were found later and are worth naming, because both
+  were hidden behind a sentence claiming they did not matter. `links`
+  built its transforms and inertias as vectors of vectors and converted
+  them -- four milliseconds of a settled ragdoll's step -- and
+  `advance-positions` built the whole cache again to read ten integers
+  off it. The ragdoll went from 2.16ms a step to 1.27.
+
+  What is left is the recursion itself rather than the arithmetic in it:
+  `(nth ls j)`, a map destructured by keyword, a `conj` onto a vector,
+  once per link per direction per contact. On a JVM that is nearly free
+  next to the floating point. In JavaScript it is most of the cost, and
+  a browser step is far slower than the JVM one in a way the flat
+  arithmetic alone does not explain.
 
   ## Spatial vectors
 
@@ -367,6 +397,75 @@
       (let [row (nth m r)]
         (dotimes [c 6] (aset out (+ (* 6 r) c) (double (nth row c))))))
     out))
+
+(defn- e-matrix
+  "The rotation `rot` as nine numbers, transposed -- the coordinate
+  transform rather than the rotation."
+  ^doubles [rot]
+  (let [r (or rot q/identity-q)
+        [ax ay az] (q/rotate r [1.0 0.0 0.0])
+        [bx by bz] (q/rotate r [0.0 1.0 0.0])
+        [cx cy cz] (q/rotate r [0.0 0.0 1.0])
+        o (a/f64 9)]
+    ;; Columns of the rotation are where the axes go, so its transpose
+    ;; -- which is what a coordinate transform wants -- has them as rows.
+    (aset o 0 (double ax)) (aset o 1 (double ay)) (aset o 2 (double az))
+    (aset o 3 (double bx)) (aset o 4 (double by)) (aset o 5 (double bz))
+    (aset o 6 (double cx)) (aset o 7 (double cy)) (aset o 8 (double cz))
+    o))
+
+(defn- transform-flat
+  "`transform`, built straight into thirty-six numbers.
+
+  The readable one above goes through four vector-of-vector matrices and
+  a `mat-mul` to say the same thing, and `links` asks for two of them
+  per link per step. On a settled ragdoll that was four milliseconds of
+  a forty-two millisecond step -- which is what comes of writing that a
+  conversion `costs nothing` without measuring it."
+  ^doubles [{:keys [rot pos]}]
+  (let [^doubles e (e-matrix rot)
+        [rx ry rz] (or pos v/zero)
+        rx (double rx) ry (double ry) rz (double rz)
+        o (a/f64 36)]
+    (dotimes [r 3]
+      (let [b (* 3 r)
+            e0 (aget e b) e1 (aget e (+ b 1)) e2 (aget e (+ b 2))]
+        ;; E in both diagonal blocks.
+        (aset o (+ (* 6 r) 0) e0) (aset o (+ (* 6 r) 1) e1) (aset o (+ (* 6 r) 2) e2)
+        (aset o (+ (* 6 (+ r 3)) 3) e0) (aset o (+ (* 6 (+ r 3)) 4) e1)
+        (aset o (+ (* 6 (+ r 3)) 5) e2)
+        ;; Bottom left is -E skew(r).
+        (let [row (* 6 (+ r 3))]
+          (aset o row (- (- (* e1 rz) (* e2 ry))))
+          (aset o (+ row 1) (- (- (* e2 rx) (* e0 rz))))
+          (aset o (+ row 2) (- (- (* e0 ry) (* e1 rx)))))))
+    o))
+
+(defn- spatial-inertia-flat
+  "`spatial-inertia`, built straight into thirty-six numbers."
+  ^doubles [mass com inertia]
+  (let [m (double mass)
+        [cx cy cz] com
+        cx (double cx) cy (double cy) cz (double cz)
+        o (a/f64 36)
+        ;; C = skew(c); the upper left is Ic + m C C^T, and C C^T is
+        ;; (c.c) I - c c^T.
+        cc (+ (* cx cx) (* cy cy) (* cz cz))
+        cvec [cx cy cz]]
+    (dotimes [r 3]
+      (dotimes [k 3]
+        (aset o (+ (* 6 r) k)
+              (+ (double (nth (nth inertia r) k))
+                 (* m (- (if (= r k) cc 0.0)
+                         (* (double (nth cvec r)) (double (nth cvec k)))))))))
+    ;; m C top right, m C^T bottom left, m on the bottom right diagonal.
+    (let [c [[0.0 (- cz) cy] [cz 0.0 (- cx)] [(- cy) cx 0.0]]]
+      (dotimes [r 3]
+        (dotimes [k 3]
+          (aset o (+ (* 6 r) 3 k) (* m (double (nth (nth c r) k))))
+          (aset o (+ (* 6 (+ r 3)) k) (* m (double (nth (nth c k) r)))))))
+    (dotimes [r 3] (aset o (+ (* 6 (+ r 3)) 3 r) m))
+    o))
 
 (defn- mv6
   "`m x` for a flat 6x6 and a flat spatial vector."
@@ -642,8 +741,8 @@
       (fn [[acc ^long off] i]
         (let [link (nth parts i)
               nd (long (joint-dof link))
-              xup (flat36 (lin/mat-mul (transform (joint-transform link (nth q-vec i nil)))
-                                       (transform (:origin link))))
+              xup (mm6 (transform-flat (joint-transform link (nth q-vec i nil)))
+                       (transform-flat (:origin link)))
               cols (subspace link)
               sarr (a/f64 (* 6 (max 1 nd)))]
           (dotimes [k nd]
@@ -660,7 +759,7 @@
                       ;; number wide, so nothing can index by link any
                       ;; more.
                       :offset off
-                      :i (flat36 (spatial-inertia (:mass link) (:com link) (:inertia link)))
+                      :i (spatial-inertia-flat (:mass link) (:com link) (:inertia link))
                       :parent (long (:parent link))})
            (+ off nd)]))
       [[] 0]
@@ -829,7 +928,7 @@
            {:links (update-in links [parent :ia] #(add36! % up)) :ia0 ia0})))
      {:links (mapv (fn [l] {:ia (copy36 (:i l))}) ls)
       :ia0 (when root
-             (flat36 (spatial-inertia (:mass root) (:com root) (:inertia root))))}
+             (spatial-inertia-flat (:mass root) (:com root) (:inertia root)))}
      (reverse (range n)))))
 
 (defn forward-dynamics
@@ -881,7 +980,7 @@
                   (a/f64 [0.0 0.0 0.0 (double gx) (double gy) (double gz)]))
          v0 (a/f64 (if root (vec (or (:vel root-state) (repeat 6 0.0))) (repeat 6 0.0)))
          root-i (when root
-                  (flat36 (spatial-inertia (:mass root) (:com root) (:inertia root))))
+                  (spatial-inertia-flat (:mass root) (:com root) (:inertia root)))
          ;; What every joint weighs from above, which depends only on
          ;; where the joints are. Handed in when the caller has already
          ;; built it for this configuration.
@@ -985,7 +1084,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Moving it
 
-(declare solve-constraints contacts-with velocity with-velocity poses limited?)
+(declare solve-constraints contacts-with self-contacts velocity with-velocity
+         poses limited?)
 
 (defn- advance-coordinate
   "One joint's configuration, moved by its own rates.
@@ -1019,10 +1119,13 @@
   (let [root (base model)
         b (:base state)
         parts (chain model)
-        ls (links model (:q state))
+        ;; Where each joint's rates start, and nothing else. Building the
+        ;; whole per-configuration cache to read ten integers off it cost
+        ;; four milliseconds a step, which was a tenth of the frame.
+        offsets (reductions + 0 (map joint-dof parts))
         q' (mapv (fn [i]
                    (advance-coordinate (nth parts i) (nth (:q state) i nil)
-                                       (:qd state) (:offset (nth ls i)) dt))
+                                       (:qd state) (nth offsets i) dt))
                  (range (count parts)))]
     (if-not root
       (assoc state :q q')
@@ -1058,9 +1161,10 @@
 
   Contacts come either ready-made as `:contacts` or, more usually, from
   `:obstacles` -- static `allgo.physics.rigid` bodies this model is to
-  be generated against. They are found at the configuration the step
-  *starts* from, which is where the model actually is when the question
-  is asked.
+  be generated against -- and from `:self-collide?`, which adds the
+  model's own parts against each other. They are found at the
+  configuration the step *starts* from, which is where the model
+  actually is when the question is asked.
 
   The base's state is a pose and a spatial velocity in its own frame,
   not six more coordinates. Three reasons, and the third is the one that
@@ -1069,7 +1173,8 @@
   speaks; and a velocity in body coordinates is what the algorithms
   already produce, so nothing has to be converted on the way in."
   ([state model dt] (step state model dt nil))
-  ([{:keys [q qd] :as state} model ^double dt {:keys [tau contacts obstacles] :as opts}]
+  ([{:keys [q qd] :as state} model ^double dt
+    {:keys [tau contacts obstacles self-collide?] :as opts}]
    (let [root (base model)
          b (:base state)
          tau (or tau (vec (repeat (dof model) 0.0)))
@@ -1078,8 +1183,12 @@
          ;; neither of which changes until the very end of the step.
          ls (links model q)
          frames (poses model q b)
+         ;; What every joint weighs from above. It depends only on `q`,
+         ;; so the accelerations and every contact impulse afterwards
+         ;; share one build -- they were making one apiece.
+         ai (articulated-inertias model ls)
          {:keys [qdd base-acc]} (forward-dynamics model q qd tau
-                                                  (cond-> (assoc opts :ls ls)
+                                                  (cond-> (assoc opts :ls ls :ai ai)
                                                     root (assoc :base b)))
          accel (if root (vec (concat base-acc qdd)) (vec qdd))
          moving (with-velocity model state
@@ -1087,7 +1196,9 @@
                         (velocity model state)
                         accel))
          cs (or contacts
-                (when (seq obstacles) (contacts-with model q b obstacles frames)))]
+                (cond-> []
+                  (seq obstacles) (into (contacts-with model q b obstacles frames))
+                  self-collide? (into (self-contacts model q b frames))))]
      (advance-positions model
                         ;; Limits are solved even with nothing to stand
                         ;; on. A joint folding backwards in mid-air is
@@ -1095,7 +1206,7 @@
                         ;; with no limits at all pays only this test.
                         (if (or (seq cs) (limited? model))
                           (solve-constraints model moving (vec cs) dt
-                                             (assoc opts :ls ls :frames frames))
+                                             (assoc opts :ls ls :ai ai :frames frames))
                           moving)
                         dt))))
 
@@ -1458,6 +1569,49 @@
   ^doubles [model ls ai j ^doubles w]
   (delta-from model ls ai (ancestry ls j) {} (a/f64 6) {j w}))
 
+(defn- pair-ancestry
+  "Everything between either of two bodies and the root, children first.
+
+  Descending index order is that order, since a link's parent always has
+  a smaller index than the link. Each body appears once even where the
+  two walks meet, which they do at the first common ancestor -- and
+  meeting is the point: an arm hitting a thigh is felt at the pelvis,
+  and the recursion has to add both shares to it before passing it on."
+  [ls i j]
+  (vec (sort > (distinct (concat (ancestry ls i) (ancestry ls j))))))
+
+(defn- pair-delta
+  "The change in generalised velocity from an impulse between two bodies
+  of the same model -- `f` on body `i` and minus `f'` on body `j`.
+
+  The two spatial forces are given separately because each is in its own
+  body's coordinates: the same push, written twice, because a spatial
+  vector only means anything alongside the frame it is in."
+  ^doubles [model ls ai i ^doubles f j ^doubles f']
+  (let [neg (fn [^doubles x] (let [o (a/f64 6)] (dotimes [k 6] (aset o k (- (aget x k)))) o))
+        pa (cond-> {}
+             (not (neg? (long i))) (assoc i (neg f))
+             (not (neg? (long j))) (assoc j (copy6 f')))
+        pa0 (cond-> (a/f64 6)
+              (neg? (long i)) (add6! (neg f))
+              (neg? (long j)) (add6! f'))]
+    (delta-from model ls ai (pair-ancestry ls i j) pa pa0 {})))
+
+(defn- pair-force
+  "The generalised force an impulse between two bodies makes: what it
+  does to `i` less what it does to `j`.
+
+  The difference, because what a contact constrains is the *relative*
+  velocity of the two surfaces, and a push that moves both bodies the
+  same way does not change that at all."
+  ^doubles [model ls i ^doubles f j ^doubles f']
+  (let [ga (generalised-force model ls i f)
+        gb (generalised-force model ls j f')
+        n (alength ga)
+        out (a/f64 n)]
+    (dotimes [k n] (aset out k (- (aget ga k) (aget gb k))))
+    out))
+
 (defn- response
   "How a unit impulse at world point `p` on body `i` along `dir` is felt.
 
@@ -1470,6 +1624,26 @@
   (let [f (point-force frame p dir)
         g (generalised-force model ls i f)
         delta (impulse-delta model ls ai i f)
+        w (dot-n g delta)]
+    {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
+
+(defn- pair-response
+  "How a unit impulse between two bodies of the same model is felt.
+
+  The same three numbers as `response`, for a push on `i` and an equal
+  and opposite one on `j` at the same world point.
+
+  `m` comes out *smaller* than either body's own effective mass there,
+  which is the reverse of what it sounds like it should be and is
+  right. It is a reduced mass. The constraint is on how fast the two
+  surfaces approach each other, and an impulse between two things that
+  can both move changes that faster than the same impulse against
+  something that cannot move at all -- both ends give."
+  [model ls ai frame-i i frame-j j p dir]
+  (let [f (point-force frame-i p dir)
+        f' (point-force frame-j p dir)
+        g (pair-force model ls i f j f')
+        delta (pair-delta model ls ai i f j f')
         w (dot-n g delta)]
     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
 
@@ -1490,6 +1664,24 @@
         {:keys [delta m]} (response model ls (articulated-inertias model ls)
                                     (frame-of model q-vec root-state i)
                                     i p (v/normalize dir))]
+    {:delta-u (vec (seq ^doubles delta))
+     :effective-mass (if (pos? (double m)) m ##Inf)}))
+
+(defn pair-impulse-at
+  "What a unit impulse between two of the model's own bodies does --
+  pushing `i` along `dir` at world point `p` and `j` the other way.
+
+  Returns `{:delta-u :effective-mass}`, as `impulse-at` does. The mass
+  is a reduced mass and comes out smaller than either body's alone:
+  both ends of this push give, where a contact with the floor has one
+  end that does not."
+  [model q-vec root-state i j p dir]
+  (let [ls (links model q-vec)
+        frames (poses model q-vec root-state)
+        {:keys [delta m]} (pair-response model ls (articulated-inertias model ls)
+                                         (frame-of model q-vec root-state i frames) i
+                                         (frame-of model q-vec root-state j frames) j
+                                         p (v/normalize dir))]
     {:delta-u (vec (seq ^doubles delta))
      :effective-mass (if (pos? (double m)) m ##Inf)}))
 
@@ -1514,6 +1706,25 @@
                                          (take 6 scaled-delta)))
           (update :qd #(mapv + % (drop 6 scaled-delta))))
       (update state :qd #(mapv + % (take n scaled-delta))))))
+
+(defn apply-pair-impulse
+  "`state` after an impulse of `magnitude` between two of the model's own
+  bodies: `i` pushed along `dir` at `p`, `j` pushed the other way.
+
+  Nothing outside the model is touched, so its momentum is unchanged --
+  which is the sharpest check there is that the two halves of the push
+  really are equal and opposite."
+  [model state i j p dir magnitude]
+  (let [magnitude (double magnitude)
+        {:keys [delta-u]} (pair-impulse-at model (:q state) (:base state) i j p dir)
+        root (base model)
+        n (dof model)
+        scaled (mapv #(* (double %) magnitude) delta-u)]
+    (if root
+      (-> state
+          (update-in [:base :vel] #(mapv + (vec (or % (repeat 6 0.0))) (take 6 scaled)))
+          (update :qd #(mapv + % (drop 6 scaled))))
+      (update state :qd #(mapv + % (take n scaled))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Generalised velocity
@@ -1629,6 +1840,83 @@
   "Whether any joint has a limit to be checked at all."
   [model]
   (boolean (some #(or (:limit %) (:cone %) (:twist %)) (chain model))))
+
+(defn- world-extent
+  "Half the width of a body's world-axis box, per axis.
+
+  Only good enough to reject a pair before the exact test is asked, and
+  that is all it is for: the separating axis test costs fifteen axes of
+  dot and cross products and most pairs of a body's own limbs are
+  nowhere near each other."
+  [b]
+  (if (= :ball (:shape b))
+    (let [r (double (:radius b))] [r r r])
+    (let [[hx hy hz] (mapv #(* 0.5 (double %)) (:size b))
+          rot (:rot b)
+          ax (q/rotate rot [1.0 0.0 0.0])
+          ay (q/rotate rot [0.0 1.0 0.0])
+          az (q/rotate rot [0.0 0.0 1.0])]
+      (mapv (fn [k] (+ (* hx (abs (double (nth ax k))))
+                       (* hy (abs (double (nth ay k))))
+                       (* hz (abs (double (nth az k))))))
+            (range 3)))))
+
+(defn- apart?
+  "Whether two bodies' world-axis boxes miss each other."
+  [a b]
+  (let [ea (world-extent a) eb (world-extent b)]
+    (boolean (some (fn [k]
+                     (> (abs (- (double (nth (:pos a) k)) (double (nth (:pos b) k))))
+                        (+ (double (nth ea k)) (double (nth eb k)))))
+                   (range 3)))))
+
+(defn- collidable?
+  "Whether two of a model's own parts are allowed to touch.
+
+  A link and its parent are not: they meet at the joint and overlap
+  there by construction, so a contact between them is a permanent one
+  pushing the body apart. Anything else is fair game unless a link's
+  `:no-collide` says otherwise, which is how a shoulder that sits inside
+  the ribcage is told to stay there."
+  [parts i j]
+  (let [i (long i) j (long j)
+        parent-of (fn [k] (if (neg? (long k)) -2 (long (:parent (nth parts k)))))
+        excluded (fn [k other]
+                   (and (not (neg? (long k)))
+                        (contains? (set (:no-collide (nth parts k))) other)))]
+    (and (not= i j)
+         (not= (parent-of i) j)
+         (not= (parent-of j) i)
+         (not (excluded i j))
+         (not (excluded j i)))))
+
+(defn self-contacts
+  "Every contact between one of the model's shapes and another of them.
+
+  Without this a forearm passes through a thigh, which on a ragdoll is
+  the most visible thing left wrong. It is also the expensive thing: a
+  model's parts are all awake and all moving, so there is no sleeping to
+  lean on the way a wall of bricks does, and the pairs go as the square
+  of the parts. The world-axis boxes reject most of them before the
+  exact test is asked.
+
+  Normals point the way the *first* link of each pair has to be pushed."
+  [model q-vec root-state frames]
+  (let [parts (chain model)
+        bodies (collision-bodies model q-vec root-state frames)]
+    (into []
+          (for [[x y] (map vector (range) bodies)
+                [x' y'] (map vector (range) bodies)
+                :when (< (long x) (long x'))
+                :let [{la :link ba :body} y
+                      {lb :link bb :body} y']
+                :when (collidable? parts la lb)
+                :when (not (apart? ba bb))
+                c (contact/between 0 1 ba bb)]
+            {:link la :other lb
+             :point (:point c)
+             :normal (v/negate (:normal c))
+             :depth (:depth c)}))))
 
 (defn- limit-rows
   "The joint limits currently being pushed against, as one-sided
@@ -1750,10 +2038,19 @@
         u0 (a/f64 (velocity model state))
         prep (mapv (fn [c]
                      (let [i (:link c)
+                           other (:other c)
                            frame (frame-of model q root-state i frames)
                            n (v/normalize (:normal c))
                            [t1 t2] (tangents n)
-                           along #(response model ls ai frame i (:point c) %)
+                           ;; A contact against the world pushes one
+                           ;; body; a contact between two of the model's
+                           ;; own parts pushes both, and what it
+                           ;; constrains is their relative velocity.
+                           along (if other
+                                   (let [frame' (frame-of model q root-state other frames)]
+                                     #(pair-response model ls ai frame i frame' other
+                                                     (:point c) %))
+                                   #(response model ls ai frame i (:point c) %))
                            dirs {:n (along n) :t1 (along t1) :t2 (along t2)}]
                        (assoc dirs
                               ;; The closing speed as the step began.
