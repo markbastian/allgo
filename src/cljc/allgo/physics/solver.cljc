@@ -330,28 +330,214 @@
      :approach (a/f64 n)
      :contacts (vec contacts)}))
 
-(defn- body-arrays [bodies]
+(defn- body-arrays
+  "The bodies as flat arrays, in one pass over the maps.
+
+  Velocity and world inertia are what the impulse solvers work in. The
+  pose is here too -- position, orientation, and the inverse orientation
+  that takes a world direction into the body's frame -- because the
+  position solve moves the bodies *during* the solve, and doing that
+  through the body vector means rebuilding a 257 element vector of maps
+  once per contact. On a sixteen course wall that was twenty thousand
+  rebuilds a substep and half of XPBD's step.
+
+  `inv-inertia` is the body frame diagonal rather than the world tensor
+  in `ii`, because the position solve turns the bodies as it goes and a
+  world tensor built at the top of the substep would be stale by the
+  second contact.
+
+  `movable` is what a correction may touch: anything not static. Not
+  `awake?` -- a sleeping body is still pushed out of an overlap, and
+  only its velocity read-back is skipped."
+  [bodies]
   (let [n (count bodies)
         vel (a/f64 (* n 3))
         omega (a/f64 (* n 3))
         inv-mass (a/f64 n)
-        ii (a/f64 (* n 9))]
+        ii (a/f64 (* n 9))
+        pos (a/f64 (* n 3))
+        rot (a/f64 (* n 4))
+        inv-rot (a/f64 (* n 4))
+        inv-inertia (a/f64 (* n 3))
+        ^ints movable (a/i32 n)]
     (dotimes [i n]
       (let [b (nth bodies i)
             [vx vy vz] (:vel b)
-            [wx wy wz] (:omega b)]
-        (aset vel (* i 3) (double vx))
-        (aset vel (+ (* i 3) 1) (double vy))
-        (aset vel (+ (* i 3) 2) (double vz))
-        (aset omega (* i 3) (double wx))
-        (aset omega (+ (* i 3) 1) (double wy))
-        (aset omega (+ (* i 3) 2) (double wz))
+            [wx wy wz] (:omega b)
+            [px py pz] (:pos b)
+            [rx ry rz rw] (:rot b)
+            [qx qy qz qw] (:inv-rot b)
+            [ax ay az] (:inv-inertia b)
+            i3 (* i 3)
+            i4 (* i 4)]
+        (aset vel i3 (double vx))
+        (aset vel (+ i3 1) (double vy))
+        (aset vel (+ i3 2) (double vz))
+        (aset omega i3 (double wx))
+        (aset omega (+ i3 1) (double wy))
+        (aset omega (+ i3 2) (double wz))
+        (aset pos i3 (double px))
+        (aset pos (+ i3 1) (double py))
+        (aset pos (+ i3 2) (double pz))
+        (aset rot i4 (double rx))
+        (aset rot (+ i4 1) (double ry))
+        (aset rot (+ i4 2) (double rz))
+        (aset rot (+ i4 3) (double rw))
+        (aset inv-rot i4 (double qx))
+        (aset inv-rot (+ i4 1) (double qy))
+        (aset inv-rot (+ i4 2) (double qz))
+        (aset inv-rot (+ i4 3) (double qw))
+        (aset inv-inertia i3 (double ax))
+        (aset inv-inertia (+ i3 1) (double ay))
+        (aset inv-inertia (+ i3 2) (double az))
         (aset inv-mass i (double (:inv-mass b)))
+        (aset movable i (if (rigid/static? b) 0 1))
         (inverse-inertia-world ii i (:rot b) (:inv-inertia b))))
-    {:vel vel :omega omega :inv-mass inv-mass :ii ii}))
+    {:n n :vel vel :omega omega :inv-mass inv-mass :ii ii
+     :pos pos :rot rot :inv-rot inv-rot :inv-inertia inv-inertia
+     :movable movable}))
+
+(defn- write-poses
+  "Puts the moved poses back on the bodies.
+
+  `prev-pos` and `prev-rot` are left alone: XPBD reads its velocity off
+  the difference between them and where the substep ended, so the pose
+  the substep started from has to survive the solve."
+  [bodies {:keys [pos rot inv-rot movable]}]
+  (let [^doubles pos pos ^doubles rot rot ^doubles inv-rot inv-rot
+        ^ints movable movable]
+    (mapv (fn [i b]
+            (let [i (long i)]
+              (if (zero? (aget movable i))
+                b
+                (let [i3 (* i 3) i4 (* i 4)]
+                  (assoc b
+                         :pos [(aget pos i3) (aget pos (+ i3 1)) (aget pos (+ i3 2))]
+                         :rot [(aget rot i4) (aget rot (+ i4 1))
+                               (aget rot (+ i4 2)) (aget rot (+ i4 3))]
+                         :inv-rot [(aget inv-rot i4) (aget inv-rot (+ i4 1))
+                                   (aget inv-rot (+ i4 2)) (aget inv-rot (+ i4 3))])))))
+          (range (count bodies))
+          bodies)))
 
 (defn- vec3-at [^doubles arr ^long i]
   [(aget arr (* i 3)) (aget arr (+ (* i 3) 1)) (aget arr (+ (* i 3) 2))])
+
+;; ---------------------------------------------------------------------------
+;; Pose arithmetic on the flat arrays
+;;
+;; The same operations `allgo.geometry.quaternion` and
+;; `allgo.physics.rigid` already have, written to read and write array
+;; slots instead of returning vectors. They are here rather than there
+;; because there is where the readable version belongs: a body is a map
+;; and a rotation is four numbers, and that is the right trade for
+;; everything except the innermost loop of a solve that runs two and a
+;; half thousand times a pass.
+;;
+;; Four arguments and one primitive hint apiece is not a style: a fn
+;; taking primitives is limited to four arguments, and array hints do
+;; not count towards it. Vectors come in and out through `^doubles`
+;; scratch of length three, allocated once by the caller.
+
+(defn- qrot!
+  "Turns the vector in `v` by the quaternion at `i`, into `out`.
+
+  `q/rotate`'s two cross products, in place. `out` may be `v`."
+  [^doubles quats ^long i ^doubles v ^doubles out]
+  (let [b (* i 4)
+        qx (aget quats b) qy (aget quats (+ b 1))
+        qz (aget quats (+ b 2)) qw (aget quats (+ b 3))
+        vx (aget v 0) vy (aget v 1) vz (aget v 2)
+        tx (* 2.0 (- (* qy vz) (* qz vy)))
+        ty (* 2.0 (- (* qz vx) (* qx vz)))
+        tz (* 2.0 (- (* qx vy) (* qy vx)))]
+    (aset out 0 (+ vx (* qw tx) (- (* qy tz) (* qz ty))))
+    (aset out 1 (+ vy (* qw ty) (- (* qz tx) (* qx tz))))
+    (aset out 2 (+ vz (* qw tz) (- (* qx ty) (* qy tx))))
+    out))
+
+(defn- inertia-mul!
+  "`invI * v` in the body's own frame, where the inertia is diagonal."
+  [^doubles inv-inertia ^long i ^doubles v ^doubles out]
+  (let [b (* i 3)]
+    (aset out 0 (* (aget inv-inertia b) (aget v 0)))
+    (aset out 1 (* (aget inv-inertia (+ b 1)) (aget v 1)))
+    (aset out 2 (* (aget inv-inertia (+ b 2)) (aget v 2)))
+    out))
+
+(defn- angular-mass
+  "How much the body at `i` gives to a correction along `n` acting at the
+  lever arm in `r`.
+
+  `rigid/inverse-mass`'s angular half: the lever arm crossed with the
+  direction, taken into the body's frame, weighted by the inertia
+  there. `scratch` is written over."
+  ^double [arrays ^long i ^doubles r-cross-n ^doubles scratch]
+  (let [^doubles inv-rot (:inv-rot arrays)
+        ^doubles inv-inertia (:inv-inertia arrays)
+        _ (qrot! inv-rot i r-cross-n scratch)
+        b (* i 3)
+        rx (aget scratch 0) ry (aget scratch 1) rz (aget scratch 2)]
+    (+ (* rx rx (aget inv-inertia b))
+       (* ry ry (aget inv-inertia (+ b 1)))
+       (* rz rz (aget inv-inertia (+ b 2))))))
+
+(defn- spin!
+  "Turns the body at `i` by the small rotation in `w`.
+
+  `rot += 1/2 * (w, 0) * rot`, renormalized, with the inverse
+  orientation kept in step -- `rigid/with-rotation` and the angular half
+  of `rigid/apply-impulse` together. For a unit quaternion the inverse
+  *is* the conjugate, which is what `q/inverse` reduces to once the
+  normalize above it has run."
+  [^doubles rot ^doubles inv-rot ^long i ^doubles w]
+  (let [b (* i 4)
+        rx (aget rot b) ry (aget rot (+ b 1))
+        rz (aget rot (+ b 2)) rw (aget rot (+ b 3))
+        ox (aget w 0) oy (aget w 1) oz (aget w 2)
+        ;; (ox oy oz 0) * rot
+        dx (+ (* ox rw) (* oy rz) (- (* oz ry)))
+        dy (+ (- (* ox rz)) (* oy rw) (* oz rx))
+        dz (+ (* ox ry) (- (* oy rx)) (* oz rw))
+        dw (- (+ (* ox rx) (* oy ry) (* oz rz)))
+        nx (+ rx (* 0.5 dx)) ny (+ ry (* 0.5 dy))
+        nz (+ rz (* 0.5 dz)) nw (+ rw (* 0.5 dw))
+        l (math/sqrt (+ (* nx nx) (* ny ny) (* nz nz) (* nw nw)))]
+    (if (zero? l)
+      (do (aset rot b 0.0) (aset rot (+ b 1) 0.0)
+          (aset rot (+ b 2) 0.0) (aset rot (+ b 3) 1.0)
+          (aset inv-rot b 0.0) (aset inv-rot (+ b 1) 0.0)
+          (aset inv-rot (+ b 2) 0.0) (aset inv-rot (+ b 3) 1.0))
+      (let [ux (/ nx l) uy (/ ny l) uz (/ nz l) uw (/ nw l)]
+        (aset rot b ux) (aset rot (+ b 1) uy)
+        (aset rot (+ b 2) uz) (aset rot (+ b 3) uw)
+        (aset inv-rot b (- ux)) (aset inv-rot (+ b 1) (- uy))
+        (aset inv-rot (+ b 2) (- uz)) (aset inv-rot (+ b 3) uw)))))
+
+(defn- anchor!
+  "Where the contact anchor at `k` on the body at `i` now is, into `out`.
+
+  The point is kept in the body's frame, so this is `rigid/local->world`
+  and is what recovers the contact geometry after the bodies have moved
+  without running collision detection again."
+  [arrays ^long i ^doubles local ^doubles out]
+  (let [^doubles rot (:rot arrays)
+        ^doubles pos (:pos arrays)
+        i3 (* i 3)]
+    (qrot! rot i local out)
+    (aset out 0 (+ (aget out 0) (aget pos i3)))
+    (aset out 1 (+ (aget out 1) (aget pos (+ i3 1))))
+    (aset out 2 (+ (aget out 2) (aget pos (+ i3 2))))
+    out))
+
+(defn- load3!
+  "Copies three numbers out of a packed array at row `k`."
+  [^doubles src ^long k ^doubles out]
+  (let [k3 (* k 3)]
+    (aset out 0 (aget src k3))
+    (aset out 1 (aget src (+ k3 1)))
+    (aset out 2 (aget src (+ k3 2)))
+    out))
 
 ;; ---------------------------------------------------------------------------
 ;; The velocity solve, shared by sequential impulse and TGS
@@ -741,13 +927,18 @@
           (range (:n cs))
           (:contacts cs))))
 
-(defn- project-contacts
+(defn- project-contacts!
   "One XPBD pass: push overlapping bodies apart, positions only.
 
-  `allgo.physics.rigid/correct` already knows how to share a correction
-  between two bodies by how much each gives at the point it acts -- which
-  is the same question a contact asks, so there is nothing to add here
-  but the error vector, and the multiplier it needed on the way back.
+  This is `allgo.physics.rigid/correct` -- share a correction between
+  two bodies by how much each gives at the point it acts -- written
+  against `body-arrays` rather than the body vector. It is the same
+  arithmetic in the same order, and the reason for the copy is that
+  `correct` returns a new `:bodies`: a persistent vector of 257 maps,
+  rebuilt twice for every contact that pushed. At 2,700 contacts and
+  eight passes that was three quarters of XPBD's step spent allocating
+  bodies it was about to throw away. Here the pass moves the poses in
+  place and the body vector is rebuilt once, at the end of the substep.
 
   The angular half of each correction is relaxed by half, which
   `allgo.physics.joint` also asks for and for the same reason. A brick in
@@ -758,43 +949,121 @@
   unrelaxed it was doing twenty metres a second within a second, and
   solving it harder -- more passes, more substeps -- made it worse, which
   is what says the trouble is the read-back and not convergence."
-  [bodies cs slop dt max-push]
+  [arrays cs slop max-push]
   (let [^doubles normal (:normal cs)
         ^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
         ^doubles depth0 (:depth0 cs)
         ^doubles lambda (:lambda cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)
-        dt (double dt)]
-    (reduce (fn [bs k]
-              (let [ia (aget ia-arr k) ib (aget ib-arr k)
-                    a (nth bs ia) b (nth bs ib)
-                    pa (rigid/local->world a (vec3-at ral k))
-                    pb (rigid/local->world b (vec3-at rbl k))
-                    n (vec3-at normal k)
-                    pen (+ (aget depth0 k) (v/dot (v/sub pa pb) n))
-                    ;; Bounded, for the same reason and by the same
-                    ;; number the impulse solvers use: however deep the
-                    ;; overlap, it is not pushed out faster than
-                    ;; `max-push-speed`. A deep overlap takes several
-                    ;; substeps to clear instead of one, which is slower
-                    ;; and is not 60 metres a second.
-                    c (min (- pen (double slop)) (double max-push))]
-                (if (pos? c)
-                  (let [{:keys [bodies force]}
-                        (rigid/correct bs {:a ia :b ib
-                                           :corr (v/scale n (- c))
-                                           :at pa :other-at pb :dt dt
-                                           :angular-relaxation 0.5})]
-                    ;; `correct` reports the force; the multiplier behind
-                    ;; it is that over dt squared, and summing it is how
-                    ;; the velocity pass learns how hard this contact was
-                    ;; pushing.
-                    (aset lambda k (+ (aget lambda k)
-                                      (abs (* (double force) dt dt))))
-                    bodies)
-                  bs)))
-            bodies
-            (range (long (:n cs))))))
+        ^doubles pos (:pos arrays)
+        ^doubles rot (:rot arrays) ^doubles inv-rot (:inv-rot arrays)
+        ^doubles inv-mass (:inv-mass arrays)
+        ^ints movable (:movable arrays)
+        slop (double slop) max-push (double max-push)
+        ;; Scratch, allocated once for the whole pass rather than per
+        ;; contact. `pa` and `pb` have to survive the correction that
+        ;; follows them; the rest are working room.
+        pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3) t1 (a/f64 3) t2 (a/f64 3)]
+    (dotimes [k (long (:n cs))]
+      (let [ia (aget ia-arr k) ib (aget ib-arr k)
+            ma (aget movable ia) mb (aget movable ib)]
+        (when-not (and (zero? ma) (zero? mb))
+          (let [_ (anchor! arrays ia (load3! ral k t0) pa)
+                _ (anchor! arrays ib (load3! rbl k t0) pb)
+                k3 (* k 3)
+                nx (aget normal k3) ny (aget normal (+ k3 1)) nz (aget normal (+ k3 2))
+                pen (+ (aget depth0 k)
+                       (* (- (aget pa 0) (aget pb 0)) nx)
+                       (* (- (aget pa 1) (aget pb 1)) ny)
+                       (* (- (aget pa 2) (aget pb 2)) nz))
+                ;; Bounded, for the same reason and by the same number
+                ;; the impulse solvers use: however deep the overlap, it
+                ;; is not pushed out faster than `max-push-speed`. A deep
+                ;; overlap takes several substeps to clear instead of
+                ;; one, which is slower and is not 60 metres a second.
+                c (min (- pen slop) max-push)]
+            (when (pos? c)
+              ;; The correction is `-c` along the normal, so the unit
+              ;; direction the pair's compliance is measured along is the
+              ;; normal reversed. Which way it points makes no difference
+              ;; to the effective mass -- that is quadratic in it -- but
+              ;; it does to the impulse.
+              (let [dx (- nx) dy (- ny) dz (- nz)
+                    ia3 (* ia 3) ib3 (* ib 3)
+                    ;; (at - pos) x d, the lever arm crossed with the
+                    ;; direction, for each body.
+                    ax (- (aget pa 0) (aget pos ia3))
+                    ay (- (aget pa 1) (aget pos (+ ia3 1)))
+                    az (- (aget pa 2) (aget pos (+ ia3 2)))
+                    bx (- (aget pb 0) (aget pos ib3))
+                    by (- (aget pb 1) (aget pos (+ ib3 1)))
+                    bz (- (aget pb 2) (aget pos (+ ib3 2)))
+                    wa (if (zero? ma)
+                         0.0
+                         (do (aset t1 0 (- (* ay dz) (* az dy)))
+                             (aset t1 1 (- (* az dx) (* ax dz)))
+                             (aset t1 2 (- (* ax dy) (* ay dx)))
+                             (+ (aget inv-mass ia) (angular-mass arrays ia t1 t2))))
+                    wb (if (zero? mb)
+                         0.0
+                         (do (aset t1 0 (- (* by dz) (* bz dy)))
+                             (aset t1 1 (- (* bz dx) (* bx dz)))
+                             (aset t1 2 (- (* bx dy) (* by dx)))
+                             (+ (aget inv-mass ib) (angular-mass arrays ib t1 t2))))
+                    w (+ wa wb)]
+                (when (pos? w)
+                  ;; `lambda` is `-c/w`, and the impulse is the direction
+                  ;; scaled by its negation. What the velocity pass wants
+                  ;; recorded is the magnitude, which is `c/w` -- the
+                  ;; force over dt squared, times dt squared.
+                  (let [mag (/ c w)
+                        px (* dx mag) py (* dy mag) pz (* dz mag)]
+                    (aset lambda k (+ (aget lambda k) mag))
+                    (when-not (zero? ma)
+                      (let [im (aget inv-mass ia)]
+                        (aset pos ia3 (+ (aget pos ia3) (* px im)))
+                        (aset pos (+ ia3 1) (+ (aget pos (+ ia3 1)) (* py im)))
+                        (aset pos (+ ia3 2) (+ (aget pos (+ ia3 2)) (* pz im))))
+                      ;; The lever arm is measured from the moved centre,
+                      ;; as the reference measures it. It makes no
+                      ;; difference: the centre moved along `p`, and a
+                      ;; vector crossed with something parallel to itself
+                      ;; is zero.
+                      (let [rx (- (aget pa 0) (aget pos ia3))
+                            ry (- (aget pa 1) (aget pos (+ ia3 1)))
+                            rz (- (aget pa 2) (aget pos (+ ia3 2)))]
+                        (aset t1 0 (- (* ry pz) (* rz py)))
+                        (aset t1 1 (- (* rz px) (* rx pz)))
+                        (aset t1 2 (- (* rx py) (* ry px)))
+                        (qrot! inv-rot ia t1 t2)
+                        (inertia-mul! (:inv-inertia arrays) ia t2 t1)
+                        (qrot! rot ia t1 t2)
+                        ;; Halved, which `allgo.physics.joint` also asks
+                        ;; for and for the same reason -- see above.
+                        (aset t2 0 (* 0.5 (aget t2 0)))
+                        (aset t2 1 (* 0.5 (aget t2 1)))
+                        (aset t2 2 (* 0.5 (aget t2 2)))
+                        (spin! rot inv-rot ia t2)))
+                    (when-not (zero? mb)
+                      (let [im (aget inv-mass ib)]
+                        (aset pos ib3 (- (aget pos ib3) (* px im)))
+                        (aset pos (+ ib3 1) (- (aget pos (+ ib3 1)) (* py im)))
+                        (aset pos (+ ib3 2) (- (aget pos (+ ib3 2)) (* pz im))))
+                      (let [rx (- (aget pb 0) (aget pos ib3))
+                            ry (- (aget pb 1) (aget pos (+ ib3 1)))
+                            rz (- (aget pb 2) (aget pos (+ ib3 2)))
+                            qx (- px) qy (- py) qz (- pz)]
+                        (aset t1 0 (- (* ry qz) (* rz qy)))
+                        (aset t1 1 (- (* rz qx) (* rx qz)))
+                        (aset t1 2 (- (* rx qy) (* ry qx)))
+                        (qrot! inv-rot ib t1 t2)
+                        (inertia-mul! (:inv-inertia arrays) ib t2 t1)
+                        (qrot! rot ib t1 t2)
+                        (aset t2 0 (* 0.5 (aget t2 0)))
+                        (aset t2 1 (* 0.5 (aget t2 1)))
+                        (aset t2 2 (* 0.5 (aget t2 2)))
+                        (spin! rot inv-rot ib t2)))))))))))
+    arrays))
 
 (defn- roots
   "Union-find over the contacts: which dynamic bodies move together.
@@ -1104,14 +1373,17 @@
               ;; again each time round.
               _ (dotimes [k (long (:n cs))] (aset lambda k 0.0))
               bodies (mapv #(if (awake? %) (rigid/integrate % h gravity) %) bodies)
+              ;; One read of the bodies for the whole position solve.
+              ;; The passes move the poses in these arrays and the body
+              ;; vector is rebuilt once, below.
+              posed (body-arrays bodies)
               _ (refresh-anchors! bodies cs)
               ;; How fast the surfaces were closing before the solve.
               ;; Restitution is measured against this; after the position
               ;; solve it is whatever the pushout left behind.
-              _ (record-approach! (body-arrays bodies) cs)
-              bodies (reduce (fn [bs _] (project-contacts bs cs slop h push-limit))
-                             bodies
-                             (range passes))
+              _ (record-approach! posed cs)
+              _ (dotimes [_ (long passes)] (project-contacts! posed cs slop push-limit))
+              bodies (write-poses bodies posed)
               bodies (mapv #(if (awake? %) (rigid/update-velocities % h) %) bodies)
               ;; The velocity pass belongs *inside* the substep, not once
               ;; at the end of the frame. It is the only thing that takes
