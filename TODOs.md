@@ -515,10 +515,28 @@ TGS stops toppling too, though it keeps its own floor, below.
     loops run on flat `double` arrays rather than vectors of vectors,
     and the contact sweep keeps one mutable generalised velocity.
 
-    A ragdoll is around eleven links, so two milliseconds a step on the
-    JVM. Worth knowing: the first flat-array attempt was *slower*, from
-    three missing type hints -- reflective `aget` costs two orders of
-    magnitude, and `make reflect` is what catches it.
+    A ragdoll is around eleven links, so about 1.3ms a step on the JVM
+    settled. Worth knowing: the first flat-array attempt was *slower*,
+    from three missing type hints -- reflective `aget` costs two orders
+    of magnitude, and `make reflect` is what catches it.
+
+    The recursion over that arithmetic went the same way afterwards:
+    `deftype`s instead of maps, so a link's transform is a field read
+    rather than a hash lookup, and the total degrees of freedom read off
+    the last link rather than walked for on every one of the seventy
+    calls a step makes. Worth 35% in a browser and lost in the noise on
+    a JVM, which is the expected shape.
+
+    **How to measure this from a browser, because it was nearly got
+    wrong twice.** An automated tab is backgrounded and Chrome gives it
+    less of a processor: ten million square roots, no Clojure in them,
+    take 6.3ms on this JVM and 110ms in that tab. Absolute figures from
+    there mean nothing, and one was published here before anybody
+    checked. Ratios do -- run a calibration loop beside the thing being
+    measured, in the same tab, and divide. That is how the 35% was
+    measured, and it is also what showed the ragdoll to be about twice
+    the JVM's cost rather than thirty times: the ordinary price of
+    Clojure in JavaScript, and not a bug. A day was spent hunting it.
 
   - ~~**Joint limits.**~~ Done, and needed sooner than expected: without
     them a body settles with its head folded back on itself and its
