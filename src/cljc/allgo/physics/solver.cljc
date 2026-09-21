@@ -106,6 +106,7 @@
             [allgo.geometry.vec3 :as v]
             [allgo.physics.contact :as contact]
             [allgo.physics.rigid :as rigid]
+            [allgo.physics.toi :as toi]
             [clojure.math :as math]))
 
 (def defaults
@@ -998,6 +999,72 @@
                         (write-back moved arrays))]
           (recur relaxed cs (dec n) false))))))
 
+(def ^:private max-slices
+  "The most substeps XPBD will cut a step into.
+
+  Conservative advancement shortens a substep to the moment of impact,
+  and a scene contrived enough -- several fast things arriving at
+  different times -- could ask for that over and over. Sixty-four
+  bounds the work, and the step it leaves is short enough that anything
+  still stepping over something at that size was going to need a
+  different engine anyway."
+  64)
+
+(defn- thinnest
+  "A body's narrowest dimension -- what it could be stepped over."
+  ^double [b]
+  (if (= :ball (:shape b))
+    (* 2.0 (double (:radius b)))
+    (reduce min (map double (:size b)))))
+
+(defn- outrunning?
+  "Whether any awake body would cross more than half its own thinnest
+  dimension in a substep of `h`.
+
+  The question that decides whether a time of impact is worth asking
+  for. Nothing in an ordinary scene answers yes, so an ordinary scene
+  pays one length and one comparison per body and nothing else."
+  [bodies ^double h]
+  (boolean (some (fn [b]
+                   (and (awake? b)
+                        (> (* (v/length (:vel b)) h) (* 0.5 (thinnest b)))))
+                 bodies)))
+
+(defn- safe-slice
+  "The longest a substep may be without anything stepping over anything,
+  or nil if nothing is going fast enough for that to be in question.
+
+  Conservative advancement, over the pairs collision detection already
+  offered. A time of impact of zero is a pair that is touching now,
+  which is the ordinary case and says nothing about how long the next
+  substep may be -- it is the pairs that are *about* to touch that set
+  the limit."
+  [bodies contacts h remaining slop]
+  (let [h (double h) remaining (double remaining) slop (double slop)]
+    (when (outrunning? bodies h)
+      (let [pairs (into #{} (map (juxt :a :b)) contacts)]
+        (reduce (fn [best [i j]]
+                  (let [a (nth bodies i) b (nth bodies j)]
+                    (if (and (rigid/inert? a) (rigid/inert? b))
+                      best
+                      (let [{:keys [t closing]} (toi/impact a b remaining)]
+                        (if (and t (> (double t) 1e-9))
+                        ;; Past the moment of impact, not onto it. A
+                        ;; position solver corrects `overlap - slop` and
+                        ;; has nothing to do at an overlap of zero, so
+                        ;; arriving exactly on contact leaves the body
+                        ;; travelling at the speed it arrived with and
+                        ;; the next slice carries it through. Twice the
+                        ;; slop is the shallowest overlap that is
+                        ;; certainly worth solving.
+                          (let [t' (if (> (double closing) 1e-9)
+                                     (+ (double t) (/ (* 2.0 slop) (double closing)))
+                                     (double t))]
+                            (if (or (nil? best) (< t' (double best))) t' best))
+                          best)))))
+                nil
+                pairs)))))
+
 (defn- step-xpbd
   "Do not solve velocities: move the bodies until they no longer overlap,
   then read the velocity back off how far each travelled.
@@ -1012,20 +1079,28 @@
         bodies (rouse bodies contacts)
         cs (prepare bodies contacts (:contacts w))
         slop (double (:slop w))
-        ;; The furthest a contact may push in one substep. The impulse
-        ;; solvers have had this bound since they were written and this
-        ;; one did not, which is the whole of why it explodes: it reads
-        ;; velocity back off the correction, over the substep, so an
-        ;; unbounded correction is an unbounded velocity.
-        push-limit (* (double (:max-push-speed w)) h)
+        ;; The furthest a contact may push in one substep is bounded --
+        ;; the impulse solvers have had this since they were written and
+        ;; this one did not, which is the whole of why it explodes: it
+        ;; reads velocity back off the correction, over the substep, so
+        ;; an unbounded correction is an unbounded velocity. It is bound
+        ;; per slice now, since the slices are no longer all one length.
         ^doubles lambda (:lambda cs)
         passes (max 1 (quot (long iterations) substeps))]
-    (loop [bodies bodies n substeps]
-      (if (zero? n)
+    (loop [bodies bodies remaining (double dt) slices 0]
+      (if (or (<= remaining 1e-9) (>= slices max-slices))
         (assoc w
                :bodies (settle bodies contacts dt w)
                :contacts (contact-state cs))
-        (let [;; Only this substep's multipliers are wanted, so they start
+        (let [;; How long this substep may be. Ordinarily the nominal
+              ;; one; shorter when something is about to be stepped
+              ;; over, which is the whole of what conservative
+              ;; advancement is for here.
+              h (max (/ (double dt) max-slices)
+                     (min h remaining
+                          (or (safe-slice bodies contacts h remaining slop) h)))
+              push-limit (* (double (:max-push-speed w)) h)
+              ;; Only this substep's multipliers are wanted, so they start
               ;; again each time round.
               _ (dotimes [k (long (:n cs))] (aset lambda k 0.0))
               bodies (mapv #(if (awake? %) (rigid/integrate % h gravity) %) bodies)
@@ -1046,7 +1121,7 @@
               arrays (body-arrays bodies)
               _ (refresh-anchors! bodies cs)
               _ (solve-xpbd-velocities! arrays cs h w)]
-          (recur (write-back bodies arrays) (dec n)))))))
+          (recur (write-back bodies arrays) (- remaining h) (inc slices)))))))
 
 (defn step
   "One step of the world, by whichever `:solver` it carries."

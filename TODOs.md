@@ -606,32 +606,52 @@ TGS stops toppling too, though it keeps its own floor, below.
   is still the thing for a scene that is only bricks. Two articulated
   models cannot touch each other yet; one can touch itself.
 
-- **Continuous collision detection.** Half done. Speculative contacts
-  — the cheap version — are in: the margin out to which a gap still
-  counts as a contact is now the fixed 2cm plus how far the pair can
-  travel in the step, and the broad phase sweeps its boxes over the
-  step so the pair survives to be asked about at all. A ball fired at a
-  static slab, highest speed at which it is still stopped:
+- ~~**Continuous collision detection.**~~ Done, both halves.
 
-      sequential impulse    26 m/s → over 2000
-      tgs                   26 m/s → over 2000
-      xpbd                  26 m/s → 120
+  **Speculative contacts**, the cheap half: the margin out to which a
+  gap still counts as a contact is the fixed 2cm plus how far the pair
+  can travel in the step, and the broad phase sweeps its boxes over the
+  step so the pair survives to be asked about at all. That fixed the
+  impulse solvers, which are told about a gap and refuse to close it
+  faster than it is wide.
 
-  The demo's own speed slider goes to 60, so this was reachable by
-  hand rather than theoretical. It costs nothing measurable: a settled
-  wall is untouched because a sleeping body contributes no travel, and
-  a wall being hit costs the same at 10 m/s as at 120. Firing a ball
-  past a brick rather than at it produced no deflection at any speed
-  or offset tried, because a pair whose swept boxes do not overlap is
-  never handed to the narrow phase however wide the margin is.
+  **Conservative advancement**, the thorough half, in
+  `allgo.physics.toi`. Take the distance between two shapes and the
+  fastest either could be closing it; their quotient is a length of
+  time in which nothing can happen, so advance by it and ask again. The
+  sequence walks down onto the moment of first contact without ever
+  stepping past it. Distance comes from `allgo.geometry.gjk`, so a box
+  and a ball are the same problem, and rotation is bounded by
+  `|omega| r` rather than simulated -- which over-states how fast a
+  spinning body closes a gap, and is the right way to be wrong.
 
-  **Conservative advancement is what is left, and XPBD is why.** It
-  integrates the substep and only then pushes overlaps apart, so a gap
-  it has not yet reached buys it nothing and it steps over a thin slab
-  above about 120 m/s. The impulse solvers do not need it. Finding the
-  time of impact and advancing to it would fix XPBD and would also
-  replace `stopped at the surface some time within the step` with
-  `stopped at the instant of arrival`, which is what a bullet wants.
+  XPBD is why it was needed. It integrates a substep and only then
+  pushes overlaps apart, so a gap it has not reached buys it nothing.
+  Its substeps are now variable: as long as the nominal one ordinarily,
+  and no longer than the time of impact when something is about to be
+  stepped over.
+
+      a ball fired at a static slab, highest speed still stopped
+
+      sequential impulse    26 m/s  ->  over 20000
+      tgs                   26 m/s  ->  over 20000
+      xpbd                  26 m/s  ->  120  ->  10000
+
+  The catch worth writing down: advancing *onto* the moment of impact
+  is not enough. A position solver corrects `overlap - slop` and has
+  nothing to do at an overlap of zero, so the ball arrived at the
+  surface still travelling and the next slice carried it through. The
+  advance goes to the impact plus the time to reach twice the slop,
+  which is the shallowest overlap certainly worth solving.
+
+  It costs nothing when nothing is moving fast, which is the point of
+  asking first: a settled 9x8 wall under XPBD is 0.544ms a step against
+  TGS's 0.611, unchanged by any of this, because no body crosses half
+  its own thinnest dimension in a substep and the time of impact is
+  never asked for. XPBD's ceiling is now the cap on how finely a step
+  may be cut -- 64 slices of a sixtieth of a second is a quarter of a
+  millisecond, and 20 km/s crosses the slab in less than that.
+
 - ~~**Sleeping.**~~ Done. An island whose bodies have all been under the
   speed thresholds for half a second is frozen: velocities zeroed, not
   integrated, not solved, and no contact generated between two bodies

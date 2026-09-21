@@ -278,14 +278,21 @@
         (is (not (through? solver speed))
             (str (name solver) " let a ball through at " speed " m/s")))
 
-      ;; The impulse solvers hold at any speed worth naming. XPBD does
-      ;; not, and the reason is structural rather than a margin that
-      ;; wants widening: it integrates the substep first and only then
-      ;; pushes overlaps apart, so a gap it has not yet reached buys it
-      ;; nothing. That one wants conservative advancement.
-      (doseq [solver [:sequential-impulse :tgs]
-              speed [500 2000]]
+      ;; All three hold at any speed worth naming now. XPBD did not
+      ;; until it was given conservative advancement: it integrates a
+      ;; substep and only then pushes overlaps apart, so a gap it had
+      ;; not yet reached bought it nothing, and it gave out at 120.
+      (doseq [solver solvers
+              speed [500 2000 10000]]
         (is (not (through? solver speed))
             (str (name solver) " let a ball through at " speed " m/s")))
-      (is (through? :xpbd 2000)
-          "xpbd has started holding at 2000 m/s -- good news, update this"))))
+
+      ;; XPBD's ceiling is now the cap on how finely a step may be cut.
+      ;; Sixty-four slices of a sixtieth of a second is a quarter of a
+      ;; millisecond, and twenty kilometres a second crosses the slab in
+      ;; less than that.
+      (is (through? :xpbd 20000)
+          "xpbd holds at 20000 m/s now -- good news, move this up")
+      (doseq [solver [:sequential-impulse :tgs]]
+        (is (not (through? solver 20000))
+            (str (name solver) " let a ball through at 20000 m/s"))))))
