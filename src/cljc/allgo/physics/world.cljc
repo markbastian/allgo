@@ -63,6 +63,7 @@
 
 (def defaults
   {:gravity [0.0 -9.81 0.0]
+   :self-collide? true
    :iterations 8
    :friction 0.6
    :restitution 0.0
@@ -122,7 +123,7 @@
   The first of those goes through `allgo.physics.contact/all`, which has
   the broad phase; the rest are pair tests, because a model has few
   enough parts that sorting them would cost more than trying them."
-  [{:keys [bodies models]} configs]
+  [{:keys [bodies models self-collide?] :or {self-collide? true}} configs]
   (let [parts (model-bodies models configs)]
     (-> []
         ;; Rigid against rigid.
@@ -136,12 +137,13 @@
                     [bi rb] (map-indexed vector bodies)
                     c (pair-contacts side body [:rigid bi] rb)]
                 c))
-        ;; And each model against itself.
-        (into (for [[mi {:keys [model pose]}] (map-indexed vector models)
-                    c (ab/self-contacts model (:q pose) (:base pose)
-                                        (:frames (nth configs mi)))]
-                {:a [:link mi (:link c)] :b [:link mi (:other c)]
-                 :point (:point c) :normal (:normal c) :depth (:depth c)})))))
+        ;; And each model against itself, unless told not to.
+        (into (when self-collide?
+                (for [[mi {:keys [model pose]}] (map-indexed vector models)
+                      c (ab/self-contacts model (:q pose) (:base pose)
+                                          (:frames (nth configs mi)))]
+                  {:a [:link mi (:link c)] :b [:link mi (:other c)]
+                   :point (:point c) :normal (:normal c) :depth (:depth c)}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; What each side of a contact answers

@@ -564,8 +564,10 @@ TGS stops toppling too, though it keeps its own floor, below.
     made independent.
 
   - ~~**A ragdoll demo.**~~ `allgo.demo.ragdoll`: eleven boxes, ten
-    joints, twenty-eight degrees of freedom, a floor and a tilted slab
-    to fall off. On the JVM a step is 0.17ms in flight and 1.3ms once
+    joints, twenty-eight degrees of freedom, a floor, a tilted slab to
+    fall off and a wall of loose bricks to land in -- dropped on four
+    courses it knocks all sixteen askew, which is `allgo.physics.world`
+    doing the thing neither half of this library could do alone. On the JVM a step is 0.17ms in flight and 1.3ms once
     it has landed on eighteen contacts, so one substep a frame, which
     is stable. The browser figure that used to be quoted here has been
     withdrawn rather than corrected -- see the note on measuring from a

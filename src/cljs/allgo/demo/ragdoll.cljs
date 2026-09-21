@@ -34,6 +34,23 @@
   is a push between a link and the floor; the solver does not need to be
   told which.
 
+  **The bricks are the point.** They are loose rigid bodies, simulated
+  by `allgo.physics.solver`'s kind of arithmetic, and the figure is a
+  jointed model simulated by nobody's idea of the same thing. Until
+  `allgo.physics.world` existed the two could not touch: a ragdoll
+  could fall down stairs, because stairs do not move, and could not
+  knock a brick off a wall. Dropped on four courses, it knocks all
+  sixteen askew.
+
+  What makes that work is that a contact does not care what is on
+  either side of it. It asks both sides the same three questions -- how
+  fast is your surface here, what does a unit impulse buy, take this
+  impulse -- and a brick answers from its inverse inertia while a
+  forearm answers with a walk up its own tree to the pelvis. One
+  Gauss-Seidel sweep covers every contact in the scene together, which
+  is what lets a brick being pushed by a hand and by the brick under it
+  see both pushes in the same iteration.
+
   **`shove` pushes the chest away from wherever you are standing**, by
   an impulse rather than a force -- `apply-impulse`, the same entry
   point a contact uses. It is worth trying on a figure that has already
@@ -63,11 +80,12 @@
 
   ## What it costs
 
-  Eleven bodies, twenty-eight degrees of freedom. On the JVM a step is
-  0.17ms in flight and 1.3ms once it has landed on eighteen contacts;
-  self collision adds about half of the first and nothing at all to the
-  second, because a figure whose limbs are not inside each other is a
-  figure with fewer contacts to solve.
+  Eleven bodies, twenty-eight degrees of freedom, and as many loose
+  bricks as `brick rows` asks for. On the JVM a settled step is 1.4ms
+  with no bricks, 2.4ms with eight and 3.0ms with sixteen; in flight it
+  is 0.17ms. Self collision adds about half of that last one and
+  nothing at all to the others, because a figure whose limbs are not
+  inside each other is a figure with fewer contacts to solve.
 
   In a browser it is a good deal slower, and this docstring used to
   name a figure for that which should not have been trusted -- it was
@@ -84,6 +102,7 @@
             [allgo.geometry.vec3 :as v]
             [allgo.physics.articulated :as ab]
             [allgo.physics.rigid :as rigid]
+            [allgo.physics.world :as pw]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
@@ -160,6 +179,23 @@
   (rigid/box {:pos [0.0 0.25 0.0] :size [1.6 0.5 1.6]
               :rot (q/from-axis-angle [0.0 0.0 1.0] (deg tilt))}))
 
+(def ^:private brick-size [0.22 0.11 0.14])
+
+(defn- wall
+  "A running-bond wall of loose bricks, `rows` high, for the figure to
+  land in. Small and light: the point is that they move when a ragdoll
+  hits them, not that they stand up to one."
+  [rows]
+  (let [[bw bh _] brick-size]
+    (vec (for [r (range (long rows))
+               c (range 4)
+               :let [offset (if (odd? r) (* 0.5 (double bw)) 0.0)]]
+           (rigid/box {:pos [(+ (* (- c 1.5) (double bw)) offset 0.55)
+                             (+ (* 0.5 (double bh)) (* r (double bh)))
+                             0.0]
+                       :size brick-size
+                       :density 500.0})))))
+
 (def ^:private ^js controls
   #js {:height 1.8
        :tilt 18
@@ -172,6 +208,7 @@
        :substeps 1
        :spin 2.0
        :shoveForce 120
+       :brickRows 4
        :drop (fn [])
        :shove (fn [])})
 
@@ -189,6 +226,7 @@
     :head (THREE/MeshStandardMaterial. #js {:color 0xd8b08a :roughness 0.7})
     :torso (THREE/MeshStandardMaterial. #js {:color 0x4f6b9c :roughness 0.75})
     :limb (THREE/MeshStandardMaterial. #js {:color 0x8a9bbd :roughness 0.75})
+    :brick (THREE/MeshStandardMaterial. #js {:color 0xb98d5f :roughness 0.85})
     (THREE/MeshStandardMaterial. #js {:color 0x2b3040 :roughness 0.9})))
 
 (defn- part-kind [link]
@@ -207,7 +245,7 @@
         ;; `:pose` rather than `:state`, so that destructuring it cannot
         ;; shadow the atom holding it. It did, and `swap!` was called on
         ;; a map for as long as the shove button existed.
-        world (atom {:model nil :pose nil :meshes {}})]
+        world (atom {:scene nil :meshes {}})]
     (set! (.-background scene) (THREE/Color. 0x0b0d15))
     (.setPixelRatio renderer (min 2 (or js/window.devicePixelRatio 1)))
     (.appendChild container (.-domElement renderer))
@@ -231,15 +269,21 @@
       (letfn [(obstacles []
                 (cond-> [floor]
                   (.-obstacle controls) (conj (slab (.-tilt controls)))))
+              (place! [^js m body]
+                (let [[x y z] (:pos body)
+                      [qx qy qz qw] (:rot body)]
+                  (.set (.-position m) x y z)
+                  (.set (.-quaternion m) qx qy qz qw)))
               (sync-meshes! []
-                (let [{:keys [model pose meshes]} @world]
+                (let [{:keys [scene meshes]} @world
+                      {:keys [model pose]} (first (:models scene))]
                   (doseq [{:keys [link body]} (ab/collision-bodies
                                                model (:q pose) (:base pose))]
-                    (when-let [^js m (get meshes link)]
-                      (let [[x y z] (:pos body)
-                            [qx qy qz qw] (:rot body)]
-                        (.set (.-position m) x y z)
-                        (.set (.-quaternion m) qx qy qz qw))))))
+                    (when-let [^js m (get meshes [:link link])]
+                      (place! m body)))
+                  (doseq [[i body] (map-indexed vector (:bodies scene))]
+                    (when-let [^js m (get meshes [:rigid i])]
+                      (place! m body)))))
               (sync-prop! []
                 (let [ob (slab (.-tilt controls))
                       [x y z] (:pos ob)
@@ -247,28 +291,32 @@
                   (set! (.-visible prop) (boolean (.-obstacle controls)))
                   (.set (.-position prop) x y z)
                   (.set (.-quaternion prop) qx qy qz qw)))
+              (mesh-for [body kind]
+                (let [[sx sy sz] (:size body)]
+                  (THREE/Mesh. (THREE/BoxGeometry. sx sy sz) (material kind))))
               (rebuild! []
                 (doseq [[_ ^js m] (:meshes @world)]
                   (.remove scene m)
                   (.dispose (.-geometry m)))
                 (let [model (figure (boolean (.-limits controls)))
                       st (start-state model (.-height controls) (.-spin controls))
-                      meshes (into {}
-                                   (for [{:keys [link body]}
-                                         (ab/collision-bodies model (:q st) (:base st))
-                                         :let [[sx sy sz] (:size body)]]
-                                     [link (doto (THREE/Mesh.
-                                                  (THREE/BoxGeometry. sx sy sz)
-                                                  (material (part-kind link)))
-                                             (-> .-castShadow (set! true)))]))]
+                      bodies (into (obstacles) (wall (.-brickRows controls)))
+                      sc (pw/world bodies [{:model model :pose st}] (opts))
+                      meshes (into (into {}
+                                         (for [{:keys [link body]}
+                                               (ab/collision-bodies model (:q st) (:base st))]
+                                           [[:link link] (mesh-for body (part-kind link))]))
+                                   (for [[i body] (map-indexed vector bodies)
+                                         :when (not (rigid/static? body))]
+                                     [[:rigid i] (mesh-for body :brick)]))]
                   (doseq [[_ ^js m] meshes] (.add scene m))
-                  (reset! world {:model model :pose st :meshes meshes})
+                  (reset! world {:scene sc :meshes meshes})
                   (sync-prop!)
                   (sync-meshes!)))
               (shove! []
                 ;; A push on the torso, from wherever the camera is, so
                 ;; it always shoves the figure away from the viewer.
-                (let [{:keys [model pose]} @world
+                (let [{:keys [model pose]} (first (:models (:scene @world)))
                       dir (let [p (.-position camera)]
                             [(- (.-x p)) 0.15 (- (.-z p))])
                       len (js/Math.hypot (nth dir 0) (nth dir 1) (nth dir 2))
@@ -278,12 +326,11 @@
                       ;; about its own neck.
                       chest (ab/frame-of model (:q pose) (:base pose) 0)
                       where (v/add (:pos chest) (q/rotate (:rot chest) [0.0 0.25 0.0]))]
-                  (swap! world update :pose
+                  (swap! world update-in [:scene :models 0 :pose]
                          #(ab/apply-impulse model % 0 where unit
                                             (.-shoveForce controls)))))
               (opts []
                 {:gravity [0.0 -9.81 0.0]
-                 :obstacles (obstacles)
                  :friction (.-friction controls)
                  :restitution (.-restitution controls)
                  :iterations (long (.-iterations controls))
@@ -298,12 +345,11 @@
                 (when @running?
                   (js/requestAnimationFrame animate)
                   (let [t0 (js/performance.now)
-                        {:keys [model]} @world
                         n (max 1 (long (.-substeps controls)))
                         h (/ 1.0 (* 60.0 n))
                         o (opts)]
                     (dotimes [_ n]
-                      (swap! world update :pose #(ab/step % model h o)))
+                      (swap! world update :scene #(pw/step (merge % o) h)))
                     (sync-meshes!)
                     (.update orbit)
                     (.render renderer scene camera)
@@ -321,8 +367,12 @@
             (-> (.add controls "shoveForce" 20 400 10) (.name "shove force"))
             (-> (.add controls "limits") (.name "joint limits") (.onChange rebuild!))
             (-> (.add controls "selfCollide") (.name "self collision"))
-            (-> (.add controls "obstacle") (.onChange sync-prop!))
-            (-> (.add controls "tilt" 0 40 1) (.onChange sync-prop!))
+            ;; The slab is part of the simulation now rather than a
+            ;; prop, so moving it means building the scene again.
+            (-> (.add controls "obstacle") (.onChange rebuild!))
+            (-> (.add controls "tilt" 0 40 1) (.onFinishChange rebuild!))
+            (-> (.add controls "brickRows" 0 8 1) (.name "brick rows")
+                (.onFinishChange rebuild!))
             (-> (.add controls "friction" 0.0 1.5 0.05))
             (-> (.add controls "restitution" 0.0 0.6 0.05))
             (-> (.add controls "iterations" 2 20 1))
