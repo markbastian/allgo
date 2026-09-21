@@ -34,6 +34,13 @@
   is a push between a link and the floor; the solver does not need to be
   told which.
 
+  **`shove` pushes the chest away from wherever you are standing**, by
+  an impulse rather than a force -- `apply-impulse`, the same entry
+  point a contact uses. It is worth trying on a figure that has already
+  settled: the whole body answers, because an impulse at the chest
+  reaches the feet through the joints in the same step rather than a
+  link at a time.
+
   **The elbows and knees are hinges and the rest are ball joints.** An
   elbow that could swing sideways would not read as an elbow. The
   shoulders and hips are spherical, which is three numbers of velocity
@@ -74,6 +81,7 @@
   the cost. The frame counter is in the corner."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.quaternion :as q]
+            [allgo.geometry.vec3 :as v]
             [allgo.physics.articulated :as ab]
             [allgo.physics.rigid :as rigid]
             ["lil-gui" :default GUI]
@@ -163,6 +171,7 @@
        :iterations 8
        :substeps 1
        :spin 2.0
+       :shoveForce 120
        :drop (fn [])
        :shove (fn [])})
 
@@ -195,7 +204,10 @@
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         running? (atom false)
         tick-fps! (fps/meter! container)
-        state (atom {:model nil :state nil :meshes {} :obstacles []})]
+        ;; `:pose` rather than `:state`, so that destructuring it cannot
+        ;; shadow the atom holding it. It did, and `swap!` was called on
+        ;; a map for as long as the shove button existed.
+        world (atom {:model nil :pose nil :meshes {}})]
     (set! (.-background scene) (THREE/Color. 0x0b0d15))
     (.setPixelRatio renderer (min 2 (or js/window.devicePixelRatio 1)))
     (.appendChild container (.-domElement renderer))
@@ -220,9 +232,9 @@
                 (cond-> [floor]
                   (.-obstacle controls) (conj (slab (.-tilt controls)))))
               (sync-meshes! []
-                (let [{:keys [model state meshes]} @state]
+                (let [{:keys [model pose meshes]} @world]
                   (doseq [{:keys [link body]} (ab/collision-bodies
-                                               model (:q state) (:base state))]
+                                               model (:q pose) (:base pose))]
                     (when-let [^js m (get meshes link)]
                       (let [[x y z] (:pos body)
                             [qx qy qz qw] (:rot body)]
@@ -236,7 +248,7 @@
                   (.set (.-position prop) x y z)
                   (.set (.-quaternion prop) qx qy qz qw)))
               (rebuild! []
-                (doseq [[_ ^js m] (:meshes @state)]
+                (doseq [[_ ^js m] (:meshes @world)]
                   (.remove scene m)
                   (.dispose (.-geometry m)))
                 (let [model (figure (boolean (.-limits controls)))
@@ -250,20 +262,25 @@
                                                   (material (part-kind link)))
                                              (-> .-castShadow (set! true)))]))]
                   (doseq [[_ ^js m] meshes] (.add scene m))
-                  (reset! state {:model model :state st :meshes meshes})
+                  (reset! world {:model model :pose st :meshes meshes})
                   (sync-prop!)
                   (sync-meshes!)))
               (shove! []
                 ;; A push on the torso, from wherever the camera is, so
                 ;; it always shoves the figure away from the viewer.
-                (let [{:keys [model state]} @state
+                (let [{:keys [model pose]} @world
                       dir (let [p (.-position camera)]
                             [(- (.-x p)) 0.15 (- (.-z p))])
                       len (js/Math.hypot (nth dir 0) (nth dir 1) (nth dir 2))
                       unit (mapv #(/ (double %) len) dir)
-                      where (:pos (ab/frame-of model (:q state) (:base state) 0))]
-                  (swap! state update :state
-                         #(ab/apply-impulse model % 0 where unit 30.0))))
+                      ;; At the chest rather than at the shoulder joint,
+                      ;; so it topples the figure instead of spinning it
+                      ;; about its own neck.
+                      chest (ab/frame-of model (:q pose) (:base pose) 0)
+                      where (v/add (:pos chest) (q/rotate (:rot chest) [0.0 0.25 0.0]))]
+                  (swap! world update :pose
+                         #(ab/apply-impulse model % 0 where unit
+                                            (.-shoveForce controls)))))
               (opts []
                 {:gravity [0.0 -9.81 0.0]
                  :obstacles (obstacles)
@@ -281,12 +298,12 @@
                 (when @running?
                   (js/requestAnimationFrame animate)
                   (let [t0 (js/performance.now)
-                        {:keys [model]} @state
+                        {:keys [model]} @world
                         n (max 1 (long (.-substeps controls)))
                         h (/ 1.0 (* 60.0 n))
                         o (opts)]
                     (dotimes [_ n]
-                      (swap! state update :state #(ab/step % model h o)))
+                      (swap! world update :pose #(ab/step % model h o)))
                     (sync-meshes!)
                     (.update orbit)
                     (.render renderer scene camera)
@@ -301,6 +318,7 @@
             (-> (.add controls "spin" -6.0 6.0 0.5) (.onFinishChange rebuild!))
             (.add controls "drop")
             (.add controls "shove")
+            (-> (.add controls "shoveForce" 20 400 10) (.name "shove force"))
             (-> (.add controls "limits") (.name "joint limits") (.onChange rebuild!))
             (-> (.add controls "selfCollide") (.name "self collision"))
             (-> (.add controls "obstacle") (.onChange sync-prop!))
