@@ -3,243 +3,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="css/style.css" rel="stylesheet" type="text/css">
     <title>allgo</title>
+    <meta name="description" content="Algorithms in Clojure and ClojureScript, each one running live in the browser.">
+    <link href="css/gallery.css" rel="stylesheet" type="text/css">
 </head>
 <body>
-<header class="page-header">
-    <h1>allgo</h1>
-    <p>Procedural generation, computational geometry, numerical integration
-        and astrodynamics &mdash; each one running live.
-        Or play <a href="cnc/index.html">Crossbows &amp; Catapults</a>, ride the
-        <a href="moto/index.html">motorcycle</a>, or tour the
-        <a href="solar/index.html">solar system</a> full screen.</p>
-    <div id="demo-picker"></div>
-</header>
-<!-- Every card ships hidden: the shell reveals the selected one once it
-     mounts. Without this the browser paints all of them for as long as it
-     takes to parse and run the bundle, and a refresh flashes the whole
-     stack before collapsing to one. The shell clears `hidden` on the
-     active card before starting its renderer, so a demo is still visible
-     -- and therefore measurable -- by the time it is built. -->
-<main class="demo-grid">
-    <section class="demo-card" hidden data-demo="caves"
-             data-group="Procedural Generation"
-             data-label="Cellular Caves"
-             data-blurb="Cellular automata carving connected caverns">
-        <div id="caves" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="dungeon"
-             data-group="Procedural Generation"
-             data-label="Dungeon Generation"
-             data-blurb="Scatter, separate, triangulate, span, carve">
-        <div id="dungeon" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="terrain"
-             data-group="Procedural Generation"
-             data-label="Fractal Terrain"
-             data-blurb="Diamond-square and TIN heightmaps in WebGL">
-        <div id="terrain" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="erosion"
-             data-group="Procedural Generation"
-             data-label="Hydraulic Erosion"
-             data-blurb="Droplets carving valleys and a drainage network">
-        <div id="erosion" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="dla"
-             data-group="Procedural Generation"
-             data-label="Diffusion-Limited Aggregation"
-             data-blurb="Random walkers branching into mountain ridges">
-        <div id="dla" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="island"
-             data-group="Procedural Generation"
-             data-label="Island Generation"
-             data-blurb="A polygon map: coastline, rivers, biomes, towns, borders">
-        <div id="island" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="planet"
-             data-group="Procedural Generation"
-             data-label="Procedural Planets"
-             data-blurb="Multifractal terrain, clouds and air on a sphere">
-        <div id="planet" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="sphere-fluid"
-             data-group="Simulation"
-             data-label="Fluid on a Sphere"
-             data-blurb="Vorticity, streamfunction and Coriolis bands">
-        <div id="sphere-fluid" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="hex"
-             data-group="Geometry"
-             data-label="Hex Grids"
-             data-blurb="Coordinates, regions and pathfinding on hexagons">
-        <div id="hex" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="delaunay"
-             data-group="Geometry"
-             data-label="Delaunay / Voronoi"
-             data-blurb="Bowyer&ndash;Watson triangulation and its dual">
-        <div id="delaunay"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="spatial-hash"
-             data-group="Spatial Queries"
-             data-label="Spatial Hashing"
-             data-blurb="Overlaps among thousands of objects, in linear time">
-        <div id="spatial-hash" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="arm"
-             data-group="Robotics"
-             data-label="Inverse Kinematics"
-             data-blurb="Click a target: all eight ways the arm can reach it">
-        <div id="arm" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="human-arm"
-             data-group="Robotics"
-             data-label="Redundancy &mdash; Human Arm"
-             data-blurb="Seven joints for six: the elbow swings, the hand stays">
-        <div id="human-arm" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="broad-phase"
-             data-group="Spatial Queries"
-             data-label="Broad Phase"
-             data-blurb="Hashing, sweep and prune and a Morton BVH, raced">
-        <div id="broad-phase" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="soft-body"
-             data-group="Soft Bodies"
-             data-label="Soft Bodies &mdash; XPBD"
-             data-blurb="Unbreakable position based dynamics on tetrahedra">
-        <div id="soft-body" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="skinning"
-             data-group="Soft Bodies"
-             data-label="Soft Bodies &mdash; Skinning"
-             data-blurb="A detailed surface carried by a coarse tetrahedral cage">
-        <div id="skinning" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="cloth"
-             data-group="Soft Bodies"
-             data-label="Cloth &mdash; XPBD"
-             data-blurb="Stretching and bending as two distance constraints">
-        <div id="cloth" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="bricks"
-             data-group="Rigid Bodies"
-             data-label="Bricks"
-             data-blurb="Four things to knock down, three contact solvers">
-        <div id="bricks" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="ragdoll"
-             data-group="Rigid Bodies"
-             data-label="Ragdoll"
-             data-blurb="A jointed figure in reduced coordinates">
-        <div id="ragdoll" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="motorcycle"
-             data-group="Rigid Bodies"
-             data-label="Motorcycle"
-             data-blurb="Exact joints, springs and a rider: lean it with the keys">
-        <div id="motorcycle" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="rigid"
-             data-group="Rigid Bodies"
-             data-label="Rigid Bodies &mdash; XPBD"
-             data-blurb="Boxes and links: corrections that turn as well as move">
-        <div id="rigid" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="joints"
-             data-group="Rigid Bodies"
-             data-label="Joints"
-             data-blurb="Ball, hinge, servo and motor, from three primitives">
-        <div id="joints" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="fluid"
-             data-group="Fluids"
-             data-label="Eulerian Fluid"
-             data-blurb="A wind tunnel: projection, advection and an obstacle">
-        <div id="fluid" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="flip"
-             data-group="Fluids"
-             data-label="FLIP Fluid"
-             data-blurb="Particles carry the fluid, a grid keeps it incompressible">
-        <div id="flip" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="fire"
-             data-group="Fluids"
-             data-label="Fire &amp; Smoke"
-             data-blurb="Buoyancy, cooling and vortex particles on a grid fluid">
-        <div id="fire" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="water"
-             data-group="Fluids"
-             data-label="Height-Field Water"
-             data-blurb="Waves, buoyancy and Archimedes on a grid of columns">
-        <div id="water" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="boids"
-             data-group="Flocking"
-             data-label="Flocking &mdash; 2D"
-             data-blurb="Reynolds' boids on a canvas">
-        <div id="boids" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="dungeon-boids"
-             data-group="Flocking"
-             data-label="Flocking &mdash; Dungeon"
-             data-blurb="A flock finding its way through generated corridors">
-        <div id="dungeon-boids" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="boids-voronoi"
-             data-group="Flocking"
-             data-label="Flocking &mdash; Voronoi"
-             data-blurb="The flock's Voronoi diagram, retriangulated each frame">
-        <div id="boids-voronoi" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="boids-3d"
-             data-group="Flocking"
-             data-label="Flocking &mdash; 3D"
-             data-blurb="The same rules in three dimensions">
-        <div id="boids-3d" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="boids-voronoi-3d"
-             data-group="Flocking"
-             data-label="Flocking &mdash; Voronoi 3D"
-             data-blurb="Voronoi polyhedra of the flock, rebuilt each frame">
-        <div id="boids-voronoi-3d" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="lorenz"
-             data-group="Orbits &amp; Numerics"
-             data-label="Lorenz &mdash; Numerical Integration"
-             data-blurb="Chapter 4 of Montenbruck &amp; Gill, integrating in real time">
-        <div id="lorenz" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="kepler"
-             data-group="Orbits &amp; Numerics"
-             data-label="Kepler &mdash; Nystrom Integration"
-             data-blurb="Two-body motion, and how each method holds energy">
-        <div id="kepler" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="satellite"
-             data-group="Orbits &amp; Numerics"
-             data-label="Satellite &mdash; Orbit Perturbations"
-             data-blurb="Perturbing forces, and the integrators for them">
-        <div id="satellite" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="orbit-determination"
-             data-group="Orbits &amp; Numerics"
-             data-label="Orbit Determination"
-             data-blurb="Recovering an orbit from noisy ranges">
-        <div id="orbit-determination" class="demo-viewport"></div>
-    </section>
-    <section class="demo-card" hidden data-demo="solar-system"
-             data-group="Orbits &amp; Numerics"
-             data-label="Solar System"
-             data-blurb="Planets, Moon, satellite and 9,000 stars in one J2000 frame">
-        <div id="solar-system" class="demo-viewport"></div>
-    </section>
-</main>
-<script src="js/compiled/allgo.js" type="text/javascript"></script>
+<!-- The gallery. Every tile links to a demo running full window: the
+     three with pages of their own go to them, the rest to play/?demo=<id>.
+     The list is demos.json, which the player reads too; this page draws
+     itself from it with the script below and loads none of the demos'
+     bundle, so it is quick on a phone. -->
+<div class="wrap">
+    <header class="hero">
+        <h1>allgo</h1>
+        <p>Procedural generation, computational geometry, physics, numerical
+            integration and astrodynamics, written in Clojure and ClojureScript,
+            each one running live.</p>
+        <div class="hero__links">
+            <a href="https://github.com/markbastian/allgo">Source on GitHub</a>
+        </div>
+    </header>
+
+    <h2 class="section-title">Featured</h2>
+    <div class="featured" id="featured"></div>
+
+    <div class="toolbar">
+        <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input id="search" type="search" placeholder="Search demos" autocomplete="off"
+                   aria-label="Search demos">
+        </label>
+        <div class="chips" id="chips" role="group" aria-label="Topics"></div>
+    </div>
+
+    <main id="gallery" aria-live="polite">
+        <noscript><p class="empty">The demos, and this list of them, need JavaScript.</p></noscript>
+    </main>
+
+    <footer>
+        Each demo opens full screen; most have controls in a panel you can
+        open and close. By Mark Bastian.
+    </footer>
+</div>
+
+<script>
+(function () {
+    // A color and a line drawing for each topic, so a tile says what it is
+    // before its words are read.
+    var topics = {
+        "Games":                 {hue: 352, glyph: '<path d="M5 21V9l2-2V4h2v2h2V4h2v2h2V4h2v3l2 2v12z"/><path d="M10 21v-4a2 2 0 0 1 4 0v4"/>'},
+        "Procedural Generation": {hue: 150, glyph: '<path d="M2.5 19.5l6-9.5 4 6 3-4 6 7.5z"/><circle cx="17" cy="6" r="2"/>'},
+        "Geometry":              {hue: 265, glyph: '<path d="M3 19.5L12 4l9 15.5z"/><path d="M7.5 11.75h9M12 4v15.5M7.5 11.75l4.5 7.75 4.5-7.75"/>'},
+        "Spatial Queries":       {hue: 200, glyph: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 12h17M12 3.5v17"/><circle cx="7.5" cy="8" r="1"/><circle cx="16" cy="7" r="1"/><circle cx="8" cy="16.5" r="1"/><circle cx="16.5" cy="16" r="1"/>'},
+        "Robotics":              {hue: 30,  glyph: '<path d="M4 20.5h8M8 20.5v-5l5-6.5 5.5 2.5"/><circle cx="8" cy="15.5" r="1.6"/><circle cx="13" cy="9" r="1.6"/><path d="M18.5 11l1.5-2.5M18.5 11l2 1.5"/>'},
+        "Soft Bodies":           {hue: 320, glyph: '<path d="M12 3.5c5 0 8.5 3.5 8.5 8s-3.5 9-8.5 9-8.5-3.5-8.5-8 3.5-9 8.5-9z"/><path d="M8.5 9.5c1.5-1.5 5-1.5 7 1"/>'},
+        "Rigid Bodies":          {hue: 45,  glyph: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'},
+        "Fluids":                {hue: 210, glyph: '<path d="M12 3c3.5 4.5 6.5 8 6.5 11.5a6.5 6.5 0 0 1-13 0C5.5 11 8.5 7.5 12 3z"/><path d="M9 15.5a3 3 0 0 0 3 3"/>'},
+        "Flocking":              {hue: 175, glyph: '<path d="M3 9l3.5 2.5L10 9M9 16l3.5 2.5L16 16M14 6l3.5 2.5L21 6"/>'},
+        "Orbits & Numerics":     {hue: 235, glyph: '<ellipse cx="12" cy="12" rx="9.5" ry="4.5" transform="rotate(-20 12 12)"/><circle cx="12" cy="12" r="2.5"/><circle cx="20" cy="9" r="1.2"/>'}
+    };
+    var cta = {"crossbows": "Play", "motorcycle": "Ride", "solar-system": "Explore"};
+
+    function el(tag, cls, text) {
+        var e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text != null) e.textContent = text;
+        return e;
+    }
+
+    function tile(d, featured) {
+        var t = topics[d.group] || {hue: 230, glyph: '<circle cx="12" cy="12" r="8"/>'};
+        var a = el("a", "tile" + (featured ? " tile--featured" : ""));
+        a.href = d.href;
+        a.style.setProperty("--hue", t.hue);
+        a.dataset.group = d.group;
+        a.dataset.text = (d.label + " " + d.blurb + " " + d.group + " " + d.badges.join(" ")).toLowerCase();
+        var art = el("div", "tile__art");
+        art.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + t.glyph + '</svg>';
+        if (d.badges.length) {
+            var bs = el("div", "badges");
+            d.badges.forEach(function (b) {
+                bs.appendChild(el("span", "badge badge--" + b.toLowerCase(), b));
+            });
+            art.appendChild(bs);
+        }
+        var body = el("div", "tile__body");
+        body.appendChild(el("h3", "tile__title", d.label));
+        body.appendChild(el("p", "tile__blurb", d.blurb));
+        if (featured) body.appendChild(el("span", "tile__cta", (cta[d.id] || "Open") + " →"));
+        a.appendChild(art);
+        a.appendChild(body);
+        return a;
+    }
+
+    fetch("demos.json").then(function (r) { return r.json(); }).then(function (catalog) {
+        var demos = catalog.demos, groups = catalog.groups;
+        var featured = document.getElementById("featured");
+        demos.filter(function (d) { return d.featured; })
+             .forEach(function (d) { featured.appendChild(tile(d, true)); });
+
+        var gallery = document.getElementById("gallery");
+        var sections = groups.map(function (g) {
+            var sec = el("section");
+            sec.dataset.group = g;
+            var h = el("h2", "section-title", g);
+            var n = el("span", "count");
+            h.appendChild(n);
+            var grid = el("div", "grid");
+            demos.filter(function (d) { return d.group === g; })
+                 .forEach(function (d) { grid.appendChild(tile(d, false)); });
+            sec.appendChild(h);
+            sec.appendChild(grid);
+            gallery.appendChild(sec);
+            return {sec: sec, count: n, tiles: Array.prototype.slice.call(grid.children)};
+        });
+        var empty = el("p", "empty", "No demos match.");
+        empty.hidden = true;
+        gallery.appendChild(empty);
+
+        // The topic chips and the search narrow the same list, together.
+        var chips = document.getElementById("chips"), topic = null;
+        function chip(label, g) {
+            var c = el("button", "chip", label);
+            c.type = "button";
+            c.setAttribute("aria-pressed", g === null ? "true" : "false");
+            c.addEventListener("click", function () {
+                topic = g;
+                Array.prototype.forEach.call(chips.children, function (o) {
+                    o.setAttribute("aria-pressed", o === c ? "true" : "false");
+                });
+                apply();
+            });
+            chips.appendChild(c);
+        }
+        chip("All", null);
+        groups.forEach(function (g) { chip(g, g); });
+
+        var search = document.getElementById("search");
+        function apply() {
+            var q = search.value.trim().toLowerCase(), shown = 0;
+            sections.forEach(function (s) {
+                var n = 0;
+                s.tiles.forEach(function (t) {
+                    var ok = (!topic || t.dataset.group === topic) && (!q || t.dataset.text.indexOf(q) >= 0);
+                    t.hidden = !ok;
+                    if (ok) n++;
+                });
+                s.sec.hidden = n === 0;
+                s.count.textContent = n;
+                shown += n;
+            });
+            empty.hidden = shown > 0;
+        }
+        search.addEventListener("input", apply);
+        // "/" to search, as on most sites that have one.
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "/" && document.activeElement !== search) {
+                e.preventDefault();
+                search.focus();
+            }
+        });
+        apply();
+    }).catch(function () {
+        document.getElementById("gallery").appendChild(
+            el("p", "empty", "The list of demos could not be loaded."));
+    });
+})();
+</script>
 </body>
 </html>

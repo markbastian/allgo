@@ -1,0 +1,383 @@
+{
+ "about": "Every demo on the site, in the order and groups the gallery shows them. The gallery (index.html) and the full-window player (play/) both read this; adding a demo is adding an entry here and a line in allgo.demo.registry.",
+ "groups": [
+  "Games",
+  "Procedural Generation",
+  "Geometry",
+  "Spatial Queries",
+  "Robotics",
+  "Soft Bodies",
+  "Rigid Bodies",
+  "Fluids",
+  "Flocking",
+  "Orbits & Numerics"
+ ],
+ "demos": [
+  {
+   "id": "crossbows",
+   "group": "Games",
+   "label": "Crossbows & Catapults",
+   "blurb": "Fling discs at the other castle until its tower falls",
+   "badges": [
+    "Game",
+    "Keyboard",
+    "New"
+   ],
+   "href": "cnc/",
+   "featured": true
+  },
+  {
+   "id": "caves",
+   "group": "Procedural Generation",
+   "label": "Cellular Caves",
+   "blurb": "Cellular automata carving connected caverns",
+   "badges": [],
+   "href": "play/?demo=caves"
+  },
+  {
+   "id": "dungeon",
+   "group": "Procedural Generation",
+   "label": "Dungeon Generation",
+   "blurb": "Scatter, separate, triangulate, span, carve",
+   "badges": [],
+   "href": "play/?demo=dungeon"
+  },
+  {
+   "id": "terrain",
+   "group": "Procedural Generation",
+   "label": "Fractal Terrain",
+   "blurb": "Diamond-square and TIN heightmaps in WebGL",
+   "badges": [
+    "3D",
+    "Keyboard"
+   ],
+   "href": "play/?demo=terrain"
+  },
+  {
+   "id": "erosion",
+   "group": "Procedural Generation",
+   "label": "Hydraulic Erosion",
+   "blurb": "Droplets carving valleys and a drainage network",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=erosion"
+  },
+  {
+   "id": "dla",
+   "group": "Procedural Generation",
+   "label": "Diffusion-Limited Aggregation",
+   "blurb": "Random walkers branching into mountain ridges",
+   "badges": [],
+   "href": "play/?demo=dla"
+  },
+  {
+   "id": "island",
+   "group": "Procedural Generation",
+   "label": "Island Generation",
+   "blurb": "A polygon map: coastline, rivers, biomes, towns, borders",
+   "badges": [],
+   "href": "play/?demo=island"
+  },
+  {
+   "id": "planet",
+   "group": "Procedural Generation",
+   "label": "Procedural Planets",
+   "blurb": "Multifractal terrain, clouds and air on a sphere",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=planet"
+  },
+  {
+   "id": "hex",
+   "group": "Geometry",
+   "label": "Hex Grids",
+   "blurb": "Coordinates, regions and pathfinding on hexagons",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=hex"
+  },
+  {
+   "id": "delaunay",
+   "group": "Geometry",
+   "label": "Delaunay / Voronoi",
+   "blurb": "Bowyer–Watson triangulation and its dual",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=delaunay"
+  },
+  {
+   "id": "spatial-hash",
+   "group": "Spatial Queries",
+   "label": "Spatial Hashing",
+   "blurb": "Overlaps among thousands of objects, in linear time",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=spatial-hash"
+  },
+  {
+   "id": "broad-phase",
+   "group": "Spatial Queries",
+   "label": "Broad Phase",
+   "blurb": "Hashing, sweep and prune and a Morton BVH, raced",
+   "badges": [],
+   "href": "play/?demo=broad-phase"
+  },
+  {
+   "id": "arm",
+   "group": "Robotics",
+   "label": "Inverse Kinematics",
+   "blurb": "Click a target: all eight ways the arm can reach it",
+   "badges": [
+    "3D",
+    "Interactive"
+   ],
+   "href": "play/?demo=arm"
+  },
+  {
+   "id": "human-arm",
+   "group": "Robotics",
+   "label": "Redundancy — Human Arm",
+   "blurb": "Seven joints for six: the elbow swings, the hand stays",
+   "badges": [
+    "3D",
+    "Interactive"
+   ],
+   "href": "play/?demo=human-arm"
+  },
+  {
+   "id": "soft-body",
+   "group": "Soft Bodies",
+   "label": "Soft Bodies — XPBD",
+   "blurb": "Unbreakable position based dynamics on tetrahedra",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=soft-body"
+  },
+  {
+   "id": "skinning",
+   "group": "Soft Bodies",
+   "label": "Soft Bodies — Skinning",
+   "blurb": "A detailed surface carried by a coarse tetrahedral cage",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=skinning"
+  },
+  {
+   "id": "cloth",
+   "group": "Soft Bodies",
+   "label": "Cloth — XPBD",
+   "blurb": "Stretching and bending as two distance constraints",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=cloth"
+  },
+  {
+   "id": "bricks",
+   "group": "Rigid Bodies",
+   "label": "Bricks",
+   "blurb": "Four things to knock down, three contact solvers",
+   "badges": [
+    "3D",
+    "Keyboard"
+   ],
+   "href": "play/?demo=bricks"
+  },
+  {
+   "id": "ragdoll",
+   "group": "Rigid Bodies",
+   "label": "Ragdoll",
+   "blurb": "A jointed figure in reduced coordinates",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=ragdoll"
+  },
+  {
+   "id": "motorcycle",
+   "group": "Rigid Bodies",
+   "label": "Motorcycle",
+   "blurb": "Exact joints, springs and a rider: ride with keys, a finger or a tilt",
+   "badges": [
+    "Touch",
+    "Tilt",
+    "New"
+   ],
+   "href": "moto/",
+   "featured": true
+  },
+  {
+   "id": "rigid",
+   "group": "Rigid Bodies",
+   "label": "Rigid Bodies — XPBD",
+   "blurb": "Boxes and links: corrections that turn as well as move",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=rigid"
+  },
+  {
+   "id": "joints",
+   "group": "Rigid Bodies",
+   "label": "Joints",
+   "blurb": "Ball, hinge, servo and motor, from three primitives",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=joints"
+  },
+  {
+   "id": "sphere-fluid",
+   "group": "Fluids",
+   "label": "Fluid on a Sphere",
+   "blurb": "Vorticity, streamfunction and Coriolis bands",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=sphere-fluid"
+  },
+  {
+   "id": "fluid",
+   "group": "Fluids",
+   "label": "Eulerian Fluid",
+   "blurb": "A wind tunnel: projection, advection and an obstacle",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=fluid"
+  },
+  {
+   "id": "flip",
+   "group": "Fluids",
+   "label": "FLIP Fluid",
+   "blurb": "Particles carry the fluid, a grid keeps it incompressible",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=flip"
+  },
+  {
+   "id": "fire",
+   "group": "Fluids",
+   "label": "Fire & Smoke",
+   "blurb": "Buoyancy, cooling and vortex particles on a grid fluid",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=fire"
+  },
+  {
+   "id": "water",
+   "group": "Fluids",
+   "label": "Height-Field Water",
+   "blurb": "Waves, buoyancy and Archimedes on a grid of columns",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=water"
+  },
+  {
+   "id": "boids",
+   "group": "Flocking",
+   "label": "Flocking — 2D",
+   "blurb": "Reynolds' boids on a canvas",
+   "badges": [],
+   "href": "play/?demo=boids"
+  },
+  {
+   "id": "dungeon-boids",
+   "group": "Flocking",
+   "label": "Flocking — Dungeon",
+   "blurb": "A flock finding its way through generated corridors",
+   "badges": [],
+   "href": "play/?demo=dungeon-boids"
+  },
+  {
+   "id": "boids-voronoi",
+   "group": "Flocking",
+   "label": "Flocking — Voronoi",
+   "blurb": "The flock's Voronoi diagram, retriangulated each frame",
+   "badges": [],
+   "href": "play/?demo=boids-voronoi"
+  },
+  {
+   "id": "boids-3d",
+   "group": "Flocking",
+   "label": "Flocking — 3D",
+   "blurb": "The same rules in three dimensions",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=boids-3d"
+  },
+  {
+   "id": "boids-voronoi-3d",
+   "group": "Flocking",
+   "label": "Flocking — Voronoi 3D",
+   "blurb": "Voronoi polyhedra of the flock, rebuilt each frame",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=boids-voronoi-3d"
+  },
+  {
+   "id": "lorenz",
+   "group": "Orbits & Numerics",
+   "label": "Lorenz — Numerical Integration",
+   "blurb": "Chapter 4 of Montenbruck & Gill, integrating in real time",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=lorenz"
+  },
+  {
+   "id": "kepler",
+   "group": "Orbits & Numerics",
+   "label": "Kepler — Nystrom Integration",
+   "blurb": "Two-body motion, and how each method holds energy",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=kepler"
+  },
+  {
+   "id": "satellite",
+   "group": "Orbits & Numerics",
+   "label": "Satellite — Orbit Perturbations",
+   "blurb": "Perturbing forces, and the integrators for them",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=satellite"
+  },
+  {
+   "id": "orbit-determination",
+   "group": "Orbits & Numerics",
+   "label": "Orbit Determination",
+   "blurb": "Recovering an orbit from noisy ranges",
+   "badges": [
+    "3D"
+   ],
+   "href": "play/?demo=orbit-determination"
+  },
+  {
+   "id": "solar-system",
+   "group": "Orbits & Numerics",
+   "label": "Solar System",
+   "blurb": "Planets, Moon, satellite and 9,000 stars in one J2000 frame",
+   "badges": [
+    "3D",
+    "New"
+   ],
+   "href": "solar/",
+   "featured": true
+  }
+ ]
+}
