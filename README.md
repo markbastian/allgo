@@ -2,7 +2,7 @@
 
 A grab bag of algorithms ("all algorithms") implemented in Clojure and
 ClojureScript, with a browser demo for each one that has something to
-show.
+show. The demos run live at <https://markbastian.github.io/allgo/>.
 
 - **[NOTES.md](NOTES.md)**: how the finished parts work, what was
   measured along the way, and what was tried and not kept.
@@ -54,8 +54,8 @@ Where a namespace follows a book, it says so. The main ones:
 
 ## Demos
 
-`make serve` and open <http://localhost:3000>. The page groups the
-demos as follows:
+Live at <https://markbastian.github.io/allgo/>, or run `make serve` and
+open <http://localhost:3000>. The page groups the demos as follows:
 
 | Group                 | Demos                                                                                          |
 |-----------------------|------------------------------------------------------------------------------------------------|
@@ -94,6 +94,12 @@ Deploy `resources/public` as it stands -- six files, the page is static
 and the bundle is the only script it loads. Release overwrites the same
 file the development build writes, so run `make dev` afterward to get
 readable names and source maps back.
+
+The live site is GitHub Pages serving the `gh-pages` branch, which
+holds nothing but the built page: `index.html`, `css/style.css`,
+`js/compiled/allgo.js` and an empty `.nojekyll`. Nothing rebuilds it;
+to publish, run `make release`, copy those files onto `gh-pages`, commit
+and push.
 
     encoding      size
     identity      1.6M
