@@ -118,8 +118,15 @@
       xpbd                --   --   --   --   --  8.4  5.3  4.2
 
   So seven courses for sequential impulse, nine for XPBD and eleven for
-  TGS, and the demo starts at eight -- tall enough that switching to
-  sequential impulse knocks it down while you watch.
+  TGS. Those are with `start asleep` off.
+
+  `start asleep`, on by default, is how a game gets past that. Every
+  brick begins asleep and is not simulated until something awake
+  touches it, so a column of forty stands, under any solver, until the
+  first shot. What the shot wakes is simulated again, and is held up
+  only as well as the solver can hold it. Turn it off and the default
+  eight course column is tall enough that sequential impulse knocks it
+  down while you watch.
 
   It is drift, not a kick. Trace the top brick and it walks one way in
   millimeters a second and never comes back; the column is standing on
@@ -351,7 +358,12 @@
        :substeps 4
        :friction 0.55
        :restitution 0.0
+       :startAsleep true
        :speed 26
+       ;; Degrees. Yaw turns the shot right of straight at the stack,
+       ;; pitch raises it; the arrow keys drive both.
+       :aimYaw 0.0
+       :aimPitch 2.0
        :fire (fn [])
        :reset (fn [])})
 
@@ -369,16 +381,41 @@
              ["rampartCourses" 1 8 1 "rampart courses"]]
    "wall"   [["rows" 3 16 1] ["cols" 3 16 1]]})
 
-(defn- projectile
-  "A shot high on the stack, from far enough out to see it coming.
+(defn- launch-point
+  "Where a shot starts: high on the stack, and far enough out to see it
+  coming. High rather than square in the middle, because a stack that is
+  about to fail fails from the top."
+  [{:keys [span height]}]
+  [0.0 (max 1.0 (* 0.72 height)) (+ 8.0 (* 1.6 span))])
 
-  High rather than square in the middle: a stack that is about to fail
-  fails from the top, so that is where the interesting answer is."
-  [speed {:keys [span height]}]
-  (rigid/ball {:pos [0.0 (max 1.0 (* 0.72 height)) (+ 8.0 (* 1.6 span))]
+(defn- launch-velocity
+  "`speed` along the aim: `yaw` degrees right of straight at the stack
+  (which is down -z), `pitch` degrees up."
+  [speed yaw pitch]
+  (let [y (* (/ Math/PI 180.0) yaw)
+        p (* (/ Math/PI 180.0) pitch)
+        s (double speed)]
+    [(* s (Math/sin y) (Math/cos p))
+     (* s (Math/sin p))
+     (- (* s (Math/cos y) (Math/cos p)))]))
+
+(defn- projectile [speed yaw pitch framing]
+  (rigid/ball {:pos (launch-point framing)
                :radius ball-radius
                :density 7.8
-               :vel [0.0 (* 0.04 speed) (- (double speed))]}))
+               :vel (launch-velocity speed yaw pitch)}))
+
+(defn- flight-path
+  "Where a shot would go if it hit nothing: the parabola under gravity,
+  sampled until it reaches the floor or two seconds pass. Drawn so the
+  aim can be seen before firing; it ignores the stack, which is the
+  point -- it shows where the ball is headed, not what will stop it."
+  [[px py pz] [vx vy vz] [gx gy gz]]
+  (for [i (range 0 61)
+        :let [t (* i (/ 2.0 60.0))
+              y (+ py (* vy t) (* 0.5 gy t t))]
+        :while (>= y 0.0)]
+    [(+ px (* vx t) (* 0.5 gx t t)) y (+ pz (* vz t) (* 0.5 gz t t))]))
 
 (defn- clay
   "The color of brick `i`, jittered a little about the same clay.
@@ -416,7 +453,17 @@
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         running? (atom false)
         tick-fps! (fps/meter! container)
-        state (atom {:world nil :meshes [] :cost 0.0 :framing nil})]
+        state (atom {:world nil :meshes [] :cost 0.0 :framing nil})
+        ;; The launcher: a ghost of the ball where it will start, and
+        ;; the path it would fly.
+        ^js ghost (THREE/Mesh. (THREE/SphereGeometry. ball-radius 20 14)
+                               (THREE/MeshStandardMaterial.
+                                #js {:color 0x9fb6d4 :transparent true :opacity 0.45}))
+        ^js path (THREE/Line. (THREE/BufferGeometry.)
+                              (THREE/LineBasicMaterial.
+                               #js {:color 0xffd166 :transparent true :opacity 0.8}))]
+    (.add scene ghost)
+    (.add scene path)
     (set! (.-background scene) (THREE/Color. 0x0b0d15))
     (.setPixelRatio renderer (min 2 (or js/window.devicePixelRatio 1)))
     (.appendChild container (.-domElement renderer))
@@ -434,12 +481,14 @@
                       (.set (.-position m) x y z)
                       (.set (.-quaternion m) qx qy qz qw)))))
               (look-at-scene! []
-                ;; Stand back far enough to see all of it, and look at
-                ;; the middle rather than the floor.
-                (let [{:keys [span height]} (:framing @state)
+                ;; Stand back and to the side far enough to see the stack
+                ;; and the launcher both, looking at a point between
+                ;; them -- nearer the stack, which is what is watched.
+                (let [{:keys [span height] :as framing} (:framing @state)
+                      [_ ly lz] (launch-point framing)
                       d (+ 9.0 (* 1.7 span) (* 0.8 height))]
-                  (.set (.-position camera) (* 0.6 d) (+ 2.0 (* 1.3 height)) d)
-                  (.set (.-target orbit) 0.0 (* 0.55 height) 0.0)
+                  (.set (.-position camera) (* 0.9 d) (+ 2.0 (* 1.1 height)) (+ lz (* 0.3 d)))
+                  (.set (.-target orbit) 0.0 (* 0.5 (+ ly (* 0.5 height))) (* 0.35 lz))
                   (.update orbit)))
               (rebuild! []
                 (doseq [^js m (:meshes @state)]
@@ -447,22 +496,58 @@
                   (.dispose (.-geometry m))
                   (.dispose (.-material m)))
                 (let [{:keys [bodies] :as built} (build-scene (.-scene controls) controls)
+                      placed (solver/world bodies (solver-opts))
+                      ;; Settled out of sight, so a reset does not open
+                      ;; with the stack squashing into its contacts. See
+                      ;; `solver/settled`. Put to sleep after, so it
+                      ;; sleeps carrying its weight.
+                      w (cond-> (solver/settled placed)
+                          (.-startAsleep controls)
+                          (update :bodies (fn [bs] (mapv #(if (rigid/static? %) % (rigid/asleep %)) bs))))
                       meshes (vec (map-indexed body-mesh bodies))]
                   (doseq [^js m meshes] (.add scene m))
                   (swap! state assoc
-                         :world (solver/world bodies (solver-opts))
+                         :world w
                          :meshes meshes
                          :cost 0.0
                          :framing (select-keys built [:span :height]))
-                  (sync-meshes!)))
+                  (sync-meshes!)
+                  (update-aim!)))
               (solver-opts []
                 {:solver (keyword (.-solver controls))
                  :iterations (long (.-iterations controls))
                  :substeps (long (.-substeps controls))
                  :friction (double (.-friction controls))
                  :restitution (double (.-restitution controls))})
+              (update-aim! []
+                (when-let [framing (:framing @state)]
+                  (let [[x y z :as p0] (launch-point framing)
+                        v (launch-velocity (.-speed controls) (.-aimYaw controls) (.-aimPitch controls))
+                        pts (flight-path p0 v (:gravity solver/defaults))
+                        ^js old (.-geometry path)]
+                    (.set (.-position ghost) x y z)
+                    (set! (.-geometry path)
+                          (.setFromPoints (THREE/BufferGeometry.)
+                                          (clj->js (map (fn [[a b c]] (THREE/Vector3. a b c)) pts))))
+                    (.dispose old))))
+              (on-key [^js e]
+                ;; Not while typing a number into the panel.
+                (when-not (= "INPUT" (some-> e .-target .-tagName))
+                  (let [step (if (.-shiftKey e) 5.0 1.0)
+                        turn! (fn [prop d lo hi]
+                                (aset controls prop (max lo (min hi (+ (aget controls prop) d))))
+                                (update-aim!)
+                                (.preventDefault e))]
+                    (case (.-key e)
+                      "ArrowLeft" (turn! "aimYaw" (- step) -45.0 45.0)
+                      "ArrowRight" (turn! "aimYaw" step -45.0 45.0)
+                      "ArrowUp" (turn! "aimPitch" step -60.0 60.0)
+                      "ArrowDown" (turn! "aimPitch" (- step) -60.0 60.0)
+                      " " (do (fire!) (.preventDefault e))
+                      nil))))
               (fire! []
-                (let [b (projectile (.-speed controls) (:framing @state))
+                (let [b (projectile (.-speed controls) (.-aimYaw controls) (.-aimPitch controls)
+                                    (:framing @state))
                       m (body-mesh 0 b)]
                   (.add scene m)
                   (swap! state (fn [s]
@@ -500,8 +585,11 @@
             (-> (.add controls "substeps" 1 8 1))
             (-> (.add controls "friction" 0.0 1.2 0.05))
             (-> (.add controls "restitution" 0.0 0.8 0.05))
-            (-> (.add controls "speed" 8 60 1))
-            (.add controls "fire")
+            (-> (.add controls "startAsleep") (.name "start asleep") (.onChange rebuild!))
+            (-> (.add controls "speed" 8 60 1) (.onChange update-aim!))
+            (-> (.add controls "aimYaw" -45 45 1) (.name "aim ← →") (.listen) (.onChange update-aim!))
+            (-> (.add controls "aimPitch" -60 60 1) (.name "aim ↓ ↑") (.listen) (.onChange update-aim!))
+            (-> (.add controls "fire") (.name "fire (space)"))
             (.add controls "reset"))
           ;; Every scene's sliders are built once and all but the
           ;; current scene's are hidden, which keeps a rebuild out of the
@@ -524,9 +612,12 @@
             (show-sliders!)))
         {:start (fn [] (when-not @running?
                          (reset! running? true)
+                         (js/window.addEventListener "keydown" on-key)
                          (on-resize)
                          (animate)))
-         :stop (fn [] (reset! running? false))}))))
+         :stop (fn []
+                 (reset! running? false)
+                 (js/window.removeEventListener "keydown" on-key))}))))
 
 (defonce ^:private controller (atom nil))
 
