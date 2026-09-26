@@ -404,3 +404,27 @@ button:hover {
 }
 
 .moto-keys { color: #6b7189; }
+
+/* Where a mouse or finger drag on the motorcycle began, and how far is
+   full lean, throttle or brake. */
+.moto-drag {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+
+.moto-drag__dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  background: rgba(240, 180, 60, 0.85);
+}
