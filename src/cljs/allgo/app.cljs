@@ -13,5 +13,8 @@
    "motorcycle" motorcycle/start!})
 
 (defonce started
-  (when-let [start! (some-> js/document.body .-dataset .-app apps)]
+  ;; `getAttribute`, not `(.. body -dataset -app)`: a release build
+  ;; renames `app`, which is this page's name and no browser's, and the
+  ;; page then starts nothing. A method the browser defines keeps its name.
+  (when-let [start! (some-> js/document.body (.getAttribute "data-app") apps)]
     (start!)))
