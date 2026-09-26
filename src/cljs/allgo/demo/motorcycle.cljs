@@ -363,6 +363,7 @@
                   (when-let [old (:meshes @state)]
                     (doseq [[k ^js o] old :when (not= k :pivot)] (.remove scene o)))
                   (doseq [[_ ^js o] (:people @state)] (.remove scene o))
+                  (doseq [^js o (:balls @state)] (.remove scene o))
                   (doseq [[k ^js o] meshes :when (not= k :pivot)] (.add scene o))
                   (doseq [[_ ^js o] people] (.add scene o))
                   (reset! state {:cfg cfg
@@ -374,9 +375,9 @@
                                  ;; and since when the rider has been off.
                                  :t 0.0 :finished nil :off-since nil})))
               (sync! []
-                (let [{:keys [cfg meshes scene people]} @state
-                      model (:model (first (:models scene)))
-                      pose (m/bike-pose scene)
+                (let [{:keys [cfg meshes people] sim :scene} @state
+                      model (:model (first (:models sim)))
+                      pose (m/bike-pose sim)
                       {:keys [q base]} pose
                       frames (ab/poses model q base)
                       root (ab/frame-of model q base -1)]
@@ -386,10 +387,20 @@
                   (place! (:bars meshes) (nth frames m/steering))
                   (place! (:slider meshes) (nth frames m/fork))
                   (place! (:front meshes) (nth frames m/front-wheel))
-                  (when-let [{rm :model rp :pose} (second (:models scene))]
+                  (when-let [{rm :model rp :pose} (second (:models sim))]
                     (doseq [{:keys [link body]} (ab/collision-bodies rm (:q rp) (:base rp))]
                       (when-let [^js mesh (get people link)]
                         (place! mesh body))))
+                  ;; Cannonballs, a mesh each, made the first time one is
+                  ;; seen. They are the only loose bodies in the scene.
+                  (let [balls (filterv #(= :cannonball (:kind %)) (:bodies sim))]
+                    (while (< (count (:balls @state)) (count balls))
+                      (let [^js m (THREE/Mesh. (THREE/SphereGeometry. (:radius (first balls)) 20 14)
+                                               (mat 0x2a2c33 0.35))]
+                        (.add scene m)
+                        (swap! state update :balls (fnil conj []) m)))
+                    (doseq [[^js m b] (map vector (:balls @state) balls)]
+                      (place! m b)))
                   ;; The shock runs from a mount on the frame to one
                   ;; partway down the swingarm, so its length is the
                   ;; suspension's travel.
@@ -427,6 +438,10 @@
                                      (.closest target ".demo-picker, .lil-gui")))
                     (case (.-code e)
                       "KeyR" (when down? (reset-bike!))
+                      ;; Not in the key list on purpose.
+                      "KeyC" (when down?
+                               (swap! state (fn [{:keys [cfg] :as st}]
+                                              (update st :scene #(m/fire-at cfg %)))))
                       "KeyB" (when down? (bail!))
                       (when-let [k (keymap (.-code e))]
                         (.preventDefault e)

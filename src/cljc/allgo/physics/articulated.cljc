@@ -269,24 +269,19 @@
   go first in each sweep, because a knee that has folded backward is a
   worse thing to look at than a foot a millimeter into the floor.
 
-  ## Limits
+  ## Armature
 
-  A joint can be given a range to stay inside, and a ragdoll needs one:
-  without limits a body settles with its head folded back on itself and
-  its knees bent the wrong way, which is a pile of sticks rather than a
-  figure.
-
-  `:limit [lo hi]` bounds a hinge or a slider. `:cone theta` bounds how
-  far a ball joint's bone may swing from where it rests, and `:twist`
-  how far it may turn about that bone -- two different things, and a
-  cone alone leaves a head free to face backward.
-
-  They are solved as one-sided constraints in the same sweep as the
-  contacts, which is why they can be: a limit is a push between a link
-  and its own parent where a contact is a push between a link and the
-  floor, and the impulse response does not need to be told which. Limits
-  go first in each sweep, because a knee that has folded backward is a
-  worse thing to look at than a foot a millimeter into the floor.
+  `:armature a` on a link is inertia its joint has of its own, `a` along
+  each of the joint's axes and nowhere else -- what a motor's rotor adds,
+  in a robot. Here it is mostly the other thing it is used for: the
+  stand-in that lets a stiff damper be integrated stably. A damper
+  applied as a torque, `-kd qd`, is explicit, and it overshoots once
+  `kd dt` exceeds about twice the inertia it acts on; a forearm turning
+  about its own length has almost none, so a damper that holds an arm
+  still can instead drive it round faster every step. With `kd dt` of
+  armature on the joint the same damper is implicit, near enough, and
+  cannot. It is the joint's own inertia in every sense -- the forward
+  and inverse dynamics and the contacts' responses all include it.
 
   A ball joint does need its body to have inertia about every axis. A
   mathematically thin rod has none about its own length, so the three by
@@ -756,7 +751,7 @@
 ;; Shared per-link setup
 
 (deftype Link [^doubles xup ^doubles xt ^doubles s ^long ndof ^long offset
-               ^doubles inertia ^long parent])
+               ^doubles inertia ^long parent ^double armature])
 
 (deftype Node [^doubles ia ^doubles u dinv ^doubles ia-free])
 
@@ -797,7 +792,8 @@
                              ;; can index by link any more.
                             off
                             (spatial-inertia-flat (:mass link) (:com link) (:inertia link))
-                            (long (:parent link))))
+                            (long (:parent link))
+                            (double (or (:armature link) 0.0))))
            (+ off nd)]))
       [[] 0]
       (range (count parts))))))
@@ -889,7 +885,10 @@
      (reduce (fn [acc i]
                (let [^Link l (nth ls i)
                      ^doubles share (s-dot (.-s l) (.-ndof l) (nth forces i))]
-                 (reduce (fn [a k] (assoc a (+ (.-offset l) k) (aget share k)))
+                 (reduce (fn [a k]
+                           (let [j (+ (.-offset l) k)]
+                             (assoc a j (+ (aget share k)
+                                           (* (.-armature l) (double (nth qdd j)))))))
                          acc
                          (range (.-ndof l)))))
              (vec (repeat (dof model) 0.0))
@@ -977,6 +976,14 @@
                                           (recur (inc j)
                                                  (+ acc (* (aget s (+ br j))
                                                            (aget u (+ bc j))))))))))))
+                  ;; A joint's armature is inertia the joint itself has,
+                  ;; along its own axes and nowhere else -- a motor's
+                  ;; rotor, or the stand-in for one that lets a stiff
+                  ;; damper be integrated stably. See `:armature` in
+                  ;; `model`.
+                  (dotimes [r nd]
+                    (let [k (+ (* nd r) r)]
+                      (aset out k (+ (aget out k) (.-armature l)))))
                   out)
               dinv (flat-d-inverse d nd)
               ia' (if dinv (minus-u-dinv-ut ia u dinv nd) ia)

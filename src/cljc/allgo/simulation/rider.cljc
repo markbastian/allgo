@@ -175,9 +175,26 @@
         bent (angle-between upper lower)]
     (assoc link :axis axis :limit [(- bent) (- (double fold) bent)])))
 
+(declare muscle)
+
+(def ^:private stepped-at
+  "The substep the rider's joints are made stable for, in seconds. The
+  bike is stepped at a quarter of a sixtieth, and a thrown rider at half
+  that; stable at the longer is stable at the shorter."
+  (/ 1.0 240.0))
+
 (defn model
   "The rider as an articulated model, its pelvis the free root, laid out
-  on the bike described by `bike-cfg`."
+  on the bike described by `bike-cfg`.
+
+  Every joint carries armature enough to make its own muscle stable:
+  `kd dt` for the damper and `kp dt^2` for the spring, at the step the
+  bike is simulated at. The muscles are applied as torques, and on their
+  own they are not: a forearm turning about its own length has almost no
+  inertia, and in a hard enough lean its damper overshot every step --
+  thirteen radians a second, then thirty, seventy, two hundred -- until
+  the rider came apart while still pinned to an upright bike. See
+  `:armature` in `allgo.physics.articulated`."
   [bike-cfg]
   (let [{:keys [pelvis spine chest neck head shoulder elbow hand hip knee foot]}
         (layout bike-cfg)
@@ -197,20 +214,27 @@
         [uar far] (arm :right)
         [thl shl] (leg :left)
         [thr shr] (leg :right)]
-    {:base {:mass 11.0 :com [0.0 0.0 0.0]
-            :inertia (box-inertia [0.20 0.16 0.34] 11.0)
-            :shape :box :size [0.20 0.16 0.32]
-            :shape-pose {:rot q/identity-q :pos [0.0 0.0 0.0]}}
-     :links
-     [(assoc (bone -1 :spherical (v/sub spine pelvis) (v/sub chest spine) 30.0 0.36 0.20)
-             :cone 0.6 :twist 0.5)
+    (-> {:base {:mass 11.0 :com [0.0 0.0 0.0]
+                :inertia (box-inertia [0.20 0.16 0.34] 11.0)
+                :shape :box :size [0.20 0.16 0.32]
+                :shape-pose {:rot q/identity-q :pos [0.0 0.0 0.0]}}
+         :links
+         [(assoc (bone -1 :spherical (v/sub spine pelvis) (v/sub chest spine) 30.0 0.36 0.20)
+                 :cone 0.6 :twist 0.5)
       ;; A head is round, and a helmet more so.
-      (assoc (bone torso :spherical (v/sub neck spine) (v/sub head neck) 5.0 0.18 0.20)
-             :cone 0.8 :twist 1.0
-             :shape :ball :radius 0.13
-             :shape-pose {:rot q/identity-q :pos (v/scale (v/sub head neck) 0.6)})
-      ual fal uar far
-      thl shl thr shr]}))
+          (assoc (bone torso :spherical (v/sub neck spine) (v/sub head neck) 5.0 0.18 0.20)
+                 :cone 0.8 :twist 1.0
+                 :shape :ball :radius 0.13
+                 :shape-pose {:rot q/identity-q :pos (v/scale (v/sub head neck) 0.6)})
+          ual fal uar far
+          thl shl thr shr]}
+        (update :links (fn [ls]
+                         (vec (map-indexed
+                               (fn [i l]
+                                 (let [[kp kd] (muscle i)
+                                       dt (double stepped-at)]
+                                   (assoc l :armature (+ (* (double kd) dt) (* (double kp) dt dt)))))
+                               ls)))))))
 
 (defn mass
   "What the rider weighs, all of them."
@@ -220,25 +244,35 @@
 ;; ---------------------------------------------------------------------------
 ;; Pins
 
+(def ^:private grip-time
+  "Seconds a pin's force is averaged over before it is judged."
+  0.05)
+
 (defn pins
   "The five places the rider is fixed to the bike, as world pins between
   model `bike` (its frame, and `steering` for the grips) and model
   `rider`. Each lets go past its `:break-force`: a rider is thrown when
   something asks the seat or the grips to hold more than a person would.
-  A landing off a well-built jump stays under them; coming down flat
-  from a couple of meters does not."
+
+  Held over a twentieth of a second, not a single step. A pin is rigid,
+  so when a wheel strikes something and the bike's velocity changes in
+  one step the pin changes the rider's in the same step -- eighty
+  kilograms jolted by a meter a second in 1/240 s is nineteen kilonewtons
+  -- and the seat and the grips were letting go on that, throwing a rider
+  off a bike that was still upright. A person's arms, legs and backside
+  take a jolt like that over tens of milliseconds, and so does this."
   [bike-cfg bike rider steering]
   (let [{:keys [seat pelvis elbow hand knee foot]} (layout bike-cfg)
         {:keys [grip-local pegs]} (anchors bike-cfg)]
     (into [{:a [:link rider pelvis-link] :pa (v/sub seat pelvis)
-            :b [:link bike -1] :pb seat :break-force 20000.0 :part :seat}]
+            :b [:link bike -1] :pb seat :break-force 20000.0 :break-time grip-time :part :seat}]
           (for [s [:left :right]
                 pin [{:a [:link rider (forearms s)] :pa (v/sub (hand s) (elbow s))
                       :b [:link bike steering] :pb (grip-local s)
-                      :break-force 4500.0 :part [:hand s]}
+                      :break-force 4500.0 :break-time grip-time :part [:hand s]}
                      {:a [:link rider (shins s)] :pa (v/sub (foot s) (knee s))
                       :b [:link bike -1] :pb (pegs s)
-                      :break-force 8000.0 :part [:foot s]}]]
+                      :break-force 8000.0 :break-time grip-time :part [:foot s]}]]
             pin))))
 
 ;; ---------------------------------------------------------------------------
@@ -274,17 +308,27 @@
   `targets` moves a ball joint's rest somewhere else -- link index to the
   rotation it should hold instead of none -- which is how the rider
   shifts their weight: the spine is asked to lean, and the same spring
-  that held it upright now holds it over."
+  that held it upright now holds it over.
+
+  `passive` is damping with no spring behind it, as a fraction of the
+  muscles' own: what a limb's tissue does when nobody is holding it. A
+  thrown rider keeps some, and has to. With none, a ragdoll whose arms
+  are whipping round at seventy radians a second from a crash gains
+  energy step by step -- light links spinning fast are where a
+  semi-implicit integrator is weakest -- until the limbs are going
+  thousands of radians a second and the solver comes apart."
   ([rider pose tone] (muscles rider pose tone nil))
-  ([rider {:keys [q qd]} tone targets]
-   (let [tone (double tone)]
+  ([rider pose tone targets] (muscles rider pose tone targets 0.0))
+  ([rider {:keys [q qd]} tone targets passive]
+   (let [tone (double tone)
+         passive (double passive)]
      (loop [i 0 offset 0 tau (transient [])]
        (if (= i (count (:links rider)))
          (persistent! tau)
          (let [link (nth (:links rider) i)
                [kp kd] (muscle i)
                kp (* tone (double kp))
-               kd (* tone (double kd))]
+               kd (* (+ tone passive) (double kd))]
            (case (:joint link)
              :revolute
              (recur (inc i) (inc offset)

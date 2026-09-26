@@ -79,6 +79,53 @@
       (is (pos? lowest) (str "lowest part at " lowest))
       (is (< (double (second (:pos (:base pose)))) 0.6) "and is lying on it"))))
 
+(deftest jolt-test
+  (testing "a jolt through the bike does not throw a rider off it"
+    ;; A wheel striking something changes the bike's velocity in a step,
+    ;; and a rigid pin changes the rider's in the same step: a meter and a
+    ;; half a second, upward, is thirty kilonewtons through the seat for
+    ;; 1/240 s. The seat used to let go on that and throw the rider off a
+    ;; bike that was still upright. Held over a twentieth of a second, as
+    ;; a person's body takes it, it is nothing like enough.
+    (let [s (ride (on-bike 8.0) {:throttle 0.05 :lean 0.0} 1.0)
+          {:keys [model pose]} (first (:models s))
+          jolted (assoc-in s [:models 0 :pose]
+                           (ab/apply-impulse model pose -1 (:pos (:base pose)) [0.0 1.0 0.0]
+                                             (* 1.5 (+ (double (#'m/total-mass cfg)) (r/mass (:model (second (:models s))))))))
+          after (ride jolted {:throttle 0.05 :lean 0.0} 1.0)]
+      (is (:upright? (m/telemetry cfg (m/bike-pose after))) "the bike rides it out")
+      (is (get-in after [:rider :attached?]) "and so does the rider")))
+  (testing "but a pin held past its limit for long enough still lets go"
+    (let [s (on-bike 8.0)
+          weak (update s :pins (fn [ps] (mapv #(if (= :seat (:part %)) (assoc % :break-force 100.0) %) ps)))
+          after (ride weak {:throttle 0.05 :lean 0.0} 0.5)]
+      (is (not (get-in after [:rider :attached?]))))))
+
+(deftest pins-that-throw-test
+  (testing "a foot knocked off its peg leaves the rider on the bike"
+    (let [s (update (on-bike 8.0) :pins
+                    (fn [ps] (mapv #(if (= [:foot :left] (:part %)) (assoc % :break-force 1.0) %) ps)))
+          after (ride s {:throttle 0.05 :lean 0.0} 0.5)]
+      (is (not-any? #(= [:foot :left] (:part %)) (:pins after)) "the foot is off")
+      (is (get-in after [:rider :attached?]) "and the rider rides on")))
+  (testing "but losing a grip throws them"
+    (let [s (update (on-bike 8.0) :pins
+                    (fn [ps] (mapv #(if (= [:hand :right] (:part %)) (assoc % :break-force 1.0) %) ps)))
+          after (ride s {:throttle 0.05 :lean 0.0} 0.5)]
+      (is (not (get-in after [:rider :attached?]))))))
+
+(deftest cannonball-test
+  (testing "a cannonball at the rider takes them off, and nothing comes apart"
+    (let [s (m/fire-at cfg (ride (on-bike 10.0) {:throttle 0.05 :lean 0.0} 1.0))
+          ball (fn [s] (some #(when (= :cannonball (:kind %)) %) (:bodies s)))
+          states (vec (take 720 (iterate #(m/step cfg % {:throttle 0.05 :lean 0.0} dt) s)))
+          closest (apply min (map #(v/distance (:pos (ball %)) (:pos (:base (m/rider-pose %)))) (take 120 states)))
+          end (peek states)]
+      (is (< closest 0.6) (str "it reached the rider: " closest " m"))
+      (is (not (get-in end [:rider :attached?])) "and knocked them off")
+      (is (every? #(Double/isFinite (double %))
+                  (concat (:qd (m/rider-pose end)) (:qd (m/bike-pose end)) (:pos (ball end))))))))
+
 (deftest leans-into-it-test
   (testing "asked for a turn, the rider tips their upper body into it"
     ;; A lean toward -z, the positive way, is a turn of the spine about

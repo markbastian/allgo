@@ -86,7 +86,13 @@
   `{:a side :pa local :b side :pb local}`, where a side is `[:rigid i]`,
   `[:link model-index link-index]` or `[:static]` and the points are in
   that body's own frame. A pin given a `:break-force` lets go when the
-  force through it exceeds that, and moves to `:broken-pins`.
+  force through it exceeds that, and moves to `:broken-pins`. Given a
+  `:break-time` too, it lets go only when the force averaged over that
+  many seconds does: a rigid pin passes on any sudden change of velocity
+  in a single step, as a force that is enormous and gone again, and a
+  pin standing for something with give in it -- a hand on a grip --
+  should not break on that. Each pin carries its `:load`, the force it
+  is judged on.
 
   Joint limits on the models are solved in the same sweep as the
   contacts and pins."
@@ -561,10 +567,21 @@
                   (solve! (mapv #(prepare w configs % dt w) cs) limits pins vel omega us w)
                   [])
         ;; A pin pulled harder than it can hold lets go, and stays gone.
-        held? (mapv (fn [pin impulse]
+        ;; With a `:break-time`, harder for that long: the force is
+        ;; averaged over it first, and the average is what is held.
+        loaded (mapv (fn [pin impulse]
+                       (let [f (/ (double impulse) (double dt))
+                             tau (double (or (:break-time pin) 0.0))]
+                         (if (pos? tau)
+                           (let [load (double (or (:load pin) 0.0))]
+                             (assoc pin :load (+ load (* (- f load) (min 1.0 (/ (double dt) tau))))))
+                           (assoc pin :load f))))
+                     (:pins w) carried)
+        held? (mapv (fn [pin]
                       (let [limit (:break-force pin)]
-                        (or (nil? limit) (<= (/ (double impulse) dt) (double limit)))))
-                    (:pins w) carried)
+                        (or (nil? limit) (<= (double (:load pin)) (double limit)))))
+                    loaded)
+        w (assoc w :pins loaded)
         w (if (every? true? held?)
             w
             (assoc w

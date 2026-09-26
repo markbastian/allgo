@@ -789,6 +789,70 @@ is still the thing for a scene that is only bricks. Two articulated
 models touch each other through the same sweep and can be pinned
 together, which is how the motorcycle carries its rider.
 
+## A rider who stays on, and a crash that stays in one piece
+
+The motorcycle's rider is a second articulated model held to the bike by
+five pins -- seat, grips, pegs -- and two things went wrong with that,
+both found by riding the three courses flat out, at three-quarter
+throttle, leaned hard over and without levelling in the air.
+
+**Riders came off upright bikes.** Five rides in twelve threw the rider
+while the bike stayed up. None of them was the rider being overloaded: a
+pin's force sat well under its limit and then passed it in one 1/240 s
+step -- the seat went from a steady hundred newtons to over twenty
+thousand. A pin is rigid, so when a wheel strikes something and the
+bike's velocity changes in a step, the pin changes the rider's in the
+same step, and eighty kilograms jolted by a meter a second in 1/240 s is
+nineteen kilonewtons. A person's body takes that over tens of
+milliseconds. So a pin can now carry a `:break-time`, and breaks on its
+force averaged over that long (`allgo.physics.world`); the rider's are a
+twentieth of a second. And a foot knocked off its peg now frees that
+foot rather than throwing the rider -- people ride on after clipping a
+rock. Only the seat or a grip letting go, or the bike going over, throws
+them. After both, none of the twelve rides throws a rider off an upright
+bike.
+
+**Crashes took the solver apart.** Two separate mechanisms, with the
+same look -- limbs spinning at thousands of radians a second, then NaN.
+
+The first was the rider's muscles, while still pinned on. They are
+springs and dampers applied as torques, which is explicit, and an
+explicit damper overshoots once `kd dt` passes about twice the inertia
+it acts on. A forearm turning about its own length has almost none; in a
+hard enough lean the forearm's damper was around four times past that,
+and the rider's joint rates went 13, 30, 76, 212, 560, 1457 rad/s on
+successive steps with nothing touching them. The fix is armature
+(`:armature` in `allgo.physics.articulated`): inertia a joint has of its
+own, along its own axes, which is what makes a damper of `kd dt` of it
+implicit near enough. Each rider joint gets `kd dt + kp dt^2`. It is the
+joint's inertia to forward dynamics, inverse dynamics and the contacts
+alike, and there is a test that the fast path and the mass matrix still
+agree to 1e-9 with it on.
+
+The second was the thrown ragdoll, which has no muscles at all. Stepped
+alone -- no gravity, no contacts, no limits -- a rider thrown from a
+crash gains energy it cannot have, and the gain is the integrator's:
+
+    step          energy gained in 0.25 s
+    1/240 s       +15.5%
+    1/480 s       +4.8%
+    1/960 s       +2.1%
+    1/1920 s      +1.0%
+
+First order in the step, which is semi-implicit Euler on light links
+spinning at seventy radians a second. At 1/240 s it compounds. Halving
+the step, or giving the limbs some damping, each fell short alone --
+four times the steps with no damping still blew up, and damping up to
+half the muscles' at the normal step did too -- but together they hold:
+once thrown the rider is stepped in two halves and keeps a tenth of its
+muscles' damping (`limp` in `allgo.simulation.motorcycle`). Riding pays
+for neither. Every one of the twelve crashes now falls, lands and comes
+to rest, including a trials run at a hundred kilometers an hour.
+
+Tried on the way and not enough on its own: a cap on the thrown rider's
+joint speed. At 40 rad/s it still blew up two seconds in, through the
+bodies' own motion rather than the joints'.
+
 ## Continuous collision detection
 
 **Speculative contacts**, the cheap half: the margin out to which a

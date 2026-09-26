@@ -107,6 +107,46 @@
     ;; ask and the one that fails loudly if a link is given no inertia.
     (is (some? (lin/cholesky (ab/mass-matrix (chain 4 0.8 1.7) [0.2 -0.5 1.1 0.3]))))))
 
+(deftest armature-test
+  (testing "armature is the joint's own inertia to every algorithm"
+    ;; Forward dynamics puts it in D, inverse dynamics adds it times the
+    ;; acceleration, and the mass matrix is built out of inverse dynamics.
+    ;; If any of the three left it out they would stop agreeing.
+    (let [model (mapv #(assoc % :armature (* 0.05 (inc (long %2)))) (chain 4 0.8 1.7) (range))
+          q [0.37 0.74 1.11 1.48]
+          qd [-0.23 -0.46 -0.69 -0.92]
+          tau [1.8 0.9 0.0 -0.9]
+          fast (:qdd (ab/forward-dynamics model q qd tau opts))
+          slow (lin/mat-vec (lin/inverse (ab/mass-matrix model q))
+                            (mapv - tau (ab/bias-forces model q qd opts)))
+          bare (ab/mass-matrix (chain 4 0.8 1.7) q)
+          with (ab/mass-matrix model q)]
+      (is (every? #(< (abs (double %)) 1e-9) (map - fast slow)) (str fast " vs " slow))
+      (is (every? (fn [i] (close? (- (double (get-in with [i i])) (double (get-in bare [i i])))
+                                  (* 0.05 (inc i)) 1e-9))
+                  (range 4))
+          "on the diagonal and nowhere else")))
+
+  (testing "and it is what lets a stiff damper on a light link be stable"
+    ;; A tenth of a kilogram, ten centimeters long, hinged at its end: a
+    ;; third of a gram-meter squared. A damper of 1 N m s at 1/240 s asks
+    ;; for more than four times that inertia's worth of change in one
+    ;; step, and applied as a torque it overshoots further every time.
+    ;; With `kd dt` of armature the same damper brings the link to rest.
+    (let [dt (/ 1.0 240.0)
+          kd 1.0
+          link (rod -1 0.1 0.1)
+          spin (fn [armature]
+                 (let [model [(assoc link :armature armature)]]
+                   (loop [s {:q [0.0] :qd [5.0]} i 0]
+                     (if (= i 60)
+                       (abs (double (first (:qd s))))
+                       (recur (ab/step s model dt {:gravity [0.0 0.0 0.0]
+                                                   :tau [(* (- kd) (double (first (:qd s))))]})
+                              (inc i))))))]
+      (is (> (spin 0.0) 1000.0) "without it the damper drives the link faster")
+      (is (< (spin (* kd dt)) 0.01) "with it the link stops"))))
+
 (deftest kinematics-test
   (testing "joint angles turn back into places"
     (let [model (chain 2 1.0 1.0)

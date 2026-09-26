@@ -425,6 +425,12 @@
   bike is a plain ragdoll, held together by its joint limits."
   0.0)
 
+(def ^:private limp
+  "The damping a thrown rider's joints keep, as a fraction of the
+  muscles': a limb's own tissue, with nothing holding it anywhere. See
+  `step` for why it cannot be none."
+  0.1)
+
 (defn scene
   "A world with the bike in it, on `obstacles` -- static boxes, the first
   of which is usually the floor. With `:rider? true` a rider is seated on
@@ -469,7 +475,7 @@
    (if-not (get-in scene [:rider :attached?])
      scene
      (let [released (assoc scene :pins [] :collide-models? true
-                           :rider {:tone slack :attached? false})]
+                           :rider {:tone slack :passive limp :attached? false})]
        (if (zero? (double push))
          released
          (let [{bm :model bp :pose} (first (:models scene))
@@ -486,12 +492,56 @@
                (update-in [:models 1 :pose] #(ab/apply-impulse rm % rider/torso chest dir j))
                (update-in [:models 0 :pose] #(ab/apply-impulse bm % -1 seat (v/negate dir) j)))))))))
 
+(def cannonball
+  "What `fire-at` throws: kilograms, meters, meters a second, and how far
+  off to the bike's left it starts. Heavy enough to take a rider off at
+  any speed the bike can do."
+  {:mass 25.0 :radius 0.2 :speed 40.0 :stand-off 9.0 :height 2.5})
+
+(defn fire-at
+  "`scene` with a cannonball on its way to the rider's chest -- or the
+  bike's frame, with nobody on it.
+
+  It starts off to the bike's left and above, and is aimed where the
+  target will be when it gets there: leading the bike by its velocity
+  over the time of flight, and aimed high by the drop gravity will take
+  off it on the way, both found by going round twice, which is plenty
+  for a flight of a fifth of a second. It is an ordinary loose rigid
+  body after that; what it hits is up to the world. The ball carries
+  `:kind :cannonball` so a drawing can find it."
+  ([cfg scene] (fire-at cfg scene cannonball))
+  ([_cfg scene {:keys [mass radius speed stand-off height]}]
+   (let [bp (bike-pose scene)
+         {:keys [rot vel]} (:base bp)
+         target (if-let [{rm :model rp :pose} (second (:models scene))]
+                  (let [f (ab/frame-of rm (:q rp) (:base rp) rider/torso)]
+                    (v/add (:pos f) (q/rotate (:rot f) [0.0 0.25 0.0])))
+                  (v/add (:pos (:base bp)) [0.0 0.5 0.0]))
+         moving (q/rotate rot (subvec (vec vel) 3 6))
+         left (let [l (q/rotate rot [0.0 0.0 -1.0])]
+                (v/normalize [(nth l 0) 0.0 (nth l 2)]))
+         start (v/add target (v/add (v/scale left (double stand-off)) [0.0 (double height) 0.0]))
+         speed (double speed)
+         aim (fn [p]
+               (let [t (/ (v/distance start p) speed)]
+                 (v/add (v/add target (v/scale moving t)) [0.0 (* 0.5 9.81 t t) 0.0])))
+         at (aim (aim target))
+         r (double radius)
+         ball (-> (rigid/ball {:pos start :radius r
+                               :density (/ (double mass) (* (/ 4.0 3.0) Math/PI r r r))
+                               :vel (v/scale (v/normalize (v/sub at start)) speed)})
+                  (assoc :kind :cannonball))]
+     (update scene :bodies conj ball))))
+
 (defn- let-go
-  "A rider still on a bike that has gone over, or whose grip on it has
-  broken anywhere, is thrown."
+  "A rider still on a bike that has gone over, or who has lost the seat or
+  a grip, is thrown. A foot knocked off its peg is not that: the rider
+  rides on with it hanging, as a person does after clipping a rock."
   [cfg scene]
   (if (and (get-in scene [:rider :attached?])
-           (or (seq (:broken-pins scene))
+           (or (some #(let [part (:part %)]
+                        (or (= :seat part) (and (vector? part) (= :hand (first part)))))
+                     (:broken-pins scene))
                (not (:upright? (telemetry cfg (bike-pose scene))))))
     (throw-rider scene)
     scene))
@@ -521,10 +571,32 @@
       (ab/apply-impulse model pose -1 pos (v/scale ground-vel (/ -1.0 speed))
                         (* (resistance cfg speed) (double dt))))))
 
+(declare step-once)
+
 (defn step
   "One substep: slow the bike by what the air and the tires cost it, work
   out the forces from where it is now, hand them to the world, and step
+  it.
+
+  Once the rider is thrown it is two half steps, and that is not about
+  accuracy. A ragdoll coming off a crash has arms and a head whipping
+  round at seventy radians a second, and semi-implicit Euler gains
+  energy on light links turning that fast -- measured on a thrown rider
+  alone, with nothing touching it, a sixth more in a quarter of a
+  second at 1/240 s, and half as much each time the step is halved. At
+  full size that compounds: the limbs reached thousands of radians a
+  second and the solver came apart, taking the bike with it. Halving the
+  step and giving the limbs a little damping (`limp`) each fall short
+  alone; together a crash at a hundred kilometers an hour plays out and
+  comes to rest. Riding, none of this applies, and nothing is paid for
   it."
+  [cfg scene controls dt]
+  (if (and (:rider scene) (not (get-in scene [:rider :attached?])))
+    (let [h (* 0.5 (double dt))]
+      (step-once cfg (step-once cfg scene controls h) controls h))
+    (step-once cfg scene controls dt)))
+
+(defn- step-once
   [cfg scene controls dt]
   (let [;; A thrown rider is no longer riding: nobody on the throttle,
         ;; the brakes or the bars. The bike is on its own, and this one
@@ -551,7 +623,8 @@
                                 (rider/muscles (:model rider) (:pose rider)
                                                (get-in scene [:rider :tone] 1.0)
                                                (when (get-in scene [:rider :attached?])
-                                                 (rider/weight-shift (:lean controls 0.0))))))]
+                                                 (rider/weight-shift (:lean controls 0.0)))
+                                               (get-in scene [:rider :passive] 0.0))))]
     (let-go cfg (pw/step scene dt))))
 
 (defn run

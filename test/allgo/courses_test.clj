@@ -69,3 +69,31 @@
           [x _ z] (:pos (:base (m/bike-pose s)))]
       (is (get-in s [:rider :attached?]))
       (is (< (abs (- (v/length [x 0.0 (+ (double z) 35.0)]) 35.0)) 4.0)))))
+
+(deftest hard-crash-test
+  (testing "leaned hard over at speed, the bike and rider come down and stay in one piece"
+    ;; The loop, cranked over further than the autopilot would go. This
+    ;; is the ride that took the rider apart while still pinned to an
+    ;; upright bike -- a forearm's damper overshooting every step -- and
+    ;; whose crash then took the solver apart too. It has to fall over,
+    ;; land, and stop.
+    (let [crs (c/course :loop)
+          free {:throttle 0.0 :brake 0.0 :lean 0.0 :hands? false}
+          finite? (fn [s] (every? #(Double/isFinite (double %))
+                                  (concat (:qd (m/bike-pose s)) (:qd (m/rider-pose s))
+                                          (:vel (:base (m/bike-pose s))) (:vel (:base (m/rider-pose s))))))
+          fastest (fn [s] (max (v/length (subvec (vec (:vel (:base (m/bike-pose s)))) 3 6))
+                               (v/length (subvec (vec (:vel (:base (m/rider-pose s)))) 3 6))))
+          crashed (loop [s (c/scene cfg crs {:rider? true}) k 0 controls nil]
+                    (let [pose (m/bike-pose s)
+                          controls (if (zero? (mod k 4))
+                                     (assoc ((:autopilot crs) pose (m/telemetry cfg pose) {:cfg cfg :max-lean 0.7})
+                                            :lean 0.9 :throttle 0.8)
+                                     controls)]
+                      (if (or (not (get-in s [:rider :attached?])) (> k 960))
+                        s
+                        (recur (m/step cfg s controls dt) (inc k) controls))))
+          after (nth (iterate #(m/step cfg % free dt) crashed) 720)]
+      (is (not (get-in crashed [:rider :attached?])) "it did crash")
+      (is (finite? after))
+      (is (< (fastest after) 1.0) (str "and came to rest, fastest " (fastest after))))))
