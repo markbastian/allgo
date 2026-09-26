@@ -571,6 +571,60 @@ tall-column entry in [TODOs.md](TODOs.md).
   velocity too recovers most of that and still loses to leaving it alone.
   Soft contacts were the right answer to the same problem.
 
+- **Stiffening a contact by the load it carries.** The idea: a real
+  column of perfect blocks stands at forty courses, and this one buckles
+  at about eleven because its soft contacts are springy joints. Treat
+  each interface as a torsion spring and the column as one buckling
+  under its own weight, and the critical height goes as `hertz^(2/3)`.
+  Measured, that holds (demo column, TGS, 20 s):
+
+      stiffness      30 Hz   60 Hz   90 Hz   240 Hz
+      stands up to      10      16   18-20       20
+      predicted         10      16      21       40
+
+  So the plan was to scale each contact's frequency by the square root
+  of the weights it holds up -- last step's normal impulse over
+  `m_eff g` -- so every interface sags the same and the top stays soft
+  enough to be still. It is worse than uniform stiffness, at every
+  setting tried. The frequency cap of a quarter of the substep rate is
+  what binds: past it a contact is a rigid one with a full position
+  correction and pumps energy into the stack, which is the pogo soft
+  contacts were brought in to stop. Uncapped, columns fell *sooner* than
+  at the default; capped, it is no better than raising the stiffness
+  everywhere to the cap.
+
+  The top row stops following the prediction at 240 Hz, and a trace says
+  why: stiff enough, a column no longer buckles but sways, the top
+  swinging ±15 cm with a period of about two and a half seconds and
+  almost no damping, until a swing carries it past the footprint. The
+  5 mm slop is part of that -- an interface can rock inside it for
+  nothing -- and cutting it to 1 mm at 240 Hz with sixteen substeps
+  stands thirty courses. Forty still falls, at four times the cost of a
+  default step.
+
+  Damping the sway is what finishes it. Angular damping of 0.5 on each
+  brick (linear 0.25), with the same 240 Hz, 1 mm slop and sixteen
+  substeps, leaves all forty courses in place after twenty seconds. It
+  does nothing for the default column, which is the diagnosis
+  confirming itself: buckling is a static instability, and damping only
+  slows it. So forty courses is reachable honestly, at four times the
+  price of a step, and not at the default settings.
+
+- **Shock propagation.** Guendelman, Bridson and Fedkiw (2003): order
+  the contact graph from the ground up and, in a final pass, treat each
+  lower body as immovable, so support reaches the top in one sweep.
+  Tried as a velocity pass inside TGS -- the last solve iteration, the
+  relax pass, or both. One sweep made things worse, and fast: a pair's
+  four corners visited in the same order, with only the upper body free
+  to answer, leave it turned a little the same way every time, and a
+  twenty course column walked twenty-five centimeters in a second.
+  Sweeping each level eight times before the next fixes that, and in the
+  relax pass raises the default column from ten courses to sixteen.
+  That is the whole gain. Combined with stiffer contacts it is worse
+  than the stiff contacts alone. The paper applies it to rigid contacts
+  at the position level; a velocity pass over soft ones is a weaker
+  version of it, and this is a result about that version.
+
 ## Articulated bodies
 
 `allgo.physics.articulated` has the spatial algebra, the recursive
@@ -800,3 +854,50 @@ a 16x16 wall, which topples rather than resting, went from 32.2ms to
 sleeps on the clock of whichever member has been still least long, so
 if no body anywhere has reached the threshold then no island can, and
 the union-find is work with a known answer.
+
+A body can also *start* asleep: `rigid/asleep`. That is what games do
+with towers, and in the bricks demo it is the `start asleep` toggle. A
+forty course column placed that way stands under every solver, where
+placed awake no solver here holds more than about eleven -- because it
+is not being simulated, which is the honest description of it.
+
+Waking has to take the whole pile. Nothing generates contacts between
+two sleeping bodies, so a sleeping stack woken only where an awake body
+touches it wakes a body a step from the bottom up -- and a shot that
+clears the bottom of a column faster than that left the upper courses
+asleep in mid air. When anything wakes now, so does every sleeping
+body touching it, directly or through a chain, found by bounding box at
+that moment: the island an engine would wake, without keeping the
+islands of sleeping bodies between steps.
+
+The opposite problem is a stack that starts awake and exactly touching.
+Its contacts are springs that push only once compressed, with no
+remembered force, so a reset opens with the whole stack squashing into
+place: an eight course column sinks 11 cm under sequential impulse, 6 cm
+under TGS and 4 cm under XPBD, and the first and last of those bounce.
+Most of it is the 5 mm slop, once per interface; the rest is the
+springs taking up the weight. `solver/settled` runs the solver out of
+sight for half a second with every velocity cut to seven tenths after
+each step -- dynamic relaxation -- and the scene is shown with the
+squash done: a wall or column then sinks a few millimeters more under
+TGS and none under XPBD, against three to fifteen centimeters placed.
+
+The damping is for scenes that start asleep, which are settled and then
+put to sleep. Settled undamped, anything about to tip had already
+started -- the half-overhanging ends of a running bond, the top of a
+wall too tall for the solver -- and sleep froze it there, up to twelve
+degrees over. Damped, nothing gathers momentum and the worst tilt is
+under a degree. Zeroing velocities outright creeps, and takes twice as
+long to get as far.
+
+A fixed half second rather than "until at rest", which was tried and
+cost seconds a reset: TGS creeps at a centimeter a second for longer
+than anyone would wait, and by its own sleep speeds a five by four wall
+never settled at all. It is also the wrong question for a scene that is
+going to fail, which would be shown already fallen.
+
+Running the solver is the point. The first version placed the bodies
+quasi-statically -- stepping with every velocity zeroed after each step
+-- and found a pose that was at rest but not the rest the solver keeps:
+an eight course TGS column sat still for half a second and then rattled.
+The solver's own rest is the only one it will hold.

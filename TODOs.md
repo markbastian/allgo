@@ -31,8 +31,16 @@ of expected return:
 
 ## Stacking
 
-- **Tall columns still topple.** Twenty courses is a real unstable
-  equilibrium now, not a numerical failure. What would help:
+- **Tall columns still topple at the default settings.** Real blocks
+  would stand at forty courses; TGS holds about ten. Forty stands with
+  stiff contacts, a 1 mm slop and body damping at sixteen substeps --
+  four times the cost of a step -- or by starting asleep. Load-scaled
+  stiffness and shock propagation were tried and did not pay (NOTES,
+  "Tried and not kept"). What is left:
+  - **An implicit contact solver.** Contacts as a convex problem solved
+    by Newton's method, as MuJoCo and Drake's SAP do, take stiff
+    contacts at large steps without the quarter-step-rate cap that
+    limits this one. The principled fix, and a solver of its own.
   - XPBD: re-measure penetration against the geometry each substep
     instead of `depth0` plus anchor drift.
   - Settle faster, so sleeping can start before bricks are shed.
