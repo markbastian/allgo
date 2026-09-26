@@ -64,7 +64,12 @@ the demos' bundle, so it is quick on a phone.
 
 The list of demos is `resources/public/demos.json`, which both the
 gallery and the player read. Adding one is an entry there and a line in
-`allgo.demo.registry`. The groups:
+`allgo.demo.registry`. The tiles' pictures are screenshots of the demos
+running, in `resources/public/thumbs/<id>.webp`; `make thumbs`, with
+`make serve` running, takes them all again with a headless Chrome
+(`script/thumbnails.mjs`), and `node script/thumbnails.mjs <id> ...`
+just the ones named. A demo without one shows its topic's picture. The
+groups:
 
 | Group                 | Demos                                                                                          |
 |-----------------------|------------------------------------------------------------------------------------------------|
@@ -125,7 +130,7 @@ readable names and source maps back.
 The live site is GitHub Pages serving the `gh-pages` branch, which
 holds nothing but the built pages: `index.html` (the gallery) and
 `demos.json`, `play/index.html`, `cnc/index.html`, `moto/index.html`,
-`solar/index.html`, `css/style.css` and `css/gallery.css`,
+`solar/index.html`, `css/style.css` and `css/gallery.css`, `thumbs/`,
 `js/compiled/allgo.js`, the three files in `data/` (the star catalogue,
 the constellations and the star names, fetched by the solar system demo)
 and an empty `.nojekyll`. Nothing rebuilds it; to publish, run

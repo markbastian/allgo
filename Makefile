@@ -22,7 +22,7 @@ SHADOW  := $(JAVA) npx shadow-cljs
 BUNDLE  := resources/public/js/compiled/allgo.js
 
 .DEFAULT_GOAL := help
-.PHONY: help test lint reflect check dev serve bundle compress release repl clean
+.PHONY: help test lint reflect check dev serve bundle compress release repl thumbs clean
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -72,6 +72,9 @@ bundle: ## Build the minified bundle without compressing it
 
 repl: ## Start an nREPL with CIDER middleware
 	@$(JAVA) clojure -M:nrepl
+
+thumbs: ## Screenshot every demo for the gallery (needs `make serve` running)
+	@node script/thumbnails.mjs
 
 clean: ## Remove build output and caches
 	@rm -rf target .cpcache .shadow-cljs resources/public/js/compiled

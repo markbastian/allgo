@@ -54,8 +54,15 @@
    "play" play!})
 
 (defonce started
+  ;; `?thumb` in the address takes the page's own chrome away -- title
+  ;; bar, controls, readouts -- leaving only the scene, which is what the
+  ;; gallery's thumbnails are screenshots of. The stylesheets do the
+  ;; hiding; this only says so.
+  ;;
   ;; `getAttribute`, not `(.. body -dataset -app)`: a release build
   ;; renames `app`, which is this page's name and no browser's, and the
   ;; page then starts nothing. A method the browser defines keeps its name.
   (when-let [start! (some-> js/document.body (.getAttribute "data-app") apps)]
+    (when (.has (js/URLSearchParams. (.. js/window -location -search)) "thumb")
+      (.add (.-classList js/document.documentElement) "thumb"))
     (start!)))

@@ -55,6 +55,8 @@
             padding: 16px 24px; border-radius: 12px; background: var(--panel); border: 1px solid var(--edge);
             font-size: 18px; text-align: center; max-width: calc(100vw - 48px);
         }
+        /* `?thumb`: the board alone, for the gallery's screenshot. */
+        .thumb .hud, .thumb .title { display: none !important; }
         @media (max-width: 640px) {
             .title { font-size: 17px; top: 64px; }
             .hud__banner { font-size: 15px; }
