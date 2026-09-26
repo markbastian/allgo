@@ -1,5 +1,5 @@
 (ns allgo.astro.variational
-  "Linearised dynamics: how a trajectory responds to a change in where it
+  "Linearized dynamics: how a trajectory responds to a change in where it
   started (Montenbruck & Gill chapter 7).
 
   Orbit determination never solves the real problem. It guesses an initial

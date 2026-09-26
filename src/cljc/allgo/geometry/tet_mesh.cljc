@@ -98,7 +98,7 @@
 
   Interior edges are shared by many tetrahedra and must appear once:
   solving the same distance constraint several times in a pass would make
-  those edges stiffer than the rest purely as an artefact of connectivity."
+  those edges stiffer than the rest purely as an artifact of connectivity."
   [tet-ids]
   (->> (partition 4 tet-ids)
        (mapcat (fn [tet]
@@ -118,7 +118,7 @@
 
   A face between two tetrahedra belongs to both; a face on the skin
   belongs to one. So counting how often each face appears -- as a set of
-  vertices, since neighbours meet it with opposite winding -- separates
+  vertices, since neighbors meet it with opposite winding -- separates
   the surface from the interior without any geometric test."
   [tet-ids]
   (let [faces (for [tet  (partition 4 tet-ids)
@@ -149,7 +149,7 @@
   Each walks from corner 000 to corner 111 changing one axis at a time,
   and the six orderings of the three axes give six tetrahedra of equal
   volume. This is Kuhn's subdivision, chosen because it is *conforming*:
-  neighbouring cubes cut their shared face the same way, so the mesh has
+  neighboring cubes cut their shared face the same way, so the mesh has
   no cracks. Cutting a cube into five tetrahedra is more economical but
   only conforms if alternate cubes are mirrored."
   (for [[a b c] [[0 1 2] [0 2 1] [1 0 2] [1 2 0] [2 0 1] [2 1 0]]]
@@ -158,7 +158,7 @@
 (defn lattice-box
   "A box of `nx` by `ny` by `nz` cells, each cut into six tetrahedra.
 
-  `size` is the edge length of one cell; the box is centred on the origin
+  `size` is the edge length of one cell; the box is centered on the origin
   in x and z and sits with its base at y = 0, which is where a soft body
   dropped on a floor wants to start."
   ([nx ny nz] (lattice-box nx ny nz 1.0))
@@ -197,7 +197,7 @@
   "Moves every vertex through `f`, a function of `[x y z]`.
 
   Tetrahedra can invert under a deformation, so orientation is restored
-  afterwards -- a tetrahedron with negative volume would be inside out,
+  afterward -- a tetrahedron with negative volume would be inside out,
   and the solver would work to keep it that way."
   [mesh f]
   (let [verts (vec (mapcat f (partition 3 (:verts mesh))))]

@@ -1,7 +1,7 @@
 (ns allgo.demo.boids-viewer
   "Canvas demo for `allgo.simulation.boids`. Each boid is drawn as a dart pointing
   along its heading and tinted by it, so alignment emerging out of a random
-  start reads as the flock converging on a single colour.
+  start reads as the flock converging on a single color.
 
   The flock is contained rather than toroidal: it bounces off the walls and
   steers around obstacles, whose clearances come from GJK."
@@ -25,7 +25,7 @@
        :trails         true
        :obstacles      true
        ;; The same three rules on flat arrays instead of a vector of maps,
-       ;; obstacles included. Several times faster; identical behaviour.
+       ;; obstacles included. Several times faster; identical behavior.
        :flatArrays     true})
 
 ;; Obstacle geometry is declared once and used twice: to build the convex

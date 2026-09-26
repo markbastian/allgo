@@ -9,7 +9,7 @@
 
   They agree to floating-point noise -- `boids-flat-test` runs them side
   by side and compares -- so which one a demo holds is a performance
-  decision, not a behavioural one.
+  decision, not a behavioral one.
 
   This namespace knows only about the reference. The flat implementation
   implements `Flock` where its record is defined, which is what keeps the

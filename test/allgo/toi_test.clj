@@ -18,7 +18,7 @@
 (deftest time-of-impact-test
   (testing "it finds the moment a ball reaches a slab"
     ;; The slab's front face is at z = 0.2 and the ball's surface leads
-    ;; its centre by 0.2, so the two meet after (z0 - 0.4) / speed. There
+    ;; its center by 0.2, so the two meet after (z0 - 0.4) / speed. There
     ;; is an exact answer here and conservative advancement should walk
     ;; down onto it.
     (doseq [[z0 speed] [[5.0 1000.0] [1.0 5000.0] [0.9 60.0] [2.0 300.0]]]
@@ -61,7 +61,7 @@
     (let [b (rigid/box {:pos [0.0 0.0 0.0] :size [2.0 0.4 0.4]
                         :rot (q/from-axis-angle [0.0 0.0 1.0] (/ Math/PI 2))})
           s ((toi/support b (:pos b)) [0.0 1.0 0.0])]
-      ;; Stood on end, its furthest point along +y is a metre up rather
+      ;; Stood on end, its furthest point along +y is a meter up rather
       ;; than a fifth of one.
       (is (close? (double (second s)) 1.0 1e-9) (str s))))
 
@@ -70,7 +70,7 @@
           s ((toi/support b (:pos b)) [1.0 0.0 0.0])]
       (is (close? (double (first s)) 1.5 1e-9))))
 
-  (testing "reach is the furthest any part of a body is from its centre"
+  (testing "reach is the furthest any part of a body is from its center"
     (is (close? (toi/reach (rigid/ball {:pos [0.0 0.0 0.0] :radius 0.7})) 0.7 1e-9))
     (is (close? (toi/reach (rigid/box {:pos [0.0 0.0 0.0] :size [2.0 2.0 2.0]}))
                 (* 0.5 (Math/sqrt 12.0)) 1e-9))))

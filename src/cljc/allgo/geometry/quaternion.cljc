@@ -75,7 +75,7 @@
   and they are opposites, so to be unambiguous: the object turns about its
   own x, then its own y, then its own z; equivalently, acting on a vector,
   the z rotation is applied first. A test pins it, because getting this
-  backwards gives rotations that are wrong only when two of the angles are
+  backward gives rotations that are wrong only when two of the angles are
   nonzero, which is the kind of thing that survives a demo."
   [x y z]
   (let [hx (* 0.5 (double x)) hy (* 0.5 (double y)) hz (* 0.5 (double z))

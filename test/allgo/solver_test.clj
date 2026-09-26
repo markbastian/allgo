@@ -31,7 +31,7 @@
     ;; not launched off it. XPBD resolves the whole overlap in a substep
     ;; and reads velocity back from the position change, so without a
     ;; pass to take that energy out again a dropped box left the floor at
-    ;; fifteen metres a second.
+    ;; fifteen meters a second.
     (doseq [solver solvers]
       (let [w (run solver [(floor) (brick [0.0 3.0 0.0])] 240)
             b (first (dynamics w))]
@@ -63,7 +63,7 @@
             (str (name solver) " never settled")))))
 
   (testing "nothing climbs while resting"
-    ;; A settled stack should not be rising. Baumgarte stabilisation does
+    ;; A settled stack should not be rising. Baumgarte stabilization does
     ;; put energy in, which is why the bias is a fraction of the overlap
     ;; and not all of it.
     (doseq [solver solvers]
@@ -82,8 +82,8 @@
     ;; XPBD reads velocity back off the position correction, at the
     ;; substep rate, so anything the position solve leaves behind is
     ;; multiplied by 240 -- and with nothing to take it out again it
-    ;; compounds. A six brick column sat at six millimetres a second for
-    ;; four seconds and was doing twenty nine metres a second at five.
+    ;; compounds. A six brick column sat at six millimeters a second for
+    ;; four seconds and was doing twenty nine meters a second at five.
     ;; Any test that stops at three seconds calls that stable.
     (doseq [solver solvers]
       (let [bodies (vec (cons (floor)
@@ -101,7 +101,7 @@
   (testing "a settled column does not merely settle, it stops"
     ;; The difference is the whole point. A stack under a Baumgarte bias
     ;; comes to rest in the sense that it stops going anywhere, and never
-    ;; stops *moving*: it jitters at a centimetre a second forever,
+    ;; stops *moving*: it jitters at a centimeter a second forever,
     ;; because the velocity invented to push the overlap out is left in
     ;; the bodies and gravity puts it back. Over a minute that walks a
     ;; wall sideways and over it goes. A soft contact has no such
@@ -112,7 +112,7 @@
     ;; sweeps to cancel the gravity it just added and a five course stack
     ;; keeps about one substep of it -- 0.05 m/s that no contact model
     ;; fixes. XPBD is still quietly pushing overlap out through the
-    ;; position solve at this point and creeps a centimetre over the five
+    ;; position solve at this point and creeps a centimeter over the five
     ;; seconds. Both are in TODOs.
     (doseq [solver [:sequential-impulse]]
       (let [bodies (vec (cons (floor)
@@ -178,7 +178,7 @@
     ;; whether the wall falls over or leaves the building. XPBD reads
     ;; velocity back off the position correction, over the substep, so
     ;; an unbounded correction is an unbounded velocity -- a sixteen
-    ;; course wall reached sixty metres a second that way. The bound is
+    ;; course wall reached sixty meters a second that way. The bound is
     ;; `max-push-speed`, which the impulse solvers have always had.
     (doseq [solver solvers]
       (let [limit 3.0
@@ -196,7 +196,7 @@
 (deftest restitution-test
   (testing "a bouncy ball bounces and a dead one does not"
     ;; Measured while still in flight: a second after being let go from
-    ;; two metres, the dead ball is on the floor and the elastic one is
+    ;; two meters, the dead ball is on the floor and the elastic one is
     ;; most of the way back up.
     ;;
     ;; The thresholds are absolute on purpose. This used to ask only
@@ -257,11 +257,11 @@
         (is (> (top true) (top false))
             (str (name solver) " warm=" (top true) " cold=" (top false)))))))
 
-(deftest tunnelling-test
+(deftest tunneling-test
   (testing "a fast ball is stopped by a wall rather than passing through it"
     ;; A static slab, so nothing can push it aside and the only question
     ;; is which side of it the ball ends up on. Before contacts were
-    ;; offered ahead of the touch this failed at sixty metres a second,
+    ;; offered ahead of the touch this failed at sixty meters a second,
     ;; which is the speed the brick demo's own slider goes up to.
     (let [through? (fn [solver speed]
                      (let [w (run solver
@@ -289,7 +289,7 @@
 
       ;; XPBD's ceiling is now the cap on how finely a step may be cut.
       ;; Sixty-four slices of a sixtieth of a second is a quarter of a
-      ;; millisecond, and twenty kilometres a second crosses the slab in
+      ;; millisecond, and twenty kilometers a second crosses the slab in
       ;; less than that.
       (is (through? :xpbd 20000)
           "xpbd holds at 20000 m/s now -- good news, move this up")

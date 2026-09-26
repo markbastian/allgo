@@ -63,7 +63,7 @@
 (deftest euler-test
   (testing "XYZ order composes as Rx*Ry*Rz"
     ;; Both readings of \"XYZ\" are in use and they are opposites. Getting
-    ;; it backwards gives rotations that are wrong only when two of the
+    ;; it backward gives rotations that are wrong only when two of the
     ;; three angles are nonzero, which is exactly the kind of error a demo
     ;; does not show.
     (let [x 0.3 y -0.7 z 1.2

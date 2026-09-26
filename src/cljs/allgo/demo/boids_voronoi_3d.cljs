@@ -50,7 +50,7 @@
 
 (defn- heading-rgb
   "Hue from compass bearing, brightness from climb -- the tint used by the
-  other flocking demos, so a flock in alignment reads as one colour."
+  other flocking demos, so a flock in alignment reads as one color."
   [^js color [vx vy vz]]
   (let [m (js/Math.sqrt (+ (* vx vx) (* vy vy) (* vz vz)))
         n (if (zero? m) 1 m)]
@@ -123,7 +123,7 @@
 
 (defn- write-boids!
   "Place and orient one cone per boid. Points would draw as flat squares
-  carrying no heading; a cone shows which way each boid is travelling."
+  carrying no heading; a cone shows which way each boid is traveling."
   [^js mesh ^js scratch ^js color flock]
   (let [[ox oy oz] (mapv #(/ % 2.0) world)]
     (doseq [[i {:keys [pos vel]}] (map-indexed vector flock)]

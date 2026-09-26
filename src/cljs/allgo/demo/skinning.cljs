@@ -49,8 +49,8 @@
         span (max (- (.-x hi) (.-x lo)) (- (.-y hi) (.-y lo)) (- (.-z hi) (.-z lo)))
         size (/ (* 1.25 span) n)]
     (-> (tet/lattice-box n n n size)
-        ;; lattice-box is centred in x and z with its base at y=0; move it
-        ;; onto the geometry's own centre.
+        ;; lattice-box is centered in x and z with its base at y=0; move it
+        ;; onto the geometry's own center.
         (tet/translate [(/ (+ (.-x lo) (.-x hi)) 2)
                         (- (/ (+ (.-y lo) (.-y hi)) 2) (/ (* n size) 2))
                         (/ (+ (.-z lo) (.-z hi)) 2)]))))

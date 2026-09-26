@@ -27,7 +27,7 @@
 
   The full chain of chapter 5, not sidereal time alone. Rotating by GMST
   only would ignore that the pole and equinox have moved since J2000, which
-  is nil at the epoch and tens of kilometres at the surface two decades on.
+  is nil at the epoch and tens of kilometers at the surface two decades on.
 
   UT1 is taken as UTC unless `dut1` is given: the difference is under a
   second by construction, and cannot be computed, only looked up."
@@ -102,7 +102,7 @@
     :active? (constantly true)
     ;; Everything the field does beyond a point mass. When tides are on
     ;; they are in here, because a tide is precisely a perturbation of the
-    ;; geopotential -- and folding them in costs nothing, where itemising
+    ;; geopotential -- and folding them in costs nothing, where itemizing
     ;; them separately would mean evaluating the field twice on the hot
     ;; path that integrates the orbit.
     :acceleration (fn [{:keys [ecef u field degree point-mass]}]

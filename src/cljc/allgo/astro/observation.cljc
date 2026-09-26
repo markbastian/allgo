@@ -6,12 +6,12 @@
   Doppler shift or a pair of angles, and each is separated from the geometry
   by a chain of effects: the signal takes time to arrive, during which the
   satellite moves; the atmosphere slows it; the ionosphere slows it by an
-  amount depending on frequency. Modelling those is most of the work in
+  amount depending on frequency. Modeling those is most of the work in
   turning tracking data into an orbit.
 
-  The corrections are not small next to the accuracy wanted. A metre matters
+  The corrections are not small next to the accuracy wanted. A meter matters
   for precise orbit determination, and the troposphere alone contributes 2.4
-  metres straight up and twenty-five at five degrees elevation."
+  meters straight up and twenty-five at five degrees elevation."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.geodesy :as geodesy]
             [allgo.geometry.vec3 :as v3]
@@ -46,8 +46,8 @@
 
   A signal leaves the satellite before it is received, and the satellite has
   moved in between. For low Earth orbit the delay is a few milliseconds and
-  the motion some tens of metres -- negligible for pointing an antenna,
-  decisive for ranging at the centimetre level.
+  the motion some tens of meters -- negligible for pointing an antenna,
+  decisive for ranging at the centimeter level.
 
   Solved by iteration because the answer feeds its own input: how far the
   satellite was depends on when it was, which depends on how far it was."
@@ -75,10 +75,10 @@
 (defn tropospheric-delay
   "Extra path length from the neutral atmosphere, km.
 
-  Two components with different behaviour. The hydrostatic part is 90% of it
+  Two components with different behavior. The hydrostatic part is 90% of it
   and is predictable from surface pressure alone. The wet part is small but
   varies with humidity along the path, which is why it is the limiting error
-  in precise geodesy: nobody knows where the water vapour is."
+  in precise geodesy: nobody knows where the water vapor is."
   ([el] (tropospheric-delay el zenith-hydrostatic zenith-wet))
   ([el zhd zwd]
    (if (<= el 0.0)
@@ -146,13 +146,13 @@
 
 ;; ---------------------------------------------------------- the full model
 
-(defn modelled-range
+(defn modeled-range
   "Range a station would measure, with the corrections chapter 6 accounts
   for: geometry, then the media, then the clocks.
 
   Clock offsets enter as a range because that is how a one-way system sees
   them -- a receiver clock a microsecond fast reports every satellite 300
-  metres too far, which is why navigation solves for four unknowns and not
+  meters too far, which is why navigation solves for four unknowns and not
   three."
   [{:keys [geometric elevation tec frequency
            station-clock satellite-clock]
@@ -241,7 +241,7 @@
   km between epochs -- the signature of the receiver having lost count.
 
   The default is 5 cm, comfortably under the 19 cm of a single L1 cycle,
-  because the whole point is to catch one lost cycle. A threshold in metres
+  because the whole point is to catch one lost cycle. A threshold in meters
   would miss every slip worth detecting and report a clean series."
   ([previous current] (cycle-slip? previous current 5e-5))
   ([previous current tolerance]

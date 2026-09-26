@@ -9,8 +9,8 @@
   lunar node -- nutation.
 
   Both matter for orbits because they move the frame the equations are
-  written in. Fifty arcseconds a year is 12 metres a year at geostationary
-  radius, and nutation's 17 arcseconds is 3.5 kilometres of instantaneous
+  written in. Fifty arcseconds a year is 12 meters a year at geostationary
+  radius, and nutation's 17 arcseconds is 3.5 kilometers of instantaneous
   offset that no amount of careful integration will recover."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.time :as time]
@@ -77,7 +77,7 @@
   and cos for obliquity, in units of 0.0001 arcsecond.
 
   The full theory runs to 106 terms; these twenty give better than a
-  hundredth of an arcsecond, which is centimetres at geostationary radius
+  hundredth of an arcsecond, which is centimeters at geostationary radius
   and far below everything else in the model."
   ;;  l  l'  F  D  Om     dpsi(sin)          deps(cos)
   [[0  0  0  0  1  -171996.0 -174.2  92025.0  8.9]
@@ -176,7 +176,7 @@
   `xp` and `yp` in radians.
 
   The pole is not fixed in the crust: it circles by some 0.3 arcseconds --
-  around 9 metres at the surface -- in a 435-day Chandler wobble beating
+  around 9 meters at the surface -- in a 435-day Chandler wobble beating
   against an annual term. Like dUT1 this can only be measured and published,
   never predicted, and zero is the honest default when it is unknown."
   [xp yp]
@@ -214,7 +214,7 @@
 (def pn-bucket
   "How coarsely the slowly varying parts may be held, in days.
 
-  A quarter of an hour, which costs at most about 4 centimetres at the
+  A quarter of an hour, which costs at most about 4 centimeters at the
   Earth's surface -- far below the truncation of the nutation series itself,
   and below anything an orbit model cares about. The daily rotation is never
   cached and keeps its full resolution."

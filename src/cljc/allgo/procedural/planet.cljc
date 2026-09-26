@@ -26,7 +26,7 @@
   Add a sea level and the land/water division falls out for free -- the
   coastline is a contour of `f`, which is why procedural coastlines have
   the right fractal wiggle without anyone drawing one. Add a second
-  fractal for cloud cover and a third for the surface colour and you have
+  fractal for cloud cover and a third for the surface color and you have
   a planet you can fly to, at any magnification, having stored nothing.
 
   ## Composing one
@@ -57,7 +57,7 @@
   "The unit vector at `latitude` and `longitude`, both in radians.
 
   Only for talking to the outside world -- nothing inside a planet is
-  parameterised this way, for the reason in the namespace docstring."
+  parameterized this way, for the reason in the namespace docstring."
   [latitude longitude]
   (let [lat (double latitude) lon (double longitude)
         c (math/cos lat)]
@@ -137,7 +137,7 @@
     of its time low than high. That is what puts a minority of the surface
     above sea level and gives oceans that are mostly one connected body.
   * **Mountains.** A second fractal -- a ridged multifractal by default,
-    for its branching ridge lines -- normalised and then multiplied by the
+    for its branching ridge lines -- normalized and then multiplied by the
     continental mask, so that ranges rise from land and the sea floor
     stays comparatively smooth. Real ocean floor is smoother than real
     land for a reason procedural terrain does not have, namely that it is
@@ -162,7 +162,7 @@
   * `:sample-spacing` -- how far apart, in radians on the unit sphere,
     this terrain is going to be sampled. Given it, each layer's octave
     count is cut to what that sampling can actually carry, by
-    `allgo.procedural.fractal/octaves-for`. This is not an optimisation
+    `allgo.procedural.fractal/octaves-for`. This is not an optimization
     with a quality cost, it is the opposite: octaves finer than the
     samples do not arrive as detail, they arrive as speckle that moves
     when the camera does, and they are paid for at full price. Leave it
@@ -206,7 +206,7 @@
                  (noise/scaled mountain-frequency))
          ;; Every construction has a different natural range -- the ridged
          ;; one never goes below zero, fBm straddles it -- so the mountains
-         ;; are measured and recentred rather than assumed. Without this,
+         ;; are measured and recentered rather than assumed. Without this,
          ;; changing the construction would also move the sea level.
          [mlo mhi] (terrain-range raw 1024)
          mspan (let [d (- (double mhi) (double mlo))] (if (zero? d) 1.0 d))
@@ -228,7 +228,7 @@
 
   * `:radius` -- of the datum, the sphere the terrain displaces.
   * `:relief` -- the displacement at full scale, in the same units. The
-    terrain function is normalised onto [-1, 1] first, so this is the
+    terrain function is normalized onto [-1, 1] first, so this is the
     real peak-to-datum height whatever the fractal underneath does.
   * `:sea-level` -- where the water sits, in those same units, so 0 is
     halfway up the range and negative values give a drier world.
@@ -295,7 +295,7 @@
   (max 0.0 (- sea-level (elevation planet d))))
 
 (defn surface-radius
-  "Distance from the centre to what you would see at `d`: the ground, or
+  "Distance from the center to what you would see at `d`: the ground, or
   the sea surface where the ground is below it."
   ^double [{:keys [^double radius ^double sea-level] :as planet} d]
   (+ radius (max sea-level (elevation planet d))))
@@ -371,12 +371,12 @@
       (shaping/smoothstep edge (+ edge 0.45) v))))
 
 ;; ---------------------------------------------------------------------------
-;; Colour
+;; Color
 
 (def terran
   "Musgrave's Terran palette: what a temperate planet is made of.
 
-  Seven colours and the rules below are the whole of it. There is no
+  Seven colors and the rules below are the whole of it. There is no
   climate model here and there does not need to be one -- altitude, slope
   and latitude between them predict what covers a piece of ground well
   enough to fool the eye, which is the standard the chapter sets."
@@ -390,7 +390,7 @@
    :snow    [0.96 0.97 0.99]})
 
 (defn surface-color
-  "The colour of the ground or sea at `d`, as `[r g b]` in [0, 1].
+  "The color of the ground or sea at `d`, as `[r g b]` in [0, 1].
 
   Layered exactly as the chapter describes, each layer a `smoothstep`
   between two of the palette entries:
@@ -398,7 +398,7 @@
   1. Under water, blend from shallow to abyssal with depth.
   2. On land, a ramp from beach through lowland and upland to bare rock,
      keyed on height above sea level as a fraction of the relief.
-  3. Snow above a line that comes *down* towards the poles, because the
+  3. Snow above a line that comes *down* toward the poles, because the
      snow line is a temperature contour and temperature falls with both
      altitude and latitude.
   4. Steep ground is bare rock whatever else it would have been, and too
@@ -410,7 +410,7 @@
   terrain evaluations, and anything drawing a mesh has the vertex normals
   in hand already -- a better answer anyway, since it is the slope of the
   surface actually being drawn -- and the elevation was needed to place
-  the vertex in the first place. Supplying both makes colouring free."
+  the vertex in the first place. Supplying both makes coloring free."
   ([planet d] (surface-color planet d {}))
   ([{:keys [^double relief ^double sea-level] :as planet} d
     {:keys [snow-line steep pole-effect palette epsilon]
@@ -442,7 +442,7 @@
                       :else (v3/lerp upland rock (shaping/smoothstep 0.35 0.7 t)))
              bare (shaping/smoothstep (* 0.7 steep) steep steepness)
              ground (v3/lerp ground rock bare)
-             ;; The snow line falls towards the poles.
+             ;; The snow line falls toward the poles.
              lat (abs (latitude d))
              line (max 0.0 (- snow-line (* pole-effect (/ lat (* 0.5 math/PI)))))
              snowy (* (shaping/smoothstep line (+ line 0.12) t)
@@ -461,7 +461,7 @@
 
   This is the one place the projection is allowed, and only because
   something outside wants a rectangle. Note what it costs: the polar rows
-  sample the same few square kilometres hundreds of times over while the
+  sample the same few square kilometers hundreds of times over while the
   equatorial rows undersample, which is exactly the waste the solid
   formulation exists to avoid."
   [f width height]

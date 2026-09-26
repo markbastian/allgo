@@ -83,7 +83,7 @@
 ;;
 ;; Gravity and the ephemerides run on TT; the Earth's orientation runs on
 ;; UT1. Confusing them is a a fraction of a second, which at 465 m/s of
-;; equatorial rotation is a few hundred metres of position.
+;; equatorial rotation is a few hundred meters of position.
 
 (def leap-seconds
   "TAI - UTC in whole seconds, from each MJD at which it changed.
@@ -139,7 +139,7 @@
   `dut1` cannot be computed, only measured and published: it is the Earth's
   rotation running fast or slow against atomic time, and it drifts by a
   millisecond a day in ways that depend on the weather and the core. Zero is
-  a reasonable default at the metre level, and wrong at the centimetre one."
+  a reasonable default at the meter level, and wrong at the centimeter one."
   ([mjd-utc] mjd-utc)
   ([mjd-utc dut1] (shift mjd-utc dut1)))
 
@@ -147,7 +147,7 @@
   "Barycentric Dynamical Time from Terrestrial Time, MJD.
 
   The two differ by at most 1.7 ms, a relativistic effect: a clock on Earth
-  runs at a varying rate relative to one at the solar system barycentre,
+  runs at a varying rate relative to one at the solar system barycenter,
   because the Earth's distance from the Sun and its speed both vary over the
   year. The dominant term is annual and follows Earth's mean anomaly."
   [mjd-tt]

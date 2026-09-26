@@ -71,7 +71,7 @@
           cx 1.0 cy 1.0]
       (vortex/add! p cx cy 20.0 1.0)
       (vortex/stir! p f dt {:radius 0.35 :damping 0.0})
-      ;; Solid-body rotation: u is driven by how far above the centre the
+      ;; Solid-body rotation: u is driven by how far above the center the
       ;; face is, so it points opposite ways above and below.
       (let [u-above (aget ^floats (:u f) (fluid/idx f 10 12))
             u-below (aget ^floats (:u f) (fluid/idx f 10 7))

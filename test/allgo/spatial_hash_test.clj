@@ -37,7 +37,7 @@
     (positions (repeatedly (* 3 n) #(* spread (- (.nextDouble r) 0.5))))))
 
 (defn- lattice
-  "A cube of points one unit apart; every neighbour count is known."
+  "A cube of points one unit apart; every neighbor count is known."
   [side]
   (positions (for [x (range side) y (range side) z (range side) c [x y z]] c)))
 
@@ -50,13 +50,13 @@
         h    (sh/spatial-hash 1.0 n)]
     (sh/rebuild! h p n)
 
-    (testing "a corner point has three neighbours, an interior one six"
+    (testing "a corner point has three neighbors, an interior one six"
       (is (= 3 (count (sh/within h p 0 1.01))))
       ;; index = x*36 + y*6 + z, so 43 is (1,1,1)
       (is (= 6 (count (sh/within h p 43 1.01)))))
 
     (testing "widening the radius picks up the diagonals"
-      ;; The twelve edge-diagonal neighbours sit at sqrt(2).
+      ;; The twelve edge-diagonal neighbors sit at sqrt(2).
       (is (= 18 (count (sh/within h p 43 1.5)))))
 
     (testing "a radius covering everything returns everything but self"
@@ -129,7 +129,7 @@
       (sh/rebuild! h near 2)
       (is (= 1 (count (sh/within h near 0 0.5))))
       (sh/rebuild! h far 2)
-      (is (= 0 (count (sh/within h far 0 0.5))) "the stale neighbour is gone"))))
+      (is (= 0 (count (sh/within h far 0 0.5))) "the stale neighbor is gone"))))
 
 (deftest query-mechanics-test
   (let [p (lattice 4)
@@ -137,23 +137,23 @@
         h (sh/spatial-hash 1.0 n)]
     (sh/rebuild! h p n)
 
-    (testing "query! reports a count and neighbour reads that many out"
+    (testing "query! reports a count and neighbor reads that many out"
       (let [found (sh/query! h p 0 1.01)]
         (is (pos? found))
-        (is (= found (count (sh/neighbours h found))))
-        (is (every? #(< -1 % n) (sh/neighbours h found)) "all are real ids")))
+        (is (= found (count (sh/neighbors h found))))
+        (is (every? #(< -1 % n) (sh/neighbors h found)) "all are real ids")))
 
     (testing "candidates include the object itself; within excludes it"
       (let [found (sh/query! h p 5 1.01)]
-        (is (contains? (set (sh/neighbours h found)) 5))
+        (is (contains? (set (sh/neighbors h found)) 5))
         (is (not (contains? (set (sh/within h p 5 1.01)) 5)))))
 
-    (testing "candidates are a superset of the true neighbours"
+    (testing "candidates are a superset of the true neighbors"
       ;; The hash is allowed to over-report -- that is the bargain that
       ;; lets it be approximate and cheap -- but never to under-report.
       (doseq [i (range n)]
         (let [found      (sh/query! h p i 1.01)
-              candidates (set (sh/neighbours h found))]
+              candidates (set (sh/neighbors h found))]
           (is (every? candidates (brute-force-within p n i 1.01))
               (str "object " i)))))))
 

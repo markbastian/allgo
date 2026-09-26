@@ -8,7 +8,7 @@
               its temperature. This is the only reason anything rises;
               there is no gravity in a fire scene.
     cooling   temperature decays, and flame decays faster than smoke, so
-              a plume turns from yellow to grey at a definite height
+              a plume turns from yellow to gray at a definite height
               rather than fading uniformly.
     vortices  `allgo.physics.vortex`, spawned at the source, because a
               grid at a playable resolution smooths its own eddies away
@@ -38,7 +38,7 @@
   ;; column impossible -- there is nowhere for the fluid to go and the
   ;; projection cancels the buoyancy outright, leaving the heat pooled on
   ;; the floor. `extrapolate!` handles the open edges instead. Mark solids
-  ;; yourself with `allgo.physics.fluid/disc!` or `set-solid!`.
+  ;; yourself with `allgo.physics.fluid/disk!` or `set-solid!`.
   (let [f (fluid/fluid nx ny h)
         {:keys [^floats smoke n]} f]
     ;; The scalar field starts at 1.0 for dye, which as a temperature
@@ -118,7 +118,7 @@
             (aset v id (float (+ vel (* accel (- (* t lift) vel)))))))))))
 
 (defn smooth-hotspots!
-  "Averages any cell that is fully alight with its diagonal neighbours.
+  "Averages any cell that is fully alight with its diagonal neighbors.
 
   A source holds its cells pinned at 1.0, which is a plateau with a hard
   edge; advection carries that edge upward as a visible flat-topped slab.
@@ -176,14 +176,14 @@
            [(* i h) (* j h)]))
      h vortex-rate dt rng)))
 
-(defmethod emit! :disc
+(defmethod emit! :disk
   [{:keys [nx ny h ^floats smoke]}
    {:keys [x y radius] :or {radius 0.2}} dt world]
   (let [{:keys [vortex-rate rng]} (merge default-world {:rng rand} world)
         nx (long nx) ny (long ny) h (double h)
         cx (double x) cy (double y)
         outer (+ (double radius) h)
-        ;; A shell, not a disc: the inside of a burning object is not
+        ;; A shell, not a disk: the inside of a burning object is not
         ;; where it burns, and heating it too only makes a blob.
         inner (* 0.85 (double radius))
         i0 (max 1 (long (math/floor (/ (- cx outer) h))))
@@ -218,7 +218,7 @@
   "One frame: the fluid's own stages, then heat, sources and vortices.
 
   The fluid is solved first so that buoyancy acts on a divergence-free
-  field; heating it afterwards leaves a little divergence for the next
+  field; heating it afterward leaves a little divergence for the next
   step's projection to clear, which is both cheaper and stabler than
   trying to heat and project at once."
   ([f] (step! f {}))

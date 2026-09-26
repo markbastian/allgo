@@ -1,7 +1,7 @@
 (ns allgo.demo.planet
   "A procedural planet, after chapter 20 of Ebert et al.
 
-  Nothing here is stored. The terrain, the coastline, the colour of the
+  Nothing here is stored. The terrain, the coastline, the color of the
   ground and the cover of the clouds are all evaluated from the direction
   of each vertex, so the controls below are not adjusting a model of a
   planet -- they are choosing a different function, and the planet is
@@ -10,7 +10,7 @@
   Three meshes, and each makes a different point:
 
   * **The ground**, a geodesic sphere whose vertices are pushed out to
-    `planet/surface-radius` and coloured by `planet/surface-color`. Its
+    `planet/surface-radius` and colored by `planet/surface-color`. Its
     slope comes from the mesh's own normals rather than from four more
     terrain evaluations apiece, which is both cheaper and more honest --
     it is the slope of the surface actually being drawn.
@@ -19,10 +19,10 @@
     image smears at the poles and has a seam down one meridian, and the
     whole argument of the chapter is that a function of a 3D direction has
     neither.
-  * **The air**, a shell whose colour at each point is what
+  * **The air**, a shell whose color at each point is what
     `allgo.procedural.atmosphere` says the sky looks like there --
     blue over the day side, red along the terminator, black at night --
-    faded towards the rim by the length of the path a grazing ray takes.
+    faded toward the rim by the length of the path a grazing ray takes.
     That is why the glow reddens where the sun is setting without anyone
     having said that it should."
   (:require [allgo.demo.fps :as fps]
@@ -40,7 +40,7 @@
   "The basis functions on offer, by the name the control shows.
 
   The two at the bottom are not lattice noises and cost roughly thirty
-  times as much per sample, since each one searches a neighbourhood of
+  times as much per sample, since each one searches a neighborhood of
   cells rather than interpolating eight corners. They are worth having
   anyway -- a planet built on `F2-F1` is made of cracked plates and looks
   like nothing summed noise can produce -- but the demo caps the octaves
@@ -75,7 +75,7 @@
    :detail 5
    ;; The clouds get a finer shell than the ground does. Their opacity is
    ;; interpolated across the triangles, and an edge you can see through
-   ;; shows the triangle it crosses; the ground's colour is interpolated
+   ;; shows the triangle it crosses; the ground's color is interpolated
    ;; too but has the terrain's own shading over it to hide the seams.
    :cloud-detail 6
    :air-detail 3
@@ -148,7 +148,7 @@
   "Area-weighted vertex normals, straight from the triangles.
 
   The cross product of two edges is twice the triangle's area along its
-  normal, so accumulating it unnormalised weights each face by its size
+  normal, so accumulating it unnormalized weights each face by its size
   for free -- which is what you want, since a sliver should not sway the
   average as much as a large triangle does."
   [^js positions ^js index ^js normals]
@@ -181,11 +181,11 @@
     normals))
 
 (defn- srgb->linear
-  "A palette entry, as a light rather than as a colour.
+  "A palette entry, as a light rather than as a color.
 
-  `allgo.procedural.planet` hands back colours in the space a person reads
-  them in -- 0.5 means mid grey -- and the renderer works in linear light,
-  where mid grey is about 0.21. Uploading the one as the other is the
+  `allgo.procedural.planet` hands back colors in the space a person reads
+  them in -- 0.5 means mid gray -- and the renderer works in linear light,
+  where mid gray is about 0.21. Uploading the one as the other is the
   reason so many procedural planets come out looking like a bleached
   photograph: everything dark is lifted and all the contrast goes."
   [c] (js/Math.pow (double c) 2.2))
@@ -247,11 +247,11 @@
 (defn- palette-texture
   "Bakes `planet/surface-color` into a lookup table the shader can read.
 
-  The splotchiness this replaces was not the terrain, it was the colour:
-  a vertex-coloured mesh interpolates the *palette entry* across each
+  The splotchiness this replaces was not the terrain, it was the color:
+  a vertex-colored mesh interpolates the *palette entry* across each
   triangle, so a coastline arrives as a green-to-blue smear a triangle
   wide rather than as a line. Interpolating the elevation instead and
-  looking the colour up per pixel puts the coastline back where the
+  looking the color up per pixel puts the coastline back where the
   terrain says it is, at no cost in vertices -- the shore is now a contour
   of the interpolated height field, and the triangles are small enough
   that its kinks land inside a pixel.
@@ -294,11 +294,11 @@
       tex)))
 
 (defn- ground-geometry
-  "Displace the sphere, and hand the shader what it needs to colour it.
+  "Displace the sphere, and hand the shader what it needs to color it.
 
   Two attributes beyond position and normal: the elevation at the vertex
   and how steep the mesh is there. Both are scalars, both interpolate
-  meaningfully across a triangle -- unlike a colour, which does not --
+  meaningfully across a triangle -- unlike a color, which does not --
   and between them they are the whole input to the palette."
   [pl {:keys [verts tri-ids]}]
   (let [dirs (vertex-directions verts)
@@ -437,7 +437,7 @@
                     clamp(vSteep, 0.0, 1.0));
      vec3 base = texture2D(uPalette, uv).rgb;
 
-     // Snow: the line comes down towards the poles, and will not lie on
+     // Snow: the line comes down toward the poles, and will not lie on
      // anything too steep to hold it.
      float lat = abs(asin(clamp(up.y, -1.0, 1.0))) / 1.5707963;
      float line = max(0.0, uSnowLine - uPoleEffect * lat);
@@ -446,7 +446,7 @@
                  * (1.0 - smoothstep(0.8 * uSteepLimit, uSteepLimit, vSteep))
                  * step(uSeaLevel, vElev);
      vec3 albedo = mix(base, uSnow, snowy);
-     // And a touch of the same field in the colour, so that flat ground is
+     // And a touch of the same field in the color, so that flat ground is
      // not flat in two senses at once.
      albedo *= 1.0 + uDetailTint * land * (detail - 0.5);
 
@@ -527,7 +527,7 @@
 
 (def ^:private air-fragment-shader
   ;; How far the view ray through this fragment passes from the planet's
-  ;; centre: at the limb it grazes the ground and has the whole atmosphere
+  ;; center: at the limb it grazes the ground and has the whole atmosphere
   ;; to cross, and at the outer edge of the shell it has none. That ratio
   ;; is the glow, and it is why the halo is a ring rather than a wash.
   "uniform float uInner;
@@ -543,7 +543,7 @@
    }")
 
 (defn- air-geometry
-  "A shell carrying, at each vertex, the colour of the sky underneath it."
+  "A shell carrying, at each vertex, the color of the sky underneath it."
   [pl {:keys [verts tri-ids]} sun]
   (let [dirs (vertex-directions verts)
         n (/ (count verts) 3)
@@ -637,7 +637,7 @@
         group (THREE/Group.)
         state (atom {:ground nil :cloud nil :air nil :spin true :wireframe false})
         ;; lil-gui reaches into this with string keys it cannot rename, so
-        ;; it needs the ^js hint or advanced optimisation reads it as
+        ;; it needs the ^js hint or advanced optimization reads it as
         ;; undefined and every control comes back empty.
         ^js controls #js {:basis "gradient (Perlin)"
                           :construction "ridged-multifractal"

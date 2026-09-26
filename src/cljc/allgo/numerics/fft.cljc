@@ -4,7 +4,7 @@
   Here because a separable elliptic problem on a periodic axis stops being
   a linear system and becomes arithmetic once you change basis. A second
   difference around a ring is a *convolution*, so the discrete Fourier
-  basis diagonalises it: each wavenumber is scaled and no wavenumber talks
+  basis diagonalizes it: each wavenumber is scaled and no wavenumber talks
   to another. `allgo.physics.sphere-fluid` uses exactly that to turn a
   Poisson solve over a whole sphere into one small tridiagonal solve per
   wavenumber, which is direct, exact to round-off, and fast enough to run

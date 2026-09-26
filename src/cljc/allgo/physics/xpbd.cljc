@@ -7,7 +7,7 @@
   Ordinary physics integrates forces into velocities into positions.
   Position based dynamics works the other way: guess where the particles
   go, then repeatedly *move them* until the constraints hold, and read the
-  velocity back off how far each one actually travelled. Nothing can
+  velocity back off how far each one actually traveled. Nothing can
   explode, because nothing is ever integrated -- the worst a bad step can
   do is move a particle somewhere and have the next projection move it
   back.
@@ -16,7 +16,7 @@
   stiffness depends on how many iterations you run and what the timestep
   is, so a body stiffened by running more iterations is not stiffer in any
   units you could measure. XPBD gives each constraint a *compliance* --
-  the inverse of stiffness, in metres per newton -- and carries a Lagrange
+  the inverse of stiffness, in meters per newton -- and carries a Lagrange
   multiplier that makes the result converge to the same material whatever
   the iteration count. Compliance 0 is perfectly rigid.
 
@@ -311,7 +311,7 @@
                     py (+ cy (* dy s))
                     pz (+ cz (* dz s))
                     ;; Friction, the position-based way: of the distance
-                    ;; travelled while in contact, undo some of the part
+                    ;; traveled while in contact, undo some of the part
                     ;; running along the surface, leaving the normal part
                     ;; alone -- that part is the contact. Without it a sheet
                     ;; dropped on a ball slides off and pools on the floor,
@@ -341,7 +341,7 @@
   undone each step. At 0 a sheet dropped on a ball slides off and pools on
   the floor, which is right and dull; a little friction is what makes it
   drape."
-  ([centre radius] (sphere-constraint centre radius 0.0))
+  ([center radius] (sphere-constraint center radius 0.0))
   ([[cx cy cz] radius friction]
    (->SphereCollision (double cx) (double cy) (double cz) (double radius)
                       (double friction))))
@@ -379,7 +379,7 @@
                             d2 (+ (* dx dx) (* dy dy) (* dz dz))]
                         (when (and (pos? d2) (< d2 th2))
                           ;; Two particles that were always this close --
-                          ;; neighbours in the sheet -- must not be pushed
+                          ;; neighbors in the sheet -- must not be pushed
                           ;; apart, or the cloth inflates. Their rest
                           ;; separation is the floor instead of the
                           ;; thickness.
@@ -424,12 +424,12 @@
 
   `thickness` is the cloth's notional thickness, and should be somewhat
   less than the spacing between particles -- larger and the sheet holds
-  itself rigid, since every neighbour is already inside it.
+  itself rigid, since every neighbor is already inside it.
 
   Two particles that started out closer than the thickness are held at
   their *rest* separation rather than pushed to the thickness. Without
   that the constraint fights the sheet's own structure and inflates it,
-  because a fine mesh's neighbours are closer together than the cloth is
+  because a fine mesh's neighbors are closer together than the cloth is
   thick.
 
   Pair it with `:max-velocity` on the world -- `speed-limit` gives the
@@ -541,7 +541,7 @@
             (aset pos (+ b 1) (double floor))))))))
 
 (defn- post-solve!
-  "Read velocity back off the distance actually travelled. This is the
+  "Read velocity back off the distance actually traveled. This is the
   move that makes the scheme unconditionally stable: velocity is a
   *result* of where the solver put the particle, so it can never disagree
   with the positions or run away."

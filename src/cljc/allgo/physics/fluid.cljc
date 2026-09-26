@@ -13,17 +13,17 @@
     advect       move the velocity field, and anything painted on it,
                  along itself
 
-  The grid is *staggered*: pressure and dye live at cell centres, while
+  The grid is *staggered*: pressure and dye live at cell centers, while
   the horizontal velocity `u` lives on vertical faces and the vertical
   velocity `v` on horizontal faces. That is not fussiness. With everything
-  at the centre, the natural divergence of a cell does not involve that
-  cell's own value, so a checkerboard of alternating pressures is
+  at the center, the natural divergence of a cell does not involve that
+  cell's own value, so a checcurboard of alternating pressures is
   invisible to the solver and grows without bound. On a staggered grid the
   divergence of a cell is exactly the four face velocities around it, and
   the mode cannot form.
 
   `s` marks which cells are open: 1 for fluid, 0 for solid. Every stage
-  consults it, so obstacles are painted rather than modelled, and a moving
+  consults it, so obstacles are painted rather than modeled, and a moving
   obstacle is just a repainting.
 
   Fields are flat arrays indexed `i*ny + j`, with a one-cell border of
@@ -31,7 +31,7 @@
 
   ## Relation to Stam's stable fluids, and why there is no FFT here
 
-  The advection is Jos Stam's, from Stable Fluids (1999): trace backwards
+  The advection is Jos Stam's, from Stable Fluids (1999): trace backward
   from each cell to find where the material arriving there came from, and
   interpolate. That is the step that made grid fluids practical, because
   it cannot go unstable however large the step -- the answer is always an
@@ -114,7 +114,7 @@
   "A grid of `nx` by `ny` interior cells, each `h` across.
 
   A border of one cell is added on every side and marked solid, so the
-  interior never has to check whether its neighbours exist."
+  interior never has to check whether its neighbors exist."
   ([nx ny] (fluid nx ny 1.0 1000.0))
   ([nx ny h] (fluid nx ny h 1000.0))
   ([nx ny h density]
@@ -130,7 +130,7 @@
       :smoke (a/f32 n 1.0) :smoke' (a/f32 n 1.0)
       ;; Conjugate gradient wants five more grids. Allocated on first use,
       ;; so a scene that never asks for it never pays for it, and kept
-      ;; afterwards so a frame allocates nothing.
+      ;; afterward so a frame allocates nothing.
       :scratch (volatile! nil)})))
 
 (defn idx ^long [{:keys [ny]} i j] (+ (* (long i) (long ny)) (long j)))
@@ -208,11 +208,11 @@
 ;;
 ;; Every solver here works on the same linear system, so they are
 ;; interchangeable and can be checked against each other. Writing it out,
-;; for a cell `k` that is fluid and has at least one open neighbour:
+;; for a cell `k` that is fluid and has at least one open neighbor:
 ;;
-;;   total[k] * x[k] - sum over open neighbours of x[neighbour] = -div[k]
+;;   total[k] * x[k] - sum over open neighbors of x[neighbor] = -div[k]
 ;;
-;; where `total` counts the open neighbours, `div` is the net outflow of
+;; where `total` counts the open neighbors, `div` is the net outflow of
 ;; the cell, and `x` is the pressure correction. That is the five-point
 ;; Laplacian with a Neumann condition at every solid face -- the wall
 ;; simply drops out of the sum -- and it is symmetric and positive
@@ -295,7 +295,7 @@
                         sy1 (aget s (inc k))
                         total (+ sx0 sx1 sy0 sy1)]
                     (when (pos? total)
-                      ;; Each cell is corrected against the neighbours as
+                      ;; Each cell is corrected against the neighbors as
                       ;; they stand now, so information crosses the grid a
                       ;; cell per sweep -- which is exactly why it takes
                       ;; more sweeps the finer the grid gets.
@@ -343,7 +343,7 @@
   "`out = A in`, the weighted five-point Laplacian, over the fluid cells.
 
   Cells that are not fluid are held at zero throughout, so reading a
-  neighbour needs no test beyond the one the mask already does."
+  neighbor needs no test beyond the one the mask already does."
   [{:keys [nx ny ^floats s]} ^floats in ^floats out ^floats m]
   (let [nx (long nx) ny (long ny)]
     (loop [i 1]
@@ -388,7 +388,7 @@
       (a/copy! r b)
       ;; Jacobi preconditioning: divide by the diagonal. Nearly free, and
       ;; it is what makes the method behave where cells have different
-      ;; numbers of open neighbours -- along a wall, or around an obstacle.
+      ;; numbers of open neighbors -- along a wall, or around an obstacle.
       (dotimes [k n] (aset d k (float (if (pos? (aget m k)) (/ (aget r k) (aget m k)) 0.0))))
       (loop [iter 0 rz (dot-over r d m n)]
         (when (and (< iter (long iterations)) (pos? rz)
@@ -416,7 +416,7 @@
 ;; Multigrid
 
 (defn- level-diagonal!
-  "How many open neighbours each cell has, which is the diagonal of A."
+  "How many open neighbors each cell has, which is the diagonal of A."
   [^floats s ^floats m ^long nx ^long ny]
   (a/fill! m 0.0)
   (loop [i 1]
@@ -471,9 +471,9 @@
 (defn- singular?
   "Whether this level's system is only determined up to a constant.
 
-  It is, unless somewhere a cell being solved has an open neighbour that
+  It is, unless somewhere a cell being solved has an open neighbor that
   is not being solved -- the inflow column of a wind tunnel, say, which is
-  open but never gets a pressure. That neighbour holds a pressure of zero,
+  open but never gets a pressure. That neighbor holds a pressure of zero,
   which is a Dirichlet condition, and one of those anywhere pins the whole
   field. Knowing which case this is matters: removing the mean from the
   right hand side is what makes a singular system solvable, and what makes
@@ -640,8 +640,8 @@
   Laplacian, copying is exactly one short.
 
   Each fine cell sits three quarters of the way into its own coarse cell
-  and one quarter toward a neighbour on each axis, giving the usual
-  9/3/3/1 sixteenths. Where a neighbour is solid its weight is dropped and
+  and one quarter toward a neighbor on each axis, giving the usual
+  9/3/3/1 sixteenths. Where a neighbor is solid its weight is dropped and
   the rest renormalized, so no correction is ever drawn from outside the
   fluid."
   [fine coarse]
@@ -753,7 +753,7 @@
 
   `field` is `:u`, `:v` or `:smoke`, and the offsets differ for each
   because they live in different places: `u` on vertical faces, `v` on
-  horizontal faces, dye at centres. Getting those half-cell offsets wrong
+  horizontal faces, dye at centers. Getting those half-cell offsets wrong
   is the classic way to end up with a fluid that drifts diagonally."
   [{:keys [nx ny h ^floats u ^floats v ^floats smoke]} field x y]
   (let [nx (long nx) ny (long ny)
@@ -783,7 +783,7 @@
   "Semi-Lagrangian advection: for each face, ask where the material
   arriving there came from a step ago, and take its velocity.
 
-  Tracing backwards rather than pushing forwards is what makes this
+  Tracing backward rather than pushing forward is what makes this
   unconditionally stable -- the answer is always an interpolation between
   values that already exist, so nothing can grow."
   [{:keys [nx ny h ^floats u ^floats v ^floats u' ^floats v' ^floats s] :as f} dt]
@@ -917,8 +917,8 @@
       (set-smoke! f 0 j (if (< (abs (- j mid)) half) 0.0 1.0)))
     f))
 
-(defn disc!
-  "Paints a solid disc, clearing whatever was solid before except the
+(defn disk!
+  "Paints a solid disk, clearing whatever was solid before except the
   border. Moving it between frames is how an obstacle is dragged around."
   [{:keys [nx ny h] :as f} cx cy r]
   (let [nx (long nx) ny (long ny) h (double h)]

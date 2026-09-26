@@ -54,7 +54,7 @@
 ;; ------------------------------------------------------------ the families
 
 (defn- adams-nodes
-  "Adams samples the force at the current point and backwards. An implicit
+  "Adams samples the force at the current point and backward. An implicit
   family reaches one point forward as well, which is what makes it implicit."
   [k implicit?]
   (mapv #(double (- (if implicit? 1 0) %)) (range k)))

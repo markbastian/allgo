@@ -14,7 +14,7 @@
     spatial hash  bin by position. Needs one cell size chosen up front,
                   which is why `sizes: mixed` hurts it: the cell has to
                   suit the largest object, and then the smallest share
-                  cells with far more neighbours than they touch.
+                  cells with far more neighbors than they touch.
     sweep+prune   sort by lower edge along one axis and compare only what
                   overlaps on it. Does not care that sizes differ, and
                   barely cares that things moved, because the sorted

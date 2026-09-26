@@ -96,10 +96,10 @@
   "Where the elbow may be, given where the wrist is: a circle about the
   line from shoulder to wrist.
 
-  Returns `{:centre :radius :axis :zero :ninety}` -- `axis` the line the
+  Returns `{:center :radius :axis :zero :ninety}` -- `axis` the line the
   elbow swings about, and `zero` and `ninety` two perpendicular directions
   in the circle's plane, so that the elbow at swivel `psi` is
-  `centre + radius * (cos psi * zero + sin psi * ninety)`.
+  `center + radius * (cos psi * zero + sin psi * ninety)`.
 
   `reference` decides where swivel zero points; the default is downward,
   which puts zero at the elbow-down posture a person rests in."
@@ -123,7 +123,7 @@
                     (v/normalize (v/cross axis (if (< (abs (nth axis 0)) 0.9)
                                                  [1.0 0.0 0.0] [0.0 1.0 0.0])))
                     (v/normalize flattened))]
-         {:centre (v/add s (v/scale axis a'))
+         {:center (v/add s (v/scale axis a'))
           :radius r
           :axis axis
           :zero zero
@@ -132,9 +132,9 @@
 (defn elbow-at
   "Where the elbow sits at a given swivel angle."
   [circle swivel]
-  (let [{:keys [centre radius zero ninety]} circle
+  (let [{:keys [center radius zero ninety]} circle
         psi (double swivel)]
-    (v/add centre (v/scale (v/add (v/scale zero (math/cos psi))
+    (v/add center (v/scale (v/add (v/scale zero (math/cos psi))
                                   (v/scale ninety (math/sin psi)))
                            radius))))
 
@@ -189,7 +189,7 @@
    (let [{:keys [elbow-position wrist]} (pose a configuration)
          circle (elbow-circle a wrist reference)]
      (when circle
-       (let [offset (v/sub elbow-position (:centre circle))]
+       (let [offset (v/sub elbow-position (:center circle))]
          (math/atan2 (v/dot offset (:ninety circle))
                      (v/dot offset (:zero circle))))))))
 

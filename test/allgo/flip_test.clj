@@ -71,7 +71,7 @@
     (let [f (advance (tank) 900 {})]
       (is (< (reduce max (speeds f)) 10.0))))
 
-  (testing "drift compensation is on by default and must not destabilise the solve"
+  (testing "drift compensation is on by default and must not destabilize the solve"
     ;; This is the regression that matters: measuring the FLIP correction
     ;; against the wrong snapshot adds the particle-to-grid splat back onto
     ;; velocities that already carry it, and drift compensation turns that

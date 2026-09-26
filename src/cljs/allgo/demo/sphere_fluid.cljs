@@ -91,12 +91,12 @@
   (* 0.5 (double amplitude) (double jets)))
 
 ;; ---------------------------------------------------------------------------
-;; Colour
+;; Color
 
 (defn- clamp01 [x] (max 0.0 (min 1.0 (double x))))
 
 (defn- ramp
-  "Piecewise-linear colour ramp through `stops`, each `[t r g b]`."
+  "Piecewise-linear color ramp through `stops`, each `[t r g b]`."
   [stops t]
   (let [t (clamp01 t)]
     (loop [[[t0 r0 g0 b0] & more] stops]
@@ -190,7 +190,7 @@
                     [mn mx]
                     (let [v (aget field i)]
                       (recur (inc i) (min mn v) (max mx v)))))
-        ;; A signed field is centred so that zero lands in the middle of
+        ;; A signed field is centered so that zero lands in the middle of
         ;; the ramp, where it is dark; an unsigned one just fills it.
         peak (max 1e-12 (max (js/Math.abs mn) (js/Math.abs mx)))
         lo (if signed? (- peak) mn)

@@ -38,7 +38,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn adjacency
-  "`edges` as a map from each node to the set of its neighbours. Nodes with
+  "`edges` as a map from each node to the set of its neighbors. Nodes with
   no edges are present only if listed in `nodes`."
   ([edges] (adjacency nil edges))
   ([nodes edges]

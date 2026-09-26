@@ -11,7 +11,7 @@
   It is the wrong shape for an arm. A six-link arm has six degrees of
   freedom and the constraint formulation gives it thirty-six, then spends
   its iterations taking thirty of them away again. They never quite go.
-  Two links a metre long hanging off a fixed base, the lower one heavier
+  Two links a meter long hanging off a fixed base, the lower one heavier
   than the upper, worst separation between a joint's two anchors over
   two seconds -- anchors that are supposed to be the same point:
 
@@ -22,7 +22,7 @@
             1000      2.75497   0.29095   0.09466
 
   At a thousand to one and five substeps the joint has come nearly three
-  metres apart, on links a metre long. More substeps help and do not
+  meters apart, on links a meter long. More substeps help and do not
   cure: every column still climbs with the ratio. That is the case a
   ragdoll is made of -- a hand on a forearm on an upper arm, each several
   times the mass of the one beyond it.
@@ -59,7 +59,7 @@
   A part gains geometry by being given a `:shape` -- `:box` with a
   `:size`, `:ball` with a `:radius`, or `:torus` with a `:major` and
   `:minor` radius about its own z axis -- and it sits at the part's
-  centre of mass unless `:shape-pose` says otherwise. A link's frame is
+  center of mass unless `:shape-pose` says otherwise. A link's frame is
   at its *joint*, not in the middle of it, so a shape left at the frame
   origin would stick out of the elbow.
 
@@ -119,7 +119,7 @@
   comes to rest at half its own height and stays there; nothing ends up
   buried; a slope is slid down when it is slippery and not when it
   grips; and a bounce returns to `0.2 + 0.8 e^2` from the height it was
-  dropped, to within two centimetres across the range of `e`.
+  dropped, to within two centimeters across the range of `e`.
 
   ## What it costs
 
@@ -144,7 +144,7 @@
   is seven objects and thirty-six boxed doubles. The per-configuration
   cache holds flat `double` arrays instead, the passes over them
   allocate one result apiece, and the contact sweep keeps one mutable
-  generalised velocity that every impulse adds into. The conversion
+  generalized velocity that every impulse adds into. The conversion
   happens once per link per step, where it costs nothing.
 
   A word of warning from having done it: the first attempt was *slower*,
@@ -159,7 +159,7 @@
   `advance-positions` built the whole cache again to read ten integers
   off it. The ragdoll went from 2.16ms a step to 1.27.
 
-  The recursion over it went the same way afterwards. `ls` and the
+  The recursion over it went the same way afterward. `ls` and the
   articulated inertias are `deftype`s rather than maps, so a link's
   transform is a field read instead of a hash lookup -- six hundred of
   those a step on a settled ragdoll -- and the total degrees of freedom
@@ -203,7 +203,7 @@
   Written this way, Newton and Euler together are `f = I a + v x* I v`,
   one line rather than two coupled ones, and an inertia is a single 6x6.
   The linear part of a motion vector is the velocity of *the point at the
-  origin*, not of the centre of mass, which is the one thing that trips
+  origin*, not of the center of mass, which is the one thing that trips
   everybody: a body spinning about a distant origin has a large linear
   part and is not going anywhere.
 
@@ -218,7 +218,7 @@
   before it -- each `{:parent :joint :axis :origin :mass :com :inertia}`.
   `:origin` is the fixed transform from the parent's frame to this
   joint's frame, `:axis` the joint's axis in that frame, `:inertia` the
-  3x3 rotational inertia about the link's own centre of mass. Parent -1
+  3x3 rotational inertia about the link's own center of mass. Parent -1
   means the root.
 
   That vector on its own is a chain bolted to the world. Wrapped as
@@ -228,7 +228,7 @@
 
   The base's six degrees of freedom are not coordinates. They are a
   pose and a spatial velocity, carried in the *state* rather than in
-  `q`, so that nothing ever has to parameterise a rotation with three
+  `q`, so that nothing ever has to parameterize a rotation with three
   numbers and find the singularity in it. The base costs one 6x6 solve
   and that is all.
 
@@ -260,14 +260,14 @@
   `:limit [lo hi]` bounds a hinge or a slider. `:cone theta` bounds how
   far a ball joint's bone may swing from where it rests, and `:twist`
   how far it may turn about that bone -- two different things, and a
-  cone alone leaves a head free to face backwards.
+  cone alone leaves a head free to face backward.
 
   They are solved as one-sided constraints in the same sweep as the
   contacts, which is why they can be: a limit is a push between a link
   and its own parent where a contact is a push between a link and the
   floor, and the impulse response does not need to be told which. Limits
-  go first in each sweep, because a knee that has folded backwards is a
-  worse thing to look at than a foot a millimetre into the floor.
+  go first in each sweep, because a knee that has folded backward is a
+  worse thing to look at than a foot a millimeter into the floor.
 
   ## Limits
 
@@ -279,14 +279,14 @@
   `:limit [lo hi]` bounds a hinge or a slider. `:cone theta` bounds how
   far a ball joint's bone may swing from where it rests, and `:twist`
   how far it may turn about that bone -- two different things, and a
-  cone alone leaves a head free to face backwards.
+  cone alone leaves a head free to face backward.
 
   They are solved as one-sided constraints in the same sweep as the
   contacts, which is why they can be: a limit is a push between a link
   and its own parent where a contact is a push between a link and the
   floor, and the impulse response does not need to be told which. Limits
-  go first in each sweep, because a knee that has folded backwards is a
-  worse thing to look at than a foot a millimetre into the floor.
+  go first in each sweep, because a knee that has folded backward is a
+  worse thing to look at than a foot a millimeter into the floor.
 
   A ball joint does need its body to have inertia about every axis. A
   mathematically thin rod has none about its own length, so the three by
@@ -371,7 +371,7 @@
 (defn crf
   "Spatial cross product for force vectors, `-crm(v)^T`.
 
-  Not the same operator and not an optimisation: a force vector is a
+  Not the same operator and not an optimization: a force vector is a
   different kind of thing from a motion vector -- it pairs with one to
   give power -- and carrying it along a moving frame is a different sum."
   [[wx wy wz vx vy vz]]
@@ -379,10 +379,10 @@
     (blocks w (skew [vx vy vz]) zero3 w)))
 
 (defn spatial-inertia
-  "The 6x6 inertia of a body of `mass` whose centre of mass is at `com`
-  and whose rotational inertia about that centre is `inertia`.
+  "The 6x6 inertia of a body of `mass` whose center of mass is at `com`
+  and whose rotational inertia about that center is `inertia`.
 
-  About the *frame origin*, not the centre of mass, which is what lets
+  About the *frame origin*, not the center of mass, which is what lets
   every link use its own joint frame and never think about the parallel
   axis theorem again -- the off-diagonal blocks are it."
   [mass com inertia]
@@ -748,7 +748,7 @@
 
   The base's six, if it has any, are not among them -- they are a pose
   and a velocity, not coordinates, precisely so that no one has to
-  parameterise a rotation with three numbers."
+  parameterize a rotation with three numbers."
   [model]
   (reduce + (map joint-dof (chain model))))
 
@@ -819,7 +819,7 @@
   "Every link's spatial velocity, in its own coordinates.
 
   Linear in `(v0, qd)` and used three ways because of it: to say what a
-  model is doing now, and -- one unit of generalised velocity at a time
+  model is doing now, and -- one unit of generalized velocity at a time
   -- to build the Jacobian of any point on it."
   [ls ^doubles v0 qd]
   (reduce (fn [acc i]
@@ -936,7 +936,7 @@
   None of it depends on how fast anything is going or on what is pushing
   it, only on where the joints are. That is what lets one build serve
   both the step's accelerations and every contact impulse asked about
-  afterwards, and it is the difference between a contact costing O(n)
+  afterward, and it is the difference between a contact costing O(n)
   and costing a whole inverse inertia matrix."
   [model ls]
   (let [n (count ls)
@@ -1235,7 +1235,7 @@
   Velocity first, then contacts, then position. The order is the whole
   of what makes a contact hold: the velocities are corrected before
   anything moves, so a body that was about to be driven into the floor
-  never is, rather than being pulled back out afterwards.
+  never is, rather than being pulled back out afterward.
 
   Contacts come either ready-made as `:contacts` or, more usually, from
   `:obstacles` -- static `allgo.physics.rigid` bodies this model is to
@@ -1246,7 +1246,7 @@
 
   The base's state is a pose and a spatial velocity in its own frame,
   not six more coordinates. Three reasons, and the third is the one that
-  matters: a rotation has no three-number parameterisation without a
+  matters: a rotation has no three-number parameterization without a
   singularity in it; a quaternion is the shape the rest of this library
   speaks; and a velocity in body coordinates is what the algorithms
   already produce, so nothing has to be converted on the way in."
@@ -1262,7 +1262,7 @@
          ls (links model q)
          frames (poses model q b)
          ;; What every joint weighs from above. It depends only on `q`,
-         ;; so the accelerations and every contact impulse afterwards
+         ;; so the accelerations and every contact impulse afterward
          ;; share one build -- they were making one apiece.
          ai (articulated-inertias model ls)
          {:keys [qdd base-acc]} (forward-dynamics model q qd tau
@@ -1279,8 +1279,8 @@
                   self-collide? (into (self-contacts model q b frames))))]
      (advance-positions model
                         ;; Limits are solved even with nothing to stand
-                        ;; on. A joint folding backwards in mid-air is
-                        ;; still a joint folding backwards, and a model
+                        ;; on. A joint folding backward in mid-air is
+                        ;; still a joint folding backward, and a model
                         ;; with no limits at all pays only this test.
                         (if (or (seq cs) (limited? model))
                           (solve-constraints model moving (vec cs) dt
@@ -1387,14 +1387,14 @@
 ;; ---------------------------------------------------------------------------
 ;; Being pushed
 
-(defn generalised-dof
+(defn generalized-dof
   "How many numbers it takes to say how fast the whole model is moving:
   one per joint, plus six for a root that is free to move."
   [model]
   (+ (dof model) (if (base model) 6 0)))
 
 (defn- split
-  "A generalised velocity back into the base's six and the joints' rest."
+  "A generalized velocity back into the base's six and the joints' rest."
   [model u]
   (if (base model)
     [(vec (take 6 u)) (vec (drop 6 u))]
@@ -1437,7 +1437,7 @@
 (defn- jacobian*
   "The Jacobian, given the per-configuration data already computed."
   [model ls frame i p]
-  (let [n (generalised-dof model)
+  (let [n (generalized-dof model)
         column (fn [j]
                  (let [u (assoc (vec (repeat n 0.0)) j 1.0)
                        [v0 qd] (split model u)
@@ -1446,10 +1446,10 @@
     (lin/transpose (mapv column (range n)))))
 
 (defn point-jacobian
-  "The 3 by `generalised-dof` matrix taking a generalised velocity to the
+  "The 3 by `generalized-dof` matrix taking a generalized velocity to the
   world velocity of the point of link `i` at `p`.
 
-  Built a column at a time, by asking what one unit of each generalised
+  Built a column at a time, by asking what one unit of each generalized
   velocity on its own does. That is not an approximation -- the map is
   linear, which is the whole reason a Jacobian exists -- and it costs a
   velocity recursion per column where a purpose-built one would walk the
@@ -1461,18 +1461,18 @@
    (jacobian* model ls (frame-of model q-vec root-state i frames) i p)))
 
 (defn inverse-mass-matrix
-  "`H^-1`, the generalised inverse inertia, a column at a time out of the
+  "`H^-1`, the generalized inverse inertia, a column at a time out of the
   articulated body algorithm.
 
   Nothing is moving and there is no gravity, so the accelerations a unit
-  generalised force produces *are* that column of the inverse. The
+  generalized force produces *are* that column of the inverse. The
   inverse rather than the matrix itself because everything asked of it
   here -- how hard is this point to push, what does an impulse do -- is
   a question about the inverse, and forming H only to factor it again
   would be work in both directions."
   ([model q-vec] (inverse-mass-matrix model q-vec (links model q-vec)))
   ([model q-vec ls]
-   (let [n (generalised-dof model)
+   (let [n (generalized-dof model)
          root (base model)
          nj (dof model)
          zero-q (vec (repeat nj 0.0))
@@ -1500,8 +1500,8 @@
         r (q/rotate inv (v/sub p pos))]
     (a/f64 (concat (v/cross r f) f))))
 
-(defn- generalised-force
-  "The generalised force a spatial force `f` on body `i` makes.
+(defn- generalized-force
+  "The generalized force a spatial force `f` on body `i` makes.
 
   A walk from the body it acts on up to the root, taking each joint's
   share along its own axis and carrying the rest to the parent. Bodies
@@ -1532,7 +1532,7 @@
       (recur (let [^Link l (nth ls j)] (.-parent l)) (conj acc j)))))
 
 (defn- delta-from
-  "The change in generalised velocity an impulse makes, whatever kind.
+  "The change in generalized velocity an impulse makes, whatever kind.
 
   The articulated body algorithm with the velocity terms gone. An
   impulse is a force with no duration, so there is no time for a
@@ -1543,7 +1543,7 @@
 
   `pa` maps a body to the spatial impulse sitting on it and `pa0` is the
   root's, which is how a contact enters. `extra` maps a joint to a
-  generalised impulse applied along its own axes, which is how a limit
+  generalized impulse applied along its own axes, which is how a limit
   enters. Both end up in the same `uu` and neither needs the recursion
   to know which it was.
 
@@ -1627,7 +1627,7 @@
     out))
 
 (defn- impulse-delta
-  "The change in generalised velocity from a spatial impulse `f` on body
+  "The change in generalized velocity from a spatial impulse `f` on body
   `i`, in that body's own coordinates. `-1` is the root.
 
   The articulated body algorithm again, with the velocity terms gone.
@@ -1651,7 +1651,7 @@
                 {})))
 
 (defn- joint-delta
-  "The change in generalised velocity from a generalised impulse `w` on
+  "The change in generalized velocity from a generalized impulse `w` on
   joint `j`'s own axes.
 
   What a joint limit needs, where a contact needs `impulse-delta`. The
@@ -1673,7 +1673,7 @@
   (vec (sort > (distinct (concat (ancestry ls i) (ancestry ls j))))))
 
 (defn- pair-delta
-  "The change in generalised velocity from an impulse between two bodies
+  "The change in generalized velocity from an impulse between two bodies
   of the same model -- `f` on body `i` and minus `f'` on body `j`.
 
   The two spatial forces are given separately because each is in its own
@@ -1690,15 +1690,15 @@
     (delta-from model ls ai (pair-ancestry ls i j) pa pa0 {})))
 
 (defn- pair-force
-  "The generalised force an impulse between two bodies makes: what it
+  "The generalized force an impulse between two bodies makes: what it
   does to `i` less what it does to `j`.
 
   The difference, because what a contact constrains is the *relative*
   velocity of the two surfaces, and a push that moves both bodies the
   same way does not change that at all."
   ^doubles [model ls i ^doubles f j ^doubles f']
-  (let [ga (generalised-force model ls i f)
-        gb (generalised-force model ls j f')
+  (let [ga (generalized-force model ls i f)
+        gb (generalized-force model ls j f')
         n (alength ga)
         out (a/f64 n)]
     (dotimes [k n] (aset out k (- (aget ga k) (aget gb k))))
@@ -1707,14 +1707,14 @@
 (defn- response
   "How a unit impulse at world point `p` on body `i` along `dir` is felt.
 
-  `:g` is the generalised force it makes, so the closing speed is
+  `:g` is the generalized force it makes, so the closing speed is
   `g . u`; `:delta` is what it does to `u`; `:m` is the mass felt there.
   Zero rather than infinity when nothing can move that way -- this is
   the number an impulse gets multiplied by, and a direction that cannot
   give is a direction no impulse is worth applying."
   [model ls ai frame i p dir]
   (let [f (point-force frame p dir)
-        g (generalised-force model ls i f)
+        g (generalized-force model ls i f)
         delta (impulse-delta model ls ai i f)
         w (dot-n g delta)]
     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
@@ -1759,10 +1759,10 @@
   "How a unit impulse at world point `p` on body `i` along `dir` is felt,
   given a `configuration`.
 
-  `{:force :delta :mass}` -- the generalised force the impulse makes, so
+  `{:force :delta :mass}` -- the generalized force the impulse makes, so
   that the closing speed along `dir` is `force . u`; what it does to
   `u`; and the mass it meets there. Both vectors are flat arrays as long
-  as `generalised-dof`, which is raw for a public interface and is the
+  as `generalized-dof`, which is raw for a public interface and is the
   point: this is what a contact solver holds per contact per direction
   and iterates over, and boxing it would undo the reason it is fast.
 
@@ -1790,7 +1790,7 @@
   "What a unit impulse at world point `p` on body `i`, along `dir`, does.
   `-1` is the free root itself.
 
-  Returns `{:delta-u :effective-mass}`: the change in generalised
+  Returns `{:delta-u :effective-mass}`: the change in generalized
   velocity per unit of impulse, and the mass the impulse feels there.
 
   The second is `1 / (d^T J H^-1 J^T d)`, and it is the number a contact
@@ -1866,10 +1866,10 @@
       (update state :qd #(mapv + % (take n scaled))))))
 
 ;; ---------------------------------------------------------------------------
-;; Generalised velocity
+;; Generalized velocity
 
 (defn velocity
-  "The model's generalised velocity: the root's spatial six, then one per
+  "The model's generalized velocity: the root's spatial six, then one per
   joint. A bolted model has only the joints'."
   [model state]
   (if (base model)
@@ -1877,7 +1877,7 @@
     (vec (:qd state))))
 
 (defn with-velocity
-  "`state` moving at the generalised velocity `u`."
+  "`state` moving at the generalized velocity `u`."
   [model state u]
   (if (base model)
     (-> state
@@ -1891,7 +1891,7 @@
 (defn- shape-pose
   "Where a part's collision shape sits in that part's own frame.
 
-  Centred on the centre of mass unless told otherwise, which is right
+  Centered on the center of mass unless told otherwise, which is right
   for a limb and saves every model repeating it. A link's frame is at
   its *joint*, not in the middle of it, so a shape left at the origin
   would stick out of the elbow."
@@ -2060,14 +2060,14 @@
 
 (defn- limit-rows
   "The joint limits currently being pushed against, as one-sided
-  constraints on the generalised velocity.
+  constraints on the generalized velocity.
 
   A hinge with `:limit [lo hi]` is the easy half: the violation is a
   number and the direction to push is its own axis.
 
   A ball joint with `:cone theta` is a limit on how far the bone may
   swing from where it points at rest -- `:limit-axis` in the child's own
-  frame, the direction of the centre of mass unless said otherwise. Turn
+  frame, the direction of the center of mass unless said otherwise. Turn
   it by the joint's rotation and the angle to the rest direction is the
   swing; the axis to turn about to reduce it is the cross product of the
   two, carried back into the child's frame because that is where a
@@ -2091,7 +2091,7 @@
                    offset (.-offset l)
                    x (nth q j nil)
                    ;; `depth` is how far past the limit, `w` the
-                   ;; generalised impulse direction that comes back.
+                   ;; generalized impulse direction that comes back.
                    [depth ^doubles w]
                    (case (kind-of link)
                      (:revolute :prismatic)
@@ -2115,7 +2115,7 @@
                            ;; How far it has turned about the bone
                            ;; itself, which the cone says nothing about:
                            ;; a head can be within forty degrees of
-                           ;; upright and still be facing backwards.
+                           ;; upright and still be facing backward.
                            proj (v/dot [(nth rot 0) (nth rot 1) (nth rot 2)] rest-dir)
                            twist (* 2.0 (Math/atan2 proj (double (nth rot 3))))]
                        (cond
@@ -2152,7 +2152,7 @@
   "The joint limits a model is currently past, as one-sided rows a
   contact solver can take alongside its contacts.
 
-  Each is `{:g :delta :m :bias}`: the generalised direction to push the
+  Each is `{:g :delta :m :bias}`: the generalized direction to push the
   joint back along, the velocity a unit push along it buys, the
   effective mass, and how fast the overlap should be closed. The same
   rows `solve-constraints` builds for itself, given to a caller that has
@@ -2175,7 +2175,7 @@
   What is different is where the work goes. `H^-1` depends only on where
   the joints are, so it is built once for the step and not once per
   contact per iteration; each contact's three directions turn into a
-  generalised force `g = J^T d` and a response `H^-1 g` once, and after
+  generalized force `g = J^T d` and a response `H^-1 g` once, and after
   that an iteration is dot products. Otherwise a ragdoll would spend its
   frame rebuilding the same matrix eighty times."
   [model state cs dt opts]
@@ -2224,7 +2224,7 @@
         nl (count limits)]
     (if (and (zero? k) (zero? nl))
       state
-      ;; One mutable generalised velocity for the whole sweep, and one
+      ;; One mutable generalized velocity for the whole sweep, and one
       ;; flat array of accumulated impulses beside it. Every push is a
       ;; scaled add into the first and every closing speed a dot product
       ;; out of it, so the inner loop allocates nothing: eight
@@ -2236,8 +2236,8 @@
         (dotimes [_ (long iterations)]
           ;; Limits first. A joint being held inside its range changes
           ;; what the contacts below it are pushing against, and a knee
-          ;; that has folded backwards is a worse thing to look at than
-          ;; a foot a millimetre into the floor.
+          ;; that has folded backward is a worse thing to look at than
+          ;; a foot a millimeter into the floor.
           (dotimes [i nl]
             (let [{:keys [m bias]} (nth limits i)
                   ^doubles gl (:g (nth limits i))

@@ -7,7 +7,7 @@
   on, which is *adjacency*: which cell borders which, which corners a
   cell has, which corners are joined to which, and which cells lie on
   either side of a given corner-to-corner edge. A heightmap does not need
-  any of that because a grid's neighbours are arithmetic. A polygon map
+  any of that because a grid's neighbors are arithmetic. A polygon map
   needs all of it, because every interesting pass over one -- flood-fill
   the ocean, raise the land away from the coast, run a river downhill,
   spread moisture inland -- is a graph traversal.
@@ -45,7 +45,7 @@
   and want to land near it rather than out in the middle distance.
 
   Sentinel centers are dropped from the finished mesh. What is left of
-  them is `:border?`, on the real centers that neighboured one and on the
+  them is `:border?`, on the real centers that neighbored one and on the
   corners that touched one, which is the map's edge and the thing the
   ocean is flooded from.
 
@@ -82,7 +82,7 @@
       [(/ cx (* 3.0 a)) (/ cy (* 3.0 a))])))
 
 (defn spacing
-  "The distance between neighbouring sites you would expect from `n`
+  "The distance between neighboring sites you would expect from `n`
   points spread over `bounds`."
   [[[x0 y0] [x1 y1]] n]
   (math/sqrt (/ (* (- x1 x0) (- y1 y0)) (max 1 (long n)))))
@@ -111,7 +111,7 @@
   Four cocircular sites give two triangles with the same circumcenter,
   and floating point will not make them equal. Left as two corners, the
   cell around them has a zero-length edge and the traversals get a
-  neighbour that is really themselves."
+  neighbor that is really themselves."
   [[x y] eps]
   [(math/round (/ (double x) eps)) (math/round (/ (double y) eps))])
 
@@ -187,7 +187,7 @@
                               (map (fn [[[a b] cs]]
                                      {:centers [a b] :corners cs})))
                         on-edge)
-        ;; Real centers only; a center that neighboured a sentinel is the
+        ;; Real centers only; a center that neighbored a sentinel is the
         ;; map's edge.
         border-centers (into #{}
                              (mapcat (fn [{[a b] :centers}]
@@ -267,7 +267,7 @@
   (mapv #(:point (corners %)) (:corners center)))
 
 (defn relax
-  "One round of Lloyd relaxation: every point moves to the centre of area
+  "One round of Lloyd relaxation: every point moves to the center of area
   of its cell.
 
   Random points clump, and clumped points make cells of wildly different
@@ -314,7 +314,7 @@
 ;; along every boundary.
 ;;
 ;; And each path is confined to the quadrilateral made by the edge's two
-;; corners and the two cell centres either side of it. A path that
+;; corners and the two cell centers either side of it. A path that
 ;; wandered outside would cross into a cell that is not one of the two it
 ;; separates, and a coastline would start overlapping land two cells
 ;; inland. The quad is the guarantee that it cannot.
@@ -350,7 +350,7 @@
           i (lerp d c q)
           h (lerp e f q)
           ;; Allowed slightly past the ends, so the child quads are not
-          ;; strictly nested and the path does not visibly taper towards
+          ;; strictly nested and the path does not visibly taper toward
           ;; the middle of every edge.
           s (+ 0.6 (* 0.8 (rng)))
           t (+ 0.6 (* 0.8 (rng)))]
@@ -373,8 +373,8 @@
       [p0 p1]
       (let [c0 (:point (centers d0))
             c1 (:point (centers d1))
-            ;; Halfway to each centre: the quad is the cell pair's shared
-            ;; neighbourhood, not the cells themselves.
+            ;; Halfway to each center: the quad is the cell pair's shared
+            ;; neighborhood, not the cells themselves.
             half (fn [v c] (lerp v c 0.5))
             first-half (into [p0] (conj (subdivide p0 (half p0 c0) midpoint (half p0 c1)
                                                    min-length rng)
@@ -393,7 +393,7 @@
   `:min-length` is where the subdivision stops, and it is the only knob
   that matters -- large and the edges stay nearly straight, small and the
   point count doubles for detail finer than anyone will see. The default
-  is a fraction of the distance between neighbouring sites, so it follows
+  is a fraction of the distance between neighboring sites, so it follows
   the mesh rather than the units it happens to be in.
 
   Costs one pass over the edges and leaves everything else untouched, so

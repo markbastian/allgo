@@ -67,7 +67,7 @@
 ;; Directions
 
 (def directions
-  "The six neighbouring directions, as axial offsets. Index 0 is `[1 0]`
+  "The six neighboring directions, as axial offsets. Index 0 is `[1 0]`
   and they proceed counter-clockwise in a pointy-top layout."
   [[1 0] [1 -1] [0 -1] [-1 0] [-1 1] [0 1]])
 
@@ -192,7 +192,7 @@
 
 (defn ring
   "The `n` hexes-per-side ring exactly `radius` steps from `center`, in
-  order around it. Radius 0 is the centre alone."
+  order around it. Radius 0 is the center alone."
   [center radius]
   (if (zero? radius)
     [center]
@@ -210,7 +210,7 @@
           (recur hex (inc i) (into out side)))))))
 
 (defn spiral
-  "Every hex within `radius`, ordered from the centre outward ring by
+  "Every hex within `radius`, ordered from the center outward ring by
   ring."
   [center radius]
   (into [center] (mapcat #(ring center %)) (range 1 (inc radius))))
@@ -384,7 +384,7 @@
     :origin      (vec origin)}))
 
 (defn ->pixel
-  "The centre of hex `h` on screen."
+  "The center of hex `h` on screen."
   [{:keys [orientation size origin]} h]
   (let [[f0 f1 f2 f3] (:f (orientations orientation))
         [q r]  (axial h)
@@ -412,7 +412,7 @@
   (round (pixel->fractional layout p)))
 
 (defn corner-offset
-  "Offset from a hex's centre to its `i`th corner."
+  "Offset from a hex's center to its `i`th corner."
   [{:keys [orientation size]} i]
   (let [{:keys [start-angle]} (orientations orientation)
         [sx sy] size
@@ -432,11 +432,11 @@
 ;; Wraparound
 
 (defn mirror-centers
-  "The six centres a hexagonal map of `radius` repeats around, plus the
+  "The six centers a hexagonal map of `radius` repeats around, plus the
   origin.
 
   A hexagonal map tiles the plane, so a map that wraps can be built by
-  translating it to each mirror centre; a hex that walks off one edge is
+  translating it to each mirror center; a hex that walks off one edge is
   the one at the matching offset on the other side."
   [radius]
   (let [seed [(+ (* 2 radius) 1) (- radius)]]

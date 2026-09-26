@@ -32,8 +32,8 @@
 
 (def ^:private ^:const no-box -1)
 
-(defn- centres
-  "The centre of every box, flat, 3 per box -- what the Morton code is
+(defn- centers
+  "The center of every box, flat, 3 per box -- what the Morton code is
   taken of."
   [^doubles mins ^doubles maxs ^long n]
   (let [out (double-array (* 3 n))]
@@ -63,7 +63,7 @@
             ^ints box   (a/i32 nodes)
             ^doubles lo (double-array (* 3 nodes))
             ^doubles hi (double-array (* 3 nodes))
-            ^ints order (morton/sorted-points (centres mins maxs n) n)
+            ^ints order (morton/sorted-points (centers mins maxs n) n)
             next-node (volatile! 0)
             take-node! (fn [] (let [k @next-node] (vreset! next-node (inc k)) k))]
         (letfn [(leaf! [id]

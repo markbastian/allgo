@@ -45,7 +45,7 @@
   "Every directed edge as `[{:key #{a b} :slot n :tri t :corner j}]`.
 
   A triangle's three edges are numbered `3t + j`, which is what lets a
-  neighbour be recorded as a single number and the opposite vertex
+  neighbor be recorded as a single number and the opposite vertex
   recovered from it."
   [tri-ids]
   (let [tris (vec tri-ids)]
@@ -55,7 +55,7 @@
                 b (tris (+ (* 3 t) (mod (inc j) 3)))]]
       {:key #{a b} :slot (+ (* 3 t) j) :tri t :corner j})))
 
-(defn triangle-neighbours
+(defn triangle-neighbors
   "For each of the `3 * triangles` edge slots, the slot of the triangle
   across it, or -1 for an edge on the boundary."
   [tri-ids]
@@ -75,7 +75,7 @@
 
   An interior edge belongs to two triangles and must appear once, or the
   constraint over it is solved twice a pass and that edge comes out
-  stiffer than its neighbours for no reason but connectivity."
+  stiffer than its neighbors for no reason but connectivity."
   [tri-ids]
   (->> (half-edges tri-ids)
        (map :key)
@@ -93,14 +93,14 @@
   the reason cloth needs no second constraint type."
   [tri-ids]
   (let [tris      (vec tri-ids)
-        neighbour (triangle-neighbours tri-ids)
+        neighbor (triangle-neighbors tri-ids)
         opposite  (fn [slot]
                     ;; The corner a slot's edge does not touch.
                     (let [t (quot slot 3) j (mod slot 3)]
                       (tris (+ (* 3 t) (mod (+ j 2) 3)))))]
-    (->> (range (count neighbour))
+    (->> (range (count neighbor))
          (keep (fn [slot]
-                 (let [other (neighbour slot)]
+                 (let [other (neighbor slot)]
                    ;; Each shared edge is seen from both sides; keep one.
                    (when (and (>= other 0) (< slot other))
                      [(opposite slot) (opposite other)]))))
@@ -176,7 +176,7 @@
 
   The reason to build one rather than to divide latitude and longitude:
   every triangle is nearly the same size and nearly equilateral, and there
-  are no poles where the parameterisation piles up and no seam where it
+  are no poles where the parameterization piles up and no seam where it
   wraps. That matters for anything sampled per vertex -- a procedural
   planet spends the same effort per unit of surface everywhere, rather
   than lavishing it on two points nobody is looking at.

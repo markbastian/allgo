@@ -8,13 +8,13 @@
 
   This is deliberately not the dual of a Delaunay tetrahedralization. That
   route needs a convex hull per cell (the 2D angular-sort shortcut has no
-  3D analogue), and 3D Bowyer-Watson is fragile near cospherical inputs:
+  3D analog), and 3D Bowyer-Watson is fragile near cospherical inputs:
   roundoff corrupts the cavity so boundary extraction yields a non-manifold
   mesh. Clipping degrades gracefully instead -- each cut is independent, so
   error cannot cascade into bad topology. Delaunay adjacency is still
-  recovered, since two sites neighbour exactly when their cells share a face.
+  recovered, since two sites neighbor exactly when their cells share a face.
 
-  A cell is `{:faces [[[x y z] ...] ...] :neighbours #{site ...}}`."
+  A cell is `{:faces [[[x y z] ...] ...] :neighbors #{site ...}}`."
   (:require [allgo.geometry.vec3 :as v]
             [clojure.math :as math]))
 
@@ -88,7 +88,7 @@
              (mapv second))))))
 
 ;; A face carries the site whose bisector created it (nil for the bounding
-;; box), so the surviving faces name the cell's true Voronoi neighbours.
+;; box), so the surviving faces name the cell's true Voronoi neighbors.
 
 (defn separating-plane?
   "True when the plane `n.x = d` is a separating axis for the convex
@@ -140,7 +140,7 @@
           faces))
 
 (defn- finish [faces]
-  {:faces (mapv :pts faces) :neighbours (into #{} (keep :site) faces)})
+  {:faces (mapv :pts faces) :neighbors (into #{} (keep :site) faces)})
 
 (defn cell
   "The Voronoi cell of `site` against `others`, clipped to `bounds`.
@@ -149,7 +149,7 @@
   sits half-way to its site, so once that half-distance exceeds the cell's
   farthest vertex, neither it nor anything beyond can cut the cell.
 
-  `seed` is an optional collection of sites believed to be neighbours -- the
+  `seed` is an optional collection of sites believed to be neighbors -- the
   previous frame's, typically. Clipping those first collapses the radius
   bound immediately, so the walk terminates far sooner. A wrong seed costs
   a little work but cannot give a wrong answer: the ordered walk still
@@ -198,8 +198,8 @@
                                 seed)]
                  (assoc! acc site
                          (cond-> c
-                           indexed? (assoc :neighbour-idx
-                                           (into #{} (keep index) (:neighbours c)))))))
+                           indexed? (assoc :neighbor-idx
+                                           (into #{} (keep index) (:neighbors c)))))))
              (transient {})
              (range n)))))
 
@@ -207,32 +207,32 @@
   "Voronoi diagram of `sites` clipped to `bounds` (`[[x0 y0 z0] [x1 y1 z1]]`):
   a map from each site to its cell. The cells tile `bounds` exactly.
 
-  The three-argument form additionally tags each cell with `:neighbour-idx`,
-  its neighbours as indices into `sites`, and accepts the previous frame's
-  indices (see `neighbour-hints`, and pass nil on the first frame) so each
-  cell starts from its likely neighbours instead of rediscovering them.
+  The three-argument form additionally tags each cell with `:neighbor-idx`,
+  its neighbors as indices into `sites`, and accepts the previous frame's
+  indices (see `neighbor-hints`, and pass nil on the first frame) so each
+  cell starts from its likely neighbors instead of rediscovering them.
   Positions move every frame, so an index is the only stable handle.
 
   Seeding is measured as a wash below a few hundred sites and is off in the
   two-argument form for that reason. The early exit has to clear every site
   within twice a cell's reach, which is around 58 sites whatever the total
   -- so under a few hundred there is no locality for a seed to exploit, and
-  clipping known neighbours first only reorders work rather than avoiding
+  clipping known neighbors first only reorders work rather than avoiding
   it. Past that point the constant stops dominating and seeding pays."
   ([sites bounds] (build sites bounds nil false))
   ([sites bounds hints] (build sites bounds hints true)))
 
-(defn neighbour-hints
-  "Per-site neighbour indices from `diagram`, in `sites` order, ready to pass
+(defn neighbor-hints
+  "Per-site neighbor indices from `diagram`, in `sites` order, ready to pass
   back as the `hints` argument on the next frame. Requires a diagram built
   with the three-argument form."
   [diagram sites]
-  (mapv #(:neighbour-idx (get diagram %)) sites))
+  (mapv #(:neighbor-idx (get diagram %)) sites))
 
 (defn edges
   "Delaunay edges implied by `diagram`: the unordered site pairs whose cells
   share a face."
   [diagram]
-  (into #{} (for [[site {:keys [neighbours]}] diagram
-                  other neighbours]
+  (into #{} (for [[site {:keys [neighbors]}] diagram
+                  other neighbors]
               #{site other})))

@@ -4,8 +4,8 @@
   Boxes linked by distance constraints. The solver is the one from the
   soft body demo with one thing added -- an orientation -- and the whole
   consequence of that addition is visible in the `chain`: pull on a link
-  off-centre and it turns, because a correction applied away from the
-  centre of mass is partly a torque. A particle solver cannot do that at
+  off-center and it turns, because a correction applied away from the
+  center of mass is partly a torque. A particle solver cannot do that at
   all.
 
   `substeps` is the parameter to play with, and the lesson is that ten
@@ -14,12 +14,12 @@
   solved exactly as often, but each solve is against a position that has
   not been re-integrated.
 
-  `compliance` is inverse stiffness in metres per newton, and it means the
+  `compliance` is inverse stiffness in meters per newton, and it means the
   same thing whatever the step size -- that is the difference between XPBD
   and pushing a fraction of the error each iteration, where stiffness
   quietly depended on how often you pushed.
 
-  `show forces` colours each link by what it is carrying. On the bridge,
+  `show forces` colors each link by what it is carrying. On the bridge,
   walk the load along and watch where it goes."
   (:require [allgo.demo.fps :as fps]
             [allgo.physics.rigid :as rigid]
@@ -130,7 +130,7 @@
            :world {:bodies bodies :constraints constraints}
            :meshes meshes :links links)))
 
-(defn- force-colour
+(defn- force-color
   "Red for heavily loaded, blue for slack."
   [f peak]
   (let [t (min 1.0 (/ (js/Math.abs f) (max 1e-6 peak)))]
@@ -151,7 +151,7 @@
         (set! (.-visible l) (.-showForces controls))
         (when (and (.-showForces controls) forces)
           (.copy (.. l -material -color)
-                 (force-colour (nth forces k 0.0) peak)))))))
+                 (force-color (nth forces k 0.0) peak)))))))
 
 (defn init! [^js container]
   (let [scene    (THREE/Scene.)

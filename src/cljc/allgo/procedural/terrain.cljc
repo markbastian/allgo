@@ -2,9 +2,9 @@
   "Fractal terrain by diamond-square.
 
   Start with the four corners of a square and repeatedly do two things.
-  Give every square's centre the average of its four corners, which is the
+  Give every square's center the average of its four corners, which is the
   *diamond* step because the points it uses form one. Then give every
-  diamond's centre the average of its four points, which is the *square*
+  diamond's center the average of its four points, which is the *square*
   step for the same reason. Each round doubles the resolution, and each
   round adds a smaller random displacement than the last -- that is the
   fractal part, and the reason the result looks like landscape rather than
@@ -32,8 +32,8 @@
   There is no need to record which cells have been filled, either, and
   that is worth seeing. After doubling the resolution, a cell's parity says
   exactly what it is: both coordinates even and it came from the previous
-  round, both odd and it is a diamond centre, one of each and it is a
-  square centre. The old code tested a map for absence; parity is free."
+  round, both odd and it is a diamond center, one of each and it is a
+  square center. The old code tested a map for absence; parity is free."
   (:require [allgo.array :as a])
   #?(:clj (:require [clojure.java.io :as io]))
   #?(:clj (:import (java.awt Color)
@@ -61,7 +61,7 @@
      :rng rng}))
 
 (defn- mean-diagonal
-  "Average of the four corners around a diamond centre."
+  "Average of the four corners around a diamond center."
   ^double [^doubles out ^long dim ^long i ^long j]
   (loop [k 0 sum 0.0 n 0.0]
     (if (= k 4)
@@ -73,7 +73,7 @@
           (recur (inc k) sum n))))))
 
 (defn- mean-orthogonal
-  "Average of the four points around a square centre."
+  "Average of the four points around a square center."
   ^double [^doubles out ^long dim ^long i ^long j]
   (loop [k 0 sum 0.0 n 0.0]
     (if (= k 4)
@@ -111,8 +111,8 @@
             (recur (+ j 2))))
         (recur (+ i 2))))
     ;; Square: one coordinate odd, from the four points around it. Every
-    ;; neighbour it wants is either an old cell or a diamond centre, so no
-    ;; square centre ever waits on another.
+    ;; neighbor it wants is either an old cell or a diamond center, so no
+    ;; square center ever waits on another.
     (loop [i 0]
       (when (< i n')
         (loop [j 0]
@@ -167,7 +167,7 @@
 
 #?(:clj
    (defn create-image-map
-     "Writes the grid to img.png as a greyscale heightmap."
+     "Writes the grid to img.png as a grayscale heightmap."
      [{:keys [dim] :as grid}]
      (let [dim (long dim)
            img (BufferedImage. dim dim BufferedImage/TYPE_INT_RGB)

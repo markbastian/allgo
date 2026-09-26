@@ -137,10 +137,10 @@
   (let [{:keys [bodies constraints]} (make-scene)
         meshes (mapv (fn [b] (let [m (body-mesh b)] (.add three-scene m) m)) bodies)
         frames (vec (mapcat (fn [_]
-                              (for [colour [0x55ff88 0xff5588]]
+                              (for [color [0x55ff88 0xff5588]]
                                 (let [m (THREE/Mesh.
                                          (THREE/SphereGeometry. 0.05 10 8)
-                                         (THREE/MeshBasicMaterial. #js {:color colour}))]
+                                         (THREE/MeshBasicMaterial. #js {:color color}))]
                                   (.add three-scene m)
                                   m)))
                             constraints))]

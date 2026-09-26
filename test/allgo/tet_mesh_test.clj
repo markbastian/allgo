@@ -22,7 +22,7 @@
       (is (every? (fn [[a b c d]] (pos? (tm/tet-volume (:verts mesh) a b c d)))
                   (tets mesh))))
 
-    (testing "the box sits on y=0, centred in x and z"
+    (testing "the box sits on y=0, centered in x and z"
       (is (= [[-1.5 0.0 -2.0] [1.5 2.0 2.0]] (tm/bounds mesh))))
 
     (testing "sizing scales the volume cubically"

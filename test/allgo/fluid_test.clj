@@ -5,11 +5,11 @@
 (defn- tunnel
   "A wind tunnel with an obstacle, ready to step."
   ([] (tunnel {}))
-  ([{:keys [nx ny speed disc] :or {nx 40 ny 30 speed 2.0 disc true}}]
+  ([{:keys [nx ny speed disk] :or {nx 40 ny 30 speed 2.0 disk true}}]
    (let [f (-> (fl/fluid nx ny (/ 1.0 ny) 1000.0)
                (fl/close-border! true))]
      (fl/wind-tunnel! f speed 0.1)
-     (when disc (fl/disc! f 0.4 0.5 0.1))
+     (when disk (fl/disk! f 0.4 0.5 0.1))
      f)))
 
 (defn- advance [f steps world]
@@ -49,9 +49,9 @@
 
 (deftest sampling-test
   (let [f (fl/fluid 8 8 1.0 1000.0)]
-    ;; Dye lives at cell centres, so sampling a centre reads that cell.
+    ;; Dye lives at cell centers, so sampling a center reads that cell.
     (fl/set-smoke! f 3 4 7.0)
-    (testing "sampling a cell centre returns that cell's value"
+    (testing "sampling a cell center returns that cell's value"
       (is (< (abs (- 7.0 (fl/sample f :smoke 3.5 4.5))) 1e-5)))
 
     (testing "sampling between two cells interpolates"
@@ -99,19 +99,19 @@
                   (for [i (range 2 20) j (range 2 20)] [i j]))))))
 
 (deftest obstacle-test
-  (testing "a disc marks cells solid, and clears what it left"
+  (testing "a disk marks cells solid, and clears what it left"
     (let [f (-> (fl/fluid 40 30 (/ 1.0 30)) (fl/close-border! true))]
-      (fl/disc! f 0.4 0.5 0.1)
-      (is (fl/solid? f (int (* 0.4 30)) (int (* 0.5 30))) "the centre is solid")
+      (fl/disk! f 0.4 0.5 0.1)
+      (is (fl/solid? f (int (* 0.4 30)) (int (* 0.5 30))) "the center is solid")
       (is (not (fl/solid? f 35 5)) "far from it is not")
       ;; Move it; the old position must open up again.
-      (fl/disc! f 1.0 0.5 0.1)
+      (fl/disk! f 1.0 0.5 0.1)
       (is (not (fl/solid? f (int (* 0.4 30)) (int (* 0.5 30)))))))
 
   (testing "flow does not pass through a solid"
     (let [f (tunnel)]
       (advance f 60 {})
-      ;; Inside the disc there is nothing moving.
+      ;; Inside the disk there is nothing moving.
       (let [ci (int (* 0.4 30)) cj (int (* 0.5 30))]
         (when (fl/solid? f ci cj)
           (let [[u v] (fl/velocity-at f ci cj)]
@@ -186,7 +186,7 @@
       ;; The u face at (i*h, (j+1/2)*h) is straddled by the v faces at
       ;; columns i-1 and i, rows j and j+1, whose centroid is the u face
       ;; itself. So with v = x, the average must be i*h -- and with the
-      ;; neighbouring four it would be (i+1)*h instead.
+      ;; neighboring four it would be (i+1)*h instead.
       (doseq [[label vf expected]
               [["v = x" (fn [x _] x) (fn [i _] (* i h))]
                ["v = y" (fn [_ y] y) (fn [_ j] (* (+ j 0.5) h))]]]
@@ -224,7 +224,7 @@
   [res]
   (let [f (-> (fl/fluid res res (/ 1.0 res) 1000.0) (fl/close-border! true))]
     (fl/wind-tunnel! f 2.0 0.1)
-    (fl/disc! f 0.35 0.5 0.12)
+    (fl/disk! f 0.35 0.5 0.12)
     (dotimes [i res]
       (dotimes [j res]
         (let [k (fl/idx f i j)]

@@ -53,7 +53,7 @@
 (def defaults
   {:dim 129
    ;; As a fraction of the grid's cells. Past a few percent the cluster
-   ;; fills the disc it lives in and the branches stop reading as
+   ;; fills the disk it lives in and the branches stop reading as
    ;; branches.
    :density 0.06
    :rng rand
@@ -89,8 +89,8 @@
   [opts]
   (let [{:keys [dim density rng birth-margin kill-margin]} (merge defaults opts)
         dim (long dim)
-        centre (quot dim 2)
-        seed (+ (* centre dim) centre)
+        center (quot dim 2)
+        seed (+ (* center dim) center)
         target (max 1 (long (* (double density) dim dim)))
         half (double (dec (quot dim 2)))
         ;; Ints rather than booleans: ClojureScript has no boolean array,
@@ -113,16 +113,16 @@
         (let [birth (min half (+ reach (double birth-margin)))
               kill (+ birth (double kill-margin))
               ang (* 2.0 math/PI (rng))
-              sx (+ centre (long (math/round (* birth (math/cos ang)))))
-              sy (+ centre (long (math/round (* birth (math/sin ang)))))
+              sx (+ center (long (math/round (* birth (math/cos ang)))))
+              sy (+ center (long (math/round (* birth (math/sin ang)))))
               ;; Walk until it touches something, strays past the kill
               ;; circle, or has plainly got lost.
               hit (loop [x sx y sy steps 0]
                     (cond
                       (or (neg? x) (neg? y) (>= x dim) (>= y dim)) nil
                       (> steps 20000) nil
-                      (> (math/sqrt (+ (* (- x centre) (- x centre))
-                                       (* (- y centre) (- y centre))))
+                      (> (math/sqrt (+ (* (- x center) (- x center))
+                                       (* (- y center) (- y center))))
                          kill)
                       nil
 
@@ -144,15 +144,15 @@
               (aset ^ints parent cell (int stuck-to))
               (recur (conj! order cell)
                      (inc grown)
-                     (max reach (math/sqrt (+ (* (- hx centre) (- hx centre))
-                                              (* (- hy centre) (- hy centre)))))
+                     (max reach (math/sqrt (+ (* (- hx center) (- hx center))
+                                              (* (- hy center) (- hy center)))))
                      0))))))))
 
 (defn subtree-sizes
   "How many cells hang off each cell, itself included, as an int array.
 
   The trunk's measure. `:order` has every cell after its parent, so one
-  pass backwards over it accumulates each node into its parent and every
+  pass backward over it accumulates each node into its parent and every
   child is finished before the parent is read."
   ^ints [{:keys [dim order parent]}]
   (let [^ints parent parent

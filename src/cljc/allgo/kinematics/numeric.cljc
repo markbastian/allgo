@@ -63,7 +63,7 @@
    ;; from throwing the arm across its workspace in a single stride.
    :max-step     0.3
    :limits?      true
-   ;; Weigh a radian of orientation against a metre of position. They are
+   ;; Weigh a radian of orientation against a meter of position. They are
    ;; different units and the solver has to be told what they are worth.
    :orientation-weight 1.0})
 

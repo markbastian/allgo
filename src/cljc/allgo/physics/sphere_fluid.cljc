@@ -22,13 +22,13 @@
   stops being a constraint to enforce and becomes a property of the
   representation: there is no pressure, no projection, and no residual --
   the divergence is zero to round-off rather than to solver tolerance.
-  The checkerboard that forces a flat solver onto a staggered grid cannot
+  The checcurboard that forces a flat solver onto a staggered grid cannot
   form either, and it is worth being exact about why: that mode lives in
-  the pressure, and there is no pressure. Centred differences do have an
+  the pressure, and there is no pressure. Centered differences do have an
   odd-even null space of their own -- an alternating streamfunction
   differences to nothing -- but nothing here drives it, because the
-  streamfunction is not iterated towards; it is solved for directly, from
-  a Laplacian whose checkerboard eigenvalue is the largest it has rather
+  streamfunction is not iterated toward; it is solved for directly, from
+  a Laplacian whose checcurboard eigenvalue is the largest it has rather
   than zero.
 
   What it costs: this is two-dimensional incompressible flow and nothing
@@ -55,9 +55,9 @@
   the harmonic part of the decomposition is empty and the streamfunction
   is therefore the whole story.
 
-  The trade is real and worth stating. Velocity and pressure generalise:
+  The trade is real and worth stating. Velocity and pressure generalize:
   to three dimensions, to free surfaces, to obstacles, none of which this
-  can do. Vorticity does not generalise, and in exchange it is exact.
+  can do. Vorticity does not generalize, and in exchange it is exact.
 
   ## The equation
 
@@ -66,14 +66,14 @@
   `f = 2*rotation*sin(latitude)` is the planetary vorticity: the vorticity
   the fluid already has by sitting on a spinning ball. Advecting the
   *absolute* vorticity `omega + f` rather than `omega` alone is the whole
-  of the Coriolis effect, and it is what organises the flow into zonal
+  of the Coriolis effect, and it is what organizes the flow into zonal
   bands -- a fluid parcel pushed north must lose relative vorticity to
   keep the sum, which turns it back. Set `:rotation` to zero and the
   bands disappear into ordinary two-dimensional turbulence.
 
   ## The grid, and the poles
 
-  Latitude and longitude, with latitudes at cell *centres*:
+  Latitude and longitude, with latitudes at cell *centers*:
 
       phi_j = -pi/2 + (j + 1/2) * dphi     j in [0, nlat)
       lam_i = i * dlam                     i in [0, nlon), periodic
@@ -111,7 +111,7 @@
 
   Steps 2 and 3 are the *same solve* with a different diagonal, and all of
   them are direct. The operator is separable and the longitude axis is
-  periodic, so a Fourier transform along it diagonalises that half of the
+  periodic, so a Fourier transform along it diagonalizes that half of the
   Laplacian and leaves one tridiagonal system per zonal wavenumber.
   Transform, solve, transform back: `O(n log n)`, exact to round-off, no
   iteration and no tolerance. It is the classical fast spherical Poisson
@@ -195,7 +195,7 @@
 
 (defn direction
   "The unit vector of cell `[i j]`, in the world frame the rest of the
-  library uses: `y` towards the north pole."
+  library uses: `y` toward the north pole."
   [{:keys [^doubles cos-phi ^doubles sin-phi ^double dlam]} i j]
   (let [j (long j)
         lam (* (long i) dlam)
@@ -321,7 +321,7 @@
 ;; Integrals over the sphere
 
 (defn d-lambda!
-  "Centred longitude derivative of a scalar, into `out`. Periodic, so no
+  "Centered longitude derivative of a scalar, into `out`. Periodic, so no
   boundary and no pole ever enters it."
   [{:keys [nlat nlon ^double dlam]} ^doubles f ^doubles out]
   (let [nlat (long nlat) nlon (long nlon)]
@@ -351,14 +351,14 @@
   trapezoidal rule is the implicit rule to use. The instinct that implicit
   means stable is right, but the usual implicit rule is not: backward
   Euler is stable *because* it damps, and what it would damp here are
-  precisely the waves that organise the flow into bands. The trapezoidal
+  precisely the waves that organize the flow into bands. The trapezoidal
   rule has an amplification factor of exactly one at every step size --
   neutral, not damped. What it gets wrong at a large step is the phase
   speed of the fast waves, not their existence.
 
   The cost is almost nothing, which is a happy accident of this solver's
   structure. `d/dlam` is diagonal in the same Fourier basis that already
-  diagonalises the longitude half of the Laplacian, so the operator is
+  diagonalizes the longitude half of the Laplacian, so the operator is
   still one tridiagonal system per zonal wavenumber -- with an imaginary
   number added to its diagonal, and therefore a complex solve rather than
   a real one. Same algorithm, same order of work.
@@ -390,7 +390,7 @@
     (dotimes [m nlon]
       (let [k-m (/ (- 2.0 (* 2.0 (math/cos (/ (* 2.0 math/PI m) nlon))))
                    (* dlam dlam))
-            ;; A centred first difference around the ring transforms to
+            ;; A centered first difference around the ring transforms to
             ;; `i sin(2 pi m / n) / dlam` -- pure imaginary, and diagonal.
             dl (/ (math/sin (/ (* 2.0 math/PI m) nlon)) dlam)
             singular? (zero? m)]
@@ -481,7 +481,7 @@
       u_east  = -(1/R) d(psi)/d(phi)
       u_north =  (1/(R cos phi)) d(psi)/d(lam)
 
-  which is `grad(psi) x n` written out. Centred differences, with the
+  which is `grad(psi) x n` written out. Centered differences, with the
   pole rule standing in for the rows that do not exist."
   [{:keys [nlat nlon ^double radius ^double dphi ^double dlam ^doubles cos-phi]}
    ^doubles psi ^doubles east ^doubles north]
@@ -721,7 +721,7 @@
       :tracer (when tracer? (a/f64 cells))
       :advection advection
       :coriolis (:coriolis opts :semi-implicit)
-      :trajectory (:trajectory opts :centred)
+      :trajectory (:trajectory opts :centered)
       :scratch-a (a/f64 cells)
       :scratch-b (a/f64 cells)
       :scratch-c (a/f64 cells)
@@ -920,7 +920,7 @@
   at a rotation of 20, and ten thousand times too large at 80, at every
   step size tried.
 
-  So the trajectory is centred instead. Advect with the velocity at hand,
+  So the trajectory is centered instead. Advect with the velocity at hand,
   solve for where that leaves the velocity, and then throw the provisional
   answer away and advect the *original* state again with the average of
   the two. That is the trapezoidal rule on the loop, whose amplification
@@ -967,7 +967,7 @@
 ;; Setting one going
 
 (defn add-vortex!
-  "Adds a Gaussian patch of vorticity centred on a direction.
+  "Adds a Gaussian patch of vorticity centered on a direction.
 
   `strength` is signed -- positive spins one way, negative the other --
   and `width` is the patch's angular radius in radians. A pair of opposite
@@ -986,7 +986,7 @@
         (dotimes [i nlon]
           (let [lam (* i dlam)
                 dot (+ (* cx cp (math/cos lam)) (* cy sp) (* cz cp (math/sin lam)))
-                ;; Great-circle angle to the centre.
+                ;; Great-circle angle to the center.
                 ang (math/acos (max -1.0 (min 1.0 dot)))
                 k (+ base i)]
             (aset field k (+ (aget field k)
@@ -1101,7 +1101,7 @@
       div u  = (1/(R cos phi)) [ D_lam(u_east) + D_phi(G) ]
              = (1/R^2 cos phi) [ -D_lam D_phi psi + D_phi D_lam psi ]
 
-  and centred differences in two independent directions commute exactly,
+  and centered differences in two independent directions commute exactly,
   so the two terms cancel to the last bit -- not to truncation error, and
   not to a solver tolerance. That is what the streamfunction buys, and it
   is why there is no pressure anywhere in this namespace.

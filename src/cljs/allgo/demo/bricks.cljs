@@ -9,9 +9,9 @@
   ## What to look for
 
   Build a tall wall, drop `iterations` to three or four, and watch the
-  bottom courses. Sequential impulse sags: it linearised at the top of
+  bottom courses. Sequential impulse sags: it linearized at the top of
   the step and its last iteration is still solving the geometry the first
-  one saw, so weight leaks downwards through the stack. TGS holds, for
+  one saw, so weight leaks downward through the stack. TGS holds, for
   one reason -- it moves the bodies between iterations and re-measures,
   so the later passes are solving the wall as it now is.
 
@@ -49,8 +49,8 @@
   ## The ring, which reverses the answer
 
   The keep is the only scene here not built out of right angles: a ring
-  of boxes meets its neighbours face to face only at the inner edge and
-  fans apart outwards, so almost every contact in it is between two
+  of boxes meets its neighbors face to face only at the inner edge and
+  fans apart outward, so almost every contact in it is between two
   planes at an angle.
 
   At the size it starts -- five courses of keep inside two of rampart,
@@ -122,8 +122,8 @@
   sequential impulse knocks it down while you watch.
 
   It is drift, not a kick. Trace the top brick and it walks one way in
-  millimetres a second and never comes back; the column is standing on
-  its own rounding error, and once the centre of mass is outside the
+  millimeters a second and never comes back; the column is standing on
+  its own rounding error, and once the center of mass is outside the
   footprint gravity does the rest. Iterations do not buy it back --
   sixteen and four fall at the same height -- because the error is not
   in how well each step is solved but in the fact that there are sixty
@@ -220,12 +220,12 @@
 
 (defn- chord
   "How long a block may be to sit in a ring and still touch its
-  neighbours rather than start inside them.
+  neighbors rather than start inside them.
 
   A ring of boxes is wedges the wrong way round: the blocks meet at
-  their inner faces and fan apart towards the outside. So the length to
+  their inner faces and fan apart toward the outside. So the length to
   take is the chord at the inner radius, `step` radians apart. Taking it
-  at the centres instead buries each block a few millimetres in the one
+  at the centers instead buries each block a few millimeters in the one
   beside it, and a ring laid like that does not settle -- it springs."
   ^double [^double radius ^double depth ^double step]
   (* 2.0 (- radius (* 0.5 depth)) (Math/sin (* 0.5 step))))
@@ -234,7 +234,7 @@
   "A block `theta` radians round a ring of `radius`, lying along it.
 
   Turned about the upright so that its length runs along the tangent and
-  its depth points out from the centre, which is a quarter turn less
+  its depth points out from the center, which is a quarter turn less
   `theta` -- at `theta` of zero the block faces down +x and has to be
   turned ninety degrees to get there."
   [^double radius ^double theta ^double y [len height depth]]
@@ -246,7 +246,7 @@
   "The named scene to knock down, read off the GUI `controls`.
 
   Returns `{:bodies :span :height}`: the bodies with the floor first, and
-  how far the stack reaches sideways and upwards. Those two numbers are
+  how far the stack reaches sideways and upward. Those two numbers are
   all the camera and the projectile need -- a scene says how big it is
   and everything else is framed from that, so adding one does not mean
   also picking a viewpoint and a firing line by hand."
@@ -381,10 +381,10 @@
                :vel [0.0 (* 0.04 speed) (- (double speed))]}))
 
 (defn- clay
-  "The colour of brick `i`, jittered a little about the same clay.
+  "The color of brick `i`, jittered a little about the same clay.
 
   Not decoration. A Jenga tower is blocks that fit exactly, so in one
-  flat colour it renders as a single brown slab and the thing the scene
+  flat color it renders as a single brown slab and the thing the scene
   is about -- that each level lies across the one below -- is invisible.
   The step is the plastic constant's reciprocal, which is the
   one-dimensional golden ratio's better-behaved cousin: consecutive

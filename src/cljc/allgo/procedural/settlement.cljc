@@ -39,7 +39,7 @@
   here has exactly one town in it, so a language per realm would mean no
   two places on the map ever share one, which is the bag of unrelated
   syllables that namespace exists to avoid. Grouped into a handful of
-  cultures instead, neighbouring realms sound alike and the places where
+  cultures instead, neighboring realms sound alike and the places where
   that changes are audible.
 
   No population, no economy, no politics, no history. Azgaar's generator
@@ -86,7 +86,7 @@
 
   Fresh water first, because everything else is negotiable and that is
   not: a river or a lakeshore outweighs every other term here. Then flat
-  and low, then a coast for a harbour, then whether the land grows
+  and low, then a coast for a harbor, then whether the land grows
   anything."
   [island]
   (let [on-river (river-cells island)
@@ -151,7 +151,7 @@
     (math/sqrt (+ (* dx dx) (* dy dy)))))
 
 (defn travel
-  "`(fn [from to])`, the cost of moving between two neighbouring cells.
+  "`(fn [from to])`, the cost of moving between two neighboring cells.
 
   Distance, multiplied up by how much climbing it involves and by how
   unfriendly the destination is. The climb term is steep on purpose: it
@@ -168,7 +168,7 @@
             (* 14.0 climb)
             (- 1.0 (get biome-appeal (:biome b) 0.5)))))))
 
-(defn- land-neighbours [{:keys [centers]}]
+(defn- land-neighbors [{:keys [centers]}]
   (fn [id]
     (into [] (remove #(:water? (centers %))) (:neighbors (centers id)))))
 
@@ -182,7 +182,7 @@
   keyed by cell."
   [island sources]
   (let [step (travel island)
-        nbrs (land-neighbours island)
+        nbrs (land-neighbors island)
         [best owner]
         (loop [;; Ordered by cost then id, so ties break the same way on
                ;; every platform rather than on map iteration order.
@@ -247,7 +247,7 @@
   town in it, no two places on the map ever share a language -- which
   makes the naming a bag of unrelated syllables again, the exact thing
   `allgo.procedural.naming` exists to avoid. Cultures are coarser than
-  realms on purpose: several neighbouring realms sound alike, and the
+  realms on purpose: several neighboring realms sound alike, and the
   places where that changes are the interesting borders."
   [{:keys [centers towns] :as island} {:keys [cultures]}]
   (let [n (max 1 (long (or cultures (max 2 (quot (count towns) 3)))))
@@ -258,7 +258,7 @@
            :centers (mapv (fn [c] (assoc c :culture (get owner (:id c)))) centers))))
 
 (defn- centers->edge
-  "Which mesh edge joins each pair of neighbouring cells."
+  "Which mesh edge joins each pair of neighboring cells."
   [{:keys [edges]}]
   (reduce (fn [m {:keys [id centers]}]
             (let [[a b] centers]
@@ -281,7 +281,7 @@
   correct, and a bridge is not something this models."
   [{:keys [towns] :as island}]
   (let [step (travel island)
-        nbrs (land-neighbours island)
+        nbrs (land-neighbors island)
         by-pair (centers->edge island)
         pts (fn [id] (:point ((:centers island) id)))
         ;; Straight-line distance to choose the links; real travel cost to
@@ -297,7 +297,7 @@
                          route (search/a-star
                                 {:start a
                                  :goal b
-                                 :neighbours nbrs
+                                 :neighbors nbrs
                                  :cost step
                                  ;; Straight-line distance never exceeds
                                  ;; the cost, whose multiplier is at least

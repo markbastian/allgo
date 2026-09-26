@@ -50,14 +50,14 @@
       (doseq [f faces] (is (>= (count f) 3) "each face is a polygon")))))
 
 (deftest adjacency-is-symmetric
-  ;; Neighbours are read off surviving faces rather than recorded when a cut
+  ;; Neighbors are read off surviving faces rather than recorded when a cut
   ;; happens, because a later cut can remove an earlier face entirely. If that
   ;; regressed, adjacency would become order-dependent and asymmetric.
   (let [g (rng 3)]
     (doseq [n [5 20 60]]
       (let [d (v3/diagram (sites g n) bounds)]
-        (doseq [[site {:keys [neighbours]}] d, other neighbours]
-          (is (contains? (:neighbours (get d other)) site)
+        (doseq [[site {:keys [neighbors]}] d, other neighbors]
+          (is (contains? (:neighbors (get d other)) site)
               (str site " lists " other " but not the reverse")))))))
 
 (deftest seeding-does-not-change-the-answer
@@ -65,10 +65,10 @@
     (let [g   (rng 99)
           pts (sites g 40)
           idx (v3/diagram pts bounds nil)
-          seeded (v3/diagram pts bounds (v3/neighbour-hints idx pts))]
+          seeded (v3/diagram pts bounds (v3/neighbor-hints idx pts))]
       (doseq [s pts]
-        (is (= (:neighbours (get idx s)) (:neighbours (get seeded s)))
-            "same neighbours with and without a seed")
+        (is (= (:neighbors (get idx s)) (:neighbors (get seeded s)))
+            "same neighbors with and without a seed")
         (is (< (abs (- (cell-volume s (get idx s)) (cell-volume s (get seeded s)))) 1e-6)
             "same cell volume with and without a seed"))))
   (testing "a deliberately wrong seed still yields the right answer"
@@ -80,24 +80,24 @@
       (doseq [s pts]
         (is (< (abs (- (cell-volume s (get plain s)) (cell-volume s (get seeded s)))) 1e-6))))))
 
-(deftest neighbour-indices-agree-with-neighbour-points
+(deftest neighbor-indices-agree-with-neighbor-points
   (let [g   (rng 17)
         pts (sites g 30)
         d   (v3/diagram pts bounds nil)]
     (doseq [s pts
-            :let [{:keys [neighbours neighbour-idx]} (get d s)]]
-      (is (= neighbours (into #{} (map #(nth pts %)) neighbour-idx)))))
+            :let [{:keys [neighbors neighbor-idx]} (get d s)]]
+      (is (= neighbors (into #{} (map #(nth pts %)) neighbor-idx)))))
   (testing "the two-argument form skips indexing entirely"
     (let [g (rng 17)
           d (v3/diagram (sites g 10) bounds)]
-      (is (every? #(nil? (:neighbour-idx %)) (vals d))))))
+      (is (every? #(nil? (:neighbor-idx %)) (vals d))))))
 
 (deftest edges-are-undirected-pairs
   (let [g (rng 23)
         d (v3/diagram (sites g 20) bounds)
         e (v3/edges d)]
     (is (every? #(= 2 (count %)) e))
-    (is (= e (into #{} (for [[s {:keys [neighbours]}] d, o neighbours] #{s o}))))))
+    (is (= e (into #{} (for [[s {:keys [neighbors]}] d, o neighbors] #{s o}))))))
 
 (deftest separating-plane-predicate
   (let [faces (mapv (fn [pts] {:pts pts}) (v3/box-faces [[0 0 0] [10 10 10]]))]

@@ -72,7 +72,7 @@
       (is (apply distinct? depths))))
 
   (testing "and a grazing path is far more air than a vertical one"
-    ;; The whole reason sunsets are a different colour from noon.
+    ;; The whole reason sunsets are a different color from noon.
     (let [up (atm/optical-depth air ground [0.0 1.0 0.0] 0.025 128)
           along (atm/optical-depth air ground [1.0 0.0 0.0] 0.025 128)]
       (is (> along (* 5.0 up)))))
@@ -130,7 +130,7 @@
       (is (every? #(< (abs (double %)) 1e-9)
                   (map - (atm/aerial-perspective air ground ground sun surface) surface))))
 
-    (testing "distance pulls a colour towards the haze and away from itself"
+    (testing "distance pulls a color toward the haze and away from itself"
       (let [near (atm/aerial-perspective air ground [0.001 1.0002 0.0] sun surface fine)
             far (atm/aerial-perspective air ground [0.02 1.0002 0.0] sun surface fine)
             gap (fn [c] (reduce + (map (fn [a b] (abs (- (double a) (double b)))) c surface)))]

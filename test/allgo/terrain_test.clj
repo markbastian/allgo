@@ -102,7 +102,7 @@
       (is (< (spread 0.1) (spread 1.0) (spread 10.0)))))
 
   (testing "no displacement leaves a surface interpolated from the corners"
-    ;; Every new point is then exactly the average of its neighbours, so
+    ;; Every new point is then exactly the average of its neighbors, so
     ;; nothing can land outside the range the corners set.
     (let [g (t/generate {:width 0.0 :iterations 6 :corners corners :rng (seeded 5)})
           [lo hi] (t/bounds g)]
@@ -110,7 +110,7 @@
       (is (<= hi (+ (apply max corners) 1e-12))))))
 
 (deftest continuity-test
-  (testing "neighbouring cells stay close, which is what makes it terrain"
+  (testing "neighboring cells stay close, which is what makes it terrain"
     ;; Each round's displacement is half the last, so the total any one
     ;; step can add is bounded by twice the first. A surface that failed
     ;; this would be noise with a fractal's parameters.
@@ -119,4 +119,4 @@
           worst (reduce max 0.0
                         (for [i (range dim) j (range (dec dim))]
                           (abs (- (t/height g i j) (t/height g i (inc j))))))]
-      (is (< worst 2.0) (str "neighbours differ by up to " worst)))))
+      (is (< worst 2.0) (str "neighbors differ by up to " worst)))))

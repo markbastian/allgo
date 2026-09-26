@@ -22,8 +22,8 @@
   0.30)
 
 (defn- legendre-2
-  "The three normalised degree-2 associated Legendre functions at sin(lat).
-  Normalised, because published coefficients are and this correction has to
+  "The three normalized degree-2 associated Legendre functions at sin(lat).
+  Normalized, because published coefficients are and this correction has to
   add to them."
   [x]
   (let [s (math/sqrt (max 0.0 (- 1.0 (* x x))))]
@@ -32,7 +32,7 @@
      (* (math/sqrt (/ 5.0 12.0)) 3.0 s s)]))                ; P22
 
 (defn corrections
-  "Degree-2 corrections to the normalised harmonic coefficients, from a
+  "Degree-2 corrections to the normalized harmonic coefficients, from a
   sequence of `[GM position]` pairs in the Earth-fixed frame.
 
   Returns `{:C {[2 0] .. [2 1] .. [2 2] ..} :S {[2 1] .. [2 2] ..}}`, ready to
@@ -62,7 +62,7 @@
     bodies)))
 
 (defn perturb
-  "Add tidal corrections to a normalised gravity field."
+  "Add tidal corrections to a normalized gravity field."
   [field bodies]
   (let [{:keys [C S]} (corrections bodies)]
     (-> field
@@ -99,7 +99,7 @@
   Earth is spinning down and handing the angular momentum to the Moon.
 
   A few degrees, and the sign is the whole physics: reverse it and the Moon
-  would be spiralling in."
+  would be spiraling in."
   (* 3.0 c/degrees))
 
 (defn- lead-longitude
@@ -124,7 +124,7 @@
    (corrections (mapv (fn [[GM r]] [GM (lead-longitude r lead)]) bodies) love)))
 
 (defn perturb-with-ocean
-  "Add both solid and ocean tidal corrections to a normalised gravity field."
+  "Add both solid and ocean tidal corrections to a normalized gravity field."
   [field bodies]
   (let [solid (corrections bodies)
         ocean (ocean-corrections bodies)

@@ -58,7 +58,7 @@
 (def ^:private half-pi (/ js/Math.PI 2))
 
 (def ^:private puma
-  "The PUMA 560, in Craig's modified DH parameters and metres. The arm his
+  "The PUMA 560, in Craig's modified DH parameters and meters. The arm his
   chapter 4 solves, and the one every later text compares against."
   (k/chain [{:alpha 0.0         :a 0.0    :d 0.0    :limits [-2.79 2.79]}
             {:alpha (- half-pi) :a 0.0    :d 0.0    :limits [-3.92 0.78]}
@@ -124,24 +124,24 @@
         (.set (.-scale mesh) 1.0 len 1.0)))))
 
 (defn- make-arm
-  "One cylinder per link and a disc per joint, reused every frame.
+  "One cylinder per link and a disk per joint, reused every frame.
 
   Ghost arms are drawn thinner as well as fainter: eight of them over the
   same point otherwise read as one solid mass rather than as eight ways of
   folding the same linkage."
-  [^js scene colour opacity]
+  [^js scene color opacity]
   (let [mat (THREE/MeshPhongMaterial.
-             #js {:color colour :transparent (< opacity 1.0) :opacity opacity})
+             #js {:color color :transparent (< opacity 1.0) :opacity opacity})
         joint-mat (THREE/MeshPhongMaterial.
                    #js {:color 0x2f3646 :transparent (< opacity 1.0) :opacity opacity})
         links (vec (for [_ (range 7)]
                      (let [m (THREE/Mesh. (THREE/CylinderGeometry. (if (< opacity 1.0) 0.016 0.035)
                                                                    (if (< opacity 1.0) 0.016 0.035) 1.0 16) mat)]
                        (.add scene m) m)))
-        discs (vec (for [_ (range 6)]
+        disks (vec (for [_ (range 6)]
                      (let [m (THREE/Mesh. (THREE/CylinderGeometry. 0.055 0.055 0.07 20) joint-mat)]
                        (.add scene m) m)))]
-    {:links links :discs discs :material mat :joint-material joint-mat}))
+    {:links links :disks disks :material mat :joint-material joint-mat}))
 
 (defn- draw-tool!
   "The gripper, from the wrist out to the tip that does the touching."
@@ -150,35 +150,35 @@
     (segment! mesh (:pos (peek fs)) (:pos (k/pose puma values)))))
 
 (defn- draw-arm!
-  "Cylinders along the links, discs across the joint axes.
+  "Cylinders along the links, disks across the joint axes.
 
-  The discs are not decoration. Several of a PUMA's frames sit on top of
+  The disks are not decoration. Several of a PUMA's frames sit on top of
   one another -- the first three are all at the shoulder, and the last
   three all at the wrist, which is the condition that makes the closed
   form exist -- so the links between them have no length and nothing to
-  draw. Without the discs the arm reads as a bare stick with a shoulder
+  draw. Without the disks the arm reads as a bare stick with a shoulder
   and a wrist that are not there."
-  [{:keys [links discs]} values show-axes?]
+  [{:keys [links disks]} values show-axes?]
   (let [fs (k/frames puma values)]
     (draw-tool! (nth links 6) values)
     (dotimes [i 6]
       (segment! (nth links i) (:pos (nth fs i)) (:pos (nth fs (inc i))))
-      (let [^js disc (nth discs i)
+      (let [^js disk (nth disks i)
             f (nth fs (inc i))
-            ;; The joint's own axis, which a disc lying across it shows.
+            ;; The joint's own axis, which a disk lying across it shows.
             [qx qy qz qw] (quat/mul (:rot f) (quat/from-axis-angle [1.0 0.0 0.0] half-pi))
             [px py pz] (:pos f)]
-        (set! (.-visible disc) true)
-        (.set (.-position disc) px py pz)
-        (.set (.-quaternion disc) qx qy qz qw)
-        ;; Stretched into a spindle, a disc becomes a visible joint axis.
-        (.set (.-scale disc) 1.0 (if show-axes? 4.5 1.0) 1.0)))))
+        (set! (.-visible disk) true)
+        (.set (.-position disk) px py pz)
+        (.set (.-quaternion disk) qx qy qz qw)
+        ;; Stretched into a spindle, a disk becomes a visible joint axis.
+        (.set (.-scale disk) 1.0 (if show-axes? 4.5 1.0) 1.0)))))
 
-(defn- set-arm-visible! [{:keys [links discs]} on?]
+(defn- set-arm-visible! [{:keys [links disks]} on?]
   (doseq [^js m links] (set! (.-visible m) on?))
-  ;; Ghosts show their links only: eight sets of joint discs over one point
+  ;; Ghosts show their links only: eight sets of joint disks over one point
   ;; bury the arm that is actually moving.
-  (doseq [^js m discs] (set! (.-visible m) false)))
+  (doseq [^js m disks] (set! (.-visible m) false)))
 
 ;; ---------------------------------------------------------------------------
 ;; The two ways of getting there
@@ -192,12 +192,12 @@
   solver a ratio of hundreds to one across a joint, and it comes apart."
   []
   (let [fs (k/frames puma (k/home puma))
-        centres (vec (for [i (range 6)]
+        centers (vec (for [i (range 6)]
                        (v/scale (v/add (:pos (nth fs i)) (:pos (nth fs (inc i)))) 0.5)))
         base (rigid/box {:size [0.2 0.2 0.2] :pos (:pos (first fs))})
         links (vec (for [i (range 6)]
                      (rigid/box {:size [0.18 0.12 0.12] :density 700.0
-                                 :pos (nth centres i)})))
+                                 :pos (nth centers i)})))
         bodies (into [base] links)
         joints (vec (for [i (range 6)]
                       (joint/servo bodies {:a i :b (inc i)
@@ -214,7 +214,7 @@
   where the bodies ended up, so the links stay exactly the length they
   are. The solver's positional drift is a property of the solver, not of
   a robot, and the angles are what it tracks well -- to a thousandth of a
-  radian, where the bodies themselves wander centimetres."
+  radian, where the bodies themselves wander centimeters."
   [world]
   (mapv (fn [jt]
           (let [[_ r0 _ r1] (joint/frames (:bodies world) jt)]

@@ -11,7 +11,7 @@
 
 (defn- ys [body] (map second (partition 3 (x/positions body))))
 
-(defn- centre-of-mass
+(defn- center-of-mass
   "Mass-weighted, so it is the quantity momentum actually conserves."
   [body]
   (let [n  (:n body)
@@ -187,13 +187,13 @@
         (is (< (apply min (ys body)) 0.0) "without a floor it keeps going")))))
 
 (deftest momentum-test
-  (testing "with no gravity and no floor, the centre of mass drifts in a straight line"
+  (testing "with no gravity and no floor, the center of mass drifts in a straight line"
     (let [mesh (tm/lattice-box 2 2 2 0.2)
           body (x/soft-body mesh)]
       (dotimes [i (:n body)] (x/set-velocity! body i [1.0 0.0 0.0]))
-      (let [c0 (centre-of-mass body)
+      (let [c0 (center-of-mass body)
             _  (dotimes [_ 60] (x/step! body no-gravity))
-            c1 (centre-of-mass body)]
+            c1 (center-of-mass body)]
         ;; One second at one unit per second.
         (is (< (abs (- 1.0 (- (c1 0) (c0 0)))) 0.02))
         (is (< (abs (- (c1 1) (c0 1))) 1e-6) "and does not wander off-axis")

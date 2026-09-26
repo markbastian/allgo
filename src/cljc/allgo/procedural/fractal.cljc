@@ -39,11 +39,11 @@
 
   ## Ranges
 
-  The monofractals are roughly zero-centred and roughly as wide as their
+  The monofractals are roughly zero-centered and roughly as wide as their
   basis. The multifractals are not: they multiply, so their range depends
   on every parameter at once and cannot usefully be predicted. That is not
   a flaw to be fixed, it is what makes them do what they do -- but it does
-  mean you have to measure before you can map one onto a colour or a
+  mean you have to measure before you can map one onto a color or a
   height. `value-range` is here for that."
   (:require [allgo.procedural.noise :as noise]
             [clojure.math :as math]))
@@ -150,7 +150,7 @@
   Folding the basis at zero before summing leaves a crease along every
   zero crossing of every octave, and those creases are what make
   turbulence look like smoke and flame where `fbm` looks like haze. Note
-  that it is no longer zero-centred -- every term is positive.
+  that it is no longer zero-centered -- every term is positive.
 
   Written as the composition it is, rather than as its own loop, because
   that is the point of `allgo.procedural.noise/absolute` existing."
@@ -185,7 +185,7 @@
   The first octave is taken unscaled and becomes a rough altitude; every
   octave after it is multiplied by that running altitude before being
   added. Valleys therefore get almost no detail and peaks get all of it,
-  which is the single most recognisable property of real landscape and
+  which is the single most recognizable property of real landscape and
   the reason this is the one to reach for first when you want ground.
 
   `:offset` sets the altitude of the sea floor, in effect: it is added to
@@ -221,7 +221,7 @@
   effect is terrain whose roughness varies over the ground rather than
   strictly with height -- smooth plains beside rough hills at the same
   altitude, which `hetero-terrain` cannot produce. Musgrave's own
-  favourite for continents with mountain ranges on them.
+  favorite for continents with mountain ranges on them.
 
   The weight is clamped at 1 each octave because without it the product
   diverges: a run of large values would feed on itself."
@@ -305,7 +305,7 @@
   "`[lowest highest]` of `f` over `n` samples of the box `[lo hi]^3`.
 
   The multifractals have no range you can derive, so measuring is the
-  only honest way to map one onto heights or colours. Samples are taken
+  only honest way to map one onto heights or colors. Samples are taken
   on a deterministic low-discrepancy walk rather than at random, so that
   the answer does not wobble between calls and a parameter change that
   moves the range shows up as a change in the range."
@@ -330,7 +330,7 @@
   "`f` rescaled so that `[lo hi]` becomes [0, 1], and clamped there.
 
   The other half of `value-range`, and the last step before a fractal
-  becomes a colour."
+  becomes a color."
   [f lo hi]
   (let [lo (double lo)
         span (let [s (- (double hi) lo)] (if (zero? s) 1.0 s))]

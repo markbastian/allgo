@@ -27,12 +27,12 @@
     (is (= -4 (d/roundm -4 4)))))
 
 (deftest random-point-test
-  (testing "stays inside the disc"
+  (testing "stays inside the disk"
     (let [r 50.0]
       (is (every? (fn [[x y]] (<= (Math/hypot x y) (+ r 1e-9)))
                   (repeatedly 500 #(d/random-point r))))))
 
-  (testing "is not crowded toward the centre"
+  (testing "is not crowded toward the center"
     ;; Sampling the radius uniformly would put half the points inside
     ;; r/2, which covers only a quarter of the area. A correct sampler
     ;; puts about a quarter of them there.
@@ -147,7 +147,7 @@
             {:keys [nodes edges]} (d/room-graph hubs)]
         (is (graph/connected-graph? nodes edges)))))
 
-  (testing "hubs sharing a centre cannot both be triangulation sites"
+  (testing "hubs sharing a center cannot both be triangulation sites"
     (let [{:keys [nodes]} (d/room-graph [(room 0 [0 0] 10 10)
                                          (room 1 [0 0] 10 10)
                                          (room 2 [50 0] 10 10)])]
@@ -263,7 +263,7 @@
   (testing "defaults alone produce a dungeon"
     (is (pos? (count (:grid (d/generate))))))
 
-  (testing "an ellipse scatter gives a wider layout than a disc"
+  (testing "an ellipse scatter gives a wider layout than a disk"
     ;; Adonaac's fix for squat dungeons: seed a strip, not a circle.
     (let [aspect (fn [cfg]
                    (let [rooms (:rooms (d/generate cfg))

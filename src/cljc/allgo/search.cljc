@@ -3,7 +3,7 @@
   best-first and A*.
 
   Adapted from Mark Bastian's https://github.com/markbastian/planning,
-  whose organising idea is that these five are one algorithm. Each keeps a
+  whose organizing idea is that these five are one algorithm. Each keeps a
   frontier of states to expand and a record of how it reached them; they
   differ only in which state comes off the frontier next. So there is one
   step function shape, one notion of a search state, and the algorithms
@@ -13,13 +13,13 @@
 
     :start       the state to begin from
     :goal        the state to reach
-    :neighbours  (fn [state]) -> the states reachable in one move
+    :neighbors  (fn [state]) -> the states reachable in one move
     :cost        (fn [from to]) -> the cost of that move (default 1)
     :heuristic   (fn [state goal]) -> estimated remaining cost (default 0)
 
-  `:neighbours` is a function rather than a graph, so the state space can
+  `:neighbors` is a function rather than a graph, so the state space can
   be implicit and unbounded -- board positions, puzzle configurations,
-  hexes on a grid that is never materialised.
+  hexes on a grid that is never materialized.
 
   Every algorithm is exposed twice. The `-seq` forms return the lazy seq
   of search states, one per expansion, which is what you want to watch a
@@ -103,20 +103,20 @@
   [search from states]
   (update search :came-from into (zipmap states (repeat from))))
 
-(defn- unvisited [{:keys [neighbours came-from]} state]
-  (remove #(contains? came-from %) (neighbours state)))
+(defn- unvisited [{:keys [neighbors came-from]} state]
+  (remove #(contains? came-from %) (neighbors state)))
 
-(defn- cheaper-neighbours
-  "The neighbours of `state` this move improves on, with their new costs.
+(defn- cheaper-neighbors
+  "The neighbors of `state` this move improves on, with their new costs.
 
   Unlike the uninformed searches this does not skip states already seen: a
   state can be reached again more cheaply, and refusing to revisit it is
   what turns Dijkstra back into breadth-first search."
-  [{:keys [neighbours cost costs]} state]
-  (for [neighbour (neighbours state)
-        :let  [new-cost (+ (costs state) (cost state neighbour))]
-        :when (< new-cost (get costs neighbour ##Inf))]
-    [neighbour new-cost]))
+  [{:keys [neighbors cost costs]} state]
+  (for [neighbor (neighbors state)
+        :let  [new-cost (+ (costs state) (cost state neighbor))]
+        :when (< new-cost (get costs neighbor ##Inf))]
+    [neighbor new-cost]))
 
 (defn- uninformed-step
   "Breadth-first or depth-first, depending only on the frontier passed in."
@@ -143,7 +143,7 @@
   [priority]
   (fn [{:keys [frontier] :as search}]
     (let [[[state] frontier] (take-next frontier)
-          improved           (cheaper-neighbours search state)]
+          improved           (cheaper-neighbors search state)]
       (-> search
           (assoc :frontier (put frontier (map (fn [[s c]] [s (priority search s c)]) improved)))
           (update :costs into improved)
@@ -226,7 +226,7 @@
   branch and follows it to the end before considering any alternative, so
   where the others fan out and meet the goal, this one walks away from it
   forever: on an unbounded grid it runs to an OutOfMemoryError rather than
-  returning a bad answer. Bound `:neighbours` -- to a board, a depth
+  returning a bad answer. Bound `:neighbors` -- to a board, a depth
   limit, anything -- or use `breadth-first`."
   (solver depth-first-seq))
 

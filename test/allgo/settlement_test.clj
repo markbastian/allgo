@@ -62,7 +62,7 @@
       ;; landmass. More would mean parallel roads down the same valley.
       (is (<= (count roads) (dec (count towns)))))
 
-    (testing "roads are on land and join cells that really are neighbours"
+    (testing "roads are on land and join cells that really are neighbors"
       (let [road-edges (filter #(pos? (long (:road % 0))) edges)]
         (is (seq road-edges))
         (is (every? (fn [e]
@@ -160,14 +160,14 @@
     (testing "cultures are coarser than realms, which is the point"
       ;; A realm holds one town, so a language per realm would mean no
       ;; two places on the map ever share one. Grouping realms into a
-      ;; handful of cultures is what makes neighbours sound alike.
+      ;; handful of cultures is what makes neighbors sound alike.
       (is (< (count cultures) (count towns)))
       (is (every? #(some #{(:culture %)} cultures)
                   (filter :territory (remove :water? centers)))))
 
     (testing "a culture is a connected patch, not a scattering"
       ;; It comes out of a cheapest-source sweep, so every cell in a
-      ;; culture has a neighbour nearer its seed -- which means you can
+      ;; culture has a neighbor nearer its seed -- which means you can
       ;; always walk home without leaving it.
       (let [by-id (into {} (map (juxt :id identity)) centers)]
         (is (every? (fn [c]

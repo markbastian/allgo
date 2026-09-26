@@ -19,7 +19,7 @@
     `elevation` distance from the coast, with the curve applied. It is
                 a dome, because that is what distance from the coast is.
     `moisture`  distance from fresh water. Dry interiors and green
-                valleys, with nothing modelling either.
+                valleys, with nothing modeling either.
     `territory` who holds what, from `allgo.procedural.settlement`. Worth
                 comparing against `elevation`: the borders sit on the
                 ridges, because territory is assigned by travel cost and
@@ -27,14 +27,14 @@
                 by distance instead this would be a Voronoi diagram of
                 the towns and would ignore the land entirely.
     `mesh`      the dual graph itself, with the Delaunay edges between
-                cell centres over the Voronoi cells they belong to.
+                cell centers over the Voronoi cells they belong to.
                 Worth a look once: every other view is a property
                 attached to this.
 
   Towns, roads, borders and names come from
   `allgo.procedural.settlement`. The names are worth reading rather than
   glancing at: each culture invents its own small phonology, so a run of
-  neighbouring towns share a sound and the places where that changes are
+  neighboring towns share a sound and the places where that changes are
   the cultural borders -- which do not line up with the political ones,
   because a culture spans several realms.
 
@@ -82,7 +82,7 @@
      (js/Math.round (+ b1 (* t (- b2 b1))))]))
 
 (defn- ramp
-  "A colour from a list of stops, `t` in [0, 1]."
+  "A color from a list of stops, `t` in [0, 1]."
   [stops t]
   (let [n (dec (count stops))
         t (max 0.0 (min 0.9999 t))
@@ -96,8 +96,8 @@
   [[196 176 124] [176 186 120] [120 168 110] [70 140 120] [44 104 140]])
 
 (defn- territory-color
-  "A hue per town, spread by the golden ratio so that neighbouring ids do
-  not come out as neighbouring colours."
+  "A hue per town, spread by the golden ratio so that neighboring ids do
+  not come out as neighboring colors."
   [idx]
   (str "hsl(" (js/Math.round (* 360 (mod (* (inc idx) 0.61803398875) 1.0)))
        ",42%,62%)"))
@@ -163,7 +163,7 @@
         (set! (.-fillStyle ctx) (cell-color view c town-index))
         (.fill ctx)
         ;; Filling and stroking the same path closes the hairline seams
-        ;; antialiasing leaves between neighbouring polygons.
+        ;; antialiasing leaves between neighboring polygons.
         (when (or (.-outlines controls) (not mesh?))
           (set! (.-strokeStyle ctx)
                 (if (.-outlines controls) "rgba(10,12,22,0.45)" (cell-color view c town-index)))
@@ -182,7 +182,7 @@
             (if (zero? i) (.moveTo ctx (sx x) (sy y)) (.lineTo ctx (sx x) (sy y)))))
         (.stroke ctx))
       (when mesh?
-        ;; The Delaunay half of the dual: centre to centre across every
+        ;; The Delaunay half of the dual: center to center across every
         ;; edge, which is the adjacency every pass actually walks.
         (set! (.-strokeStyle ctx) "rgba(150,180,230,0.35)")
         (set! (.-lineWidth ctx) 0.6)
@@ -217,7 +217,7 @@
                            (not= (:territory (centers a)) (:territory (centers b))))]
           (stroke-path (edge-path e))))
       (when (.-roads controls)
-        ;; Roads run centre to centre, because a road goes through a
+        ;; Roads run center to center, because a road goes through a
         ;; place rather than along its boundary -- which is exactly the
         ;; other half of the dual from where the rivers are.
         (set! (.-strokeStyle ctx) "rgb(226,206,160)")

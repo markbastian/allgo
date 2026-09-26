@@ -59,7 +59,7 @@
           (keys grid)))
 
 (defn fit
-  "A tile -> pixel transform that centres the whole map in `[w h]` with a
+  "A tile -> pixel transform that centers the whole map in `[w h]` with a
   little air around it. Returns `[scale offset-x offset-y]`."
   [grid [w h]]
   (let [[x0 y0 x1 y1] (grid-extent grid)
@@ -74,7 +74,7 @@
 
 (defn- draw-tiles! [^js ctx grid [scale ox oy]]
   ;; Tiles are drawn a hair oversized; at fractional scales exact widths
-  ;; leave hairline seams between neighbours that read as cracks in the
+  ;; leave hairline seams between neighbors that read as cracks in the
   ;; floor.
   (let [side (js/Math.ceil (+ scale 0.5))]
     (doseq [[kind tiles] (group-by val grid)]
@@ -95,7 +95,7 @@
     (.strokeRect ctx (px x0) (py y0) (- (px x1) (px x0)) (- (py y1) (py y0)))))
 
 (defn- draw-graph!
-  "The edges the spanning tree kept, drawn hub centre to hub centre."
+  "The edges the spanning tree kept, drawn hub center to hub center."
   [^js ctx rooms edges tile-size [scale ox oy]]
   (let [by-id (into {} (map (juxt :id identity)) rooms)
         px    (fn [v] (+ ox (* scale (/ v tile-size))))

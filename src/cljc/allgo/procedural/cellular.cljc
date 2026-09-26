@@ -15,7 +15,7 @@
   positive away from them, which draws the Voronoi diagram of the feature
   points as a network of sharp creases: cracked mud, crazed glaze, dragon
   scales, the veins in a leaf. Neither is achievable by summing noise, and
-  both are recognisable at a glance, which is the argument for the basis.
+  both are recognizable at a glance, which is the argument for the basis.
 
   ## Scattering the points
 
@@ -57,22 +57,22 @@
   "The feature points of one lattice cell, as `[[x y z v] ...]`.
 
   `v` is a random value in [-1, 1] carried by the point -- Worley's
-  per-feature attribute, which is what lets a cell be given a flat colour
+  per-feature attribute, which is what lets a cell be given a flat color
   or a height of its own rather than only a distance."
   [{:keys [seed density jitter] :or {seed 0 density 3.0 jitter 1.0}} i j k]
   (let [seed (long seed) i (long i) j (long j) k (long k)
         density (double density) jitter (double jitter)
         s0 (noise/cell-seed seed i j k)
         m (noise/poisson-count density (noise/unit s0))
-        centre (* 0.5 (- 1.0 jitter))]
+        center (* 0.5 (- 1.0 jitter))]
     (loop [n 0 s (noise/advance s0) acc []]
       (if (>= n m)
         acc
-        (let [px (+ i centre (* jitter (noise/unit s)))
+        (let [px (+ i center (* jitter (noise/unit s)))
               s (noise/advance s)
-              py (+ j centre (* jitter (noise/unit s)))
+              py (+ j center (* jitter (noise/unit s)))
               s (noise/advance s)
-              pz (+ k centre (* jitter (noise/unit s)))
+              pz (+ k center (* jitter (noise/unit s)))
               s (noise/advance s)
               v (noise/signed s)]
           (recur (inc n) (noise/advance s) (conj acc [px py pz v])))))))
@@ -105,7 +105,7 @@
     :or {seed 0 density 3.0 jitter 1.0 metric :euclidean}}]
   (let [seed (long seed) density (double density) jitter (double jitter)
         dist (get metrics metric (:euclidean metrics))
-        centre (* 0.5 (- 1.0 jitter))]
+        center (* 0.5 (- 1.0 jitter))]
     (fn [^doubles best ^doubles bp x y z]
       (let [x (double x) y (double y) z (double z)
             ci (long (math/floor x)) cj (long (math/floor y)) ck (long (math/floor z))]
@@ -124,11 +124,11 @@
                 (loop [p 0 s (noise/advance s0) bd bd]
                   (if (>= p m)
                     bd
-                    (let [px (+ i centre (* jitter (noise/unit s)))
+                    (let [px (+ i center (* jitter (noise/unit s)))
                           s (noise/advance s)
-                          py (+ j centre (* jitter (noise/unit s)))
+                          py (+ j center (* jitter (noise/unit s)))
                           s (noise/advance s)
-                          pz (+ k centre (* jitter (noise/unit s)))
+                          pz (+ k center (* jitter (noise/unit s)))
                           s (noise/advance s)
                           v (noise/signed s)
                           d (double (dist (- x px) (- y py) (- z pz)))]
@@ -187,7 +187,7 @@
 
 (defn- scalar-basis
   "Wraps a reduction over the nearest distances as an ordinary basis,
-  centred on zero and scaled to land near [-1, 1].
+  centered on zero and scaled to land near [-1, 1].
 
   The centring and scaling constants at the call sites are measured rather
   than derived -- the distributions of F1, F2 and F2-F1 have closed forms
@@ -195,7 +195,7 @@
   basis and a gradient basis can be swapped for one another inside a
   fractal without every other parameter having to move too. Under
   `:manhattan` and `:chebyshev`, distances run larger and the result sits
-  off centre."
+  off center."
   [opts n f k]
   (let [search (searcher opts)
         n (long n)
@@ -212,7 +212,7 @@
   "Distance to the nearest feature point: a field of rounded bumps.
 
   Zero at the mean spacing, negative in a feature point's immediate
-  neighbourhood and positive out towards the cell boundaries. Inverted, it
+  neighborhood and positive out toward the cell boundaries. Inverted, it
   is the classic pebbles-and-bubbles texture."
   ([] (f1 {}))
   ([opts] (scalar-basis opts 1 (fn [^doubles d] (- (aget d 0) 1.0)) 1.1)))
@@ -237,8 +237,8 @@
 
   The whole family in one function: `[-1 1]` is `f2-f1`, `[1]` is `f1`,
   `[-1 0 1]` picks out a different set of creases again. Worley's chapter
-  is largely a catalogue of what the coefficients do, and this is the knob
-  that catalogue turns."
+  is largely a catalog of what the coefficients do, and this is the knob
+  that catalog turns."
   ([coeffs] (combination {} coeffs))
   ([opts coeffs]
    (let [coeffs (mapv double coeffs)

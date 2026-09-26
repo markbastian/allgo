@@ -47,14 +47,14 @@
             "triangle inequality")))))
 
 (deftest direction-test
-  (testing "the six neighbours are each one step away and all distinct"
+  (testing "the six neighbors are each one step away and all distinct"
     (let [ns (h/neighbors [3 -1])]
       (is (= 6 (count (distinct ns))))
       (is (every? #(= 1 (h/distance [3 -1] %)) ns))))
 
   (testing "diagonals are two steps away and off-axis"
     ;; Not the directions doubled: [2 0] is two steps along one axis,
-    ;; whereas the diagonal [2 -1] shares only a corner with the centre.
+    ;; whereas the diagonal [2 -1] shares only a corner with the center.
     (is (every? #(= 2 (h/distance [0 0] %)) h/diagonals))
     (is (every? (fn [d] (not-any? zero? (h/cube d))) h/diagonals))
     (is (= 6 (count (distinct (h/diagonal-neighbors [2 2]))))))
@@ -80,7 +80,7 @@
       (is (= (h/hex-length hex) (h/hex-length (h/rotate-left hex))))
       (is (= (h/distance [2 2] hex) (h/distance [2 2] (h/rotate-left hex [2 2]))))))
 
-  (testing "rotating about a centre fixes that centre"
+  (testing "rotating about a center fixes that center"
     (is (= [2 2] (h/rotate-left [2 2] [2 2])))
     (is (= [2 2] (h/rotate-right [2 2] [2 2]))))
 
@@ -99,7 +99,7 @@
     (is (every? #(= (second (h/cube %)) (second (h/cube (h/reflect-r %)))) (patch 3)))
     (is (every? #(= (nth (h/cube %) 2) (nth (h/cube (h/reflect-s %)) 2)) (patch 3))))
 
-  (testing "reflection preserves distance from the origin, and from a centre"
+  (testing "reflection preserves distance from the origin, and from a center"
     (doseq [hex (patch 3)]
       (is (= (h/hex-length hex) (h/hex-length (h/reflect-q hex))))
       (is (= (h/distance [1 -2] hex) (h/distance [1 -2] (h/reflect-r hex [1 -2])))))))
@@ -126,7 +126,7 @@
         (is (= target (last l)))
         (is (= (inc (h/distance [0 0] target)) (count l)) "no gaps or repeats")
         (is (every? (fn [[a b]] (= 1 (h/distance a b))) (partition 2 1 l))
-            "each step is to a neighbour"))))
+            "each step is to a neighbor"))))
 
   (testing "a line to itself is just itself"
     (is (= [[2 2]] (h/line [2 2] [2 2]))))
@@ -203,7 +203,7 @@
     (is (= [0 0] (h/->offset :odd-r [0 0])))
     (is (= [0 0] (h/->offset :even-r [0 0]))))
 
-  (testing "neighbours stay adjacent through the conversion"
+  (testing "neighbors stay adjacent through the conversion"
     (doseq [k all-kinds]
       (is (every? #(= 1 (h/distance [2 -3] (h/offset-> k (h/->offset k %))))
                   (h/neighbors [2 -3]))
@@ -237,7 +237,7 @@
       (testing (str o ": pixel conversion round-trips")
         (is (every? #(= % (h/pixel->hex l (h/->pixel l %))) (h/hexagon 6))))
 
-      (testing (str o ": a point near a centre lands in that hex")
+      (testing (str o ": a point near a center lands in that hex")
         (doseq [hex (h/hexagon 3)]
           (let [[x y] (h/->pixel l hex)]
             (is (= hex (h/pixel->hex l [(+ x 2.0) (- y 1.5)]))))))
@@ -250,7 +250,7 @@
                         (< (abs (- 12.0 (Math/hypot (- x cx) (- y cy)))) 1e-9))
                       cs))))
 
-      (testing (str o ": neighbouring centres are all the same distance apart")
+      (testing (str o ": neighboring centers are all the same distance apart")
         (let [[cx cy] (h/->pixel l [0 0])
               ds      (map (fn [n] (let [[x y] (h/->pixel l n)]
                                      (Math/hypot (- x cx) (- y cy))))
@@ -301,7 +301,7 @@
   (let [path-between (fn [start goal blocked]
                        (search/a-star {:start      start
                                        :goal       goal
-                                       :neighbours #(remove blocked (h/neighbors %))
+                                       :neighbors #(remove blocked (h/neighbors %))
                                        ;; hex/distance is exactly the right
                                        ;; heuristic and has the right shape
                                        ;; to be handed over as-is.
@@ -313,7 +313,7 @@
           (is (= [0 0] (first p)))
           (is (= goal (last p))))))
 
-    (testing "every step of a path is to a neighbour"
+    (testing "every step of a path is to a neighbor"
       (let [wall (set (for [r (range -3 4) :when (not= r 3)] [2 r]))
             p    (path-between [0 0] [4 0] wall)]
         (is (every? (fn [[a b]] (= 1 (h/distance a b))) (partition 2 1 p)))
@@ -327,7 +327,7 @@
       (doseq [goal [[4 -2] [-3 1] [0 5]]]
         (is (= (count (path-between [0 0] goal #{}))
                (count (search/dijkstra {:start [0 0] :goal goal
-                                        :neighbours h/neighbors}))))))))
+                                        :neighbors h/neighbors}))))))))
 
 (deftest wraparound-test
   (testing "a hex already inside is left alone"
@@ -337,7 +337,7 @@
     (doseq [hex (h/hexes-within [0 0] 7)]
       (is (<= (h/distance [0 0] (h/wrap hex 3)) 3))))
 
-  (testing "there are seven centres and they are distinct"
+  (testing "there are seven centers and they are distinct"
     (let [cs (h/mirror-centers 3)]
       (is (= 7 (count cs)))
       (is (= 7 (count (distinct cs))))
@@ -365,7 +365,7 @@
   (let [board (set (h/hexagon 4))
         p     (search/depth-first {:start      [0 0]
                                    :goal       [3 -1]
-                                   :neighbours #(filterv board (h/neighbors %))})]
+                                   :neighbors #(filterv board (h/neighbors %))})]
     (is (some? p) "it finds a route")
     (is (= [0 0] (first p)))
     (is (= [3 -1] (last p)))

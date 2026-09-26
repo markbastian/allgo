@@ -10,10 +10,10 @@
   axes meeting at the wrist. The geometry is chosen to make the algebra
   possible.
 
-  What that buys is *kinematic decoupling*. The wrist centre cannot be
+  What that buys is *kinematic decoupling*. The wrist center cannot be
   moved by the wrist, only by the first three joints, so:
 
-    1. find the wrist centre by stepping back from the tool along its own
+    1. find the wrist center by stepping back from the tool along its own
        approach axis
     2. solve joints 1 to 3 for the position of that point -- pure geometry,
        a triangle
@@ -77,15 +77,15 @@
 (defn- solve-shoulder
   "Joint 1, twice: the arm can pass either side of the target.
 
-  Seen from above the wrist centre sits at a fixed offset `b` from the
+  Seen from above the wrist center sits at a fixed offset `b` from the
   shoulder's turning axis, so the base angle is where the target lies
   minus how far that offset carries it round."
   [px py b]
   (let [r2 (- (+ (* px px) (* py py)) (* b b))]
     (when-not (neg? r2)
       (let [r (math/sqrt r2)]
-        ;; The two roots of the offset triangle: reaching forwards, and
-        ;; reaching backwards over the shoulder.
+        ;; The two roots of the offset triangle: reaching forward, and
+        ;; reaching backward over the shoulder.
         [[(- (math/atan2 py px) (math/atan2 b r)) r]
          [(- (math/atan2 py px) (math/atan2 b (- r))) (- r)]]))))
 
@@ -108,7 +108,7 @@
 
 (defn- solve-upper-arm
   "Joint 2, once the elbow is known: where the upper arm has to point for
-  the forearm to finish at the wrist centre."
+  the forearm to finish at the wrist center."
   [reach lift theta3 {:keys [a2 a3 d4]}]
   (let [c3 (math/cos theta3) s3 (math/sin theta3)
         wx (+ a2 (* a3 c3) (- (* d4 s3)))
@@ -118,7 +118,7 @@
 (defn- solve-wrist
   "Joints 4, 5 and 6 from the rotation the arm has left to make.
 
-  With the two wrist twists at right angles and cancelling, the three
+  With the two wrist twists at right angles and canceling, the three
   rotations compose into a plain Z-Y-Z Euler sequence, and that has the
   textbook two solutions -- one with the middle angle positive, one with
   it negative and the outer two turned half a circle."
@@ -177,7 +177,7 @@
                      {:joints (k/joint-count chain)})))
    (let [{:keys [d1 d2 d3 alpha3 alpha4 rest] :as g} (geometry chain)
          ;; Step back from the tool to the last joint frame, whose origin
-         ;; is the wrist centre -- the wrist joints add no offset, so they
+         ;; is the wrist center -- the wrist joints add no offset, so they
          ;; cannot move it.
          f6 (k/compose target (k/invert (:tool chain)))
          [px py pz] (:pos f6)

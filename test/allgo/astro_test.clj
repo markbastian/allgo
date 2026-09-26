@@ -80,7 +80,7 @@
 (def ^:private test-field
   "A field with terms at every shape the recursion has to handle: zonal
   (m=0), sectorial (m=n) and tesseral (0<m<n)."
-  {:GM c/GM-earth :R c/R-earth :normalised? true
+  {:GM c/GM-earth :R c/R-earth :normalized? true
    :C {[0 0] 1.0 [2 0] -4.841654e-4 [2 2] 2.43926e-6
        [3 0] 9.5717e-7 [3 1] 2.02929e-6 [3 3] 7.2114e-7 [4 0] 5.3997e-7}
    :S {[2 2] -1.40027e-6 [3 1] 2.4892e-7 [3 3] 1.41437e-6}})
@@ -102,8 +102,8 @@
 
 (deftest j2-matches-its-closed-form
   ;; The one term with a standard closed form, so it pins the recursion,
-  ;; the normalisation and the acceleration formula together.
-  (let [only {:GM c/GM-earth :R c/R-earth :normalised? true
+  ;; the normalization and the acceleration formula together.
+  (let [only {:GM c/GM-earth :R c/R-earth :normalized? true
               :C {[0 0] 1.0 [2 0] (- (/ geo/J2 (Math/sqrt 5.0)))} :S {}}
         pm   (geo/point-mass c/GM-earth c/R-earth)]
     (doseq [r sample-points]
@@ -141,7 +141,7 @@
                        ["tesseral C31"  {[3 1] 2.0e-6} {}]
                        ["sectorial C33" {[3 3] 7.0e-7} {}]]]
     (testing label
-      (let [m  {:GM c/GM-earth :R c/R-earth :normalised? true :C (assoc C [0 0] 1.0) :S S}
+      (let [m  {:GM c/GM-earth :R c/R-earth :normalized? true :C (assoc C [0 0] 1.0) :S S}
             pm (geo/point-mass c/GM-earth c/R-earth)
             r  [5000.0 3000.0 4000.0]
             a  (sub (geo/acceleration m r 4) (geo/acceleration pm r 0))
@@ -164,13 +164,13 @@
     (is (pos? (step 4)))
     (is (> (step 2) (* 100 (step 3))) "J2 dominates everything above it")))
 
-(deftest normalisation-factors-are-right
-  (is (close? 1.0 (geo/normalisation-factor 0 0) 1e-14))
-  (is (close? (Math/sqrt 5.0) (geo/normalisation-factor 2 0) 1e-14))
-  (is (close? (Math/sqrt 7.0) (geo/normalisation-factor 3 0) 1e-14))
-  (is (close? 3.0 (geo/normalisation-factor 4 0) 1e-14))
+(deftest normalization-factors-are-right
+  (is (close? 1.0 (geo/normalization-factor 0 0) 1e-14))
+  (is (close? (Math/sqrt 5.0) (geo/normalization-factor 2 0) 1e-14))
+  (is (close? (Math/sqrt 7.0) (geo/normalization-factor 3 0) 1e-14))
+  (is (close? 3.0 (geo/normalization-factor 4 0) 1e-14))
   ;; N_22 = sqrt(2 * 5 * (0!/4!)) = sqrt(10/24)
-  (is (close? (Math/sqrt (/ 10.0 24.0)) (geo/normalisation-factor 2 2) 1e-14)))
+  (is (close? (Math/sqrt (/ 10.0 24.0)) (geo/normalization-factor 2 2) 1e-14)))
 
 ;; ---------------------------------------------------------------- ephemeris
 
@@ -280,7 +280,7 @@
 
 (deftest the-penumbra-is-a-ramp-not-a-step
   ;; The whole reason for a conical model: a satellite crossing the terminator
-  ;; sees the force ease off over several hundred kilometres rather than
+  ;; sees the force ease off over several hundred kilometers rather than
   ;; switch. At GEO the ramp is about 400 km wide.
   (let [nus (mapv #(srp/shadow [-42164.0 % 0.0] sun-at) (range 5800.0 7200.0 25.0))]
     (is (apply <= nus) "monotonic across the terminator")
@@ -288,11 +288,11 @@
     (is (close? 1.0 (last nus) 1e-12))
     (testing "and it passes through half-light at the geometric limb"
       (is (close? 0.5 (srp/shadow [-42164.0 6378.0 0.0] sun-at) 0.02)))
-    (testing "no step: no two neighbouring samples jump far"
+    (testing "no step: no two neighboring samples jump far"
       (is (< (apply max (map (fn [[a b]] (abs (- b a))) (partition 2 1 nus))) 0.15)))))
 
 (deftest annular-eclipse-beyond-the-tip
-  ;; Far enough back the Earth is the smaller disc and can only ever cover a
+  ;; Far enough back the Earth is the smaller disk and can only ever cover a
   ;; fraction (b/a)^2 of the Sun.
   (let [d      2.0e6
         d-sun  (+ c/AU d)
@@ -306,7 +306,7 @@
         a (srp/acceleration r sun-at 0.02 1.3)]
     (testing "magnitude is pressure times area-over-mass times reflectivity"
       ;; Scaled by (AU/d)^2, and d is not quite an AU: a satellite 7000 km
-      ;; sunward of the Earth's centre catches light 1e-4 brighter. Small,
+      ;; sunward of the Earth's center catches light 1e-4 brighter. Small,
       ;; but it is the inverse-square law doing its job, not rounding.
       (let [d (- c/AU 7000.0)
             want (* c/solar-pressure 1.3 0.02 1e-3 (/ (* c/AU c/AU) (* d d)))]
@@ -461,7 +461,7 @@
       ;; On a circular orbit v^2 = GM/r, so the radial coefficient
       ;; 4GM/r - v^2 comes to +3GM/r. The sign is not incidental: an
       ;; inward correction would close the orbit faster than Newton and
-      ;; precess the perihelion backwards, which is the opposite of what
+      ;; precess the perihelion backward, which is the opposite of what
       ;; Mercury does.
       (is (pos? (first circular))))))
 
@@ -481,12 +481,12 @@
 
 (deftest the-induced-potential-is-k2-times-the-raising-potential
   ;; The definition of a Love number, and the sharpest check available here:
-  ;; it pins the normalisation, the Legendre functions, the k2/5 factor and
+  ;; it pins the normalization, the Legendre functions, the k2/5 factor and
   ;; every sign convention at once. Anything wrong anywhere moves the ratio
   ;; off one.
   (let [corr  (tid/corrections [[c/GM-moon moon-at]])
         ;; a field of the corrections alone, with no central term
-        field {:GM c/GM-earth :R c/R-earth :normalised? true
+        field {:GM c/GM-earth :R c/R-earth :normalized? true
                :C (assoc (:C corr) [0 0] 0.0) :S (:S corr)}]
     (doseq [[label p] [["sub-lunar" [c/R-earth 0.0 0.0]]
                        ["quadrature" [0.0 c/R-earth 0.0]]
@@ -516,12 +516,12 @@
       (is (close? (* want-s amp) (get-in cr [:S [2 2]]) (* 1e-6 amp)) (str "S22 at " lon)))))
 
 (deftest tidal-perturbation-is-the-expected-size
-  (let [j2    {:GM c/GM-earth :R c/R-earth :normalised? true
+  (let [j2    {:GM c/GM-earth :R c/R-earth :normalized? true
                :C {[0 0] 1.0 [2 0] -4.841654e-4} :S {}}
         tided (tid/perturb j2 [[c/GM-moon moon-at] [c/GM-sun [c/AU 0.0 0.0]]])
         r     [7000.0 0.0 0.0]
         a     (* 1000.0 (mag (mapv - (geo/acceleration tided r 2) (geo/acceleration j2 r 2))))]
-    (testing "around 1e-7 m/s^2, this being the geometry that maximises it"
+    (testing "around 1e-7 m/s^2, this being the geometry that maximizes it"
       (is (< 1e-8 a 1e-6) (str a " m/s^2")))
     (testing "and utterly dwarfed by the static field it perturbs"
       (let [pm   (geo/point-mass c/GM-earth c/R-earth)
@@ -551,7 +551,7 @@
 
 (def ^:private j2-only
   {:degree 2 :sun? false :moon? false
-   :field {:GM c/GM-earth :R c/R-earth :normalised? true
+   :field {:GM c/GM-earth :R c/R-earth :normalized? true
            :C {[0 0] 1.0 [2 0] (- (/ geo/J2 (Math/sqrt 5.0)))} :S {}}})
 
 (deftest j2-precesses-the-node-at-the-textbook-rate
@@ -620,7 +620,7 @@
       (is (close? (mag r) (mag (forces/eci->ecef r u)) 1e-10)
           "a frame rotation cannot change an altitude"))))
 
-(deftest confusing-tt-with-ut1-costs-thirty-kilometres
+(deftest confusing-tt-with-ut1-costs-thirty-kilometers
   ;; The larger of the two mistakes available here, and the easier to make:
   ;; the rotation angle is a UT1 quantity while the dynamics run on TT, and
   ;; the two differ by 64 s at J2000. The Earth turns 465 m/s at the equator.
@@ -641,8 +641,8 @@
                     sidereal-only (let [g (t/gmst ut1) ca (Math/cos g) sa (Math/sin g) [x y z] r]
                                     [(+ (* ca x) (* sa y)) (+ (* (- sa) x) (* ca y)) z])]
                 (mag (mapv - full sidereal-only))))]
-    (is (< (gap c/mjd-J2000) 1.0) "under a kilometre at the epoch")
-    (is (> (gap (t/calendar->mjd 2030 1 1)) 20.0) "tens of kilometres a generation later")
+    (is (< (gap c/mjd-J2000) 1.0) "under a kilometer at the epoch")
+    (is (> (gap (t/calendar->mjd 2030 1 1)) 20.0) "tens of kilometers a generation later")
     (is (> (gap (t/calendar->mjd 2050 1 1)) (gap (t/calendar->mjd 2030 1 1))))))
 
 (deftest nystrom-is-refused-when-the-model-needs-velocity
@@ -708,7 +708,7 @@
 
 (deftest tdb-stays-within-two-milliseconds-of-tt
   ;; A relativistic effect: a clock on Earth beats at a varying rate against
-  ;; one at the barycentre, because Earth's distance from the Sun and its
+  ;; one at the barycenter, because Earth's distance from the Sun and its
   ;; speed both vary annually. It cannot accumulate -- it is periodic.
   (let [diffs (map (fn [d] (* 86400.0 1000.0
                               (- (t/tt->tdb (+ c/mjd-J2000 d)) (+ c/mjd-J2000 d))))
@@ -735,7 +735,7 @@
   (let [utc (t/calendar->mjd 2020 6 1)]
     (is (= utc (t/utc->ut1 utc)) "no offset given, no offset applied")
     ;; Only to a microsecond: an MJD near 59000 held in one double resolves
-    ;; about 1e-11 of a day. Ample for orbit work at the metre level, and the
+    ;; about 1e-11 of a day. Ample for orbit work at the meter level, and the
     ;; reason precise systems carry a two-part Julian date instead.
     (is (close? 0.3 (* 86400.0 (- (t/utc->ut1 utc 0.3) utc)) 1e-5))
     (testing "and the offset is always under a second, by construction"
@@ -865,7 +865,7 @@
 (deftest precession-makes-a-gmst-only-rotation-obsolete
   ;; Worth being explicit about: rotating by sidereal time alone ignores that
   ;; the pole and equinox have moved since J2000. The error is nil at the
-  ;; epoch and grows at 50 arcseconds a year, which is tens of kilometres at
+  ;; epoch and grows at 50 arcseconds a year, which is tens of kilometers at
   ;; the Earth's surface within a couple of decades.
   (let [err (fn [yr]
               (let [utc (t/calendar->mjd yr 1 1)
@@ -874,11 +874,11 @@
                     gmst-only (let [g (t/gmst utc)]
                                 [(* c/R-earth (Math/cos g)) (* c/R-earth (- (Math/sin g))) 0.0])]
                 (mag (mapv - full gmst-only))))]
-    (is (< (err 2000) 1.0) "agree to under a kilometre at the epoch itself")
-    (is (> (err 2025) 20.0) "but tens of kilometres apart a generation later")
+    (is (< (err 2000) 1.0) "agree to under a kilometer at the epoch itself")
+    (is (> (err 2025) 20.0) "but tens of kilometers apart a generation later")
     (is (> (err 2050) (err 2025)) "and it only grows")))
 
-(deftest polar-motion-moves-the-ground-by-metres
+(deftest polar-motion-moves-the-ground-by-meters
   ;; The rotation pole wanders within the crust by about 0.3 arcseconds in a
   ;; 435-day Chandler wobble. Negligible for an orbit, decisive for geodesy.
   (let [utc (t/calendar->mjd 2024 1 1)
@@ -912,7 +912,7 @@
 
 (deftest geodetic-latitude-differs-from-geocentric
   ;; The distinction the ellipsoid forces. Geodetic latitude is measured
-  ;; from the local vertical, geocentric from the centre, and a plumb line
+  ;; from the local vertical, geocentric from the center, and a plumb line
   ;; on an ellipsoid does not point at the middle of the Earth.
   (doseq [[lat expect-arcmin] [[0.0 0.0] [15.0 5.76] [30.0 9.98]
                                [45.0 11.55] [60.0 10.02] [90.0 0.0]]]
@@ -1080,7 +1080,7 @@
               ;; Relative, because the round trip loses precision as the
               ;; orbit elongates: the half-angle conversions between true
               ;; and eccentric anomaly are delicate near periapsis, where a
-              ;; high-eccentricity orbit sweeps fastest. A metre on a
+              ;; high-eccentricity orbit sweeps fastest. A meter on a
               ;; 10,000 km orbit is 1e-7 relative, and that is the floor.
               err (/ (mag (mapv - r1 r0)) 10000.0)]
           (is (< err 1e-7)
@@ -1136,7 +1136,7 @@
                      (* 3.0 T)))
             [ra _] (kep/propagate mu-e r0 v0 (* 3.0 T))]
         (is (< (mag (mapv - ra (subvec (vec num) 0 3))) 1e-4)
-            "agreeing to well under a metre after three orbits")))))
+            "agreeing to well under a meter after three orbits")))))
 
 (deftest j2-moves-the-elements-the-way-theory-says
   ;; Chapter 3 in the language of chapter 2. The whole value of elements is
@@ -1189,7 +1189,7 @@
 (def ^:private equator-station (gd/geodetic->cartesian 0.0 0.0 0.0))
 
 (deftest tropospheric-delay-matches-published-magnitudes
-  (testing "2.4 metres straight up"
+  (testing "2.4 meters straight up"
     (is (close? 2.4 (* 1000.0 (obs/tropospheric-delay (/ Math/PI 2.0))) 0.01)))
   (testing "and about twenty-five at five degrees"
     (is (< 20.0 (* 1000.0 (obs/tropospheric-delay (* 5.0 c/degrees))) 30.0)))
@@ -1219,7 +1219,7 @@
     (let [truth 20000.0
           m1 (+ truth (obs/ionospheric-delay tec obs/L1))
           m2 (+ truth (obs/ionospheric-delay tec obs/L2))]
-      (is (> (* 1000.0 (- m1 truth)) 1.0) "L1 alone is metres out")
+      (is (> (* 1000.0 (- m1 truth)) 1.0) "L1 alone is meters out")
       (is (< (abs (* 1000.0 (- (obs/ionosphere-free m1 obs/L1 m2 obs/L2) truth))) 1e-6)
           (str tec " TECU: the combination removes it")))))
 
@@ -1244,7 +1244,7 @@
                                    {:a (+ c/R-earth 800.0) :e 0.0 :i 0.9 :raan 0.0 :argp 0.0 :nu 0.3})
         fixed   (:range-rate (obs/range-and-rate equator-station [0.0 0.0 0.0] r v))
         rotating (:range-rate (obs/range-and-rate equator-station (obs/station-velocity equator-station) r v))]
-    (is (not (close? fixed rotating 0.01)) "worth hundreds of metres per second")
+    (is (not (close? fixed rotating 0.01)) "worth hundreds of meters per second")
     (is (close? 0.4651 (mag (obs/station-velocity equator-station)) 1e-3)
         "the equator travels 465 m/s")))
 
@@ -1252,7 +1252,7 @@
   ;; A satellite overhead moves perpendicular to the line of sight, so the
   ;; range barely changes during the light travel time and the correction
   ;; nearly vanishes. Low on the horizon it moves along the beam and the
-  ;; correction is tens of metres.
+  ;; correction is tens of meters.
   (let [orbit (fn [nu] (kep/elements->state c/GM-earth
                                             {:a (+ c/R-earth 800.0) :e 0.0 :i 0.9
                                              :raan 0.0 :argp 0.0 :nu nu}))
@@ -1262,7 +1262,7 @@
                            lt (obs/light-time equator-station sat-at 0.0)]
                        (* 1000.0 (abs (- (mag (mapv - (sat-at 0.0) equator-station)) (:range lt))))))]
     (is (< (correction 0.0) 1.0) "overhead: nothing to see")
-    (is (> (correction 0.45) 10.0) "low: tens of metres")
+    (is (> (correction 0.45) 10.0) "low: tens of meters")
     (is (> (correction 0.72) (correction 0.45)) "and more the lower it goes")))
 
 (deftest light-time-is-a-few-milliseconds
@@ -1284,17 +1284,17 @@
 (deftest a-clock-error-looks-exactly-like-a-range-error
   ;; Which is why a navigation receiver solves for four unknowns and not
   ;; three: a microsecond of clock offset is 300 m on every satellite at once.
-  (let [m (obs/modelled-range {:geometric 20000.0 :station-clock 1e-6})]
-    (is (close? 0.2998 (:clock m) 1e-3) "a microsecond is about 300 metres")
+  (let [m (obs/modeled-range {:geometric 20000.0 :station-clock 1e-6})]
+    (is (close? 0.2998 (:clock m) 1e-3) "a microsecond is about 300 meters")
     (is (close? (+ 20000.0 (:clock m)) (:range m) 1e-9)))
   (testing "and a satellite clock offset works the other way"
-    (let [m (obs/modelled-range {:geometric 20000.0 :satellite-clock 1e-6})]
+    (let [m (obs/modeled-range {:geometric 20000.0 :satellite-clock 1e-6})]
       (is (neg? (:clock m))))))
 
-(deftest the-modelled-range-adds-up
-  (let [m (obs/modelled-range {:geometric 20000.0
-                               :elevation (* 10.0 c/degrees)
-                               :tec 50 :frequency obs/L1})]
+(deftest the-modeled-range-adds-up
+  (let [m (obs/modeled-range {:geometric 20000.0
+                              :elevation (* 10.0 c/degrees)
+                              :tec 50 :frequency obs/L1})]
     (is (close? (+ 20000.0 (:troposphere m) (:ionosphere m) (:clock m)) (:range m) 1e-12))
     (is (close? 0.01334 (:troposphere m) 1e-4) "13 m of troposphere at ten degrees")
     (is (close? 0.00812 (:ionosphere m) 1e-4) "8 m of ionosphere at 50 TECU")))
@@ -1560,7 +1560,7 @@
           pos-err (mag (mapv - (subvec final 0 3) (subvec truth 0 3)))
           cov (:covariance (est/solve-batch rows1 6))
           formal (Math/sqrt (+ (nth (nth cov 0) 0) (nth (nth cov 1) 1) (nth (nth cov 2) 2)))]
-      (is (> (est/rms rows0) 1.0) "starts kilometres out")
+      (is (> (est/rms rows0) 1.0) "starts kilometers out")
       (is (< (est/rms rows1) (* 2.0 sigma)) "and ends at the noise floor")
       (is (< pos-err 0.1)
           (str "recovered to " (* 1000.0 pos-err) " m from a 2.7 km initial error"))
@@ -1576,7 +1576,7 @@
   ;; is not optional. With too short an arc only two stations ever see the
   ;; satellite, giving eleven ranges for six unknowns. Gauss-Newton drives
   ;; the residuals to the noise floor -- the fit is excellent -- while the
-  ;; orbit walks kilometres away from the truth. Nothing in the residuals
+  ;; orbit walks kilometers away from the truth. Nothing in the residuals
   ;; says so; the formal uncertainty does.
   (let [mu c/GM-earth
         accel (fn [_ r _] (let [d (mag r)] (mapv #(* (- (/ mu (* d d d))) %) r)))
@@ -1638,16 +1638,16 @@
       (is (<= (:stations weak) 2) "only two stations get a pass"))
     (testing "yet it fits the data beautifully"
       (is (< (:rms weak) (* 2.0 sigma)) "residuals at the noise floor"))
-    (testing "while being kilometres wrong"
+    (testing "while being kilometers wrong"
       (is (> (:error weak) 1.0)))
     (testing "and the covariance is what says so"
-      (is (> (:formal weak) 1.0) "formal uncertainty is kilometres too")
+      (is (> (:formal weak) 1.0) "formal uncertainty is kilometers too")
       (is (> (/ (:formal weak) (:rms weak)) 20.0)
           "formal uncertainty enormous next to the residual: the tell"))
     (testing "a longer arc determines the orbit and the covariance agrees"
       (is (> (:n strong) 25))
       (is (>= (:stations strong) 3))
-      (is (< (:error strong) 0.1) "tens of metres")
+      (is (< (:error strong) 0.1) "tens of meters")
       (is (< (/ (:formal strong) (:rms strong)) 20.0) "and no longer flagged"))))
 
 ;; -------------------------------------------------- orthogonal least squares
@@ -1714,7 +1714,7 @@
   (testing "and there must be at least as many observations as unknowns"
     (is (nil? (est/solve [{:H [1.0 0.0] :residual 1.0}] 2)))))
 
-(deftest qr-honours-weights
+(deftest qr-honors-weights
   (let [rows [{:H [1.0] :residual 10.0 :weight 100.0}
               {:H [1.0] :residual 0.0 :weight 1.0}]]
     (is (close? (first (:correction (est/solve rows 1 {:method :normal})))
@@ -1863,7 +1863,7 @@
   ;; Not lags. The Earth turns once a day while the Moon takes twenty-seven,
   ;; so rotation drags the bulge past the sub-lunar point. The resulting
   ;; couple is why the Moon recedes 38 mm a year and the day lengthens.
-  ;; Reverse this sign and the Moon would be spiralling in.
+  ;; Reverse this sign and the Moon would be spiraling in.
   (let [axis (fn [corr]
                (let [c22 (get-in corr [:C [2 2]])
                      s22 (get-in corr [:S [2 2]])]
@@ -1882,7 +1882,7 @@
       (is (close? lead axis 1e-6) (str "lead of " lead " degrees")))))
 
 (deftest ocean-tides-add-to-the-acceleration
-  (let [j2 {:GM c/GM-earth :R c/R-earth :normalised? true
+  (let [j2 {:GM c/GM-earth :R c/R-earth :normalized? true
             :C {[0 0] 1.0 [2 0] -4.841654e-4} :S {}}
         bodies [[c/GM-moon moon-at] [c/GM-sun [c/AU 0.0 0.0]]]
         r [7000.0 0.0 0.0]
@@ -1918,7 +1918,7 @@
   ;; measurable rather than merely a nuisance.
   (doseq [tec [10 50 100]]
     (let [g 20000.0
-          code (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L1}))
+          code (:range (obs/modeled-range {:geometric g :tec tec :frequency obs/L1}))
           ph   (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1}))]
       (is (pos? (- code g)) "code long")
       (is (neg? (- ph g)) "carrier short")
@@ -1930,7 +1930,7 @@
   ;; removed what is left is purely ionospheric and varies smoothly.
   (doseq [tec [10 50 100]]
     (let [g 20000.0 n 123456
-          code (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L1}))
+          code (:range (obs/modeled-range {:geometric g :tec tec :frequency obs/L1}))
           ph   (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1 :ambiguity n}))]
       ;; Tolerance set by cancellation, not by the model: this subtracts two
       ;; numbers near 20,000 km to get 0.016, so six digits go immediately
@@ -1968,10 +1968,10 @@
         mw (fn [g tec]
              (obs/melbourne-wubbena
               (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L1 :ambiguity n1}))
-              (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L1}))
+              (:range (obs/modeled-range {:geometric g :tec tec :frequency obs/L1}))
               obs/L1
               (:phase (obs/carrier-phase {:geometric g :tec tec :frequency obs/L2 :ambiguity n2}))
-              (:range (obs/modelled-range {:geometric g :tec tec :frequency obs/L2}))
+              (:range (obs/modeled-range {:geometric g :tec tec :frequency obs/L2}))
               obs/L2))]
     (doseq [[g tec] [[20000.0 10] [25000.0 80] [30000.0 150] [22000.0 0]]]
       (is (close? widelane-n (/ (mw g tec) (obs/wavelength (- obs/L1 obs/L2))) 1e-6)
@@ -1985,7 +1985,7 @@
     (is (not (obs/cycle-slip? smooth (+ smooth 1e-6))) "quiet epochs are quiet")
     (is (obs/cycle-slip? smooth slipped)
         "and one lost cycle on L1 -- 19 cm -- must be visible, which is the
-         whole purpose; a threshold in metres would report a clean series")
+         whole purpose; a threshold in meters would report a clean series")
     (testing "the default threshold sits under a single wavelength"
       (is (< 5e-5 (obs/wavelength obs/L1))))))
 

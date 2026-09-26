@@ -41,7 +41,7 @@
     (testing (:name method)
       (doseq [p (observed-order method)]
         ;; Generous below, tight above: a method may not beat its order, but
-        ;; roundoff and pre-asymptotic behaviour cost a little beneath it.
+        ;; roundoff and pre-asymptotic behavior cost a little beneath it.
         (is (< (- (:order method) 0.35) p (+ (:order method) 0.35))
             (str (:name method) " claims order " (:order method) ", observed " p))))))
 
@@ -55,7 +55,7 @@
     (let [s (core/step-until (rk/integrator rk/rk4 exponential 0.0 [1.0] h {:adaptive? false}) 1.0)]
       (is (< (abs (- (:t s) 1.0)) 1e-12) (str "h=" h " ended at " (:t s))))))
 
-(deftest adaptive-stepping-honours-its-tolerance
+(deftest adaptive-stepping-honors-its-tolerance
   (doseq [method [rk/rkf45 rk/dopri54]]
     (testing (:name method)
       (doseq [tol [1e-4 1e-6 1e-8 1e-10]]
@@ -166,7 +166,7 @@
       (is (< (rkn-err h) (* 3.0 (rk-err h)))
           "and at equal step it is within a small factor while doing 3/4 the work"))))
 
-(deftest nystrom-step-doubling-honours-its-tolerance
+(deftest nystrom-step-doubling-honors-its-tolerance
   (doseq [tol [1e-6 1e-8 1e-10]]
     (let [s (core/step-until (rkn/integrator rkn/rkn4 oscillator 0.0 [1.0] [0.0] 0.1
                                              {:adaptive? true :tol-abs tol :tol-rel tol})
@@ -416,7 +416,7 @@
 ;; -------------------------------------------------- variable-step multistep
 
 (deftest variable-coefficients-reduce-to-the-fixed-tables
-  ;; The generalisation must contain the special case exactly, not
+  ;; The generalization must contain the special case exactly, not
   ;; approximately: evenly spaced offsets are just particular node values.
   (doseq [k [2 3 4 5 6]]
     (testing (str "order " k)
@@ -436,7 +436,7 @@
                 [1.0 0.0 -0.4] [0.0 -5.0] [0.0 -0.01 -0.02]]]
     (is (close? 1.0 (reduce + (ms/variable-coefficients offs)) 1e-11) (str offs))))
 
-(deftest variable-step-adams-honours-its-tolerance
+(deftest variable-step-adams-honors-its-tolerance
   (doseq [method ms/catalog-variable
           tol [1e-6 1e-9 1e-12]]
     (let [s (core/step-until (ms/variable-integrator method exponential 0.0 [1.0] 0.05

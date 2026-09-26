@@ -17,7 +17,7 @@
   a test if the scene it runs on is the same every time. It is not a
   detail here: on an unlucky draw two boids sit close enough to the
   perception radius that the two implementations round the same distance
-  to opposite sides of it, take different neighbour sets, and part
+  to opposite sides of it, take different neighbor sets, and part
   company by far more than double precision would explain. Seeding it
   means a failure is a real disagreement rather than that draw coming
   up."
@@ -86,7 +86,7 @@
     (is (< (run-both 150 [60.0 60.0] {:edges :wrap :perception-radius 200.0} 15)
            tolerance)))
 
-  (testing "and a single boid, which has no neighbours at all"
+  (testing "and a single boid, which has no neighbors at all"
     (is (< (run-both 1 [300.0 300.0] {:edges :wrap} 20) tolerance))))
 
 (deftest obstacles-test

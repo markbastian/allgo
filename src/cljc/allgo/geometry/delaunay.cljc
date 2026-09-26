@@ -264,7 +264,7 @@
   A bisector lies half-way to its site, so a sentinel at distance r from a
   site puts a cut r/2 away. To leave the box untouched that has to exceed
   the box diagonal -- not merely its half-width, or the cut clears the edges
-  but still shaves the corners. Three diagonals from the centre clears it
+  but still shaves the corners. Three diagonals from the center clears it
   for any site in the box."
   [[[x0 y0] [x1 y1]]]
   (let [cx (/ (+ x0 x1) 2.0)

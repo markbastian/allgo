@@ -3,7 +3,7 @@
 
   Ebert et al., *Texturing & Modeling: A Procedural Approach*. Chapter 2
   and chapter 12 for lattice noise, chapter 20 (Musgrave, \"MojoWorld:
-  Building Procedural Planets\") for the idea that organises this
+  Building Procedural Planets\") for the idea that organizes this
   namespace. MojoWorld's central move is to separate *what is repeated*
   from *how it is repeated*: a basis function is a band-limited random
   function of space, and a fractal is a recipe for summing scaled copies of
@@ -40,7 +40,7 @@
   `gradient-basis-4d` is here for the reason MojoWorld is built on 4D
   noise: a 3D world carved out of a 4D function can be *moved* through the
   fourth coordinate, so clouds evolve and a planet's terrain can be
-  dialled continuously from one variant to another, without any of the
+  dialed continuously from one variant to another, without any of the
   popping a reseed would cause."
   (:require [allgo.procedural.shaping :as shaping]
             [clojure.math :as math]))
@@ -166,7 +166,7 @@
 
   What makes a noise field tileable: fold the lattice and the field
   repeats exactly, seams included, because the cell at `period - 1`
-  interpolates towards the cell at 0 -- which is the same cell the tile
+  interpolates toward the cell at 0 -- which is the same cell the tile
   next door starts from."
   ^long [^long v ^long period]
   (if (zero? period) v (mod v period)))
@@ -600,7 +600,7 @@
          density (double density)
          radius (double radius)
          r2 (* radius radius)
-         ;; The neighbourhood searched, flattened to one index so that the
+         ;; The neighborhood searched, flattened to one index so that the
          ;; sample loop is a loop and not three of them.
          reach (long (math/ceil radius))
          side (inc (* 2 reach))
@@ -645,7 +645,7 @@
                               (if (< d2 r2)
                                ;; 1 - 3t^2 + 2t^3: one at the impulse, and
                                ;; zero with zero slope at the edge of its
-                               ;; support, so neighbouring cells join with
+                               ;; support, so neighboring cells join with
                                ;; no seam.
                                 (let [t (math/sqrt (/ d2 r2))]
                                   (+ acc (* w (+ 1.0 (* t t (- (* 2.0 t) 3.0))))))
@@ -662,7 +662,7 @@
 (defn absolute
   "`|basis|`. The fold that turns noise into Perlin's turbulence.
 
-  Reflecting the negative half upwards leaves a crease wherever the
+  Reflecting the negative half upward leaves a crease wherever the
   original crossed zero, and those creases are the thin dark filaments
   that read as smoke, flame and marble veins."
   [basis]
@@ -722,7 +722,7 @@
                 (+ z (* amount (double dz)))))))))
 
 (defn stepped
-  "`basis` quantised into `n` terraces, with `smooth` of each riser blended.
+  "`basis` quantized into `n` terraces, with `smooth` of each riser blended.
 
   MojoWorld's stepped bases, and the direct route to sedimentary strata
   and rice-terrace landscapes: the terrain function is unchanged, but its

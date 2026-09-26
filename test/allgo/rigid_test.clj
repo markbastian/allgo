@@ -51,7 +51,7 @@
           p [1.5 0.25 -3.0]]
       (is (< (v/distance p (r/local->world b (r/world->local b p))) 1e-12))))
 
-  (testing "a body's own centre is the origin of its frame"
+  (testing "a body's own center is the origin of its frame"
     (let [b (r/box {:size [1 1 1] :density 1.0 :pos [3 -1 2]})]
       (is (< (v/length (r/world->local b [3 -1 2])) 1e-12)))))
 
@@ -96,7 +96,7 @@
 
 (deftest inverse-mass-test
   (let [b (r/box {:size [1 1 1] :density 1.0})]
-    (testing "a correction through the centre sees only the mass"
+    (testing "a correction through the center sees only the mass"
       (is (< (abs (- (:inv-mass b) (r/inverse-mass b [0 1 0] (:pos b)))) 1e-12)))
 
     (testing "one at arm's length sees more, because it also spins the body"
@@ -109,7 +109,7 @@
              (r/inverse-mass b [0 1 0] [2.0 0 0]))))
 
     (testing "a correction along the arm does not spin it at all"
-      ;; Pushing a body straight at its own centre cannot turn it.
+      ;; Pushing a body straight at its own center cannot turn it.
       (is (< (abs (- (:inv-mass b) (r/inverse-mass b [1 0 0] [1.0 0.0 0.0]))) 1e-12)))
 
     (testing "with no point at all the question is purely angular"

@@ -6,7 +6,7 @@
   That is enough for the impulse solvers, which are told about a gap and
   refuse to close it faster than it is wide. It is not enough for XPBD,
   which integrates a substep and only then pushes overlaps apart: a gap
-  it has not yet reached buys it nothing, so above about 120 metres a
+  it has not yet reached buys it nothing, so above about 120 meters a
   second it steps over a thin slab and comes out the other side.
 
   ## The algorithm
@@ -22,7 +22,7 @@
   closing speed is measured along the line between the nearest points,
   which is the direction that matters and the only one; and rotation is
   allowed for by `|omega| * r`, the fastest any point of a body can move
-  about its own centre, rather than by turning the shapes and asking
+  about its own center, rather than by turning the shapes and asking
   again. That over-states how fast a spinning body closes a gap, which
   is the right way to be wrong -- the answer comes back early, never
   late.
@@ -47,7 +47,7 @@
    (if (neg? (double z)) -1.0 1.0)])
 
 (defn support
-  "A body's support mapping, with its centre moved to `at`.
+  "A body's support mapping, with its center moved to `at`.
 
   Only the position is moved and not the orientation, because the
   rotation is accounted for in the closing-speed bound instead. Turning
@@ -64,7 +64,7 @@
         (v/add at (q/rotate rot (v/mul half (signs (q/rotate inv dir)))))))))
 
 (defn reach
-  "The furthest any point of a body is from its centre.
+  "The furthest any point of a body is from its center.
 
   What `|omega| * r` needs: the most a spin of one radian a second can
   move a part of this body."

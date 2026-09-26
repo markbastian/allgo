@@ -40,7 +40,7 @@
 
 (def ^:private sheet-size 1.6)
 (def ^:private ball-radius 0.32)
-(def ^:private ball-centre [0.0 0.55 0.0])
+(def ^:private ball-center [0.0 0.55 0.0])
 
 (defn- pinned-ids
   "Which particles are held, for the current pinning mode."
@@ -72,7 +72,7 @@
         body  (cond-> body
                 (.-obstacle controls)
                 (xpbd/add-constraint
-                 (xpbd/sphere-constraint ball-centre ball-radius (.-friction controls)))
+                 (xpbd/sphere-constraint ball-center ball-radius (.-friction controls)))
                 (.-selfCollision controls)
                 ;; Detected once a frame, resolved every substep. Needs the
                 ;; speed limit too, or a fast fold crosses its own thickness
@@ -128,7 +128,7 @@
                   (-> .-position (.setY 0.002))))
     (let [ball (THREE/Mesh. (THREE/SphereGeometry. ball-radius 32 24)
                             (THREE/MeshPhongMaterial. #js {:color 0x4f7ac0}))]
-      (.set (.-position ball) (nth ball-centre 0) (nth ball-centre 1) (nth ball-centre 2))
+      (.set (.-position ball) (nth ball-center 0) (nth ball-center 1) (nth ball-center 2))
       (.add scene ball)
       (.set (.-position camera) 1.9 1.5 2.3)
       (.appendChild container (.-domElement renderer))

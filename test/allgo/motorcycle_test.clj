@@ -24,7 +24,7 @@
       (is (< (abs (double (:front-travel t))) 0.01)))))
 
 (deftest rolls-without-slipping-test
-  (testing "at a steady cruise both tyres turn at road speed"
+  (testing "at a steady cruise both tires turn at road speed"
     (let [t (tel (ride (m/scene cfg [floor] (m/start-pose cfg 8.0)) {:throttle 0.05 :lean 0.0} 2.0))]
       (is (< (abs (- (double (:rear-wheel-speed t)) (double (:speed t)))) 0.05))
       (is (< (abs (- (double (:front-wheel-speed t)) (double (:speed t)))) 0.2)))))
@@ -67,9 +67,9 @@
       (is (< 9.0 x 15.0) (str "stopped at " x)))))
 
 (deftest suspension-test
-  (testing "a kerb compresses the fork, and the bike rides over it and settles"
-    (let [kerb (rigid/box {:pos [6.0 0.04 0.0] :size [0.5 0.08 3.0]})
-          s0 (m/scene cfg [floor kerb] (m/start-pose cfg 8.0))
+  (testing "a curb compresses the fork, and the bike rides over it and settles"
+    (let [curb (rigid/box {:pos [6.0 0.04 0.0] :size [0.5 0.08 3.0]})
+          s0 (m/scene cfg [floor curb] (m/start-pose cfg 8.0))
           travel (loop [s s0 k 0 lowest 0.0]
                    (if (= k 240)
                      [s lowest]
@@ -85,7 +85,7 @@
 
 (deftest top-speed-test
   (testing "a steady throttle levels off rather than accelerating for ever"
-    ;; A minute near 30 m/s is well over a kilometre, which is further
+    ;; A minute near 30 m/s is well over a kilometer, which is further
     ;; than the usual floor goes.
     (let [s1 (ride (m/scene cfg [(m/ground 4000.0)] (m/start-pose cfg 20.0))
                    {:throttle 0.3 :lean 0.0} 50.0)
@@ -100,5 +100,5 @@
                     (if (< (abs (- v' v)) 1e-9) v' (recur v'))))]
       (is (< (abs (- v2 v1)) 0.2) (str "still changing: " v1 " then " v2))
       ;; Short of the ideal, and not by much: the rest is lost in the
-      ;; tyres, which the contact solver does not model as lossless.
+      ;; tires, which the contact solver does not model as lossless.
       (is (< (* 0.75 ideal) v2 ideal) (str v2 " against an ideal of " ideal)))))

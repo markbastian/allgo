@@ -3,7 +3,7 @@
   and with it every other chapter at once.
 
   What is animated here is not time but *convergence*. The true orbit is
-  drawn in green and never moves. The estimate starts kilometres away in
+  drawn in green and never moves. The estimate starts kilometers away in
   blue, knowing only a pile of ranges corrupted by noise, and each
   Gauss-Newton iteration snaps it closer until the two are indistinguishable
   and the residuals have fallen to the noise floor.
@@ -16,9 +16,9 @@
   Shorten the arc to three hours and only two stations ever see the
   satellite: eleven ranges for six unknowns. The residuals still drop to the
   noise floor -- the fit is excellent -- while the true error climbs to
-  nine kilometres. A good fit is not a good orbit. The covariance is what
+  nine kilometers. A good fit is not a good orbit. The covariance is what
   tells you which you have, reporting a formal uncertainty of some seven
-  kilometres, and the readout says so."
+  kilometers, and the readout says so."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.estimation :as est]
             [allgo.astro.frames :as fr]
@@ -37,7 +37,7 @@
 (def ^:private elevation-mask (* 10.0 c/degrees))
 
 (def ^:private ^js controls
-  #js {:noiseMetres   10.0
+  #js {:noiseMeters   10.0
        :arcHours      6.0
        :sampleSeconds 150.0
        :startErrorKm  2.7
@@ -82,7 +82,7 @@
   "Build a truth orbit, simulate observations from it, and start the estimate
   somewhere wrong."
   []
-  (let [sigma  (/ (.-noiseMetres controls) 1000.0)
+  (let [sigma  (/ (.-noiseMeters controls) 1000.0)
         span   (* 3600.0 (.-arcHours controls))
         times  (vec (range 60.0 span (.-sampleSeconds controls)))
         truth  (let [[r v] (kep/elements->state mu {:a 7500.0 :e 0.02 :i 0.95
@@ -163,9 +163,9 @@
       (.beginPath ctx) (.moveTo ctx 0 y) (.lineTo ctx chart-w y) (.stroke ctx)))
   ;; both on a shared log scale, decades from 1e-4 to 1e2 km
   (let [lo -4.0 hi 2.0
-        plot (fn [key colour]
+        plot (fn [key color]
                (when (> (count history) 1)
-                 (set! (.-strokeStyle ctx) colour)
+                 (set! (.-strokeStyle ctx) color)
                  (set! (.-lineWidth ctx) 2)
                  (.beginPath ctx)
                  (doseq [[i h] (map-indexed vector history)]
@@ -284,7 +284,7 @@
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (refresh!)
         (let [gui (GUI. #js {:container container})]
-          (-> (.add gui controls "noiseMetres" 0 200 1) (.onChange restart!))
+          (-> (.add gui controls "noiseMeters" 0 200 1) (.onChange restart!))
           ;; Down to one hour, so the ill-conditioned failure is reachable
           ;; rather than merely described.
           (-> (.add gui controls "arcHours" 1 10 0.5) (.onChange restart!))

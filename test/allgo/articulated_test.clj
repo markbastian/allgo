@@ -52,7 +52,7 @@
   (testing "a hinged rod accelerates as the textbook says it does"
     ;; The one place there is an answer to check against that shares no
     ;; code with the thing being checked. A rod pivoted at one end:
-    ;; qdd = -(m g d / I_pivot) cos q, with d the distance to the centre
+    ;; qdd = -(m g d / I_pivot) cos q, with d the distance to the center
     ;; of mass and I_pivot = m L^2 / 3 by the parallel axis theorem.
     (let [L 1.3 m 2.4
           model [(rod -1 L m)]
@@ -220,7 +220,7 @@
 ;; Being pushed
 
 (defn- sphere-ish
-  "A free body whose centre of mass is at its frame origin and whose
+  "A free body whose center of mass is at its frame origin and whose
   inertia is the same about every axis, so the textbook formulae for
   being hit apply without any further care."
   [m i]
@@ -229,13 +229,13 @@
    :links []})
 
 (deftest impulse-test
-  (testing "through the centre of mass, a free body weighs what it weighs"
+  (testing "through the center of mass, a free body weighs what it weighs"
     (let [m 2.5]
       (is (close? (:effective-mass (ab/impulse-at (sphere-ish m 0.7) [] at-rest -1
                                                   [0.0 0.0 0.0] [1.0 0.0 0.0]))
                   m 1e-12))))
 
-  (testing "off the centre of mass it weighs less, by the textbook amount"
+  (testing "off the center of mass it weighs less, by the textbook amount"
     ;; 1/m_eff = 1/m + (r x d) . I^-1 (r x d). An impulse that can spin
     ;; the body as well as move it meets less resistance.
     (let [m 2.5 i 0.7
@@ -302,8 +302,8 @@
   (rigid/box {:pos [0.0 -0.5 0.0] :size [40.0 1.0 40.0]}))
 
 (defn- crate
-  "A free box, its shape centred on its own frame rather than on a
-  centre of mass somewhere else."
+  "A free box, its shape centered on its own frame rather than on a
+  center of mass somewhere else."
   [[sx sy sz] m]
   (let [f (/ (double m) 12.0)]
     {:base {:mass m :com [0.0 0.0 0.0]
@@ -351,7 +351,7 @@
     ;; Contacts are offered before the touch, so a settled body sits in
     ;; a gap rather than in a hole. Every depth here should be negative
     ;; or within the slop; a positive one means the solver let something
-    ;; through and pushed it back out afterwards.
+    ;; through and pushed it back out afterward.
     (let [model (crate [0.6 0.4 0.5] 2.0)
           s (fall model (resting 2.0) 360 (/ 1.0 120.0) [floor])
           depths (map :depth (ab/contacts-with model (:q s) (:base s) [floor]))]
@@ -520,7 +520,7 @@
     ;; The reason the configuration is a quaternion and the velocity is
     ;; three numbers rather than both being three. Turn the whole
     ;; problem about the gravity axis and the answer must turn with it;
-    ;; a three-angle parameterisation has orientations where it does
+    ;; a three-angle parameterization has orientations where it does
     ;; not, and a ragdoll finds them by tumbling.
     (let [L 1.3 m 2.4
           model [(limb -1 :spherical L m)]
@@ -555,7 +555,7 @@
           rs {:rot (q/from-axis-angle [0.2 0.9 0.3] 0.6) :pos [0.3 -0.2 0.5]
               :vel [0.0 0.0 0.0 0.0 0.0 0.0]}
           hinv (ab/inverse-mass-matrix model qv)]
-      (is (= 13 (ab/generalised-dof model)))
+      (is (= 13 (ab/generalized-dof model)))
       (doseq [i [-1 0 2]
               dir [[1.0 0.0 0.0] (v/normalize [0.3 -0.8 0.5])]]
         (let [p (v/add (:pos (ab/frame-of model qv rs i)) [0.11 -0.07 0.23])
@@ -637,7 +637,7 @@
   (testing "and the cone says nothing about twist, which is its own limit"
     ;; The distinction is worth a test because it is the one that is easy
     ;; to miss by eye: a head can be within forty degrees of upright and
-    ;; still be facing backwards.
+    ;; still be facing backward.
     ;;
     ;; Both cases keep the cone on. Swing and twist are read out of the
     ;; joint's quaternion by projecting onto the bone, and that
@@ -717,7 +717,7 @@
           "and it should actually have done something")))
 
   (testing "the mass it meets is a reduced mass"
-    ;; Smaller than either body's alone, which sounds backwards and is
+    ;; Smaller than either body's alone, which sounds backward and is
     ;; not: both ends of this push give, where a contact with the floor
     ;; has one end that does not. With a root heavy enough to make the
     ;; two limbs independent it is the textbook identity exactly.

@@ -78,12 +78,12 @@
   (testing "a sphere on a box top is pushed straight up"
     (let [cs (ct/between 0 1 (ball [0.0 0.9 0.0] 0.5) (box [0.0 0.0 0.0]))]
       (is (= 1 (count cs)))
-      ;; Normal runs from the sphere towards the box, so downwards.
+      ;; Normal runs from the sphere toward the box, so downward.
       (is (< (v/distance (:normal (first cs)) [0.0 -1.0 0.0]) 1e-9))
       (is (< (abs (- 0.1 (:depth (first cs)))) 1e-9))))
 
   (testing "a sphere swallowed by a box comes out of the nearest face"
-    ;; No nearest surface point exists in the usual sense once the centre
+    ;; No nearest surface point exists in the usual sense once the center
     ;; is inside, and a solver handed a zero normal does nothing at all.
     (let [cs (ct/between 0 1 (ball [0.1 0.0 0.0] 0.2) (box [0.0 0.0 0.0] [4.0 1.0 1.0]))]
       (is (= 1 (count cs)))
@@ -166,9 +166,9 @@
       (is (= ct/speculative (ct/margin still (assoc fast :inv-mass 0.0) dt)))))
 
   (testing "a body is offered a contact with what it is about to reach"
-    ;; A metre short of the floor and closing at sixty metres a second,
-    ;; which is a metre of travel in the step. Standing still it is a
-    ;; metre of daylight and nothing to report; moving, it is a contact
+    ;; A meter short of the floor and closing at sixty meters a second,
+    ;; which is a meter of travel in the step. Standing still it is a
+    ;; meter of daylight and nothing to report; moving, it is a contact
     ;; with a negative depth -- a gap the solver is allowed to see
     ;; coming and stop at.
     (let [floor (rigid/box {:pos [0.0 -0.5 0.0] :size [20.0 1.0 20.0]})
@@ -189,23 +189,23 @@
         (is (= 1 (count cs)))
         (is (< (abs (- 0.01 (double (:depth c)))) 1e-6))
         (is (< (v/distance (:point c) [0.2 0.0 0.1]) 1e-4))
-        (is (< (v/distance (:normal c) [0.0 -1.0 0.0]) 1e-9) "from the wheel towards the floor")))
+        (is (< (v/distance (:normal c) [0.0 -1.0 0.0]) 1e-9) "from the wheel toward the floor")))
     (testing "a leaning wheel touches at the bottom of its own rim, not under its hub"
       ;; This is the whole reason for a torus. Leaned 40 degrees, a ball
-      ;; would still touch directly beneath its centre; a tyre touches
+      ;; would still touch directly beneath its center; a tire touches
       ;; where its rim is lowest, which is out in the plane of the wheel.
       (let [lean 0.7
             rot (q/from-axis-angle [1.0 0.0 0.0] lean)
             axis (q/rotate rot [0.0 0.0 1.0])
             hub [0.0 (- (+ (* big (Math/cos lean)) r) 0.005) 0.0]
             c (first (ct/between 0 1 (wheel hub rot) floor))
-            ;; The point is on the floor's surface, so the tube's centre is
+            ;; The point is on the floor's surface, so the tube's center is
             ;; the tube's radius less the overlap above it.
-            tube-centre (v/add (:point c) [0.0 (- r (double (:depth c))) 0.0])]
+            tube-center (v/add (:point c) [0.0 (- r (double (:depth c))) 0.0])]
         (is (some? c))
         (is (< (abs (- 0.005 (double (:depth c)))) 1e-4))
-        (is (< (abs (v/dot (v/sub tube-centre hub) axis)) 1e-4) "in the plane of the wheel")
-        (is (< (abs (- big (v/distance tube-centre hub))) 1e-4) "on the rim")
+        (is (< (abs (v/dot (v/sub tube-center hub) axis)) 1e-4) "in the plane of the wheel")
+        (is (< (abs (- big (v/distance tube-center hub))) 1e-4) "on the rim")
         (is (> (abs (double (nth (:point c) 2))) 0.15) "well out from under the hub")))
     (testing "a wheel clear of the floor by more than the margin does not touch it"
       (is (empty? (ct/between 0 1 (wheel [0.0 (+ big r 0.1) 0.0] q/identity-q) floor))))

@@ -24,7 +24,7 @@
   (testing "Fibonacci directions are unit vectors spread over the whole sphere"
     (let [ds (dirs 2000)]
       (is (every? #(< (abs (- 1.0 (v3/length %))) 1e-9) ds))
-      ;; No hemisphere is favoured: the mean of an even spread is the centre.
+      ;; No hemisphere is favored: the mean of an even spread is the center.
       (is (< (v3/length (v3/scale (reduce v3/add ds) (/ 1.0 2000))) 0.01))))
 
   (testing "the tangent basis is orthonormal everywhere, poles included"
@@ -151,7 +151,7 @@
       (is (every? #(zero? (p/cloud-cover pl %)) (dirs 200))))))
 
 (deftest color-test
-  (testing "every colour is a real colour"
+  (testing "every color is a real color"
     (let [pl @world]
       (doseq [d (dirs 2000)]
         (let [c (p/surface-color pl d)]
@@ -177,7 +177,7 @@
       (is (> (/ (reduce + (map lum shallow)) 50.0)
              (/ (reduce + (map lum deep)) 50.0)))))
 
-  (testing "the snow line comes down towards the poles"
+  (testing "the snow line comes down toward the poles"
     ;; Testing the rule rather than a picture: hold the terrain fixed and
     ;; turn the latitude term up, and the only ground that may gain snow
     ;; is the ground away from the equator.

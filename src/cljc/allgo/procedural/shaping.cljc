@@ -21,7 +21,7 @@
     edge, terrain with flatter plains.
 
   The argument order follows the book, which follows the RenderMan shading
-  language: the value being shaped comes last. That reads backwards for
+  language: the value being shaped comes last. That reads backward for
   Clojure's threading macros and is worth keeping anyway, because these are
   the names and the signatures a reader of the book already has."
   (:require [clojure.math :as math]))
@@ -106,11 +106,11 @@
     :else (math/pow t (/ (math/log b) (math/log 0.5)))))
 
 (defn gain
-  "Perlin's gain: pushes values away from the middle, or towards it.
+  "Perlin's gain: pushes values away from the middle, or toward it.
 
   `g` = 0.5 is the identity. Above it the curve steepens around 0.5 and
   contrast rises; below it the curve flattens and everything drifts to
-  grey. Built from two halves of `bias` so that it fixes 0, 0.5 and 1."
+  gray. Built from two halves of `bias` so that it fixes 0, 0.5 and 1."
   ^double [^double g ^double t]
   (if (< t 0.5)
     (* 0.5 (bias (- 1.0 g) (* 2.0 t)))
@@ -142,7 +142,7 @@
 (defn spline
   "Catmull-Rom through `knots`, with `t` in [0, 1] spanning the whole run.
 
-  The book's colour-ramp primitive: four or more control values, and a
+  The book's color-ramp primitive: four or more control values, and a
   curve that passes through each of them. The first and last knots are
   phantoms -- the curve starts at the second and ends at the second to
   last -- which is what makes the interior tangents well defined, so give

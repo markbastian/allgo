@@ -15,7 +15,7 @@
   {:heights (double-array (* dim dim) (double h)) :dim dim})
 
 (defn- ramp
-  "A field tilting `drop` per cell towards the last row."
+  "A field tilting `drop` per cell toward the last row."
   [dim drop]
   {:heights (double-array (for [i (range dim) _ (range dim)] (* (- (dec dim) i) (double drop))))
    :dim dim})
@@ -46,13 +46,13 @@
       (is (= [0] (vec ^ints (:dr b))))
       (is (= [0] (vec ^ints (:dc b))))))
 
-  (testing "it is a disc, not a square, and rim cells that take nothing are dropped"
-    ;; A 7x7 square would be 49; the disc of radius 3 is 29, and the 8
+  (testing "it is a disk, not a square, and rim cells that take nothing are dropped"
+    ;; A 7x7 square would be 49; the disk of radius 3 is 29, and the 8
     ;; cells at distance exactly 3 carry zero weight and are not visited.
     (is (= 29 (:n (e/brush 3))))
     (is (every? pos? (vec ^doubles (:w (e/brush 3))))))
 
-  (testing "weight falls with distance from the centre"
+  (testing "weight falls with distance from the center"
     (let [{:keys [n dr dc w]} (e/brush 3)
           by-distance (sort-by first
                                (for [k (range n)]
@@ -150,7 +150,7 @@
   (testing "erosion cuts valleys into a slope rather than smoothing it"
     ;; A uniform ramp has no valleys. After rain it does: the droplets
     ;; converge, and the cells they converge on are cut below their
-    ;; neighbours, so the spread of heights within a row goes from nothing
+    ;; neighbors, so the spread of heights within a row goes from nothing
     ;; to something.
     (let [dim 96
           r (ramp dim 0.02)
@@ -167,7 +167,7 @@
         row-flux (fn [i] (reduce + (map #(e/drainage f i %) (range dim))))]
 
     (testing "flux accumulates downstream"
-      ;; The ramp falls towards the last row, so every droplet that passes
+      ;; The ramp falls toward the last row, so every droplet that passes
       ;; a high row must also pass the rows below it.
       (is (< (row-flux 10) (row-flux 40) (row-flux 70))))
 
@@ -201,8 +201,8 @@
 
 (deftest border-test
   (testing "the border is cut far less than the interior"
-    ;; The taper zeroes erosion *centred* on an edge cell, not erosion
-    ;; that reaches one: a droplet a few cells in still swings its disc
+    ;; The taper zeroes erosion *centered* on an edge cell, not erosion
+    ;; that reaches one: a droplet a few cells in still swings its disk
     ;; over the edge. So the outermost cells are worn lightly rather than
     ;; not at all, and it is the ratio that matters -- an untapered run
     ;; cuts the border harder than the interior, not a fifth as hard, and

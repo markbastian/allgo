@@ -54,7 +54,7 @@
   "The ring of solid tiles touching the floor.
 
   Only this shell can be hit, so the rest of the void is not worth
-  modelling -- and there is no way to enumerate it anyway, the void being
+  modeling -- and there is no way to enumerate it anyway, the void being
   unbounded."
   [grid]
   (into #{}
@@ -68,7 +68,7 @@
 (defn- wall-obstacles
   "One box per shell tile, in pixel space.
 
-  Merging each row into long runs is the obvious optimisation and it makes
+  Merging each row into long runs is the obvious optimization and it makes
   things slower. Obstacles are culled against a bounding sphere before the
   GJK query, and a twenty-tile run has a sphere wide enough to catch most
   of the flock, so the cull stops doing anything and GJK runs against the

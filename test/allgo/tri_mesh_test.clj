@@ -19,7 +19,7 @@
       (is (= 32 f))
       (is (= 56 e)))
 
-    (testing "it is a disc: V - E + F = 1"
+    (testing "it is a disk: V - E + F = 1"
       (is (= 1 (+ (- v e) f))))
 
     (testing "the area is the area"
@@ -111,7 +111,7 @@
 
 (deftest topology-test
   (testing "two triangles meeting at an edge know about each other"
-    (let [n (tri/triangle-neighbours (:tri-ids pair))]
+    (let [n (tri/triangle-neighbors (:tri-ids pair))]
       (is (= 6 (count n)))
       (is (= 2 (count (filter #(>= % 0) n))) "one shared edge, seen from both sides")
       (is (= 4 (count (filter neg? n))) "and four edges on the boundary")

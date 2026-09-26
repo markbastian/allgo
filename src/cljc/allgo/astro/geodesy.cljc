@@ -4,7 +4,7 @@
   The Earth is an ellipsoid, not a sphere, and the distinction is not a
   refinement: geodetic latitude is measured from the local vertical -- the
   normal to the ellipsoid -- while geocentric latitude is measured from the
-  centre, and at 45 degrees the two differ by 11.5 arcminutes, some 21 km
+  center, and at 45 degrees the two differ by 11.5 arcminutes, some 21 km
   along the surface. A position quoted in one and read as the other is
   wrong by that much.
 
@@ -29,7 +29,7 @@
 (defn- prime-vertical
   "Radius of curvature in the prime vertical -- the distance from the
   surface to where the local normal cuts the spin axis. Not the distance to
-  the centre, which is why the ellipsoid needs its own radius at all."
+  the center, which is why the ellipsoid needs its own radius at all."
   [sin-lat]
   (/ a-earth (math/sqrt (- 1.0 (* e2 sin-lat sin-lat)))))
 
@@ -64,7 +64,7 @@
             (recur lat' (inc n))))))))
 
 (defn geocentric-latitude
-  "Latitude as seen from the centre, which is what a spherical model would
+  "Latitude as seen from the center, which is what a spherical model would
   give. It differs from the geodetic value by up to 11.5 arcminutes."
   [[x y z]]
   (math/atan2 z (math/sqrt (+ (* x x) (* y y)))))
@@ -79,7 +79,7 @@
   "The local horizon frame at a geodetic latitude and longitude: rows are
   the east, north and up directions in Earth-fixed coordinates.
 
-  Up is the ellipsoid normal, not the direction to the centre. On an
+  Up is the ellipsoid normal, not the direction to the center. On an
   ellipsoid a plumb line does not point at the middle of the Earth."
   [lat lon]
   (let [sl (math/sin lat) cl (math/cos lat)
@@ -118,8 +118,8 @@
 
   This is the frame orbit errors are quoted in, because they are not
   isotropic. A small error in speed grows along-track and hardly at all
-  radially, so after a day a prediction is typically wrong by kilometres in
-  one direction and metres in the others."
+  radially, so after a day a prediction is typically wrong by kilometers in
+  one direction and meters in the others."
   [r v]
   (let [R (unit r)
         N (unit (v3/cross r v))

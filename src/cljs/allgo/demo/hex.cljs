@@ -73,9 +73,9 @@
 (defn- search-for
   "Runs the selected algorithm, returning `[path explored]`."
   [source target walls on-board?]
-  (let [neighbours (fn [h] (filterv #(and (on-board? %) (not (walls %))) (hex/neighbors h)))
+  (let [neighbors (fn [h] (filterv #(and (on-board? %) (not (walls %))) (hex/neighbors h)))
         spec       {:start source :goal target
-                    :neighbours neighbours :heuristic hex/distance}
+                    :neighbors neighbors :heuristic hex/distance}
         seq-fn     (case (.-algorithm controls)
                      "dijkstra"      search/dijkstra-seq
                      "greedy"        search/greedy-seq

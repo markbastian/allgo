@@ -27,7 +27,7 @@
   longitude of perihelion and longitude of the ascending node -- each as a
   value at J2000 and a rate per Julian century. Angles in degrees.
 
-  Note the Earth row is the Earth-Moon barycentre, which is what the fit
+  Note the Earth row is the Earth-Moon barycenter, which is what the fit
   actually tracks; the Earth itself wanders about it by some 4700 km."
   {:mercury {:a [0.38709927  0.00000037] :e [0.20563593  0.00001906]
              :i [7.00497902 -0.00594749] :L [252.25032350 149472.67411175]
@@ -60,7 +60,7 @@
 
 (defn elements-at
   "The classical elements of `planet` at `mjd-tt`, in the units the rest of
-  this package uses: kilometres and radians."
+  this package uses: kilometers and radians."
   [planet mjd-tt]
   (let [T   (time/centuries-J2000 mjd-tt)
         at  (fn [k] (let [[v0 rate] (get-in elements [planet k])] (+ v0 (* rate T))))

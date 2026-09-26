@@ -81,7 +81,7 @@
    ;; How fast a vortex is slowed by the flow it sits in, per second.
    :damping 10.0
    ;; The fraction of its radius over which its influence falls to zero.
-   ;; A vortex that stops abruptly at its rim stamps a visible disc on the
+   ;; A vortex that stops abruptly at its rim stamps a visible disk on the
    ;; flow.
    :falloff 0.2})
 
@@ -99,7 +99,7 @@
   Within its radius each staggered velocity sample is moved toward what
   solid-body rotation about the vortex would give it: a velocity
   perpendicular to the offset, proportional to the distance out, plus the
-  speed the vortex itself is travelling at so the whole eddy is carried
+  speed the vortex itself is traveling at so the whole eddy is carried
   along rather than left behind.
 
   Mutates the fluid's velocity arrays and the pool."

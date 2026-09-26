@@ -155,7 +155,7 @@
 
     (testing "at every fork it took the fuller branch"
       ;; The rule that decides which stream is the same river as the one
-      ;; below, and the whole reason a river has a length to be labelled
+      ;; below, and the whole reason a river has a length to be labeled
       ;; along. Checked by looking at what else drained into each step and
       ;; confirming nothing carried more than the branch taken.
       (let [drains-into (reduce (fn [m v]

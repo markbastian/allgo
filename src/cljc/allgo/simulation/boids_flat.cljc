@@ -11,13 +11,13 @@
 
   Two things beyond the representation actually matter:
 
-  The reference walks each boid's neighbours three times, once per rule,
+  The reference walks each boid's neighbors three times, once per rule,
   because that reads clearly. Here all three sums are accumulated in one
-  pass, so the neighbour list is traversed once instead of three times.
+  pass, so the neighbor list is traversed once instead of three times.
 
   Positions are double buffered. Every boid must see the state as it was
   at the start of the tick -- update in place and a boid steers using its
-  neighbours' *new* positions, which biases the flock by iteration order.
+  neighbors' *new* positions, which biases the flock by iteration order.
   The reference gets this for free from persistent data; an array has to
   be explicit about it.
 
@@ -131,12 +131,12 @@
          ;; The three rules are summed into a scratch array rather than
          ;; carried as loop arguments. Ten accumulators through `recur`
          ;; box every one of them, and threading `[sx sy sz]` through a
-         ;; conditional allocates a vector for every neighbour examined --
+         ;; conditional allocates a vector for every neighbor examined --
          ;; which is how a flat-array rewrite ends up slower than the
          ;; persistent code it was replacing.
          (dotimes [q 10] (aset sums q 0.0))
          (dotimes [k found]
-           (let [j (spatial/neighbour hash k)]
+           (let [j (spatial/neighbor hash k)]
              (when (not= j i)
                (let [c  (* 3 j)
                      qx (aget pos c) qy (aget pos (+ c 1)) qz (aget pos (+ c 2))

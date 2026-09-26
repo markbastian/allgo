@@ -26,7 +26,7 @@
   cover a detailed surface exactly, and vertices near the skin fall
   outside. The weights for such a point come out negative, and the size of
   the most negative one says how far outside it is in units of the
-  tetrahedron's own extent -- so keeping the tetrahedron that minimises it
+  tetrahedron's own extent -- so keeping the tetrahedron that minimizes it
   attaches every vertex to the element it is least outside of, and the
   extrapolation carries it along just as well."
   (:require [allgo.array :as a]
@@ -42,7 +42,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- tet-radius
-  "Centre and bounding radius of one tetrahedron, as `[cx cy cz r]`."
+  "Center and bounding radius of one tetrahedron, as `[cx cy cz r]`."
   [^doubles pos ids base]
   (let [ids (vec ids)
         cx (/ (reduce + (map #(aget pos (* 3 (ids (+ base %)))) (range 4))) 4.0)
@@ -99,7 +99,7 @@
          (when (pos? found)
            (let [a (ids base) b (ids (+ base 1)) c (ids (+ base 2)) d (ids (+ base 3))]
              (dotimes [k found]
-               (let [id (spatial/neighbour hash k)]
+               (let [id (spatial/neighbor hash k)]
                  ;; Already inside something: nothing can beat that.
                  (when (pos? (aget outside id))
                    (let [p  (* 3 id)
@@ -122,7 +122,7 @@
                              (aset bary (+ 2 (* 3 id)) b2)))))))))))))
 
      ;; Anything the sweep did not reach is bound to the tetrahedron whose
-     ;; centre is nearest, whatever the distance. A surface much larger
+     ;; center is nearest, whatever the distance. A surface much larger
      ;; than its cage has vertices no element comes close to, and leaving
      ;; those unbound strands them at the origin -- which reads as the mesh
      ;; tearing. Extrapolating from a distant element is a stretch, but it

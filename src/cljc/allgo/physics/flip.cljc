@@ -121,7 +121,7 @@
   "Spreads particles that have piled up.
 
   The same counting sort as `allgo.spatial.hash`: bin the particles,
-  prefix-sum the counts into offsets, fill backwards. Without this the
+  prefix-sum the counts into offsets, fill backward. Without this the
   particles clump into the middle of cells and leave gaps the pressure
   solve reads as empty space."
   [{:keys [^floats pos count particle-radius p-nx p-ny p-spacing

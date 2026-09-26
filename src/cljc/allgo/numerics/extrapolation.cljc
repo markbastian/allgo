@@ -13,7 +13,7 @@
   (:require [allgo.numerics.core :as core]))
 
 (defn modified-midpoint
-  "Gragg's rule: cross `H` in `n` sub-steps by centred differences, then take
+  "Gragg's rule: cross `H` in `n` sub-steps by centered differences, then take
   the smoothing average at the end that cancels the odd error terms."
   [f t y H n]
   (let [h  (/ H n)
@@ -41,7 +41,7 @@
   Returns `[best difference]`, the difference being the gap between the last
   two columns -- the classic estimate for an extrapolation tableau, and the
   reason no second method is needed to size the step. It is returned
-  unnormalised so the caller can scale it by its own tolerances."
+  unnormalized so the caller can scale it by its own tolerances."
   [values ns]
   (let [k (count values)]
     (loop [j 1, col (vec values), prev nil]

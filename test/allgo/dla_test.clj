@@ -43,7 +43,7 @@
                   (remove #{seed} order))))
 
     (testing "a parent always arrives before its children"
-      ;; `subtree-sizes` walks `:order` backwards and depends on it.
+      ;; `subtree-sizes` walks `:order` backward and depends on it.
       (let [arrival (into {} (map-indexed (fn [i c] [c i])) order)]
         (is (every? #(< (arrival (aget parent %)) (arrival %))
                     (remove #{seed} order)))))

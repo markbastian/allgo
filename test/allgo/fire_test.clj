@@ -10,7 +10,7 @@
   ([] (scene {}))
   ([opts] (fire/fire (merge {:nx 60 :ny 90 :h 0.01 :vortices 200} opts))))
 
-(def ^:private disc {:kind :disc :x 0.3 :y 0.25 :radius 0.06})
+(def ^:private disk {:kind :disk :x 0.3 :y 0.25 :radius 0.06})
 
 (defn- highest-hot-row
   "The topmost row holding anything warmer than `t`."
@@ -107,37 +107,37 @@
   (testing "buoyancy is the only thing lifting a fire"
     ;; There is no gravity in a fire scene, so with the lift turned off
     ;; nothing should rise at all.
-    (let [f (advance (scene) 120 {:emitters [disc] :lift 0.0})
-          lifted (advance (scene) 120 {:emitters [disc]})]
+    (let [f (advance (scene) 120 {:emitters [disk] :lift 0.0})
+          lifted (advance (scene) 120 {:emitters [disk]})]
       (is (< (highest-hot-row f 0.05) (highest-hot-row lifted 0.05))
           "without lift the heat stays far below where buoyancy carries it"))))
 
 (deftest plume-test
   (testing "a fire rises"
     (let [f (scene)
-          source-row (do (fire/step! f {:emitters [disc]})
+          source-row (do (fire/step! f {:emitters [disk]})
                          (highest-hot-row f 0.05))]
-      (advance f 300 {:emitters [disc]})
+      (advance f 300 {:emitters [disk]})
       (is (> (highest-hot-row f 0.05) (+ source-row 20))
           "heat has climbed well above where it was made")))
 
   (testing "the plume stays inside the grid and stays finite"
-    (let [f (advance (scene) 300 {:emitters [disc]})
+    (let [f (advance (scene) 300 {:emitters [disk]})
           {:keys [^floats u ^floats v n]} f]
       (is (every? #(Float/isFinite (aget u %)) (range n)))
       (is (every? #(Float/isFinite (aget v %)) (range n)))
       (is (<= (fire/max-temperature f) 1.0))))
 
   (testing "a source keeps making heat and a settled fire does not run away"
-    (let [f (advance (scene) 200 {:emitters [disc]})
+    (let [f (advance (scene) 200 {:emitters [disk]})
           early (fire/total-heat f)]
-      (advance f 200 {:emitters [disc]})
+      (advance f 200 {:emitters [disk]})
       (is (pos? (fire/total-heat f)))
       (is (< (fire/total-heat f) (* 3 early))
           "heat settles to a steady plume rather than accumulating")))
 
   (testing "sources spawn the vortices that give a plume its curl"
-    (let [f (advance (scene) 120 {:emitters [disc]})]
+    (let [f (advance (scene) 120 {:emitters [disk]})]
       (is (pos? (vortex/vortex-count (:vortices f))))))
 
   (testing "no source, no fire"
@@ -146,7 +146,7 @@
       (is (zero? (vortex/vortex-count (:vortices f)))))))
 
 (deftest emitter-test
-  (testing "a disc heats a ring and a floor heats its bottom rows"
+  (testing "a disk heats a ring and a floor heats its bottom rows"
     (let [f (scene)]
       (fire/ignite! f dt {:emitters [{:kind :floor :rows 3}]})
       (is (< (abs (- (fire/temperature-at f 30 2) 1.0)) 1e-6))
@@ -161,10 +161,10 @@
   (testing "several sources burn at once"
     (let [f (scene)]
       (fire/ignite! f dt {:emitters [{:kind :floor :rows 2}
-                                     {:kind :disc :x 0.3 :y 0.5 :radius 0.06}]})
+                                     {:kind :disk :x 0.3 :y 0.5 :radius 0.06}]})
       (is (pos? (fire/temperature-at f 30 1)))
       (is (pos? (fire/max-temperature f)))
-      (is (> (highest-hot-row f 0.5) 20) "the disc is alight too")))
+      (is (> (highest-hot-row f 0.5) 20) "the disk is alight too")))
 
   (testing "a new kind of source is a new method, not a change to the step"
     (defmethod fire/emit! ::stripe [f _ _ _]

@@ -9,7 +9,7 @@
 
   `flipRatio` is the parameter worth playing with. At 0 the particles take
   the grid velocity outright, every particle in a cell is averaged with its
-  neighbours, and the water turns to treacle. At 1 they take only the
+  neighbors, and the water turns to treacle. At 1 they take only the
   grid's change, nothing is averaged away, and the splash keeps every eddy
   along with enough noise to look like it is boiling. 0.9 is the usual
   compromise.
@@ -56,9 +56,9 @@
      :obstacle [(* 0.65 nx cell) (* 0.4 ny cell) (* obstacle-radius ny cell)]}))
 
 ;; ---------------------------------------------------------------------------
-;; Colour
+;; Color
 
-(defn- sci-colour
+(defn- sci-color
   "Blue through green to red, the same ramp as the Eulerian demo."
   [v lo hi]
   (let [t (max 0.0 (min 0.999 (/ (- v lo) (max 1e-9 (- hi lo)))))
@@ -104,7 +104,7 @@
       (let [b (* 2 i)]
         (set! (.-fillStyle ctx)
               (if (= "speed" mode)
-                (sci-colour (js/Math.hypot (aget vel b) (aget vel (inc b))) 0.0 3.0)
+                (sci-color (js/Math.hypot (aget vel b) (aget vel (inc b))) 0.0 3.0)
                 "#5fa8e8"))
         (.beginPath ctx)
         (.arc ctx (* (aget pos b) scale) (sy (aget pos (inc b)))

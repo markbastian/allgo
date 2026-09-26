@@ -142,27 +142,27 @@
       (is (< (apply max (ys body)) 1.0) "and it did fall"))))
 
 (deftest sphere-constraint-test
-  (let [centre [0.0 0.55 0.0]
+  (let [center [0.0 0.55 0.0]
         r      0.33
         drop-sheet (fn [friction]
                      (let [mesh (tri/grid 20 20 0.08 1.25)
                            body (cond-> (x/cloth mesh {:bend-compliance 0.05})
-                                  true (x/add-constraint (x/sphere-constraint centre r friction)))]
+                                  true (x/add-constraint (x/sphere-constraint center r friction)))]
                        (dotimes [_ 300] (x/step! body {:gravity [0.0 -9.8 0.0]
                                                        :substeps 12 :damping 0.4 :floor 0.0}))
                        body))
-        distance-from-centre (fn [[px py pz]]
+        distance-from-center (fn [[px py pz]]
                                (Math/sqrt (+ (* px px)
                                              (* (- py 0.55) (- py 0.55))
                                              (* pz pz))))
         on-ball (fn [body]
-                  (count (filter #(< (abs (- (distance-from-centre %) r)) 0.03)
+                  (count (filter #(< (abs (- (distance-from-center %) r)) 0.03)
                                  (partition 3 (x/positions body)))))]
 
     (testing "nothing ends up inside the sphere, at any friction"
       (doseq [mu [0.0 0.35 0.9]]
         (let [body (drop-sheet mu)]
-          (is (every? #(>= (distance-from-centre %) (- r 1e-6))
+          (is (every? #(>= (distance-from-center %) (- r 1e-6))
                       (partition 3 (x/positions body)))
               (str "friction " mu)))))
 
@@ -186,8 +186,8 @@
       ;; above passes through anything checked only between frames.
       (let [mesh (tri/grid 10 10 0.1 6.0)
             body (-> (x/cloth mesh {:bend-compliance 0.05})
-                     (x/add-constraint (x/sphere-constraint centre r 0.3)))]
+                     (x/add-constraint (x/sphere-constraint center r 0.3)))]
         (dotimes [_ 200] (x/step! body {:gravity [0.0 -20.0 0.0] :substeps 10 :floor 0.0}))
-        (is (every? #(>= (distance-from-centre %) (- r 1e-6))
+        (is (every? #(>= (distance-from-center %) (- r 1e-6))
                     (partition 3 (x/positions body)))
-            "nothing tunnelled through")))))
+            "nothing tunneled through")))))

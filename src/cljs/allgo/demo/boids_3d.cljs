@@ -5,7 +5,7 @@
 
   Boids are instanced cones oriented along their heading and tinted by it
   (hue from compass bearing, brightness from climb), so a flock settling into
-  alignment reads as the swarm converging on a single colour."
+  alignment reads as the swarm converging on a single color."
   (:require [allgo.demo.fps :as fps]
             [allgo.simulation.boids :as boids]
             [allgo.simulation.boids-flat :as flat]
@@ -70,7 +70,7 @@
     (.rotateX (/ js/Math.PI 2))))
 
 (defn- obstacle-meshes
-  "Meshes for the obstacles, shifted from boid space into the centred world."
+  "Meshes for the obstacles, shifted from boid space into the centered world."
   [[w h d]]
   (let [material (THREE/MeshLambertMaterial. #js {:color 0x39456b})
         offset   [(/ w 2.0) (/ h 2.0) (/ d 2.0)]]
@@ -99,8 +99,8 @@
       :else      (into flock (repeatedly (- n have) #(boids/random-boid world max-speed))))))
 
 (defn- write-instances!
-  "Push flock state into the InstancedMesh: one matrix and colour per boid.
-  Boid space is [0,size); the mesh is centred on the origin, hence the offset."
+  "Push flock state into the InstancedMesh: one matrix and color per boid.
+  Boid space is [0,size); the mesh is centered on the origin, hence the offset."
   [^js mesh ^js scratch ^js color flock [w h d]]
   (let [offset [(/ w 2) (/ h 2) (/ d 2)]]
     (doseq [[i {:keys [pos vel]}] (map-indexed vector flock)]

@@ -128,7 +128,7 @@
         (is (= (values a 200) (values b 200)))
         (is (not= (values a 200) (values c 200)))))
 
-    (testing "and neighbouring slices are near each other, which is what
+    (testing "and neighboring slices are near each other, which is what
               makes the fourth dimension usable for animation"
       (let [a (n/slice g4 0.500)
             b (n/slice g4 0.501)]
@@ -146,7 +146,7 @@
         (is (< (abs (/ (reduce + vs) (count vs))) 0.1))))
 
     (testing "density changes the texture, not the range"
-      ;; The normalisation exists so that a density knob does not double
+      ;; The normalization exists so that a density knob does not double
       ;; as a brightness knob.
       (doseq [d [1.0 3.0 8.0]]
         (let [vs (values (n/sparse-convolution-basis {:seed 5 :density d}) 4000)]
@@ -195,7 +195,7 @@
       (let [d (n/distorted g (n/vector-basis {:seed 9}) 0.5)]
         (is (not= (values d 500) (values g 500)))))
 
-    (testing "stepping quantises the range"
+    (testing "stepping quantizes the range"
       (let [st (n/stepped g 4 0.0)
             vs (set (values st 4000))]
         (is (<= (count vs) 5))))
@@ -211,7 +211,7 @@
       (let [vs (values s 20000)]
         (is (every? #(<= -1.0 % 1.0) vs))
         ;; And actually uses it -- a scaling constant set too low would
-        ;; pass the bound above while quietly making everything grey.
+        ;; pass the bound above while quietly making everything gray.
         (is (> (reduce max vs) 0.7))
         (is (< (reduce min vs) -0.7))))
 
@@ -286,7 +286,7 @@
 
     (testing "holding the fourth coordinate gives an ordinary 3D basis"
       ;; What the fourth dimension is for: a slice is a field in its own
-      ;; right, and neighbouring slices are neighbouring fields rather
+      ;; right, and neighboring slices are neighboring fields rather
       ;; than unrelated ones.
       (let [a (n/slice s 0.0)
             b (n/slice s 0.0)

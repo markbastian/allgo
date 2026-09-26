@@ -52,7 +52,7 @@
       (is (= (count pairs) (count (distinct pairs))))))
 
   (testing "and it agrees with the spatial hash on what a sphere overlap is"
-    ;; A hash pair means centres within the query distance; an AABB
+    ;; A hash pair means centers within the query distance; an AABB
     ;; overlap is a weaker condition, so every hash pair must be a sweep
     ;; pair but not the reverse.
     (let [n 400 r 0.35

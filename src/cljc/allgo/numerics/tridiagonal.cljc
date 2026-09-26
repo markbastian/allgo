@@ -84,7 +84,7 @@
 (defn solve-complex
   "Thomas for a system with real off-diagonals and a complex diagonal.
 
-  The shape a semi-implicit wave term takes: discretising a first
+  The shape a semi-implicit wave term takes: discretizing a first
   derivative along a periodic axis and transforming it puts a pure
   imaginary number on the diagonal and leaves the off-diagonals, which
   came from a second derivative across the other axis, real. The

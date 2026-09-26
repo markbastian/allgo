@@ -2,7 +2,7 @@
   "Physical and astronomical constants for the force models of Montenbruck &
   Gill chapter 3.
 
-  Units throughout the astro package are kilometres, seconds and kilograms,
+  Units throughout the astro package are kilometers, seconds and kilograms,
   which is what the gravitational parameters below are quoted in and what
   keeps orbital radii near 1e4 rather than 1e7. Angles are radians."
   (:require [clojure.math :as math]))

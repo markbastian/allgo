@@ -104,9 +104,9 @@
         (.set (.-quaternion mesh) qx qy qz qw)
         (.set (.-scale mesh) 1.0 len 1.0)))))
 
-(defn- make-limb [^js scene colour opacity radius]
+(defn- make-limb [^js scene color opacity radius]
   (let [mat (THREE/MeshPhongMaterial.
-             #js {:color colour :transparent (< opacity 1.0) :opacity opacity})
+             #js {:color color :transparent (< opacity 1.0) :opacity opacity})
         bone (fn [] (let [m (THREE/Mesh. (THREE/CylinderGeometry. radius radius 1.0 14) mat)]
                       (.add scene m) m))
         blob (fn [r] (let [m (THREE/Mesh. (THREE/SphereGeometry. r 16 12) mat)]
@@ -130,10 +130,10 @@
   [^js line circle]
   (if-not circle
     (set! (.-visible line) false)
-    (let [{:keys [centre radius zero ninety]} circle
+    (let [{:keys [center radius zero ninety]} circle
           pts (for [i (range 65)]
                 (let [t (* 2 js/Math.PI (/ i 64))]
-                  (v/add centre (v/scale (v/add (v/scale zero (js/Math.cos t))
+                  (v/add center (v/scale (v/add (v/scale zero (js/Math.cos t))
                                                 (v/scale ninety (js/Math.sin t)))
                                          radius))))
           arr (js/Float32Array. (* 3 65))]

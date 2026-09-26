@@ -15,8 +15,8 @@
               two children that do not overlap much. `allgo.spatial.bvh`
               is built exactly that way.
     a cache   objects visited together end up adjacent in memory.
-    a GPU     the sort is a radix sort, which parallelises, and the tree
-              build afterwards needs no comparisons at all.
+    a GPU     the sort is a radix sort, which parallelizes, and the tree
+              build afterward needs no comparisons at all.
 
   The curve is not perfect: two points either side of a high-bit boundary
   are far apart in code however close they are in space. That shows up as

@@ -20,7 +20,7 @@
   (rigid/box {:pos [0.0 -0.5 0.0] :size [40.0 1.0 40.0]}))
 
 (def ^:private arm
-  "A metre of limb on a ball joint, bolted at the origin and hanging."
+  "A meter of limb on a ball joint, bolted at the origin and hanging."
   [{:parent -1 :joint :spherical :origin {:rot nil :pos [0.0 0.0 0.0]}
     :mass 3.0 :com [0.0 -0.5 0.0] :inertia (box-inertia [0.12 1.0 0.12] 3.0)
     :shape :box :size [0.12 1.0 0.12]}])
@@ -183,18 +183,18 @@
                                 states))
           lowest (apply min (map #(double (second (:pos (first (:bodies %))))) states))]
       (is (< worst 0.01) (str "the pinned point strayed " worst))
-      ;; A tenth of a metre from the pin, so it swings down to 1.9.
+      ;; A tenth of a meter from the pin, so it swings down to 1.9.
       (is (< lowest 1.91) "and it swung down"))))
 
 (def ^:private hanging
-  "A metre of limb on a hinge about z, bolted at `x` and hanging straight down."
+  "A meter of limb on a hinge about z, bolted at `x` and hanging straight down."
   (fn [x]
     [{:parent -1 :joint :revolute :axis [0.0 0.0 1.0] :origin {:rot nil :pos [x 0.0 0.0]}
       :mass 2.0 :com [0.0 -0.5 0.0] :inertia (box-inertia [0.1 1.0 0.1] 2.0)}]))
 
 (deftest pin-between-models-test
   (testing "two models pinned tip to tip close a loop"
-    ;; Two hinged limbs half a metre apart, their tips pinned to a point
+    ;; Two hinged limbs half a meter apart, their tips pinned to a point
     ;; between them: a closed loop, which no single tree of reduced
     ;; coordinates can describe.
     (let [left (hanging -0.25)

@@ -36,7 +36,7 @@
     (doseq [[_ cell] cells]
       (is (>= (count cell) 3) "every cell is a polygon"))))
 
-(deftest clip-polygon-behaviour
+(deftest clip-polygon-behavior
   (let [square [[0 0] [10 0] [10 10] [0 10]]]
     (testing "a polygon inside the window is unchanged in area"
       (is (< (abs (- 100.0 (area (d/clip-polygon square [[-1 -1] [11 11]])))) 1e-9)))

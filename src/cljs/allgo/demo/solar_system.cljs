@@ -85,11 +85,11 @@
             [x y z] r]
         (place [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))])))))
 
-(defn- line-of [points colour opacity]
+(defn- line-of [points color opacity]
   (THREE/Line.
    (doto (THREE/BufferGeometry.)
      (.setFromPoints (clj->js (map (fn [[x y z]] (THREE/Vector3. x y z)) points))))
-   (THREE/LineBasicMaterial. #js {:color colour :transparent true :opacity opacity})))
+   (THREE/LineBasicMaterial. #js {:color color :transparent true :opacity opacity})))
 
 (defn init! [^js container]
   (let [scene    (THREE/Scene.)

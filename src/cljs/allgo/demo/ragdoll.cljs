@@ -14,8 +14,8 @@
   a thing that has six, and then spends its iterations taking thirty
   away again. They never quite go, and the error grows with the mass
   ratio across the joint -- which is exactly what a hand on a forearm on
-  an upper arm is. Two metre-long links, the lower a thousand times the
-  heavier, come nearly three metres apart at five substeps.
+  an upper arm is. Two meter-long links, the lower a thousand times the
+  heavier, come nearly three meters apart at five substeps.
 
   Here there is no such number to report. A joint angle cannot be
   violated because there is nowhere for the violation to live. Watch the
@@ -74,8 +74,8 @@
   at the joint and overlap there by construction, so a contact between
   them would be permanent and would push the figure apart from the
   inside. Everything else is fair game, and the shoulders sit two
-  centimetres wider than the ribcage for the same reason: a forearm
-  resting five millimetres inside the chest at the start is a contact
+  centimeters wider than the ribcage for the same reason: a forearm
+  resting five millimeters inside the chest at the start is a contact
   that never goes away.
 
   ## What it costs
@@ -112,7 +112,7 @@
 (defn- deg [d] (* (double d) (/ js/Math.PI 180.0)))
 
 (defn- box-inertia
-  "A solid box's inertia about its own centre."
+  "A solid box's inertia about its own center."
   [[sx sy sz] m]
   (let [f (/ (double m) 12.0)
         sx (double sx) sy (double sy) sz (double sz)]
@@ -125,7 +125,7 @@
 
   The joint is at one end and the mass in the middle, which is what a
   limb is: a link's frame sits where it attaches to its parent, so the
-  centre of mass -- and with it the shape -- is half a length away."
+  center of mass -- and with it the shape -- is half a length away."
   [dir parent joint axis origin size m]
   (let [[_ sy _] size]
     (cond-> {:parent parent :joint joint :origin {:rot nil :pos origin}

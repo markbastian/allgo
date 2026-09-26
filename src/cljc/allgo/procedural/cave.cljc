@@ -120,7 +120,7 @@
    (fn [v] (Math/round (double (/ v (count island)))))
    (apply mapv + island)))
 
-(defn step-towards [a b]
+(defn step-toward [a b]
   (letfn [(signum [x] (cond (pos? x) 1 (neg? x) -1 :else 0))]
     (let [[dx dy] (map - b a)
           delta (if (> (abs dx) (abs dy)) [(signum dx) 0] [0 (signum dy)])]
@@ -128,7 +128,7 @@
 
 (defn path-to
   ([start finish]
-   (->> (iterate #(step-towards % finish) start)
+   (->> (iterate #(step-toward % finish) start)
         (take-while (complement #{finish}))))
   ([[start finish]] (path-to start finish)))
 

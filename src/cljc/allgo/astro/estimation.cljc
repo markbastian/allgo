@@ -38,7 +38,7 @@
           rows))
 
 (defn solve-batch
-  "One Gauss-Newton step: the correction that minimises the weighted sum of
+  "One Gauss-Newton step: the correction that minimizes the weighted sum of
   squared residuals, given their partials.
 
   Returns nil when the normal matrix is not positive definite, which means

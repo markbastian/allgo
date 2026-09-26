@@ -19,7 +19,7 @@
     (is (about (* 2 (Math/sqrt 3))
                (:distance (gjk/distance (gjk/box [0 0 0] [1 1 1])
                                         (gjk/box [3 3 3] [4 4 4]))))))
-  (testing "spheres, distance is centre separation less both radii"
+  (testing "spheres, distance is center separation less both radii"
     (is (about 2.0 (:distance (gjk/distance (gjk/sphere [0 0 0] 1) (gjk/sphere [5 0 0] 2)))))
     (is (about 3.0 (:distance (gjk/distance (gjk/sphere [0 0 0] 1) (gjk/sphere [3 4 0] 1))))))
   (testing "a point against a box, nearest feature is a vertex"

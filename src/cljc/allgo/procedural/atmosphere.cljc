@@ -17,7 +17,7 @@
   weight of everything above it, so density falls by a constant factor
   every `:scale-height`. Earth's is about 8 km against 6378 km of radius,
   which is why the atmosphere is a film and not a shell -- and why the
-  sunset, which looks through hundreds of kilometres of it, is so much
+  sunset, which looks through hundreds of kilometers of it, is so much
   redder than noon, which looks through eight.
 
   ## Scattering
@@ -27,15 +27,15 @@
   strongly as red, so blue is what arrives from directions other than the
   sun -- the sky -- and red is what is left of the sun after a long path
   through air has taken the blue out of it. One constant, one exponent,
-  and both of the sky's famous colours.
+  and both of the sky's famous colors.
 
   Mie scattering, off droplets and dust comparable to the wavelength, is
   near enough wavelength-independent and strongly forward-biased. It is
-  the white haze around the sun and the grey of a humid horizon.
+  the white haze around the sun and the gray of a humid horizon.
 
   ## What this computes
 
-  Single scattering: light from the sun, scattered once towards the eye,
+  Single scattering: light from the sun, scattered once toward the eye,
   attenuated on both legs of that journey. Multiple scattering is what
   fills in the deep blue overhead and the light in shadows, and is not
   here -- it needs a solver, not a quadrature. Single scattering is what
@@ -49,7 +49,7 @@
             [clojure.math :as math]))
 
 (def wavelengths-rgb
-  "Representative wavelengths for red, green and blue, in nanometres."
+  "Representative wavelengths for red, green and blue, in nanometers."
   [680.0 550.0 440.0])
 
 (defn rayleigh-coefficients
@@ -57,7 +57,7 @@
 
   `strength` is the coefficient at 550 nm, in reciprocal length units of
   whatever the planet is measured in. Everything characteristic about the
-  sky's colour is in the ratios, which come out near 1 : 2.3 : 5.6 --
+  sky's color is in the ratios, which come out near 1 : 2.3 : 5.6 --
   that is the whole of why it is blue."
   [strength]
   (let [strength (double strength)
@@ -77,7 +77,7 @@
   * `:rayleigh` -- coefficients per channel, from `rayleigh-coefficients`.
   * `:mie` / `:mie-g` -- haze strength and how forward-biased it is.
     `:mie-g` near 0.76 is the usual fit for atmospheric aerosol.
-  * `:sun` -- the sun's colour and intensity, per channel."
+  * `:sun` -- the sun's color and intensity, per channel."
   ([] (atmosphere {}))
   ([{:keys [radius thickness scale-height rayleigh mie mie-g sun]
      :or {radius 1.0 thickness 0.025 scale-height 0.0013
@@ -133,15 +133,15 @@
 (defn transmittance
   "What fraction of each channel survives an optical depth.
 
-  Beer's law, per channel, with Mie extinction folded in -- it is grey, so
-  it darkens without colouring."
+  Beer's law, per channel, with Mie extinction folded in -- it is gray, so
+  it darkens without coloring."
   [{:keys [rayleigh ^double mie]} ^double depth]
   (mapv (fn [b] (math/exp (- (* (+ (double b) mie) depth)))) rayleigh))
 
 (defn rayleigh-phase
   "How much Rayleigh scattering goes at an angle: `3/(16pi) (1 + cos^2)`.
 
-  Symmetric forwards and backwards, and only twice as strong along the
+  Symmetric forward and backward, and only twice as strong along the
   axis as across it -- which is why the whole sky glows rather than just
   the part near the sun."
   ^double [^double cos-theta]
@@ -164,7 +164,7 @@
 
   The single-scattering integral, as directly as it can be written: walk
   the segment, and at each sample ask how much sunlight reaches that
-  point, how much of it turns towards the eye, and how much of that
+  point, how much of it turns toward the eye, and how much of that
   survives the rest of the way. Everything expensive about an atmosphere
   is in the inner sun-ray optical depth, which is why `:sun-steps` is
   separate from `:steps` and much smaller.
@@ -190,13 +190,13 @@
          (let [p (v3/add-scaled origin dir (+ t-near (* dt (+ 0.5 (double i)))))
                d (density atm p)
                view-depth (+ view-depth (* d dt))
-               ;; How far the sunlight travelled through air to get here.
+               ;; How far the sunlight traveled through air to get here.
                sun-depth (if-let [[_ far] (ray-sphere p sun-dir top)]
                            (optical-depth atm p sun-dir (max 0.0 (double far)) (long sun-steps))
                            0.0)
                total (+ view-depth sun-depth)
                [tr tg tb] (transmittance atm total)
-               ;; Rayleigh is coloured and Mie is not, so they cannot share
+               ;; Rayleigh is colored and Mie is not, so they cannot share
                ;; a coefficient even though they share everything else.
                contrib (fn [^double beta ^double t]
                          (* d dt t (+ (* beta pr) (* mie pm))))]
@@ -206,14 +206,14 @@
                    (+ (nth acc 2) (contrib (double (nth rayleigh 2)) tb))])))))))
 
 (defn sky-color
-  "The colour of the sky looking from `origin` along `dir`, or nil if that
+  "The color of the sky looking from `origin` along `dir`, or nil if that
   ray never enters the atmosphere.
 
   `:t-far` cuts the integral short where the ground is, which is what
   makes this do aerial perspective as well as sky: pass the distance to
   the terrain and you get the haze in front of it.
 
-  The result is radiance, not a colour: it is unbounded above, and the sun
+  The result is radiance, not a color: it is unbounded above, and the sun
   seen directly is orders of magnitude brighter than the sky beside it.
   Run it through `tone-map` before it reaches a pixel."
   ([atm origin dir sun-dir] (sky-color atm origin dir sun-dir {}))
@@ -228,7 +228,7 @@
 (defn aerial-perspective
   "`surface-color` as seen through the air between `origin` and `point`.
 
-  The two halves of what distance does to a colour, and they pull in
+  The two halves of what distance does to a color, and they pull in
   opposite directions: the air takes light out of the view ray, and it
   puts scattered sunlight back in. Near enough, nothing happens; far
   enough, everything you see is the second term and the surface has
@@ -254,10 +254,10 @@
 
   `1 - exp(-exposure * c)` rolls the highlights off smoothly instead of
   clipping them, which is what keeps the sun from becoming a flat white
-  disc with a hard edge; the 1/2.2 afterwards is the sRGB transfer curve,
+  disk with a hard edge; the 1/2.2 afterward is the sRGB transfer curve,
   near enough. Not from chapter 18 -- the chapter computes radiance and
   stops, quite properly -- but every use of this namespace needs it, and
-  leaving it out is how atmospheric renderings end up looking burnt."
+  leaving it out is how atmospheric renderings end up looking burned."
   ([color] (tone-map 1.0 color))
   ([exposure color]
    (let [e (double exposure)]

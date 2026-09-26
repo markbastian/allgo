@@ -60,7 +60,7 @@
 
   ## Why the two halves are not shaped alike
 
-  Erosion is taken from a whole disc, `:radius` cells across, weighted by
+  Erosion is taken from a whole disk, `:radius` cells across, weighted by
   distance. A droplet's running deposits go into just the four cells
   beneath it, with the bilinear weights its height was read with.
 
@@ -69,7 +69,7 @@
   next droplet flows around it -- so it can afford to be sharp. Erosion is
   not: dig a cell and every later droplet is steered *into* it, digs it
   further, and the map ends up a field of one-cell wells with the drainage
-  network lost between them. Spreading the cut over a disc is what makes a
+  network lost between them. Spreading the cut over a disk is what makes a
   valley have sides.
 
   The exception is the last deposit a droplet makes. A droplet that runs
@@ -77,7 +77,7 @@
   is carrying at once, and that is far too much to put in four cells --
   it is a spike, and a quarter of a million of them read as grit strewn
   over the landscape. A drying puddle spreads, so that one goes over the
-  disc as well.
+  disk as well.
 
   ## The edge of the map
 
@@ -99,9 +99,9 @@
 
   So erosion -- not deposition, which is free to build the coastal plain
   it would build anyway -- is faded out over the last `:border` cells,
-  reaching zero at the edge. What that zeroes is a cut *centred* on a
+  reaching zero at the edge. What that zeroes is a cut *centered* on a
   border cell, not one that reaches it: a droplet a few cells inside
-  still swings its disc across the edge, so the outermost ring is worn
+  still swings its disk across the edge, so the outermost ring is worn
   lightly rather than not at all. Lightly is the point. Declining to cut
   what we cannot model the other side of costs a margin of barely
   weathered ground and buys a map without a trench around it.
@@ -116,7 +116,7 @@
   in the capacity formula, and it exists so that a droplet on dead-flat
   ground does not conclude it can carry nothing and drop its whole load in
   one cell. It has to sit *well below* the typical difference between
-  neighbouring cells, and the failure when it does not is quiet rather
+  neighboring cells, and the failure when it does not is quiet rather
   than loud: with the floor above the real slopes, every droplet
   everywhere has the same capacity, erosion stops depending on the terrain
   it is cutting, and what comes out is the heightmap smoothed rather than
@@ -124,7 +124,7 @@
 
   Worth measuring rather than guessing. A diamond-square grid from
   `allgo.procedural.terrain` at `:width 1.0` and 257 cells on a side has a
-  median neighbour-to-neighbour difference near 0.0036; the 0.01 that is
+  median neighbor-to-neighbor difference near 0.0036; the 0.01 that is
   the usual published default puts the floor above 94% of the map, and
   gives exactly that blur. The default here is an order of magnitude
   below the median instead, and between one and two orders below it the
@@ -169,7 +169,7 @@
    :initial-water 1.0
    :initial-speed 1.0
    ;; Cells. 1 is visibly pitted, 2 to 4 is the useful range, and large
-   ;; radii cost the whole disc per erosion step for a softer cut.
+   ;; radii cost the whole disk per erosion step for a softer cut.
    :radius        3
    ;; Cells of margin over which erosion fades to nothing at the map's
    ;; edge. Zero turns the taper off, and digs a trench around the map.
@@ -180,10 +180,10 @@
 ;; The erosion brush
 
 (defn brush
-  "The disc a droplet erodes from: offsets from the centre cell, and the
+  "The disk a droplet erodes from: offsets from the center cell, and the
   share of the cut each one takes.
 
-  Weights fall linearly to zero at the rim and are normalised to sum to
+  Weights fall linearly to zero at the rim and are normalized to sum to
   one, so the brush moves a fixed amount of material regardless of its
   size. Cells at the rim contribute nothing and are dropped rather than
   visited."
@@ -203,31 +203,31 @@
      :w  (a/f64 (map #(/ (double (peek %)) total) cells))}))
 
 (defn- spread-at!
-  "Adds `amount` across the disc around cell `ri ci`, in the brush's
+  "Adds `amount` across the disk around cell `ri ci`, in the brush's
   proportions, and returns how much actually landed. Negative cuts.
 
-  Less than asked for where the disc hangs off the grid, and the caller
+  Less than asked for where the disk hangs off the grid, and the caller
   is told so -- for a cut that means the droplet is credited only with
-  what it really took, so mass is conserved and erosion fades out towards
+  what it really took, so mass is conserved and erosion fades out toward
   the border instead of being concentrated there.
 
   The other reading, squeezing the whole cut into whatever part of the
-  disc is in bounds, is what the first version of this did. It conserves
+  disk is in bounds, is what the first version of this did. It conserves
   mass too, and it is unstable: it cuts an edge cell at up to twice the
   rate of an interior one, and an edge pit is the one kind that never
   refills."
   ;; Primitives are coerced in the body rather than hinted on the
   ;; parameters: a fn taking primitives is limited to four arguments.
-  [^doubles heights rows cols disc ri ci amount]
+  [^doubles heights rows cols disk ri ci amount]
   (let [rows   (long rows)
         cols   (long cols)
         ri     (long ri)
         ci     (long ci)
         amount (double amount)
-        n      (long (:n disc))
-        ^ints bdr   (:dr disc)
-        ^ints bdc   (:dc disc)
-        ^doubles bw (:w disc)]
+        n      (long (:n disk))
+        ^ints bdr   (:dr disk)
+        ^ints bdc   (:dc disk)
+        ^doubles bw (:w disk)]
     (loop [k 0 applied 0.0]
       (if (= k n)
         applied
@@ -269,7 +269,7 @@
   A droplet that leaves the map takes its sediment with it, which is what
   a river does at the coast. One that stops on the map puts its load down
   where it stopped. Between the two, nothing is created or destroyed."
-  [^doubles heights ^doubles flux rows cols disc params r0 c0]
+  [^doubles heights ^doubles flux rows cols disk params r0 c0]
   (let [rows        (long rows)
         cols        (long cols)
         lifetime    (long (:lifetime params))
@@ -297,7 +297,7 @@
             fr (- r ri)
             fc (- c ci)
             id (+ (* ri cols) ci)
-            ;; Erosion is faded out towards the border. The border is not
+            ;; Erosion is faded out toward the border. The border is not
             ;; a feature of the landscape, it is where the map was cut,
             ;; and a droplet that runs off it exports its load for good --
             ;; so the cells beside it are mined by every droplet that
@@ -318,15 +318,15 @@
           ;; rounding error. Every droplet picks up close to a full load
           ;; and most of them end this way, so dropping it on the floor
           ;; cost the terrain four fifths of its material within four
-          ;; droplets per cell, planing the map towards flat.
-          ;; Over the whole disc, not the four cells under the droplet.
+          ;; droplets per cell, planing the map toward flat.
+          ;; Over the whole disk, not the four cells under the droplet.
           ;; An incremental deposit is small and self-correcting -- fill a
           ;; cell and the next droplet flows around it -- so it can afford
           ;; to be sharp. This one is a whole load at once, and put down
           ;; sharply it is a spike; a quarter of a million of them read as
           ;; grit strewn over the terrain rather than as sediment. A
           ;; drying puddle spreads, and so does this.
-          (when (pos? sed) (spread-at! heights rows cols disc ri ci sed))
+          (when (pos? sed) (spread-at! heights rows cols disk ri ci sed))
           (let [h00 (aget heights id)
                 h01 (aget heights (+ id 1))
                 h10 (aget heights (+ id cols))
@@ -341,7 +341,7 @@
                 ;; going downhill by one and uphill by the other.
                 gr  (+ (* (- h10 h00) (- 1.0 fc)) (* (- h11 h01) fc))
                 gc  (+ (* (- h01 h00) (- 1.0 fr)) (* (- h11 h10) fr))
-                ;; Momentum against gradient, unnormalised first: the two
+                ;; Momentum against gradient, unnormalized first: the two
                 ;; can cancel exactly -- a droplet that has run itself
                 ;; onto a flat spot -- and then there is no downhill to
                 ;; speak of and a direction has to be invented.
@@ -383,15 +383,15 @@
                              (- sed amt))
                            ;; Under capacity on a descent. `(- dh)` is the
                            ;; drop, and the cut may not exceed it. The
-                           ;; droplet is credited with what the disc
+                           ;; droplet is credited with what the disk
                            ;; actually gave up, not what it asked for.
                            (let [amt (* taper (min (* (- cap sed) erosion) (- dh)))
-                                 ;; Credited with what the disc actually
+                                 ;; Credited with what the disk actually
                                  ;; gave up, not with what it was asked
                                  ;; for. `spread-at!` signs its answer the
                                  ;; way it signs its argument, so a cut
                                  ;; comes back negative.
-                                 cut (- (spread-at! heights rows cols disc ri ci (- amt)))]
+                                 cut (- (spread-at! heights rows cols disk ri ci (- amt)))]
                              (+ sed cut)))]
                 (recur (inc step) nr nc udr udc
                        ;; Kinetic energy from the drop. Clamped because a

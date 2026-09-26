@@ -34,8 +34,8 @@
 
 (defn sphere
   "Support mapping for a ball."
-  [centre radius]
-  (fn [dir] (v/add centre (v/scale (v/normalize dir) radius))))
+  [center radius]
+  (fn [dir] (v/add center (v/scale (v/normalize dir) radius))))
 
 (defn box
   "Support mapping for an axis-aligned box."

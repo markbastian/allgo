@@ -14,13 +14,13 @@
 
   `fireCooling` against `smokeCooling` is what separates flame from
   smoke. Set them equal and the plume dims uniformly instead of turning
-  grey at a height.
+  gray at a height.
 
   `vortexRate` is the honest one. Turn it to zero and watch the plume go
   flat and sheet-like: a grid at this resolution smooths its own eddies
   away within a few cells, and the curl has to be put back by hand.
 
-  Drag to move the burning disc. `show` swaps the fire palette for the
+  Drag to move the burning disk. `show` swaps the fire palette for the
   raw temperature, the flow speed, or the vortices themselves."
   (:require [allgo.demo.fps :as fps]
             [allgo.physics.fire :as fire]
@@ -29,7 +29,7 @@
 
 (def ^:private ^js controls
   #js {:resolution   140
-       :source       "disc"
+       :source       "disk"
        :iterations   10
        :lift         3.0
        :buoyancy     6.0
@@ -41,13 +41,13 @@
        :show         "fire"})
 
 (defn- emitters [{:keys [ny h]} [ox oy]]
-  (let [disc {:kind :disc :x ox :y oy :radius (* 0.09 (* ny h))}
+  (let [disk {:kind :disk :x ox :y oy :radius (* 0.09 (* ny h))}
         floor {:kind :floor :rows (max 2 (quot ny 40))}]
     (case (.-source controls)
-      "disc"  [disc]
+      "disk"  [disk]
       "floor" [floor]
-      "both"  [disc floor]
-      [disc])))
+      "both"  [disk floor]
+      [disk])))
 
 (defn- build [[w h]]
   (let [ny   (.-resolution controls)
@@ -58,9 +58,9 @@
      :obstacle [(* 0.5 (:nx f) cell) (* 0.25 (:ny f) cell)]}))
 
 ;; ---------------------------------------------------------------------------
-;; Colour
+;; Color
 
-(defn- fire-colour
+(defn- fire-color
   "Black through dark smoke to red, orange and yellow.
 
   The three bands are not decoration: the first covers everything below
@@ -77,7 +77,7 @@
       :else     (let [s (/ (- t 0.5) 0.48)]
                   [255 (js/Math.round (* 255 (min 1.0 s))) 0]))))
 
-(defn- sci-colour [v lo hi]
+(defn- sci-color [v lo hi]
   (let [t (max 0.0 (min 0.999 (/ (- v lo) (max 1e-9 (- hi lo)))))
         n (js/Math.floor (/ t 0.25))
         s (/ (- t (* n 0.25)) 0.25)
@@ -100,8 +100,8 @@
               (case mode
                 "temperature" (let [c (js/Math.round (* 255 (max 0.0 (min 1.0 (aget smoke k)))))]
                                 [c c c])
-                "speed" (sci-colour (js/Math.hypot (aget u k) (aget v k)) 0.0 3.0)
-                (fire-colour (aget smoke k)))
+                "speed" (sci-color (js/Math.hypot (aget u k) (aget v k)) 0.0 3.0)
+                (fire-color (aget smoke k)))
               ;; ImageData runs top-down; the grid runs bottom-up.
               px (* 4 (+ i (* (- ny 1 j) nx)))]
           (aset data px r)
@@ -185,7 +185,7 @@
       (let [gui (GUI. #js {:container container})]
         (doto gui
           (-> (.add controls "resolution" 60 220 10) (.onFinishChange rebuild!))
-          (-> (.add controls "source" #js ["disc" "floor" "both"]) (.onChange rebuild!))
+          (-> (.add controls "source" #js ["disk" "floor" "both"]) (.onChange rebuild!))
           (.add controls "iterations" 1 40 1)
           (.add controls "lift" 0 8 0.1)
           (.add controls "buoyancy" 0 20 0.5)

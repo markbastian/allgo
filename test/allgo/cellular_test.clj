@@ -18,7 +18,7 @@
     (doseq [[_ _ _ v] (c/feature-points {:seed 4} 0 0 0)]
       (is (<= -1.0 v 1.0))))
 
-  (testing "jitter pulls them towards the centre of the cell"
+  (testing "jitter pulls them toward the center of the cell"
     ;; Jitter zero is a regular lattice, which is the thing the Poisson
     ;; scatter exists to avoid -- but it is also how you get a honeycomb
     ;; on purpose, so it has to work.
@@ -43,7 +43,7 @@
                          (v3/distance [x y z] point)))
                  1e-9)))))
 
-    (testing "and no feature point of the neighbourhood is nearer"
+    (testing "and no feature point of the neighborhood is nearer"
       (doseq [[x y z] (points 200)]
         (let [d1 (double (first (:distances (near x y z))))
               ci (long (Math/floor x)) cj (long (Math/floor y)) ck (long (Math/floor z))
@@ -71,7 +71,7 @@
         (let [[d1 d2] (:distances (near x y z))]
           (is (<= (double d1) (double d2)))))))
 
-  (testing "the scalar bases are centred and land near [-1, 1]"
+  (testing "the scalar bases are centered and land near [-1, 1]"
     (doseq [b [(c/f1 {:seed 3}) (c/f2 {:seed 3}) (c/id-basis {:seed 3})]]
       (let [vs (mapv (fn [[x y z]] (b x y z)) (points 4000))]
         (is (> (apply min vs) -1.5))
@@ -85,7 +85,7 @@
       (let [vs (mapv (fn [[x y z]] ((c/f1 {:seed 3 :density d}) x y z)) (points 2000))]
         (is (< 1.0 (- (apply max vs) (apply min vs)) 3.0)))))
 
-  (testing "combination reproduces the named bases it generalises"
+  (testing "combination reproduces the named bases it generalizes"
     (let [opts {:seed 3 :density 3.0}
           comb (c/combination opts [-1.0 1.0])
           raw (c/distance-basis (assoc opts :n 2))]
@@ -102,7 +102,7 @@
 (deftest expected-spacing-test
   (testing "the closed form matches what the scatter actually does"
     ;; If these drifted apart, every cellular basis would quietly shift
-    ;; off centre as the density changed.
+    ;; off center as the density changed.
     (doseq [density [1.0 3.0 8.0]]
       (let [near (c/nearest {:seed 11 :density density :n 1})
             mean (/ (reduce + (map (fn [[x y z]] (first (:distances (near x y z))))

@@ -41,14 +41,14 @@
                 (fluid/close-border! true))]
     (fluid/wind-tunnel! f (.-speed controls) 0.1)
     (when (.-obstacle controls)
-      (fluid/disc! f (* 0.35 nx cell) (* 0.5 ny cell) (* 0.12 ny cell)))
+      (fluid/disk! f (* 0.35 nx cell) (* 0.5 ny cell) (* 0.12 ny cell)))
     {:fluid f :cell cell
      :obstacle [(* 0.35 nx cell) (* 0.5 ny cell) (* 0.12 ny cell)]}))
 
 ;; ---------------------------------------------------------------------------
-;; Colour
+;; Color
 
-(defn- sci-colour
+(defn- sci-color
   "Blue through green to red, the usual scientific ramp."
   [v lo hi]
   (let [t (max 0.0 (min 0.999 (/ (- v lo) (max 1e-9 (- hi lo)))))
@@ -85,10 +85,10 @@
               [r g b]
               (cond
                 (zero? (aget s k)) [40 48 70]
-                (= "pressure" mode) (sci-colour (aget p k) lo hi)
+                (= "pressure" mode) (sci-color (aget p k) lo hi)
                 (= "speed" mode)
                 (let [sp (js/Math.hypot (aget u k) (aget v k))]
-                  (sci-colour sp 0.0 (* 2.2 (.-speed controls))))
+                  (sci-color sp 0.0 (* 2.2 (.-speed controls))))
                 :else (let [m (aget smoke k)
                             c (js/Math.round (* 255 (max 0.0 (min 1.0 m))))]
                         [c c c]))
@@ -131,7 +131,7 @@
                     fx (* (/ (- (.-clientX e) (.-left rect)) w) (:nx fluid) cell)
                     fy (* (- 1.0 (/ (- (.-clientY e) (.-top rect)) h)) (:ny fluid) cell)]
                 (when (.-obstacle controls)
-                  (fluid/disc! fluid fx fy (nth obstacle 2))
+                  (fluid/disk! fluid fx fy (nth obstacle 2))
                   (swap! state assoc :obstacle [fx fy (nth obstacle 2)]))))
             (tick []
               (when @running?

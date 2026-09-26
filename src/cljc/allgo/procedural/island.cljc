@@ -9,14 +9,14 @@
   a height at a point, which is the right shape for terrain and the wrong
   shape for geography. A noise field has no notion of *this* island,
   *that* lake, the river between them, or how far inland you are. Those
-  are facts about a region and its neighbours, and to have them at all
+  are facts about a region and its neighbors, and to have them at all
   you need the map to be made of countable things with edges between
   them.
 
   So this builds a graph and then walks it, and every interesting
   property falls out of a traversal rather than a formula:
 
-      ocean      flood fill inwards from the edge of the map, which is
+      ocean      flood fill inward from the edge of the map, which is
                  what makes a lake a lake -- not its shape, but the fact
                  that the fill never reached it
       elevation  breadth-first from the coast, so height is distance from
@@ -40,7 +40,7 @@
   biomes live on the cells. That is not an implementation detail. Water
   runs along the boundaries between regions rather than through the
   middle of them -- a river is a border, which is why so many real ones
-  are -- and a river that ran centre-to-centre would cut its own cells in
+  are -- and a river that ran center-to-center would cut its own cells in
   half. Cells take their elevation and moisture as the average over their
   corners, which is the only place the two representations meet.
 
@@ -82,19 +82,19 @@
 ;; ---------------------------------------------------------------------------
 ;; Island shapes
 ;;
-;; A shape is `(fn [[nx ny]] -> land?)` over normalised coordinates, where
+;; A shape is `(fn [[nx ny]] -> land?)` over normalized coordinates, where
 ;; the map is [-1, 1] on both axes. Everything downstream asks only this
 ;; one question, so the difference between an archipelago and a single
 ;; round island is entirely here.
 
-(defn- normalise [[[x0 y0] [x1 y1]]]
+(defn- normalize [[[x0 y0] [x1 y1]]]
   (fn [[x y]]
     [(- (* 2.0 (/ (- (double x) x0) (- x1 x0))) 1.0)
      (- (* 2.0 (/ (- (double y) y0) (- y1 y0))) 1.0)]))
 
 (defn radial-shape
   "Overlapping sine waves in polar coordinates: one blobby island with
-  bays and headlands, always centred, always a single landmass.
+  bays and headlands, always centered, always a single landmass.
 
   Predictable in a way the noise shape is not, which is what it is for --
   a map that must have exactly one island with a coast all the way round."
@@ -119,7 +119,7 @@
         (< r edge)))))
 
 (defn noise-shape
-  "Fractal noise pulled down towards the edges of the map.
+  "Fractal noise pulled down toward the edges of the map.
 
   The falloff is what turns a noise field into an island: without it the
   land runs off every side, and with it the same field becomes a coast.
@@ -161,7 +161,7 @@
   corners are water whatever the shape says, because the map has to end
   in sea or the flood fill below has nowhere to start."
   [{:keys [centers corners] :as island} shape bounds lake-threshold]
-  (let [to-unit (normalise bounds)
+  (let [to-unit (normalize bounds)
         corners (mapv (fn [c]
                         (assoc c :water? (or (:border? c)
                                              (not (shape (to-unit (:point c)))))))
@@ -175,7 +175,7 @@
     (assoc island :centers centers :corners corners)))
 
 (defn- assign-ocean
-  "Flood the sea inwards from the edge, then read off what that made.
+  "Flood the sea inward from the edge, then read off what that made.
 
   A lake is water the flood did not reach, and nothing about its shape
   says so -- only its connectivity. This is the pass that a heightmap
@@ -262,7 +262,7 @@
   not at sea level -- a tarn sits at the height of the shelf it is on --
   and dropping them to zero with the ocean puts every lake at the coast
   and drags the cells around it down to meet them. Only ocean and coast
-  corners are truly at sea level, and those are set afterwards."
+  corners are truly at sea level, and those are set afterward."
   [{:keys [corners] :as island}]
   (let [land (into [] (comp (remove :ocean?) (remove :coast?) (map :id)) corners)
         ordered (vec (sort-by #(:elevation (corners %)) land))
@@ -290,7 +290,7 @@
                centers)))
 
 (defn- assign-downslope
-  "The neighbour each corner drains to, which may be itself.
+  "The neighbor each corner drains to, which may be itself.
 
   One pointer per corner and every river in the map follows from it. A
   corner that is its own downslope is a pit, and the river that reaches
@@ -317,9 +317,9 @@
   watershed exactly when the rain landing on them ends up in the same
   place -- which is a fact about the whole path between them and not
   about how close together they are. Basins meet along ridges, and the
-  ridge is wherever two neighbouring corners give different answers.
+  ridge is wherever two neighboring corners give different answers.
 
-  mapgen2 relaxes this by re-reading every corner's downhill neighbour a
+  mapgen2 relaxes this by re-reading every corner's downhill neighbor a
   hundred times over and stopping when nothing moves. Walking each chain
   once and remembering what the walk found gets the same answer without
   the iteration count -- and it has somewhere to put the case that
@@ -561,7 +561,7 @@
 (def biome-colors
   "Patel's palette, which is chosen so that the diagram reads as a
   diagram: the dry end warm, the wet end green, and altitude draining the
-  colour out towards bare rock and snow."
+  color out toward bare rock and snow."
   {:ocean [68 68 122] :lake [51 102 153] :marsh [47 102 102] :ice [153 255 255]
    :beach [160 144 119] :snow [255 255 255] :tundra [187 187 170]
    :bare [136 136 136] :scorched [85 85 85] :taiga [153 170 119]

@@ -18,7 +18,7 @@
                           than where they were. PhysX's default.
     :xpbd                 do not solve velocities at all. Move the bodies
                           until they no longer overlap, then read the
-                          velocity back off how far each one travelled.
+                          velocity back off how far each one traveled.
                           `allgo.physics.rigid` and Müller's papers.
 
   ## What actually separates them
@@ -27,7 +27,7 @@
   each one sees the effect of the last. The differences are *when the
   geometry is evaluated* and *what quantity is being corrected*.
 
-  Sequential impulse linearises once, at the top of the step, and every
+  Sequential impulse linearizes once, at the top of the step, and every
   iteration after that works against stale lever arms. That is fine when
   bodies barely move in a step and wrong when they do -- a fast spin, or
   a deep stack settling a long way. It is also the cheapest per
@@ -38,12 +38,12 @@
   recovered without running collision detection again. That is the whole
   trick, and it is why TGS holds a tall stack that sequential impulse
   lets sag: the twentieth iteration is solving the real problem rather
-  than a linearisation of the problem as it was twenty iterations ago.
+  than a linearization of the problem as it was twenty iterations ago.
 
   XPBD corrects positions instead of velocities, which cannot inject
   energy -- the worst a bad correction can do is put a body somewhere and
   have the next one move it back. It pays for that by needing the
-  velocity pass afterwards to get restitution and friction, and by being
+  velocity pass afterward to get restitution and friction, and by being
   stiffer to tune.
 
   ## Which one to use
@@ -72,7 +72,7 @@
   Sequential impulse cannot get there and more iterations will not take
   it -- sixteen and sixty-four both leave nineteen bricks of a sixteen
   course wall standing, which is the same answer at four times the cost.
-  It linearises once, at the top of the step, so its later iterations are
+  It linearizes once, at the top of the step, so its later iterations are
   solving lever arms and overlaps measured before anything moved. That is
   not a bug to be fixed; it is what sequential impulse *is*, and it is
   why TGS exists.
@@ -281,7 +281,7 @@
 ;;
 ;; Four arguments and one primitive hint apiece is not a style: a fn
 ;; taking primitives is limited to four arguments, and array hints do
-;; not count towards it. Vectors come in and out through `^doubles`
+;; not count toward it. Vectors come in and out through `^doubles`
 ;; scratch of length three, allocated once by the caller.
 
 (defn- qrot!
@@ -392,7 +392,7 @@
 
   The pair, and the feature id `allgo.physics.contact` stamps on the
   point -- which corner of which face is pressed into which face. It used
-  to be the contact point rounded to two centimetres, and that is a fine
+  to be the contact point rounded to two centimeters, and that is a fine
   key for a stack that is already still and a bad one for a stack that is
   moving: the points slide across the rounding and the match is lost
   exactly when the impulse history is most needed. A twenty brick column
@@ -455,7 +455,7 @@
         ;; `refresh-anchors!` can add the drift to it rather than to a
         ;; value the last substep already moved.
         (aset depth0 k (double (:depth c)))
-        ;; The lever arm in the world is the point less the centre, and
+        ;; The lever arm in the world is the point less the center, and
         ;; the anchor in the body's own frame is that turned back by the
         ;; body's orientation -- so the world arm is what `world->local`
         ;; wanted anyway and is computed once for both.
@@ -671,7 +671,7 @@
             va (aget approach k)
             ;; A gap only bounces if the surfaces actually reach each
             ;; other before the step is out. Without the test a ball
-            ;; falling towards a floor it will not touch this step is
+            ;; falling toward a floor it will not touch this step is
             ;; still handed a restitution target, and since the margin
             ;; is as wide as the body can travel there is always such a
             ;; step -- the ball bounces off nothing, short of the floor.
@@ -695,7 +695,7 @@
             ;; with its usual zero stops a body dead the moment
             ;; anything comes within the margin, which with a margin as
             ;; wide as a step's travel means stopping in mid-air a
-            ;; tenth of a metre short of the floor.
+            ;; tenth of a meter short of the floor.
             ;;
             ;; Otherwise: the solve pushes overlap out and adds the
             ;; rebound, the relax pass takes back what the push added
@@ -798,8 +798,8 @@
   stable, and it is also what makes this pass necessary: the correction
   that pushed two bodies apart shows up in that reading as separating
   velocity, so a body that was resolved out of a deep overlap leaves the
-  position solve travelling fast. A dropped box came off the floor at
-  fifteen metres a second before this existed.
+  position solve traveling fast. A dropped box came off the floor at
+  fifteen meters a second before this existed.
 
   So the normal velocity is *set* rather than pushed at: to whatever
   restitution asks of the approach speed measured before the solve, and
@@ -825,7 +825,7 @@
       ;; the normal velocity here is *set* rather than pushed at, touching
       ;; one would brake a body that is legitimately flying away from it.
       ;; That is what killed the bounce: the substep after the impact, the
-      ;; ball was leaving at four metres a second and this pass set it to
+      ;; ball was leaving at four meters a second and this pass set it to
       ;; nothing.
       (when (pos? (aget lambda k))
         (let [ia (aget ia-arr k) ib (aget ib-arr k)
@@ -849,7 +849,7 @@
           ;; friction at all. Nothing then removed the sideways and
           ;; angular velocity the position solve hands back -- it reads
           ;; velocity off the correction at the substep rate, so a
-          ;; millimetre of pushout is a quarter of a metre a second -- and
+          ;; millimeter of pushout is a quarter of a meter a second -- and
           ;; a six brick column wound itself from 6mm/s to 29m/s in five
           ;; seconds.
           (let [limit (* friction (/ (abs (aget lambda k)) h))
@@ -894,7 +894,7 @@
 
   This is TGS. Sequential impulse never calls it, and that single
   difference is the whole of what TGS buys: its later iterations are
-  solving the problem as it stands rather than as it was linearised at
+  solving the problem as it stands rather than as it was linearized at
   the top of the step.
 
   It runs twice a substep, over every contact, which on a sixteen course
@@ -1013,7 +1013,7 @@
   it the whole way on its own; they fight, the substep ends somewhere
   none of them asked for, and that leftover displacement comes back as
   velocity divided by `h`. Relaxed, a twelve course wall settles dead;
-  unrelaxed it was doing twenty metres a second within a second, and
+  unrelaxed it was doing twenty meters a second within a second, and
   solving it harder -- more passes, more substeps -- made it worse, which
   is what says the trouble is the read-back and not convergence."
   [arrays cs slop max-push]
@@ -1047,7 +1047,7 @@
                 ;; the impulse solvers use: however deep the overlap, it
                 ;; is not pushed out faster than `max-push-speed`. A deep
                 ;; overlap takes several substeps to clear instead of
-                ;; one, which is slower and is not 60 metres a second.
+                ;; one, which is slower and is not 60 meters a second.
                 c (min (- pen slop) max-push)]
             (when (pos? c)
               ;; The correction is `-c` along the normal, so the unit
@@ -1091,9 +1091,9 @@
                         (aset pos ia3 (+ (aget pos ia3) (* px im)))
                         (aset pos (+ ia3 1) (+ (aget pos (+ ia3 1)) (* py im)))
                         (aset pos (+ ia3 2) (+ (aget pos (+ ia3 2)) (* pz im))))
-                      ;; The lever arm is measured from the moved centre,
+                      ;; The lever arm is measured from the moved center,
                       ;; as the reference measures it. It makes no
-                      ;; difference: the centre moved along `p`, and a
+                      ;; difference: the center moved along `p`, and a
                       ;; vector crossed with something parallel to itself
                       ;; is zero.
                       (let [rx (- (aget pa 0) (aget pos ia3))
@@ -1168,7 +1168,7 @@
 
   This is what makes a settled scene actually settle. A stack that has
   stopped is not nearly stopped: it is carrying the solver's own residual,
-  a millimetre a second of it, and an unstable arrangement amplifies that
+  a millimeter a second of it, and an unstable arrangement amplifies that
   until it falls over. Sleeping is the only thing that takes the residual
   to zero, and it is why a wall in any shipping engine stands overnight."
   [bodies contacts dt opts]
@@ -1240,7 +1240,7 @@
       (reduce (fn [bs i] (update bs i rigid/wake)) bodies disturbed))))
 
 (defn- step-sequential-impulse
-  "Linearise once, solve velocities, then move.
+  "Linearize once, solve velocities, then move.
 
   Every iteration works against the lever arms and overlaps measured at
   the top of the step. Cheapest per iteration, and the one that sags when
@@ -1392,7 +1392,7 @@
                         ;; position solver corrects `overlap - slop` and
                         ;; has nothing to do at an overlap of zero, so
                         ;; arriving exactly on contact leaves the body
-                        ;; travelling at the speed it arrived with and
+                        ;; traveling at the speed it arrived with and
                         ;; the next slice carries it through. Twice the
                         ;; slop is the shallowest overlap that is
                         ;; certainly worth solving.
@@ -1406,10 +1406,10 @@
 
 (defn- step-xpbd
   "Do not solve velocities: move the bodies until they no longer overlap,
-  then read the velocity back off how far each travelled.
+  then read the velocity back off how far each traveled.
 
   Nothing here can inject energy, which is the appeal. The cost is a
-  velocity pass afterwards for restitution and friction, which positions
+  velocity pass afterward for restitution and friction, which positions
   alone cannot express."
   [{:keys [bodies gravity substeps iterations] :as w} dt]
   (let [substeps (max 1 (long substeps))

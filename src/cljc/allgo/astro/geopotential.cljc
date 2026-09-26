@@ -18,7 +18,7 @@
   (:require [allgo.astro.constants :as c]
             [clojure.math :as math]))
 
-;; ------------------------------------------------------------ normalisation
+;; ------------------------------------------------------------ normalization
 
 (defn- factorial-ratio
   "(n-m)! / (n+m)!, built as a product so it stays finite at high degree
@@ -26,10 +26,10 @@
   [n m]
   (reduce (fn [acc k] (/ acc (double k))) 1.0 (range (inc (- n m)) (inc (+ n m)))))
 
-(defn normalisation-factor
-  "The factor taking a normalised coefficient to an unnormalised one.
+(defn normalization-factor
+  "The factor taking a normalized coefficient to an unnormalized one.
 
-  Published Earth models are normalised, because raw coefficients span so
+  Published Earth models are normalized, because raw coefficients span so
   many orders of magnitude that the series is awkward to tabulate; the
   recursion below wants them raw."
   [n m]
@@ -37,16 +37,16 @@
                 (+ (* 2.0 n) 1.0)
                 (if (zero? m) 1.0 2.0))))
 
-(defn denormalise
-  "Convert a model's normalised coefficients to the raw form the recursion
+(defn denormalize
+  "Convert a model's normalized coefficients to the raw form the recursion
   uses. A model already raw is returned unchanged."
-  [{:keys [normalised? C S] :as model}]
-  (if-not normalised?
+  [{:keys [normalized? C S] :as model}]
+  (if-not normalized?
     model
     (letfn [(scale [m] (reduce-kv (fn [acc [n mm] v]
-                                    (assoc acc [n mm] (* v (normalisation-factor n mm))))
+                                    (assoc acc [n mm] (* v (normalization-factor n mm))))
                                   {} m))]
-      (assoc model :C (scale C) :S (scale S) :normalised? false))))
+      (assoc model :C (scale C) :S (scale S) :normalized? false))))
 
 ;; ------------------------------------------------------------- the recursion
 
@@ -98,7 +98,7 @@
   -- the acceleration is not differentiated from this -- so agreement
   between it and the numerical gradient of this is a real check on both."
   [{:keys [GM R] :as model} r degree]
-  (let [{:keys [C S]} (denormalise model)
+  (let [{:keys [C S]} (denormalize model)
         [V W] (vw r R degree)]
     (* (/ GM R)
        (reduce + (for [n (range 0 (inc degree))
@@ -116,7 +116,7 @@
   reach the next degree up: the gradient of a term of degree n is expressed
   in V and W of degree n+1."
   [model r degree]
-  (let [{:keys [GM R C S]} (denormalise model)
+  (let [{:keys [GM R C S]} (denormalize model)
         [V W] (vw r R (+ degree 1))
         gr    (/ GM (* R R))]
     (reduce
@@ -151,17 +151,17 @@
 ;; ---------------------------------------------------------------- a model
 
 (def J2
-  "The dominant zonal coefficient, unnormalised. Everything else in the
+  "The dominant zonal coefficient, unnormalized. Everything else in the
   field is smaller by three orders of magnitude."
   1.0826359e-3)
 
 (def earth
-  "A low-degree Earth field. Normalised coefficients, as models are
+  "A low-degree Earth field. Normalized coefficients, as models are
   published; the zonal terms are J2, J3 and J4 converted, and the degree-2
   order-2 pair is the equatorial ellipticity."
   {:GM c/GM-earth
    :R  c/R-earth
-   :normalised? true
+   :normalized? true
    :C {[0 0] 1.0
        [2 0] (- (/ J2 (math/sqrt 5.0)))
        [2 2] 2.43926e-6
@@ -172,4 +172,4 @@
 (defn point-mass
   "The zero-degree field: a point mass, for comparison."
   [GM R]
-  {:GM GM :R R :normalised? true :C {[0 0] 1.0} :S {}})
+  {:GM GM :R R :normalized? true :C {[0 0] 1.0} :S {}})

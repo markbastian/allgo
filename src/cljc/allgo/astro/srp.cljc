@@ -8,7 +8,7 @@
   part of every revolution by the Earth's shadow, and that periodic
   interruption is what makes it accumulate.
 
-  Which is why the shadow is modelled as a cone rather than a cylinder. The
+  Which is why the shadow is modeled as a cone rather than a cylinder. The
   Sun is not a point, so its light does not stop abruptly at a boundary;
   there is a penumbra where it is partly occulted, and a satellite crossing
   it sees the force ramp rather than switch."
@@ -18,15 +18,15 @@
 (defn- mag [v] (math/sqrt (reduce + (map * v v))))
 
 (defn- circle-overlap
-  "Fraction of a disc of apparent radius `a` hidden behind one of apparent
-  radius `b`, their centres `sep` apart. All angles, in radians."
+  "Fraction of a disk of apparent radius `a` hidden behind one of apparent
+  radius `b`, their centers `sep` apart. All angles, in radians."
   [a b sep]
   (cond
     (>= sep (+ a b))  0.0                        ; clear of each other
     (<= sep (- b a))  1.0                        ; the occulter covers it entirely
     (<= sep (- a b))  (/ (* b b) (* a a))        ; the occulter sits wholly inside
     :else
-    ;; Two overlapping discs: the shared area is a pair of circular segments.
+    ;; Two overlapping disks: the shared area is a pair of circular segments.
     (let [x    (/ (+ (* sep sep) (* a a) (- (* b b))) (* 2.0 sep))
           y    (math/sqrt (max 0.0 (- (* a a) (* x x))))
           area (- (+ (* a a (math/acos (/ x a)))
@@ -46,7 +46,7 @@
    (let [to-sun   (mapv - r-sun r)
          d-sun    (mag to-sun)
          d-earth  (mag r)
-         ;; apparent radii, and the apparent separation of their centres
+         ;; apparent radii, and the apparent separation of their centers
          a        (math/asin (min 1.0 (/ c/R-sun d-sun)))
          b        (math/asin (min 1.0 (/ r-occulter d-earth)))
          cos-sep  (/ (reduce + (map * (mapv - r) to-sun)) (* d-earth d-sun))

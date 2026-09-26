@@ -14,7 +14,7 @@
   `terrain` shades by height and steepness, which is what the landscape
   would look like.
 
-  `drainage` colours by `:flux` -- how much water has crossed each cell
+  `drainage` colors by `:flux` -- how much water has crossed each cell
   over the whole run, on a log scale, since a main channel carries orders
   of magnitude more than a hillside. This is the view worth watching from
   the start: the network appears within the first few frames, long before
@@ -76,7 +76,7 @@
     (assoc g :original original)))
 
 ;; ---------------------------------------------------------------------------
-;; Colour
+;; Color
 
 (defn- lerp3 [[r1 g1 b1] [r2 g2 b2] t]
   (let [t (max 0.0 (min 1.0 t))]
@@ -89,7 +89,7 @@
 (def ^:private silt [0.55 0.48 0.33])
 
 (defn- terrain-color
-  "Height picks the band, steepness pulls it towards bare rock.
+  "Height picks the band, steepness pulls it toward bare rock.
 
   Without the steepness term the snow line is a contour and the cliffs
   wear it too, which is the one thing that stops eroded terrain from
@@ -145,7 +145,7 @@
         y-scale (* height-scale exaggeration)
         at (fn [i j] (aget heights (+ (* (min (dec dim) (max 0 i)) dim)
                                       (min (dec dim) (max 0 j)))))
-        ;; One pass for the ranges the colouring needs, so the second pass
+        ;; One pass for the ranges the coloring needs, so the second pass
         ;; can be a straight write.
         [lo hi] (loop [k 0 lo ##Inf hi ##-Inf]
                   (if (= k n)

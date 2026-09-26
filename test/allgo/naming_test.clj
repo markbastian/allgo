@@ -27,13 +27,13 @@
   (let [lang (nm/language 5)
         ns (names-of lang 300)]
 
-    (testing "every name is a capitalised, pronounceable-length word"
+    (testing "every name is a capitalized, pronounceable-length word"
       (is (every? seq ns))
       (is (every? #(re-matches #"[A-Z][a-z]+" %) ns))
       (is (every? #(<= 2 (count %) 18) ns)))
 
     (testing "no name has a pile of consonants in it"
-      ;; Four in a row is always an artefact of gluing syllables, never a
+      ;; Four in a row is always an artifact of gluing syllables, never a
       ;; cluster any of these languages has. Three is allowed, because
       ;; `thr` and `str` are real onsets in the pool.
       (is (not-any? #(re-find #"[^aeiouy]{4}" (str/lower-case %)) ns)))

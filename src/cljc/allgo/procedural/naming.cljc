@@ -16,7 +16,7 @@
   drew `k`, none of its towns have a `k` in them.
 
   That is the whole trick, and it is Azgaar's: names belong to cultures,
-  cultures belong to regions, so neighbours sound like neighbours and a
+  cultures belong to regions, so neighbors sound like neighbors and a
   border is audible.
 
   ## Seeds, not streams
@@ -151,11 +151,11 @@
 
   Three of the same letter in a row is the common one, and a doubled
   vowel pair across a syllable boundary is the ugly one. Neither is a
-  sound; both are an artefact of gluing."
+  sound; both are an artifact of gluing."
   [w]
   (-> w
       (str/replace #"([a-z])\1{2,}" "$1$1")
-      ;; A doubled vowel is always a join artefact, never a sound here:
+      ;; A doubled vowel is always a join artifact, never a sound here:
       ;; `Phaarnpho` is `pha` meeting `arn`, and no language in the pools
       ;; has a long vowel to spell that way.
       (str/replace #"([aeiouy])\1" "$1")

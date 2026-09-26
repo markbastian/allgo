@@ -14,7 +14,7 @@
                          :vel (b/with-magnitude dir (* max-speed (+ 0.5 (* 0.5 (.nextDouble g)))))})))))
 
 (defn- order
-  "Polarisation: 0 when headings are scattered, 1 when the flock is aligned."
+  "Polarization: 0 when headings are scattered, 1 when the flock is aligned."
   [flock]
   (b/mag (b/v* (reduce b/v+ (map (comp b/normalize :vel) flock)) (/ 1.0 (count flock)))))
 
@@ -57,7 +57,7 @@
 (deftest step-does-not-depend-on-update-order
   (testing "every boid sees the same previous state, so reversing the flock only permutes the result"
     ;; Compared within a tolerance, not bitwise. The invariant is real, but
-    ;; reversing the flock also reverses the order neighbour contributions
+    ;; reversing the flock also reverses the order neighbor contributions
     ;; are summed in, and floating-point addition is not associative -- the
     ;; two answers can differ in the last unit in the last place.
     (let [bounds [400 400]
@@ -136,9 +136,9 @@
       (is (gjk/intersects? (gjk/sphere [9.0 0.0 0.0] 0.5) support))
       (is (not (gjk/intersects? (gjk/sphere [11.0 0.0 0.0] 0.5) support)))))
   (testing "the bounding sphere used for broad phase really encloses the body"
-    (doseq [{:keys [support centre radius]} [(b/sphere-obstacle [1 2 3] 5)
+    (doseq [{:keys [support center radius]} [(b/sphere-obstacle [1 2 3] 5)
                                              (b/box-obstacle [0 0 0] [4 6 8])]]
-      (is (not (gjk/intersects? (gjk/sphere centre (* 0.999 radius))
+      (is (not (gjk/intersects? (gjk/sphere center (* 0.999 radius))
                                 (gjk/translate support [(* 3 radius) 0.0 0.0])))))))
 
 (deftest flat-box-bounding-sphere-measures-the-rectangle
@@ -146,14 +146,14 @@
   ;; degenerate face, but that depth is invented and the prism straddles the
   ;; flock's plane. Letting it into the radius inflates the sphere by more
   ;; than 2x and the broad-phase cull stops culling.
-  (let [{:keys [centre radius]} (b/box-obstacle [0 0] [6 6])]
-    (is (= 0.0 (nth centre 2)) "the prism is centred on the flock's plane")
+  (let [{:keys [center radius]} (b/box-obstacle [0 0] [6 6])]
+    (is (= 0.0 (nth center 2)) "the prism is centered on the flock's plane")
     (is (< (Math/abs (- radius (* 0.5 (Math/hypot 6 6)))) 1e-9)
         "radius is the half-diagonal of the rectangle, not of the prism"))
 
   (testing "it still encloses the rectangle the flock actually meets"
-    (let [{:keys [centre radius]} (b/box-obstacle [2 3] [10 9])
-          [cx cy] centre]
+    (let [{:keys [center radius]} (b/box-obstacle [2 3] [10 9])
+          [cx cy] center]
       (doseq [corner [[2 3] [10 3] [2 9] [10 9]]]
         (is (<= (Math/hypot (- (first corner) cx) (- (second corner) cy))
                 (+ radius 1e-9)))))))
@@ -193,7 +193,7 @@
 
 (deftest stepping-with-obstacles-is-index-independent
   ;; `step` builds an index internally; the flock it produces must match
-  ;; what the unindexed path produces, or the optimisation changed the sim.
+  ;; what the unindexed path produces, or the optimization changed the sim.
   (let [obstacles (vec (for [x (range 0 300 30)] (b/box-obstacle [x 100] [(+ x 12) 112])))
         params    {:obstacles obstacles :avoid-radius 15 :boid-radius 2.0
                    :edges :bounce :perception-radius 40}

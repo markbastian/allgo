@@ -3,7 +3,7 @@
 
   A cellular automaton carving caverns: seed a fraction of the cells at
   random, then repeatedly keep every cell with more than four live
-  neighbours. Scrubbing `iterations` walks the same seed forward one
+  neighbors. Scrubbing `iterations` walks the same seed forward one
   generation at a time, which is the point worth seeing -- noise resolves
   into rounded chambers within a handful of steps and then barely moves.
 
@@ -33,7 +33,7 @@
   (.fillRect ctx 0 0 w h)
   (let [rows  (count grid)
         cols  (count (first grid))
-        ;; Square cells, centred: the grid's aspect ratio rarely matches
+        ;; Square cells, centered: the grid's aspect ratio rarely matches
         ;; the viewport's.
         scale (min (/ w cols) (/ (- h 24) rows))
         ox    (/ (- w (* cols scale)) 2)

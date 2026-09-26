@@ -107,7 +107,7 @@
     (dotimes [i n]
       (let [found (hash/query! h pos i min-dist)]
         (dotimes [k found]
-          (let [j (hash/neighbour h k)]
+          (let [j (hash/neighbor h k)]
             (when (< i j)
               (aset checks 0 (inc (aget checks 0)))
               (when (resolve-pair! pos vel i j min-dist)
@@ -180,7 +180,7 @@
                        :instanced inst
                        :touched (js/Int32Array. n)
                        ;; Cells one diameter across: the query radius, so a
-                       ;; ball's neighbours are never more than a cell away.
+                       ;; ball's neighbors are never more than a cell away.
                        :hash (hash/spatial-hash (* 2 radius) n))))
             (resize! []
               (let [w (.-clientWidth container) h (.-clientHeight container)]

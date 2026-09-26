@@ -42,7 +42,7 @@
     (testing "it starts flat at the requested depth"
       (is (every? #(== 0.5 %) (heights s))))
 
-    (testing "the grid is centred on the origin"
+    (testing "the grid is centered on the origin"
       (is (== 0.0 (hf/column-x s (:cx s))))
       (is (== 0.0 (hf/column-z s (:cz s))))
       (is (= [(:cx s) (:cz s)] (hf/nearest-column s 0.0 0.0))))
@@ -200,7 +200,7 @@
   (testing "a sphere reports the chord of the circle it cuts at each column"
     (let [b (hf/sphere {:pos [0.0 0.5 0.0] :radius 0.2 :density 1.0})]
       (is (< (abs (- (hf/half-height-at b 0.0 0.0) 0.2)) 1e-9)
-          "at the centre, the full radius")
+          "at the center, the full radius")
       (is (zero? (hf/half-height-at b 0.3 0.0))
           "outside the footprint, nothing")
       (is (< (abs (- (hf/half-height-at b 0.2 0.0) 0.0)) 1e-9)

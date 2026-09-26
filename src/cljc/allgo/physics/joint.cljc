@@ -25,7 +25,7 @@
 
   One departure from the reference, measured rather than assumed. It
   halves every position-level angular correction, under a comment
-  reading stabilize rotation. That destabilises these joints badly: on a ball joint
+  reading stabilize rotation. That destabilizes these joints badly: on a ball joint
   pendulum at ten substeps the anchors, which should stay together, come
   18 units apart, against 0.005 at full strength. Halving is not a
   relaxation here because `allgo.physics.rigid/inverse-mass` sizes the
@@ -33,7 +33,7 @@
   angular half and what is delivered no longer opposes the error. The
   giveaway is that a quarter behaves better than a half, which no genuine
   damping factor does. `:angular-relaxation` is a per-joint setting for
-  anyone wanting the reference's behaviour; it defaults to applying the
+  anyone wanting the reference's behavior; it defaults to applying the
   correction in full."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]

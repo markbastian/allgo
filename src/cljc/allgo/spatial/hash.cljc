@@ -34,7 +34,7 @@
       (rebuild! h positions n)
       (let [found (query! h positions i 0.05)]
         (dotimes [k found]
-          (let [j (neighbour h k)] ...)))"
+          (let [j (neighbor h k)] ...)))"
   (:require [allgo.array :as a]
             [clojure.math :as math]))
 
@@ -50,7 +50,7 @@
   The table is at least twice `max-objects`, which keeps the load factor
   near a half -- enough that most buckets hold the one cell they were
   given -- and rounded up to a power of two so that reducing a hash to a
-  bucket is a mask rather than a division. That is not a micro-optimisation
+  bucket is a mask rather than a division. That is not a micro-optimization
   here: the modulo runs once per cell visited, which for a few thousand
   objects is a few hundred thousand times a frame."
   [spacing max-objects]
@@ -124,7 +124,7 @@
            (recur (inc i) start))))
 
      ;; 3. Walk the objects again, each one stepping its bucket's offset
-     ;;    back and writing itself there. Filling backwards is what lets
+     ;;    back and writing itself there. Filling backward is what lets
      ;;    the offsets double as cursors: when the pass ends every bucket's
      ;;    offset has walked down to exactly where that bucket begins.
      (dotimes [i n]
@@ -137,7 +137,7 @@
 (defn query-point!
   "Every object in the cells covering the box of `max-dist` around a point.
 
-  Returns how many were found; `neighbour` reads them out. These are
+  Returns how many were found; `neighbor` reads them out. These are
   *candidates*: everything in the cells the box touches, which includes
   objects up to a cell beyond `max-dist` and, rarely, objects from an
   unrelated cell that hashed to the same bucket. Filter by actual distance.
@@ -192,23 +192,23 @@
     (query-point! h (aget positions b) (aget positions (+ b 1)) (aget positions (+ b 2))
                   max-dist)))
 
-(defn neighbour
+(defn neighbor
   "The `k`th candidate from the last query."
   ^long [{:keys [^ints query-ids]} k]
   (aget query-ids k))
 
-(defn neighbours
+(defn neighbors
   "The candidates from the last query, as a vector.
 
-  Convenient and allocating; the hot path is `query!` plus `neighbour`."
+  Convenient and allocating; the hot path is `query!` plus `neighbor`."
   [h found]
-  (into [] (map #(neighbour h %)) (range found)))
+  (into [] (map #(neighbor h %)) (range found)))
 
 ;; ---------------------------------------------------------------------------
 ;; Conveniences over the raw query
 
 (defn within
-  "Every object whose centre is within `max-dist` of object `i`, excluding
+  "Every object whose center is within `max-dist` of object `i`, excluding
   `i` itself. The candidates filtered down to real hits."
   [h positions i max-dist]
   (let [^doubles positions positions
@@ -217,7 +217,7 @@
         x (aget positions b) y (aget positions (+ b 1)) z (aget positions (+ b 2))
         r2 (* max-dist max-dist)]
     (into []
-          (comp (map #(neighbour h %))
+          (comp (map #(neighbor h %))
                 (remove #(= % i))
                 (filter (fn [j]
                           (let [c  (* 3 j)
@@ -233,7 +233,7 @@
   Returns `{:starts :ids :pairs}`: `ids` holds the partners of every
   object end to end, and `starts` says where each object's run begins, so
   object `i`'s partners are `ids[starts[i] .. starts[i+1])`. One flat
-  array and one index, which is how a neighbour list is kept when it is
+  array and one index, which is how a neighbor list is kept when it is
   read far more often than it is built.
 
   Each pair is recorded once, under the higher-numbered object, so walking
@@ -261,7 +261,7 @@
               (loop [k 0 acc acc total total]
                 (if (= k found)
                   [acc total]
-                  (let [j (neighbour h k)]
+                  (let [j (neighbor h k)]
                     (if (>= j i)
                       (recur (inc k) acc total)
                       (let [b  (* 3 j)

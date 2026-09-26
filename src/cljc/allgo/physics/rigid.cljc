@@ -3,7 +3,7 @@
 
   `allgo.physics.xpbd` moves particles, which have a position and nothing
   else. A rigid body also has an orientation, and that is the whole
-  difference: a correction applied away from the centre of mass has to
+  difference: a correction applied away from the center of mass has to
   turn the body as well as move it, by an amount that depends on which way
   the body is facing. Everything here follows from that.
 
@@ -24,8 +24,8 @@
   `inverse-mass` is the piece worth understanding. For a correction along
   `n` applied at world point `p`, it answers how much the body will give
   -- and for a body that is easy to push but hard to spin, that depends
-  entirely on where `p` is relative to the centre. A correction through
-  the centre sees only the mass; one at arm's length sees mostly the
+  entirely on where `p` is relative to the center. A correction through
+  the center sees only the mass; one at arm's length sees mostly the
   inertia. Passing no point at all asks the purely angular question, which
   is what an orientation constraint needs and what `allgo.physics.joint`
   is built on.
@@ -104,9 +104,9 @@
 
 (defn torus
   "A solid torus: a tube of radius `minor` swept round a circle of radius
-  `major`, about the body's own z axis. What a tyre is, near enough, and
-  the reason for having it: a wheel modelled as a ball touches the ground
-  directly beneath its centre however far it leans, which is a tyre as
+  `major`, about the body's own z axis. What a tire is, near enough, and
+  the reason for having it: a wheel modeled as a ball touches the ground
+  directly beneath its center however far it leans, which is a tire as
   wide as the wheel is tall.
 
   `:size` is the box it fits in, which is what the broad phase asks for."
@@ -212,7 +212,7 @@
   "How much this body gives to a correction along `n` applied at `at`.
 
   With a point, this is the linear and angular response together: the
-  further `at` is from the centre, the more of the correction goes into
+  further `at` is from the center, the more of the correction goes into
   spinning the body and the less into moving it. With `at` nil it is the
   purely angular response to a correction about the axis `n`, which is
   what an orientation constraint asks."
@@ -240,8 +240,8 @@
           b (if (and at velocity-level?)
               (update b :vel v/add-scaled p inv-mass)
               b)
-          ;; The lever arm is measured from the moved centre, as the
-          ;; reference measures it. It makes no difference: the centre
+          ;; The lever arm is measured from the moved center, as the
+          ;; reference measures it. It makes no difference: the center
           ;; moved by `p * inv-mass`, which is parallel to `p`, and a
           ;; vector crossed with something parallel to itself is zero.
           torque (if at (v/cross (v/sub at (:pos b)) p) p)
@@ -261,7 +261,7 @@
    ;; joint solver and not in its rigid body one. Halving is a relaxation:
    ;; the constraint is not satisfied in one pass but converges over the
    ;; substeps, and converges more calmly. 1.0 is the rigid body
-   ;; behaviour; `allgo.physics.joint` asks for 0.5.
+   ;; behavior; `allgo.physics.joint` asks for 0.5.
    :angular-relaxation 1.0})
 
 (defn correct
@@ -273,7 +273,7 @@
   are the world points the correction acts through, and nil for a
   correction that is purely about orientation.
 
-  `compliance` is the inverse stiffness, in metres per newton: zero is
+  `compliance` is the inverse stiffness, in meters per newton: zero is
   rigid, and larger is springier in a way that does not depend on the step
   size -- which is the point of XPBD over pushing a fraction of the error
   each iteration."

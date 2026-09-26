@@ -11,7 +11,7 @@
 (def ^:private half-pi (/ math/PI 2))
 
 (def puma
-  "The PUMA 560, in Craig's modified DH parameters and metres. The
+  "The PUMA 560, in Craig's modified DH parameters and meters. The
   canonical six-axis arm, and the one his chapter 4 solves."
   (k/chain [{:alpha 0.0         :a 0.0    :d 0.0    :limits [-2.8 2.8]}
             {:alpha (- half-pi) :a 0.0    :d 0.0    :limits [-3.9 0.8]}
@@ -108,7 +108,7 @@
 
   (testing "every reachable pose has exactly eight configurations"
     ;; Two shoulder, two elbow, two wrist. The multiplicity is the
-    ;; structure, not an artefact.
+    ;; structure, not an artifact.
     (let [r (java.util.Random. 17)]
       (dotimes [_ 300]
         (let [qs (rng-angles r 6)

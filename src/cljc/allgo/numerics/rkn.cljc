@@ -35,7 +35,7 @@
 (def verlet
   "Velocity Verlet as a Nystrom tableau: second order, two force
   evaluations, and the staple of orbit and molecular-dynamics work for its
-  even behaviour over long integrations."
+  even behavior over long integrations."
   {:name "Verlet" :order 2 :stages 2 :kind :nystrom
    :c [0.0 1.0]
    :a [[] [(/ 1.0 2.0)]]

@@ -75,7 +75,7 @@
       (is (not (get-in s [:rider :attached?])))
       (is (empty? (:pins s)))
       (is (< (double (get-in s [:rider :tone])) 0.5))
-      ;; Centres of the parts: nothing has gone through the floor.
+      ;; Centers of the parts: nothing has gone through the floor.
       (is (pos? lowest) (str "lowest part at " lowest))
       (is (< (double (second (:pos (:base pose)))) 0.6) "and is lying on it"))))
 

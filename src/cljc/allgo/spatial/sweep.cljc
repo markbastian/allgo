@@ -45,7 +45,7 @@
 (defn axis-of
   "The axis the boxes are most spread along, 0, 1 or 2.
 
-  Spread is measured over the box centres, by variance. Sweeping the
+  Spread is measured over the box centers, by variance. Sweeping the
   widest axis is what makes the prune bite: on a scene twice as tall as it
   is wide, sweeping x leaves roughly twice as many candidates per box as
   sweeping y does."
@@ -71,7 +71,7 @@
 
   Insertion sort is quadratic on a shuffled list and linear on one that is
   nearly right, which is exactly the case here: between frames a box moves
-  a little and swaps with a neighbour or two. The first call on a fresh
+  a little and swaps with a neighbor or two. The first call on a fresh
   structure is the shuffled case, so it starts from the identity order,
   which for boxes built in any spatial order is already close.
 
@@ -170,7 +170,7 @@
 ;; Building boxes
 
 (defn spheres->boxes!
-  "Fills `mins` and `maxs` from sphere centres and a radius.
+  "Fills `mins` and `maxs` from sphere centers and a radius.
 
   Lets a scene held as points be swept without being rewritten as boxes,
   which is how `allgo.spatial.hash` is usually fed."

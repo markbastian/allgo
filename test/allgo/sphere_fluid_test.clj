@@ -72,7 +72,7 @@
         (is (< (rel-error out psi) 2e-3) label))))
 
   (testing "and converges at second order, which is what the differencing
-            promises and the only way to tell a discretisation from a bug"
+            promises and the only way to tell a discretization from a bug"
     (let [[_ deg f] (first harmonics)
           err (fn [n]
                 (let [g (sf/grid {:nlat n :nlon (* 2 n)})

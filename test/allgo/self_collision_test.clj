@@ -18,7 +18,7 @@
   (abs (- (first (x/particle body 1)) (first (x/particle body 0)))))
 
 (deftest adjacency-test
-  (testing "the neighbour list matches the pairs brute force finds"
+  (testing "the neighbor list matches the pairs brute force finds"
     (let [p (double-array (for [x (range 5) y (range 5) z (range 2) c [x y z]] (double c)))
           n 50
           h (sh/spatial-hash 1.0 n)
@@ -63,7 +63,7 @@
       (is (< (abs (- 0.5 (separation body))) 1e-9))))
 
   (testing "particles that were always close are held at their rest gap"
-    ;; The rule that keeps a fine mesh from inflating: neighbours in the
+    ;; The rule that keeps a fine mesh from inflating: neighbors in the
     ;; sheet are closer together than the cloth is thick, and pushing them
     ;; to the thickness would blow the sheet up.
     (let [body (pair-body 0.05 0.05 0.2)]
@@ -139,7 +139,7 @@
 
     (testing "and adding it does not inflate the sheet"
       ;; Without the rest-distance rule this is what goes wrong: every
-      ;; neighbour is inside the thickness, so the constraint pushes the
+      ;; neighbor is inside the thickness, so the constraint pushes the
       ;; whole mesh apart.
       (let [plain (x/cloth mesh {})
             selfy (-> (x/cloth mesh {})

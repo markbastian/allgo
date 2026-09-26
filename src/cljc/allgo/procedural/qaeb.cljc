@@ -28,7 +28,7 @@
   * **The crossing is interpolated, not searched.** Once a step straddles
     the surface, the altitude at either end is known, and one linear
     interpolation lands within the error bound already accepted. That is
-    the \"quasi-analytic\" half. Bisection afterwards is available and
+    the \"quasi-analytic\" half. Bisection afterward is available and
     usually unnecessary.
 
   What you give up is the guarantee. A ridge thinner than a step can be
@@ -38,7 +38,7 @@
 
   ## Coherence
 
-  Neighbouring rays hit at nearly the same distance, so starting a ray at
+  Neighboring rays hit at nearly the same distance, so starting a ray at
   the previous one's hit distance less a margin removes most of the march.
   Chapter 17 gets a large constant factor that way. Nothing here does it
   for you -- it is a property of the traversal order, which is the
@@ -105,7 +105,7 @@
                a' (at t')]
            (if (neg? a')
              ;; Bracketed. One interpolation lands inside the error already
-             ;; accepted; bisect afterwards only if asked.
+             ;; accepted; bisect afterward only if asked.
              (let [t0 (loop [lo t hi t' alo a ahi a' n (long refine)]
                         (let [mid (if (== alo ahi)
                                     (* 0.5 (+ lo hi))
@@ -120,7 +120,7 @@
              (recur t' a' (inc steps)))))))))
 
 (defn shadowed?
-  "Whether anything blocks the ray from `point` towards `light`.
+  "Whether anything blocks the ray from `point` toward `light`.
 
   The same march with the answer thrown away, which is all a shadow ray
   is. `:t-min` has to be far enough off the surface to clear the point the
@@ -142,7 +142,7 @@
         r (double r)
         b (v3/dot origin d)
         c (- (v3/dot origin origin) (* r r))
-        disc (- (* b b) c)]
-    (when-not (neg? disc)
-      (let [s (Math/sqrt disc)]
+        disk (- (* b b) c)]
+    (when-not (neg? disk)
+      (let [s (Math/sqrt disk)]
         [(- (- b) s) (+ (- b) s)]))))

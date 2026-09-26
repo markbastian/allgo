@@ -37,7 +37,7 @@
 (defn surface
   "A grid of water columns spanning `size-x` by `size-z`, `depth` deep.
 
-  The grid is centred on the origin, because the bodies that float in it
+  The grid is centered on the origin, because the bodies that float in it
   are placed in world coordinates and it is one less thing to convert."
   [{:keys [size-x size-z spacing depth]
     :or   {spacing 0.02 depth 0.8}}]
@@ -109,13 +109,13 @@
   "The fastest a wave may travel on this grid at this step size.
 
   A wave that crosses more than half a cell per step outruns the
-  stencil, which can only see its neighbours, and the grid answers by
+  stencil, which can only see its neighbors, and the grid answers by
   oscillating harder every step until it overflows."
   [{:keys [spacing]} dt]
   (* 0.5 (/ (double spacing) (double dt))))
 
 (defn splash!
-  "Drops a disc of water `amount` deep and `radius` wide at `x z`.
+  "Drops a disk of water `amount` deep and `radius` wide at `x z`.
 
   Nothing in the simulation needs this; it is how you poke the surface to
   see what it does."
@@ -145,10 +145,10 @@
   "One step of the wave equation over the height field.
 
   Each column is accelerated by how far it sits below the average of its
-  four neighbours, which is the discrete Laplacian and so the wave
+  four neighbors, which is the discrete Laplacian and so the wave
   equation. The two dampings do different jobs: `:vel-damping` bleeds
   energy out, so the water eventually goes flat, while `:pos-damping`
-  pulls each column toward its neighbours' average, which smooths the
+  pulls each column toward its neighbors' average, which smooths the
   grid-scale jitter the stencil cannot resolve."
   ([s dt] (step-surface! s dt {}))
   ([{:keys [nx nz spacing ^floats heights ^floats velocities] :as s} dt world]
@@ -168,7 +168,7 @@
        (dotimes [j nz]
          (let [id (+ (* i nz) j)
                h  (aget heights id)
-               ;; A missing neighbour reads as this column's own height,
+               ;; A missing neighbor reads as this column's own height,
                ;; which is a wall that reflects rather than absorbs.
                sum (+ (if (> i 0) (aget heights (- id nz)) h)
                       (if (< i (dec nx)) (aget heights (+ id nz)) h)
@@ -198,7 +198,7 @@
   (half-height-at [body x z]
     "Half the body's vertical extent over the column at `x z`, or 0 where
      the column misses the body entirely.")
-  (centre-y [body] "The body's centre height.")
+  (center-y [body] "The body's center height.")
   (body-volume [body] "The volume displaced when the body is fully under.")
   (add-vertical-velocity [body dv] "The body, moving `dv` faster upward."))
 
@@ -213,9 +213,9 @@
           dz (- (double pz) (double z))
           d2 (+ (* dx dx) (* dz dz))
           r2 (* (double radius) (double radius))]
-      ;; Half the chord of the circle cut at this distance from centre.
+      ;; Half the chord of the circle cut at this distance from center.
       (if (< d2 r2) (math/sqrt (- r2 d2)) 0.0)))
-  (centre-y [_] (nth pos 1))
+  (center-y [_] (nth pos 1))
   (body-volume [_] (* 4.0 (/ math/PI 3.0) radius radius radius))
   (add-vertical-velocity [b dv] (update-in b [:vel 1] + dv)))
 
@@ -252,7 +252,7 @@
    :drag      12.0})
 
 (defn- smooth-body-heights!
-  "Spreads the displaced volume over neighbouring columns.
+  "Spreads the displaced volume over neighboring columns.
 
   A sphere's footprint has a hard rim -- the chord goes to zero at the
   edge but the column either contains it or does not -- and without this
@@ -303,7 +303,7 @@
             (let [[bx0 bz0 bx1 bz1] (footprint body)
                   [i0 j0] (nearest-column s bx0 bz0)
                   [i1 j1] (nearest-column s bx1 bz1)
-                  cy (double (centre-y body))
+                  cy (double (center-y body))
                   force
                   (loop [i (long i0) force 0.0]
                     (if (> i (long i1))
@@ -343,7 +343,7 @@
                   submerged (min 1.0 (/ displaced (max 1e-12 (double (body-volume body)))))
                   damped (max 0.0 (- 1.0 (* (double drag) dt submerged)))]
               ;; Drag first, then the impulse. The other order damps the
-              ;; buoyant impulse but not the gravity added afterwards, and
+              ;; buoyant impulse but not the gravity added afterward, and
               ;; that asymmetry moves the resting depth: a body has to sit
               ;; deeper, by a factor of 1/damped, before the two balance.
               ;; Archimedes then depends on the drag coefficient, which is

@@ -58,7 +58,7 @@
   (int (* (math/floor (/ (dec (+ n m)) m)) m)))
 
 (defn random-point
-  "A point drawn uniformly from the disc of radius `radius`.
+  "A point drawn uniformly from the disk of radius `radius`.
 
   Two uniform draws are summed and the result folded back on itself past 1,
   which turns the flat distribution into a triangular one. That extra
@@ -106,7 +106,7 @@
     (+ mean (* sd (math/sqrt (* -2.0 (math/log u1))) (math/cos (* 2.0 math/PI u2))))))
 
 (defn random-room
-  "A room with a uniformly random size, centred somewhere in the disc of
+  "A room with a uniformly random size, centered somewhere in the disk of
   radius `radius`. Kept for callers that want one loose room; `scatter`
   is what the pipeline uses."
   [radius max-width max-height]
@@ -146,11 +146,11 @@
 (defn- snap-size
   "Rounds an extent to an *even* number of tiles, to nearest.
 
-  Even, because rooms are positioned by their centre: a room an odd number
+  Even, because rooms are positioned by their center: a room an odd number
   of tiles wide has its edges half a tile off the grid, and two such rooms
   placed flush straddle a shared column of tiles and bleed into each other
   when rasterized. An even extent has a whole-tile half-extent, so
-  grid-aligned centres give grid-aligned edges.
+  grid-aligned centers give grid-aligned edges.
 
   To nearest rather than `roundm`'s round-up, because the threshold that
   picks out hub rooms is a multiple of the mean size. Rounding up inflates
@@ -163,8 +163,8 @@
     (max (round min-size) (round v) step)))
 
 (defn scatter
-  "Step 1. `room-count` rooms with normally distributed extents, centred on
-  points drawn from the scatter region -- the disc of radius `:radius`, or
+  "Step 1. `room-count` rooms with normally distributed extents, centered on
+  points drawn from the scatter region -- the disk of radius `:radius`, or
   the ellipse `:ellipse` when one is given. Sizes and positions are both
   snapped to the tile grid."
   [{:keys [room-count radius ellipse tile-size
@@ -369,14 +369,14 @@
 ;; 4. Delaunay graph
 
 (defn room-graph
-  "Step 4. Delaunay-triangulates the hub centres and reads the triangle
+  "Step 4. Delaunay-triangulates the hub centers and reads the triangle
   edges off as a graph. Returns `{:nodes #{id} :edges #{#{id id}}}`.
 
   Delaunay is the right triangulation here because it avoids sliver
   triangles, so the edges it produces connect rooms to their genuine
-  neighbours rather than skipping across the map."
+  neighbors rather than skipping across the map."
   [rooms]
-  (let [;; Two hubs that snapped onto the same centre would be
+  (let [;; Two hubs that snapped onto the same center would be
         ;; indistinguishable as triangulation sites, so only the first can
         ;; take part.
         by-center (reduce (fn [m {:keys [id center]}]
@@ -443,10 +443,10 @@
 (defn corridor-segments
   "The run between two rooms, as one or two axis-aligned segments.
 
-  Adonaac's test: take the midpoint of the two centres. If its x falls
+  Adonaac's test: take the midpoint of the two centers. If its x falls
   inside both rooms they overlap in a vertical band, so a single vertical
   run down that band joins them; likewise for y. Failing both, an L --
-  out along x from the first centre, then along y into the second."
+  out along x from the first center, then along y into the second."
   [a b]
   (let [[ax ay] (:center a)
         [bx by] (:center b)

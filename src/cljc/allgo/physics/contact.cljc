@@ -46,7 +46,7 @@
 
   A vector of contacts, each
 
-      {:a :b        body indices, normal points from `a` towards `b`
+      {:a :b        body indices, normal points from `a` toward `b`
        :point       where they touch, in world coordinates
        :normal      unit, the direction to separate along
        :depth       signed -- positive is an overlap, negative a gap}
@@ -59,7 +59,7 @@
   A contact is offered while the two are still apart, out to `margin`,
   and that margin is as wide as the pair can travel in the step. It is
   what stops a fast thing going through a thin thing: detection runs
-  once a step, so a ball crossing a metre and a half between two looks
+  once a step, so a ball crossing a meter and a half between two looks
   is never near a 2cm window and arrives on the far side of the brick
   having been asked about nothing. The broad phase sweeps its boxes
   over the step for the same reason -- a pair has to survive it before
@@ -101,7 +101,7 @@
           (q/rotate rot [0.0 0.0 1.0])]})
 
 (defn- radius-on
-  "How far the box reaches from its centre along `axis`."
+  "How far the box reaches from its center along `axis`."
   ^double [{:keys [half axes]} axis]
   (let [[hx hy hz] half
         [ax ay az] axes]
@@ -137,7 +137,7 @@
   Linear only. A spinning body's surface moves too, but a contact is
   missed when the *gap closes* faster than detection looks, and closing
   is what translation does -- a brick can spin as fast as it likes about
-  its own centre without arriving anywhere. Adding the angular term
+  its own center without arriving anywhere. Adding the angular term
   would widen every long box's margin for a case that does not tunnel."
   ^double [b ^double dt]
   (if (rigid/inert? b)
@@ -156,7 +156,7 @@
   existing rule for gaps -- approach no faster than closes this one --
   stops the ball at the surface.
 
-  It is bought, not free: a margin metres wide asks the separating axis
+  It is bought, not free: a margin meters wide asks the separating axis
   test for the shortest way out between two bodies that are nowhere near
   each other, and that answer is only roughly the direction they will
   actually meet from. See `allgo.physics.solver` on what that costs."
@@ -208,7 +208,7 @@
 (defn- most-opposed-face
   "The face of `b` pointing most directly back along `n`.
 
-  `n` runs from the reference box towards this one, so the face we want
+  `n` runs from the reference box toward this one, so the face we want
   is the one whose outward normal is closest to `-n` -- the face being
   pressed into."
   [{:keys [axes]} n]
@@ -239,7 +239,7 @@
   A corner that survives the clip keeps the id it came in with; a point
   made by cutting an edge gets one built from the plane that cut it and
   the corner the cut started from. So the same configuration next step
-  produces the same ids, and a contact can be recognised as the one that
+  produces the same ids, and a contact can be recognized as the one that
   was there before rather than merely as one nearby."
   [poly n d tag]
   (let [pts (vec poly)
@@ -325,7 +325,7 @@
                        ;; Which corner of which face, pressed into which
                        ;; face -- the same answer every step for as long
                        ;; as the two bodies stay in the same arrangement,
-                       ;; which is what warm starting needs to recognise
+                       ;; which is what warm starting needs to recognize
                        ;; it by. `flip?` is in it because it says which
                        ;; body was the reference, and that decides what
                        ;; the rest of the id means.
@@ -366,9 +366,9 @@
                            (v/scale (nth as idx)
                                     (* (nth h idx)
                                        (if (pos? (* dir (v/dot (nth as idx) n))) 1.0 -1.0))))
-                     centre (v/add (:pos body) (v/add (sgn axis-i 1.0) (sgn axis-j 1.0)))
+                     center (v/add (:pos body) (v/add (sgn axis-i 1.0) (sgn axis-j 1.0)))
                      along (v/scale (nth as k) (nth h k))]
-                 [(v/sub centre along) (v/add centre along)]))
+                 [(v/sub center along) (v/add center along)]))
         [p1 q1] (pick a (mod (inc (long i)) 3) (mod (inc (long (mod (inc (long i)) 3))) 3))
         [p2 q2] (pick b (mod (inc (long j)) 3) (mod (inc (long (mod (inc (long j)) 3))) 3))]
     [{:a ia :b ib
@@ -390,7 +390,7 @@
                            (map-indexed (fn [j ax] [:b nil j ax]) bs))
         edge-tests (for [i (range 3) j (range 3)]
                      [:edge i j (v/cross (nth as i) (nth bs j))])
-        ;; Faces get a small handicap in their favour, and a's faces one
+        ;; Faces get a small handicap in their favor, and a's faces one
         ;; over b's. Equal overlaps otherwise flip between a face result
         ;; and an edge result, or between a's face and b's, on
         ;; floating-point noise -- and a resting brick loses three of its
@@ -414,7 +414,7 @@
     (if (nil? best)
       []
       (let [{:keys [kind i j normal depth]} best
-            ;; Point the axis from a towards b.
+            ;; Point the axis from a toward b.
             n (if (neg? (v/dot normal (v/sub (:pos b) (:pos a))))
                 (v/negate normal)
                 normal)]
@@ -448,8 +448,8 @@
   "Sphere `a` against box `b`.
 
   The nearest point on a box to anything is found by clamping in the
-  box's own frame, which is the whole of it -- as long as the centre is
-  outside. A centre that has tunnelled inside has no nearest surface
+  box's own frame, which is the whole of it -- as long as the center is
+  outside. A center that has tunneled inside has no nearest surface
   point in that sense, and is pushed out through whichever face it is
   closest to."
   [ia ib a b margin]
@@ -489,7 +489,7 @@
 (def ^:private torus-samples
   "How many points round the ring are tried before refining. Enough that
   the deepest one is never missed between two of them on anything the
-  size of a tyre against anything the size of a floor or a kerb."
+  size of a tire against anything the size of a floor or a curb."
   24)
 
 (defn- ring-point
@@ -530,9 +530,9 @@
   it -- and `sphere-box` already answers that. What is left is *where*
   on the circle, which is the one-dimensional question of which angle
   goes deepest: try evenly spaced angles, then narrow in on the best by
-  golden section between its neighbours.
+  golden section between its neighbors.
 
-  One contact, not a manifold. A tyre on the road touches in one patch,
+  One contact, not a manifold. A tire on the road touches in one patch,
   and that is the case this is for; a torus lying flat on a floor touches
   all the way round and will rock until something else is resting on it."
   [ia ib a b margin]
@@ -565,13 +565,13 @@
       (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
             (torus-box ib ia b a margin))
       ;; A torus against a ball or another torus is not asked for yet:
-      ;; tyres meet the road, and the road is made of boxes.
+      ;; tires meet the road, and the road is made of boxes.
       :else [])))
 
 (defn between
   "The manifold between two bodies, whatever shapes they are.
 
-  The normal always runs from `a` towards `b`, so a caller never has to
+  The normal always runs from `a` toward `b`, so a caller never has to
   ask which way round the pair was tested.
 
   With no `dt` the two are taken as standing still, which is the fixed
