@@ -557,7 +557,7 @@
                   ;; demo picker, are not the rider's.
                   (when-not (or (#{"INPUT" "SELECT" "TEXTAREA"} tag)
                                 (and target (.-closest target)
-                                     (.closest target ".demo-picker, .lil-gui")))
+                                     (.closest target ".lil-gui")))
                     (case (.-code e)
                       "KeyR" (when down? (reset-bike!))
                       ;; Not in the key list on purpose.

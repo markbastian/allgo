@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>allgo</title>
+    <!-- The demos' own chrome -- readouts, the fps meter -- is styled in
+         the site's stylesheet; this page only makes a demo fill a window. -->
+    <link href="../css/style.css" rel="stylesheet" type="text/css">
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #05060b; }
+        #play { position: fixed; inset: 0; color: var(--text-dim); font: 15px system-ui, sans-serif; }
+        #play:not(:has(.play-viewport)) { display: grid; place-items: center; }
+        /* Important, because a few demos set their container's position
+           inline -- the arms make it relative, for their overlay -- and
+           relative would collapse it to its contents. Absolute holds the
+           overlay just as well. */
+        .play-viewport { position: absolute !important; inset: 0; }
+        .play-viewport > canvas, .play-viewport > svg { display: block; }
+        /* The Delaunay viewer draws a square of its own, with its buttons
+           below it; in the middle of the window, not its corner. */
+        #delaunay { display: grid; place-items: center; overflow: auto; }
+        /* The controls float over the scene rather than hanging below it,
+           which is where a card on the old demo page put them. */
+        .play-viewport .lil-gui.lil-root {
+            position: absolute; top: 12px; right: 12px; z-index: 6;
+            max-height: calc(100vh - 24px); overflow-y: auto;
+        }
+        .play-bar {
+            position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7;
+            display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px);
+            padding: 6px 14px; border-radius: 999px; background: rgba(5, 7, 13, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(6px);
+            font: 600 15px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; color: #e8eaf2;
+        }
+        .play-bar a { color: #9aa3c0; font-weight: 400; font-size: 13px; text-decoration: none; white-space: nowrap; }
+        .play-bar a:hover, .play-bar a:focus-visible { color: #e8eaf2; }
+        #play-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        @media (max-width: 640px) {
+            /* Below the fps meter, clear of the collapsed controls. */
+            .play-bar { top: 34px; left: 8px; transform: none; font-size: 13px; }
+            .play-viewport .lil-gui.lil-root { max-height: 45vh; }
+        }
+    </style>
+</head>
+<body data-app="play">
+<div class="play-bar"><a href="../index.html">&larr; All demos</a><span id="play-title"></span></div>
+<div id="play"></div>
+<script src="../js/compiled/allgo.js"></script>
+</body>
+</html>

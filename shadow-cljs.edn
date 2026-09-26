@@ -7,5 +7,5 @@
   {:target     :browser
    :output-dir "resources/public/js/compiled"
    :asset-path "/js/compiled"
-   :modules    {:allgo {:entries [allgo.demo.shell allgo.app]}}
+   :modules    {:allgo {:entries [allgo.app]}}
    :devtools   {:after-load allgo.demo.shell/on-js-reload}}}}

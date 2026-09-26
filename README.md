@@ -55,7 +55,16 @@ Where a namespace follows a book, it says so. The main ones:
 ## Demos
 
 Live at <https://markbastian.github.io/allgo/>, or run `make serve` and
-open <http://localhost:3000>. The page groups the demos as follows:
+open <http://localhost:3000>. The landing page is a gallery of tiles --
+searchable, filterable by topic, badged for what each demo needs or
+offers -- and every tile opens its demo full window: the three with pages
+of their own (`cnc/`, `moto/`, `solar/`) go there, the rest to the
+player, `play/?demo=<id>`. The gallery is plain HTML and loads none of
+the demos' bundle, so it is quick on a phone.
+
+The list of demos is `resources/public/demos.json`, which both the
+gallery and the player read. Adding one is an entry there and a line in
+`allgo.demo.registry`. The groups:
 
 | Group                 | Demos                                                                                          |
 |-----------------------|------------------------------------------------------------------------------------------------|
@@ -114,9 +123,11 @@ file the development build writes, so run `make dev` afterward to get
 readable names and source maps back.
 
 The live site is GitHub Pages serving the `gh-pages` branch, which
-holds nothing but the built pages: `index.html`, `cnc/index.html`,
-`moto/index.html`, `solar/index.html`, `css/style.css`, `js/compiled/allgo.js`,
-`data/bsc5.tsv` (the star catalogue, fetched by the solar system demo)
+holds nothing but the built pages: `index.html` (the gallery) and
+`demos.json`, `play/index.html`, `cnc/index.html`, `moto/index.html`,
+`solar/index.html`, `css/style.css` and `css/gallery.css`,
+`js/compiled/allgo.js`, the three files in `data/` (the star catalogue,
+the constellations and the star names, fetched by the solar system demo)
 and an empty `.nojekyll`. Nothing rebuilds it; to publish, run
 `make release`, copy those files onto `gh-pages`, commit and push.
 
@@ -148,8 +159,8 @@ deployed tree from about 17MB to 2.6MB.
 Size is dominated by three.js, at 630KB of the 1.6MB bundle -- using
 `WebGLRenderer` reaches most of the library, so it does not tree-shake
 usefully (`:js-provider :shadow` makes no difference). React, ReactDOM
-and Reagent account for another 147KB, and are needed only by the demo
-picker and the Delaunay tile. The two levers left, if the bundle ever
+and Reagent account for another 147KB, and are needed only by the
+Delaunay demo. The two levers left, if the bundle ever
 needs to be smaller, are splitting the WebGL demos into a lazily loaded
 module so the first paint does not pay for three.js, and dropping Reagent
 for plain DOM.
