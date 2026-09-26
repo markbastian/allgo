@@ -26,7 +26,9 @@
         }
         .app-title a { color: #9aa3c0; font-weight: 400; font-size: 13px; margin-left: 10px; }
         @media (max-width: 640px) {
-            .app-title { top: 34px; left: 8px; transform: none; font-size: 13px; }
+            /* The collapsed controls take the top of a phone; the tab
+               already says what the page is. */
+            .app-title { display: none; }
             #motorcycle .lil-gui.lil-root { max-height: 45vh; }
         }
     </style>

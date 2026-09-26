@@ -261,11 +261,47 @@
     ;; Screen y runs down, so up the screen is negative.
     {:lean (- x) :throttle (max 0.0 (- y)) :brake (max 0.0 y)}))
 
+(defn- screen-tilt
+  "A phone's tilt as the person holding it sees it, from the
+  `deviceorientation` angles `beta` and `gamma` and the screen's rotation
+  `angle`: `[right forward]` in degrees, `right` growing as the screen's
+  right edge dips and `forward` as its top edge tips away.
+
+  The sensor reports against the phone's own axes -- beta about the long
+  side, gamma about the short -- so which one is the screen's left and
+  right depends on which way up the phone is being held. Turned into
+  landscape, what was pitch is now roll."
+  [beta gamma angle]
+  (let [b (double (or beta 0.0))
+        g (double (or gamma 0.0))]
+    (case (mod (long (or angle 0)) 360)
+      90 [b g]
+      180 [(- g) b]
+      270 [(- b) (- g)]
+      [g (- b)])))
+
+(defn- tilt-controls
+  "Lean, throttle and brake from a tilt of `right` and `forward` degrees
+  away from however the phone was being held when tilt was turned on:
+  full lean at twenty-five degrees, full throttle or brake at twenty, and
+  nothing for the first three, which is about how much a phone held
+  still moves anyway."
+  [right forward]
+  (let [dead 3.0
+        scale (fn [d full]
+                (let [m (- (abs (double d)) dead)]
+                  (if (pos? m) (* (Math/sign (double d)) (min 1.0 (/ m (- (double full) dead)))) 0.0)))
+        x (scale right 25.0)
+        y (scale forward 20.0)]
+    {:lean (- x) :throttle (max 0.0 y) :brake (max 0.0 (- y))}))
+
 (defn- rider-inputs
-  "What the rider is asking for this frame, smoothed toward what the keys
-  or a drag -- or, with neither, the course's own autopilot -- want."
-  [inputs held drag pose cfg dt]
+  "What the rider is asking for this frame, smoothed toward what the keys,
+  a drag or the phone's tilt -- or, with none of them, the course's own
+  autopilot -- want. In that order: a key beats a finger beats a tilt."
+  [inputs held drag tilt pose cfg dt]
   (let [max-lean (* (/ Math/PI 180.0) (.-maxLean controls))
+        drag (or drag tilt)
         auto (when (and (.-autopilot controls) (empty? held) (nil? drag))
                ((:autopilot (current-course)) pose (m/telemetry cfg pose)
                                               {:cfg cfg :max-lean max-lean}))
@@ -316,9 +352,13 @@
                "<br>lean " (deg lean) "&deg; &nbsp; steer " (deg steer) "&deg;"
                "<br>rear " (bar rear-travel rlo rhi) " front " (bar front-travel flo fhi)
                "<br>throttle " (bar (:throttle inputs) 0 1) " brake " (bar (:brake inputs) 0 1)
-               "<br><span class='moto-keys'>W/&uarr; throttle &middot; S/&darr; brake &middot; "
-               "A D/&larr; &rarr; lean &middot; B bail &middot; R reset"
-               "<br>or drag: &larr; &rarr; lean &middot; &uarr; throttle &middot; &darr; brake</span>"))))
+               ;; Keys where there is a keyboard, and the phone's own ways
+               ;; where there is a touch screen; the stylesheet shows
+               ;; whichever fits.
+               "<span class='moto-keys moto-keys--keyboard'><br>W/&uarr; throttle &middot; S/&darr; brake &middot; "
+               "A D/&larr; &rarr; lean &middot; B bail &middot; R reset</span>"
+               "<span class='moto-keys'><br>drag: &larr; &rarr; lean &middot; &uarr; throttle &middot; &darr; brake</span>"
+               "<span class='moto-keys moto-keys--touch'><br>Tilt: lean to steer, tip forward for gas, back to brake, shake to reset</span>"))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -334,6 +374,9 @@
         ;; Lean, throttle and brake from a mouse or finger held down on
         ;; the scene, or nil when nothing is.
         drag (atom nil)
+        ;; Motion control, when it is on: where the phone was held when it
+        ;; was turned on, and what its tilt from there asks for.
+        tilt (atom nil)
         ;; Where a drag began and where it has got to: a ring and a dot.
         ring (doto (js/document.createElement "div")
                (-> .-className (set! "moto-drag")))
@@ -532,6 +575,65 @@
                       lean (double (:lean (m/telemetry cfg (m/bike-pose scene))))]
                   (swap! state update :scene
                          #(m/throw-rider % (* m/bail-impulse (if (neg? lean) -1.0 1.0))))))
+              (on-orient [^js e]
+                ;; The first reading after tilt is turned on is where the
+                ;; phone is being held, and neutral; every one after asks
+                ;; for whatever it is tipped away from that.
+                (when (and @tilt (some? (.-beta e)))
+                  (let [angle (or (some-> js/screen .-orientation .-angle) js/window.orientation 0)
+                        [x y] (screen-tilt (.-beta e) (.-gamma e) angle)]
+                    (if-let [[x0 y0] (:zero @tilt)]
+                      (swap! tilt assoc :controls (tilt-controls (- x x0) (- y y0)))
+                      (swap! tilt assoc :zero [x y] :controls (tilt-controls 0.0 0.0))))))
+              (on-motion [^js e]
+                ;; A shake is three hard jolts inside a second -- well past
+                ;; gravity, where a bump in a car or a tilt is not -- and
+                ;; it starts the ride again. Where the phone is held after
+                ;; shaking it is new neutral.
+                (when-let [^js a (and @tilt (.-accelerationIncludingGravity e))]
+                  (when (some? (.-x a))
+                    (let [now (js/performance.now)
+                          jolt? (> (abs (- (Math/hypot (.-x a) (.-y a) (.-z a)) 9.81)) 12.0)
+                          jolts (if jolt?
+                                  (conj (filterv #(< (- now %) 1000.0) (:jolts @tilt)) now)
+                                  (:jolts @tilt))]
+                      (if (and (>= (count jolts) 3)
+                               (> (- now (double (or (:shaken @tilt) 0.0))) 1500.0))
+                        (do (swap! tilt assoc :jolts [] :shaken now :zero nil :controls nil)
+                            (reset-bike!))
+                        (swap! tilt assoc :jolts jolts))))))
+              (toggle-tilt! [^js b]
+                (if @tilt
+                  (do (js/window.removeEventListener "deviceorientation" on-orient)
+                      (js/window.removeEventListener "devicemotion" on-motion)
+                      (reset! tilt nil)
+                      (set! (.-textContent b) "Tilt"))
+                  (let [on! (fn []
+                              (reset! tilt {:zero nil :controls nil :jolts []})
+                              (js/window.addEventListener "deviceorientation" on-orient)
+                              (js/window.addEventListener "devicemotion" on-motion)
+                              (set! (.-textContent b) "Tilt: on")
+                              ;; A browser can offer the event and never
+                              ;; fire it, as a laptop's does. No reading in
+                              ;; two seconds is no sensor.
+                              (js/setTimeout (fn []
+                                               (when (and @tilt (nil? (:zero @tilt)))
+                                                 (toggle-tilt! b)
+                                                 (set! (.-textContent b) "No tilt sensor")))
+                                             2000))
+                        ;; iOS asks first, and only from inside a tap --
+                        ;; which is why tilt is a button and not automatic.
+                        ask (fn [^js cls]
+                              (if (and (some? cls) (fn? (.-requestPermission cls)))
+                                (.requestPermission cls)
+                                (js/Promise.resolve "granted")))]
+                    (-> (js/Promise.all #js [(ask (when (exists? js/DeviceOrientationEvent) js/DeviceOrientationEvent))
+                                             (ask (when (exists? js/DeviceMotionEvent) js/DeviceMotionEvent))])
+                        (.then (fn [^js answers]
+                                 (if (= "granted" (aget answers 0))
+                                   (on!)
+                                   (set! (.-textContent b) "Tilt not allowed"))))
+                        (.catch (fn [_] (set! (.-textContent b) "Tilt not allowed")))))))
               (on-resize []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (when (and (pos? w) (pos? h))
@@ -548,7 +650,7 @@
                         ;; Not `scene`: that name is the one being drawn.
                         {:keys [cfg inputs t finished off-since] sim :scene} @state
                         pose (m/bike-pose sim)
-                        inputs (rider-inputs inputs @held @drag pose cfg frame-dt)
+                        inputs (rider-inputs inputs @held @drag (:controls @tilt) pose cfg frame-dt)
                         t (+ (double t) frame-dt)
                         crs (current-course)
                         finished (or finished (when (c/finished? crs pose) t))
@@ -563,7 +665,7 @@
                       (hud! hud cfg pose inputs (:rider (:scene @state)) @state))
                     ;; Riding itself, it goes round again: a few seconds
                     ;; after the finish, or after coming off.
-                    (when (and (.-autopilot controls) (empty? @held) (nil? @drag)
+                    (when (and (.-autopilot controls) (empty? @held) (nil? @drag) (nil? @tilt)
                                (or (and finished (> (- t finished) 3.0))
                                    (and off-since (> (- t off-since) 4.0))))
                       (reset-bike!))
@@ -595,7 +697,27 @@
               ;; No fewer than four: at 1/180s the pins holding the rider
               ;; on push the bike along by about 30 newtons that are not
               ;; there, measured against 1/240 and 1/480, which agree.
-              (-> (.add controls "substeps" 4 8 1))))
+              (-> (.add controls "substeps" 4 8 1)))
+            ;; On a phone the panel would cover half the scene; it starts
+            ;; closed, a tap on its title away.
+            (when (.-matches (js/window.matchMedia "(max-width: 640px)"))
+              (.close gui)))
+          ;; Buttons for what the keys do, where there are no keys.
+          (let [bar (doto (js/document.createElement "div") (-> .-className (set! "moto-buttons")))
+                button (fn [label f]
+                         (let [^js b (doto (js/document.createElement "button")
+                                       (-> .-className (set! "moto-button"))
+                                       (-> .-textContent (set! label)))]
+                           (.addEventListener b "click" (fn [^js e] (.preventDefault e) (f b)))
+                           (.appendChild bar b)
+                           b))]
+            (button "Reset" (fn [_] (reset-bike!)))
+            (button "Bail" (fn [_] (bail!)))
+            ;; Tilt only where there is likely to be something to tilt.
+            (when (and (.-matches (js/window.matchMedia "(pointer: coarse)"))
+                       (exists? js/DeviceOrientationEvent))
+              (button "Tilt" toggle-tilt!))
+            (.appendChild container bar))
           {:start (fn []
                     (when-not @running?
                       (reset! running? true)
