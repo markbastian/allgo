@@ -25,7 +25,6 @@
   definite ones, which between them cover every system that comes from a
   second difference. `solve` returns nil rather than infinities if a
   pivot vanishes, so a caller that is unsure can find out."
-  (:refer-clojure :exclude [solve])
   (:require [allgo.array :as a]))
 
 (defn solve
