@@ -243,3 +243,50 @@
                    480 (/ 1.0 240.0))
           angle (double (first (:q (:pose (first (:models end))))))]
       (is (< -0.32 angle 0.32) (str "at " angle)))))
+
+(defn- free-box
+  "A loose box as an articulated model: a free root with nothing hung off
+  it, so it collides as a model rather than as a rigid body."
+  []
+  {:base {:mass 2.0 :com [0.0 0.0 0.0] :inertia (box-inertia [0.3 0.3 0.3] 2.0)
+          :shape :box :size [0.3 0.3 0.3]
+          :shape-pose {:rot idq :pos [0.0 0.0 0.0]}}
+   :links []})
+
+(defn- box-pose [x vx]
+  {:q [] :qd [] :base {:rot idq :pos [(double x) 0.0 0.0] :vel [0.0 0.0 0.0 (double vx) 0.0 0.0]}})
+
+(defn- collide [dt opts]
+  (run (w/world [] [{:model (free-box) :pose (box-pose -0.6 2.0)}
+                    {:model (free-box) :pose (box-pose 0.0 0.0)}]
+                (merge {:gravity [0.0 0.0 0.0]} opts))
+       (long (/ 1.0 dt)) dt))
+
+(defn- model-momentum [world]
+  (reduce v/add (map (fn [{:keys [model pose]}] (:linear (ab/momentum model pose)))
+                     (:models world))))
+
+(deftest models-touch-test
+  (testing "one model runs into another and they part"
+    ;; No gravity and no floor: a box model flying at a resting one. If
+    ;; models did not see each other the first would pass straight
+    ;; through.
+    (let [end (collide (/ 1.0 240.0) nil)
+          x (fn [i] (double (first (:pos (:base (:pose (nth (:models end) i)))))))
+          vx (fn [i] (let [{:keys [rot vel]} (:base (:pose (nth (:models end) i)))]
+                       (double (first (q/rotate rot (subvec (vec vel) 3 6))))))]
+      (is (pos? (vx 1)) "the resting one was pushed")
+      (is (< (x 0) (x 1)) "and the flying one did not pass through it")))
+  (testing "the push between them loses momentum only as fast as the integrator does"
+    ;; Equal and opposite impulses cannot move the pair's total; the
+    ;; first-order step underneath can, a little -- so the test, as for a
+    ;; model against a rigid body, is that a finer step loses less.
+    (let [start (v/scale [2.0 0.0 0.0] 2.0)
+          drift (fn [dt] (v/distance start (model-momentum (collide dt nil))))
+          coarse (drift (/ 1.0 240.0))
+          fine (drift (/ 1.0 960.0))]
+      (is (< coarse 1e-3) (str "coarse " coarse))
+      (is (< fine coarse) (str "coarse " coarse " fine " fine))))
+  (testing "told not to, they pass through each other"
+    (let [end (collide (/ 1.0 240.0) {:collide-models? false})]
+      (is (> (double (first (:pos (:base (:pose (first (:models end))))))) 1.0)))))

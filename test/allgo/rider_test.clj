@@ -78,3 +78,44 @@
       ;; Centres of the parts: nothing has gone through the floor.
       (is (pos? lowest) (str "lowest part at " lowest))
       (is (< (double (second (:pos (:base pose)))) 0.6) "and is lying on it"))))
+
+(deftest leans-into-it-test
+  (testing "asked for a turn, the rider tips their upper body into it"
+    ;; A lean toward -z, the positive way, is a turn of the spine about
+    ;; the figure's forward axis the negative way.
+    (let [s (ride (on-bike 8.0) {:throttle 0.08 :lean 0.3} 3.0)
+          [x _ _ w] (nth (:q (m/rider-pose s)) r/torso)
+          about-forward (* 2.0 (Math/atan2 (double x) (double w)))]
+      (is (< about-forward -0.1) (str "spine turned " about-forward " about forward")))))
+
+(defn- deepest-into-bike
+  "How far the rider's parts have sunk into the bike's, at worst."
+  [scene]
+  (let [configs (mapv (fn [{:keys [model pose]}] (ab/configuration model (:q pose) (:base pose)))
+                      (:models scene))
+        between (filter #(and (= :link (first (:a %))) (= :link (first (:b %)))
+                              (not= (second (:a %)) (second (:b %))))
+                        (pw/contacts (assoc scene :collide-models? true) configs))]
+    (reduce max 0.0 (map #(double (:depth %)) between))))
+
+(deftest thrown-off-test
+  (testing "released on a moving bike, the rider is a ragdoll at once"
+    (let [s0 (m/throw-rider (ride (on-bike 6.0) {:throttle 0.05 :lean 0.0} 1.0))
+          rider (second (:models s0))]
+      (is (empty? (:pins s0)) "every pin let go at once")
+      (is (zero? (double (get-in s0 [:rider :tone]))) "and every muscle")
+      (is (:collide-models? s0) "and the rider now hits the bike")
+      (is (every? zero? (r/muscles (:model rider) (:pose rider) 0.0)))))
+  (testing "bailing out, the rider goes over the side and ends up on the road, clear of the bike"
+    (let [s (ride (m/throw-rider (ride (on-bike 8.0) {:throttle 0.05 :lean 0.0} 1.0)
+                                 m/bail-impulse)
+                  {:throttle 1.0 :lean 0.0} 4.0)
+          rp (:base (m/rider-pose s))
+          bp (:base (m/bike-pose s))]
+      ;; Whatever is asked of it now, nobody is riding: the bike, left to
+      ;; itself, has gone over.
+      (is (not (:upright? (m/telemetry cfg (m/bike-pose s)))))
+      (is (> (v/distance (:pos rp) (:pos bp)) 1.0) "the rider is clear of the bike")
+      (is (< (double (second (:pos rp))) 0.4) "and lying on the road")
+      ;; Nothing passing through the bike on the way down.
+      (is (< (deepest-into-bike s) 0.05) (str "sunk " (deepest-into-bike s) " into the bike")))))

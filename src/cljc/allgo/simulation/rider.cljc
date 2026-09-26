@@ -37,9 +37,13 @@
   and derivative pull on the joint's own coordinate: an angle for a
   hinge, the rotation vector of its quaternion for a ball joint.
 
-  In a crash the pins let go and the rider goes slack -- `tone` falls to a
-  fraction -- so what hits the floor is a ragdoll with joint limits rather
-  than a statue."
+  They also lean. Asked for a turn, the rider tips their upper body into
+  it (`weight-shift`), which is the other half of how a bike is steered:
+  the hands countersteer it over, the body goes with it.
+
+  In a crash the pins let go and the muscles switch off altogether:
+  what falls off is a plain ragdoll, held together only by its joint
+  limits, and it lands on the bike as well as the road."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]))
 
@@ -263,27 +267,55 @@
 (defn muscles
   "The torque on every joint of the rider, one per degree of freedom, as
   a spring and damper toward the riding pose. `tone` scales both: 1 is a
-  rider riding, a small fraction one who has been thrown."
-  [rider {:keys [q qd]} tone]
-  (let [tone (double tone)]
-    (loop [i 0 offset 0 tau (transient [])]
-      (if (= i (count (:links rider)))
-        (persistent! tau)
-        (let [link (nth (:links rider) i)
-              [kp kd] (muscle i)
-              kp (* tone (double kp))
-              kd (* tone (double kd))]
-          (case (:joint link)
-            :revolute
-            (recur (inc i) (inc offset)
-                   (conj! tau (- (- (* kp (double (nth q i))))
-                                 (* kd (double (nth qd offset))))))
-            :spherical
-            (let [rv (rotation-vector (nth q i))
-                  t (fn [k] (- (- (* kp (double (nth rv k))))
-                               (* kd (double (nth qd (+ offset k))))))]
-              (recur (inc i) (+ offset 3)
-                     (-> tau (conj! (t 0)) (conj! (t 1)) (conj! (t 2)))))))))))
+  rider riding, zero a ragdoll.
+
+  `targets` moves a ball joint's rest somewhere else -- link index to the
+  rotation it should hold instead of none -- which is how the rider
+  shifts their weight: the spine is asked to lean, and the same spring
+  that held it upright now holds it over."
+  ([rider pose tone] (muscles rider pose tone nil))
+  ([rider {:keys [q qd]} tone targets]
+   (let [tone (double tone)]
+     (loop [i 0 offset 0 tau (transient [])]
+       (if (= i (count (:links rider)))
+         (persistent! tau)
+         (let [link (nth (:links rider) i)
+               [kp kd] (muscle i)
+               kp (* tone (double kp))
+               kd (* tone (double kd))]
+           (case (:joint link)
+             :revolute
+             (recur (inc i) (inc offset)
+                    (conj! tau (- (- (* kp (double (nth q i))))
+                                  (* kd (double (nth qd offset))))))
+             :spherical
+             (let [rv (rotation-vector (if-let [t (get targets i)]
+                                        ;; What is left of the joint's
+                                        ;; rotation once the target's is
+                                        ;; taken out of it.
+                                         (q/mul (q/conjugate t) (nth q i))
+                                         (nth q i)))
+                   t (fn [k] (- (- (* kp (double (nth rv k))))
+                                (* kd (double (nth qd (+ offset k))))))]
+               (recur (inc i) (+ offset 3)
+                      (-> tau (conj! (t 0)) (conj! (t 1)) (conj! (t 2))))))))))))
+
+(def ^:private max-shift
+  "How far a rider leans their upper body into a turn, at most."
+  0.35)
+
+(defn weight-shift
+  "Where the rider holds their spine and head to help a lean of `lean`
+  radians along: the torso tipped toward the inside of the turn by part
+  of it -- moving their weight to where the bike is going -- and the head
+  tipped part of the way back, to keep the eyes nearer level.
+
+  The figure's frames face +x with +y up, so a lean toward -z, the
+  positive way, is a turn of the torso about +x the negative way."
+  [lean]
+  (let [shift (max (- max-shift) (min max-shift (* 0.6 (double lean))))]
+    {torso (q/from-axis-angle [1.0 0.0 0.0] (- shift))
+     head (q/from-axis-angle [1.0 0.0 0.0] (* 0.6 shift))}))
 
 ;; ---------------------------------------------------------------------------
 ;; Getting on

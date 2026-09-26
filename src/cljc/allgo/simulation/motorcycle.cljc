@@ -420,9 +420,9 @@
          :carried-mass (rider/mass (rider/model cfg))))
 
 (def ^:private slack
-  "How much of a thrown rider's muscle is left: enough that they land as a
-  person rather than a pile, not enough to hold a pose."
-  0.12)
+  "How much of a thrown rider's muscle is left: none. What comes off the
+  bike is a plain ragdoll, held together by its joint limits."
+  0.0)
 
 (defn scene
   "A world with the bike in it, on `obstacles` -- static boxes, the first
@@ -437,21 +437,62 @@
        (let [r (rider/model cfg)]
          (assoc (pw/world obstacles
                           [bike {:model r :pose (rider/start-pose cfg r (:base pose))}]
-                          (assoc world-defaults :pins (rider/pins cfg 0 1 steering)))
+                          ;; While seated the rider's knees are tucked in
+                          ;; against the frame; the two only collide once
+                          ;; they have come apart.
+                          (assoc world-defaults
+                                 :pins (rider/pins cfg 0 1 steering)
+                                 :collide-models? false))
                 :rider {:tone 1.0 :attached? true}))))))
 
 (defn bike-pose [scene] (:pose (first (:models scene))))
 
 (defn rider-pose [scene] (:pose (second (:models scene))))
 
+(def bail-impulse
+  "How hard a rider throws themselves off, in newton seconds: about what a
+  jump sideways out of the saddle is."
+  110.0)
+
+(defn throw-rider
+  "The rider comes off, now: every pin lets go, the muscles switch off,
+  and from here on the rider collides with the bike like anything else.
+
+  With `push` -- newton seconds, toward the bike's left for positive --
+  the rider also launches themselves off the side, which is what bailing
+  out is: an impulse at the chest, sideways and up, and the same impulse
+  the other way into the frame, which is left kicked and wobbling. A
+  bike that is already going over needs no push; the crash throws them."
+  ([scene] (throw-rider scene 0.0))
+  ([scene push]
+   (if-not (get-in scene [:rider :attached?])
+     scene
+     (let [released (assoc scene :pins [] :collide-models? true
+                           :rider {:tone slack :attached? false})]
+       (if (zero? (double push))
+         released
+         (let [{bm :model bp :pose} (first (:models scene))
+               {rm :model rp :pose} (second (:models scene))
+               rot (:rot (:base bp))
+               ;; Toward the bike's left, which is -z in its frame, and up.
+               dir (v/normalize (v/add (q/rotate rot [0.0 0.0 (if (pos? (double push)) -1.0 1.0)])
+                                       [0.0 0.7 0.0]))
+               chest (let [f (ab/frame-of rm (:q rp) (:base rp) rider/torso)]
+                       (v/add (:pos f) (q/rotate (:rot f) [0.0 0.25 0.0])))
+               seat (:pos (:base bp))
+               j (abs (double push))]
+           (-> released
+               (update-in [:models 1 :pose] #(ab/apply-impulse rm % rider/torso chest dir j))
+               (update-in [:models 0 :pose] #(ab/apply-impulse bm % -1 seat (v/negate dir) j)))))))))
+
 (defn- let-go
   "A rider still on a bike that has gone over, or whose grip on it has
-  broken anywhere, comes off altogether and goes slack."
+  broken anywhere, is thrown."
   [cfg scene]
   (if (and (get-in scene [:rider :attached?])
            (or (seq (:broken-pins scene))
                (not (:upright? (telemetry cfg (bike-pose scene))))))
-    (assoc scene :pins [] :rider {:tone slack :attached? false})
+    (throw-rider scene)
     scene))
 
 (defn- total-mass ^double [{:keys [frame-mass swingarm-mass steering-mass fork-mass wheel-mass
@@ -484,13 +525,19 @@
   out the forces from where it is now, hand them to the world, and step
   it."
   [cfg scene controls dt]
-  (let [{:keys [model pose]} (first (:models scene))
+  (let [;; A thrown rider is no longer riding: nobody on the throttle,
+        ;; the brakes or the bars. The bike is on its own, and this one
+        ;; cannot stay up on its own.
+        controls (if (and (:rider scene) (not (get-in scene [:rider :attached?])))
+                   {:throttle 0.0 :brake 0.0 :lean 0.0 :hands? false}
+                   controls)
+        {:keys [model pose]} (first (:models scene))
         pose (slow cfg model pose dt)
         ;; The rider's feel for how far off the lean has been: integrated,
-        ;; leaking away over a couple of seconds so an old error does not
+        ;; leaking away over twenty seconds or so, so an old error does not
         ;; outlive the turn it came from, and capped so it cannot wind up.
         err (- (double (:lean (telemetry cfg pose))) (double (:lean controls 0.0)))
-        held (let [h (+ (* (double (:lean-held scene 0.0)) (- 1.0 (* 0.25 (double dt))))
+        held (let [h (+ (* (double (:lean-held scene 0.0)) (- 1.0 (* 0.05 (double dt))))
                         (* err (double dt)))]
                (max -0.3 (min 0.3 h)))
         controls (assoc controls :lean-held held)
@@ -501,7 +548,9 @@
                 true (assoc :lean-held held)
                 rider (assoc-in [:models 1 :tau]
                                 (rider/muscles (:model rider) (:pose rider)
-                                               (get-in scene [:rider :tone] 1.0))))]
+                                               (get-in scene [:rider :tone] 1.0)
+                                               (when (get-in scene [:rider :attached?])
+                                                 (rider/weight-shift (:lean controls 0.0))))))]
     (let-go cfg (pw/step scene dt))))
 
 (defn run

@@ -52,8 +52,9 @@
   bricks; this one is for a scene that mixes kinds, and it says so
   rather than pretending to replace it.
 
-  Two articulated models cannot yet touch each other. One can touch
-  itself, and either can touch anything rigid."
+  Two articulated models touch each other through the same sweep, and
+  can be pinned together; one can touch itself, and either can touch
+  anything rigid."
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
@@ -129,14 +130,37 @@
                  :depth (:depth c)})
         (contact/between 0 1 body-a body-b)))
 
+(defn- reach
+  "How far a body's shape extends from its centre, at most: the radius of
+  a ball that holds it, which is all the test below needs."
+  ^double [{:keys [shape radius size major minor]}]
+  (case shape
+    :ball (double radius)
+    :torus (+ (double major) (double minor))
+    (* 0.5 (Math/sqrt (reduce + (map #(* (double %) (double %)) size))))))
+
+(defn- near?
+  "Whether two bodies are close enough for a contact to be worth asking
+  about -- their bounding balls, with the speculative margin to spare."
+  [a b]
+  (< (v/distance (:pos a) (:pos b)) (+ (reach a) (reach b) 0.1)))
+
 (defn contacts
   "Every contact in the scene: rigid against rigid, rigid against a
-  model's parts, and a model against itself.
+  model's parts, one model's parts against another's, and a model
+  against itself.
 
   The first of those goes through `allgo.physics.contact/all`, which has
   the broad phase; the rest are pair tests, because a model has few
-  enough parts that sorting them would cost more than trying them."
-  [{:keys [bodies models self-collide?] :or {self-collide? true}} configs]
+  enough parts that sorting them would cost more than trying them.
+  Between two models the pairs are thrown out by their bounding balls
+  first, since most of two bodies' parts are nowhere near each other.
+
+  `:collide-models?` false leaves different models passing through one
+  another, which is what two bodies pinned together in an overlapping
+  pose want -- a rider's knees tucked in against a tank."
+  [{:keys [bodies models self-collide? collide-models?]
+    :or {self-collide? true collide-models? true}} configs]
   (let [parts (model-bodies models configs)]
     (-> []
         ;; Rigid against rigid.
@@ -150,6 +174,17 @@
                     [bi rb] (map-indexed vector bodies)
                     c (pair-contacts side body [:rigid bi] rb)]
                 c))
+        ;; One model's parts against another's. Each side answers for its
+        ;; own tree, exactly as it does against a rigid body: the two
+        ;; models share nothing, so neither's response depends on the
+        ;; other's.
+        (into (when collide-models?
+                (for [{side-a :side body-a :body} parts
+                      {side-b :side body-b :body} parts
+                      :when (< (long (second side-a)) (long (second side-b)))
+                      :when (near? body-a body-b)
+                      c (pair-contacts side-a body-a side-b body-b)]
+                  c)))
         ;; And each model against itself, unless told not to.
         (into (when self-collide?
                 (for [[mi {:keys [model pose]}] (map-indexed vector models)

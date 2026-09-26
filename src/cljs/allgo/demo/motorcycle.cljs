@@ -28,12 +28,19 @@
   the rear shock -- the rod between the frame and the swingarm -- takes
   it a moment later, and both settle in a couple of bounces.
 
-  **Throw the rider.** The rider is a jointed figure of their own,
-  pinned to the bike at the seat, the grips and the pegs, holding the
-  riding pose with a spring and damper at every joint -- so they sway as
-  the bike leans and their arms follow the bars. Take your hands off and
-  let it go over: the pins let go, the muscles go slack, and a ragdoll
-  with joint limits tumbles down the road. `ragdoll rider` off puts the
+  **Watch the rider.** They are a jointed figure of their own, pinned to
+  the bike at the seat, the grips and the pegs, holding the riding pose
+  with a spring and damper at every joint -- so they sway as the bike
+  pitches, their arms follow the bars, and in a turn they tip their upper
+  body in toward the inside.
+
+  **Bail out.** B, or the button, and the rider jumps off the side. The
+  pins let go, the muscles switch off, and what leaves the saddle is a
+  plain ragdoll held together by its joint limits, colliding with the
+  bike on its way past it. Nobody is riding any more, so the bike -- kicked
+  by the jump and with nobody on the bars -- goes over too. The same
+  happens without the button whenever the bike goes down with the rider
+  on it. `ragdoll rider` off puts the
   old lumped rider back, whose weight is simply part of the frame's.
 
   **Open it up.** The rear rises under power rather than squatting: the
@@ -65,7 +72,8 @@
        :rearRate 25
        :frontRate 20
        :damping 1.0
-       :reset (fn [])})
+       :reset (fn [])
+       :bail (fn [])})
 
 ;; ---------------------------------------------------------------------------
 ;; The course
@@ -329,7 +337,7 @@
                "<br>rear " (bar rear-travel rlo rhi) " front " (bar front-travel flo fhi)
                "<br>throttle " (bar (:throttle inputs) 0 1) " brake " (bar (:brake inputs) 0 1)
                "<br><span class='moto-keys'>W/&uarr; throttle &middot; S/&darr; brake &middot; "
-               "A D/&larr; &rarr; lean &middot; R reset</span>"))))
+               "A D/&larr; &rarr; lean &middot; B bail &middot; R reset</span>"))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -437,11 +445,19 @@
                   (when-not (or (#{"INPUT" "SELECT" "TEXTAREA"} tag)
                                 (and target (.-closest target)
                                      (.closest target ".demo-picker, .lil-gui")))
-                    (if (= "KeyR" (.-code e))
-                      (when down? (reset-bike!))
+                    (case (.-code e)
+                      "KeyR" (when down? (reset-bike!))
+                      "KeyB" (when down? (bail!))
                       (when-let [k (keymap (.-code e))]
                         (.preventDefault e)
                         (swap! held (if down? conj disj) k))))))
+              (bail! []
+                ;; Off the side the bike is leaning toward, or the left if
+                ;; it is upright.
+                (let [{:keys [cfg scene]} @state
+                      lean (double (:lean (m/telemetry cfg (m/bike-pose scene))))]
+                  (swap! state update :scene
+                         #(m/throw-rider % (* m/bail-impulse (if (neg? lean) -1.0 1.0))))))
               (on-resize []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (when (and (pos? w) (pos? h))
@@ -471,12 +487,14 @@
         (let [kd (partial on-key true)
               ku (partial on-key false)]
           (set! (.-reset controls) reset-bike!)
+          (set! (.-bail controls) bail!)
           (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
           (reset-bike!)
           (.set (.-position camera) -6 2.4 0)
           (let [gui (GUI. #js {:container container})]
             (doto gui
               (.add controls "reset")
+              (-> (.add controls "bail") (.name "bail out (B)"))
               (-> (.add controls "riderBody") (.name "ragdoll rider") (.onChange reset-bike!))
               (-> (.add controls "handsOn") (.name "hands on bars"))
               (-> (.add controls "autopilot") (.name "lap until a key"))
