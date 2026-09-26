@@ -610,6 +610,20 @@
         d (if (rigid/inert? b) v/zero (v/scale (:vel b) dt))]
     [(mapv min lo (v/add lo d)) (mapv max hi (v/add hi d))]))
 
+(defn near?
+  "Whether two bodies' world boxes come within `gap` of each other.
+
+  A cheap and generous test, for the solver's question of which sleeping
+  bodies lean on which: nothing generates contacts between two sleeping
+  bodies, so when one wakes this is how it finds the rest of its pile."
+  [a b gap]
+  (let [[alo ahi] (aabb a 0.0)
+        [blo bhi] (aabb b 0.0)
+        gap (double gap)]
+    (every? (fn [k] (and (<= (double (nth alo k)) (+ (double (nth bhi k)) gap))
+                         (<= (double (nth blo k)) (+ (double (nth ahi k)) gap))))
+            [0 1 2])))
+
 (defn broad-phase
   "Somewhere for `all` to keep its sorted order between steps.
 

@@ -1237,7 +1237,24 @@
                         contacts)]
     (if (empty? disturbed)
       bodies
-      (reduce (fn [bs i] (update bs i rigid/wake)) bodies disturbed))))
+      ;; And everything asleep that leans on them, directly or through a
+      ;; chain. Nothing generates contacts between two sleeping bodies,
+      ;; so waking only what an awake body touches wakes a pile one body
+      ;; a step from the bottom up -- and a shot that clears the bottom
+      ;; of a column faster than that leaves the rest asleep in mid air.
+      ;; An engine wakes the island; this is the island, found by
+      ;; proximity at the moment it is needed.
+      (let [asleep (filterv #(rigid/sleeping? (nth bodies %)) (range (count bodies)))
+            woken (loop [found disturbed frontier (vec disturbed)]
+                    (if (empty? frontier)
+                      found
+                      (let [fresh (for [i asleep
+                                        :when (not (found i))
+                                        :when (some #(contact/near? (nth bodies %) (nth bodies i) 0.02)
+                                                    frontier)]
+                                    i)]
+                        (recur (into found fresh) (vec fresh)))))]
+        (reduce (fn [bs i] (update bs i rigid/wake)) bodies woken)))))
 
 (defn- step-sequential-impulse
   "Linearize once, solve velocities, then move.
@@ -1473,3 +1490,44 @@
      :tgs (step-tgs w dt)
      :xpbd (step-xpbd w dt)
      (step-sequential-impulse w dt))))
+
+(defn settled
+  "The world a moment after it was placed: every body sunk into the
+  contacts below it by as much as they need to hold it up, and each
+  contact remembering the force it carries.
+
+  A stack placed exactly touching has neither. Its contacts are springs
+  that push only once they are compressed, and they start from no
+  remembered force, so on the first step everything falls into place at
+  once -- an eight course column squashes by five to twelve centimeters,
+  and under sequential impulse or XPBD bounces back up.
+
+  Half a second of the solver, out of sight, with every velocity cut to
+  seven tenths after each step: dynamic relaxation. The damping is what
+  lets it serve a scene that starts asleep. Run undamped, the bricks
+  that are going to tip -- the half-overhanging ends of a running bond,
+  the top of anything the solver cannot hold -- have already started,
+  and a scene put to sleep then shows them frozen mid-topple, up to
+  twelve degrees over on a sixteen course wall. Damped, nothing builds
+  momentum, the worst tilt is under a degree, and the squash still goes:
+  a woken wall or column sinks a few millimeters more under TGS and none
+  under XPBD. Zeroing the velocities outright was tried too and creeps
+  -- it takes twice as long to get as far.
+
+  Deliberately a fixed half second, not \"until at rest\". Waiting for
+  rest cost seconds a reset -- TGS creeps at a centimeter a second for
+  longer than anyone would wait -- and a scene that is going to fail
+  would be shown already fallen.
+
+  Sleeping is off while it runs, so nothing is put to sleep by being
+  placed, and a body already asleep stays so."
+  ([w] (settled w 30))
+  ([w steps]
+   (let [dt (/ 1.0 60.0)
+         damp (fn [b] (if (rigid/inert? b)
+                        b
+                        (assoc b :vel (v/scale (:vel b) 0.7) :omega (v/scale (:omega b) 0.7))))]
+     (-> (nth (iterate #(update (step % dt) :bodies (fn [bs] (mapv damp bs)))
+                       (assoc w :allow-sleep? false))
+              steps)
+         (assoc :allow-sleep? (:allow-sleep? w))))))

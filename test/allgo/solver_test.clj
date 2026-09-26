@@ -165,10 +165,74 @@
             (str (name solver) " slept through being hit"))
         (is (every? finite? (dynamics hit)) (name solver)))))
 
+  (testing "a column that starts asleep stands however tall it is"
+    ;; Forty courses, four times what any solver here holds when the
+    ;; column is placed awake. It stands because it is not simulated
+    ;; until something touches it, which is what games do with towers.
+    (doseq [solver solvers]
+      (let [column (for [i (range 40)]
+                     (rigid/asleep (brick [0.0 (+ 0.25 (* i 0.5)) 0.0])))
+            w (run solver (vec (cons (floor) column)) 300)
+            bricks (dynamics w)]
+        (is (every? rigid/sleeping? bricks) (str (name solver) " woke on its own"))
+        (is (= (map :pos column) (map :pos bricks))
+            (str (name solver) " moved in its sleep")))))
+
+  (testing "and a stack that starts asleep wakes when something runs into it"
+    (doseq [solver solvers]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 5)]
+                                (rigid/asleep (brick [0.0 (+ 0.25 (* i 0.5)) 0.0])))))
+            fired (conj bodies (rigid/ball {:pos [4.0 0.3 0.0] :radius 0.3
+                                            :density 4.0 :vel [-18.0 0.0 0.0]}))
+            hit (run solver fired 40)]
+        (is (not (rigid/sleeping? (first (dynamics hit))))
+            (str (name solver) " slept through being hit"))
+        (is (every? finite? (dynamics hit)) (name solver)))))
+
+  (testing "and wakes all at once, not one body a step"
+    ;; Nothing generates contacts between two sleeping bodies, so a pile
+    ;; woken only where an awake body touches it wakes from the bottom up
+    ;; a body a step -- and a shot low enough clears the bottom before
+    ;; the waking reaches the top, which is left asleep in mid air.
+    (doseq [solver solvers]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 12)]
+                                (rigid/asleep (brick [0.0 (+ 0.25 (* i 0.5)) 0.0])))))
+            fired (conj bodies (rigid/ball {:pos [0.0 0.25 1.0] :radius 0.2
+                                            :density 4.0 :vel [0.0 0.0 -20.0]}))
+            hit (run solver fired 5)]
+        (is (not-any? rigid/sleeping? (butlast (dynamics hit)))
+            (str (name solver) " left some of the column asleep: "
+                 (count (filter rigid/sleeping? (dynamics hit))) " of 12")))))
+
   (testing "and does not sleep when it is told not to"
     (let [bodies (vec (cons (floor) [(brick [0.0 0.25 0.0])]))
           w (run :sequential-impulse bodies 300 {:allow-sleep? false})]
       (is (not-any? rigid/sleeping? (dynamics w))))))
+
+(deftest settled-test
+  (testing "a stack settled before it starts does not squash when it does"
+    ;; Placed exactly touching, a six course column sinks by centimeters
+    ;; in its first half second as the contacts compress to carry it.
+    ;; Settled, it has already done nearly all of that. Sequential
+    ;; impulse is left out: its rest is a jitter of a couple of
+    ;; millimeters, which is the solver, not the start.
+    (doseq [solver [:tgs :xpbd]]
+      (let [bodies (vec (cons (floor)
+                              (for [i (range 6)]
+                                (brick [0.0 (+ 0.25 (* i 0.5)) 0.0]))))
+            top-drop (fn [w0]
+                       (let [y0 (y-of (last (:bodies w0)))
+                             w (loop [w w0 i 0] (if (= i 60) w (recur (s/step w dt) (inc i))))]
+                         (- y0 (y-of (last (:bodies w))))))
+            placed (s/world bodies {:solver solver})]
+        (is (> (top-drop placed) 0.01)
+            (str (name solver) " did not squash when placed, so this tests nothing"))
+        (is (< (abs (top-drop (s/settled placed))) 0.005)
+            (str (name solver) " still squashed after settling"))
+        (is (not-any? rigid/sleeping? (dynamics (s/settled placed)))
+            (str (name solver) " was put to sleep by settling"))))))
 
 (deftest pushout-bound-test
   (testing "however deep the overlap, nothing is fired out of it"

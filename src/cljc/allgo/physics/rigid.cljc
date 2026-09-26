@@ -151,6 +151,17 @@
   [b]
   (assoc b :sleeping? false :sleep-time 0.0))
 
+(defn asleep
+  "A body that begins asleep: placed, at rest, and not simulated until
+  something awake touches it.
+
+  What a game does with a tower it has built, and the only way a stack
+  taller than the solver can hold comes to stand at all. Placed awake,
+  every brick has to survive the settling of the ones above it before it
+  can sleep, and a tall column loses that race."
+  [b]
+  (assoc b :sleeping? true :vel v/zero :omega v/zero))
+
 (defn local->world [{:keys [pos rot]} p] (v/add (q/rotate rot p) pos))
 
 (defn world->local [{:keys [pos inv-rot]} p] (q/rotate inv-rot (v/sub p pos)))
