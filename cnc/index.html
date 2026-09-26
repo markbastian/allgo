@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Crossbows and Catapults</title>
+    <style>
+        :root {
+            --ink: #f6efe2;
+            --muted: #d9ccb4;
+            --panel: rgba(28, 22, 16, 0.72);
+            --edge: rgba(246, 239, 226, 0.18);
+            --vikings: #e0485c;
+            --barbarians: #5b8cf0;
+        }
+        html, body { margin: 0; height: 100%; background: #9cc4e4; overflow: hidden; }
+        body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
+        #crossbows { position: fixed; inset: 0; }
+        #crossbows canvas { display: block; }
+        .title {
+            position: fixed; top: 12px; left: 16px; z-index: 2; pointer-events: none;
+            font: 700 22px/1.1 Georgia, "Times New Roman", serif; letter-spacing: 0.02em;
+            color: #ffe27a; text-shadow: 0 2px 0 #7a1d1d, 0 0 12px rgba(0,0,0,0.35);
+        }
+        .title a { pointer-events: auto; color: var(--ink); font: 13px system-ui, sans-serif; text-shadow: none; margin-left: 10px; }
+        .hud { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
+        .hud > * { pointer-events: auto; }
+        .hud__banner {
+            position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+            padding: 8px 18px; border-radius: 999px; background: var(--panel); border: 1px solid var(--edge);
+            font-weight: 700; font-size: 18px; white-space: nowrap;
+        }
+        .hud__banner--vikings { box-shadow: inset 0 -3px 0 var(--vikings); }
+        .hud__banner--barbarians { box-shadow: inset 0 -3px 0 var(--barbarians); }
+        .hud__tally, .hud__weapon {
+            position: absolute; left: 50%; transform: translateX(-50%);
+            padding: 4px 12px; border-radius: 8px; background: var(--panel); white-space: nowrap;
+        }
+        .hud__tally { top: 58px; font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
+        .hud__weapon { bottom: 52px; font-size: 16px; font-weight: 600; }
+        .hud__weapon:empty, .hud__overlay[hidden] { display: none; }
+        .hud__help {
+            position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+            padding: 6px 12px; border-radius: 8px; background: var(--panel); color: var(--muted);
+            font-size: 13px; text-align: center; max-width: calc(100vw - 32px);
+        }
+        .hud__buttons { position: absolute; top: 12px; right: 16px; display: flex; gap: 8px; }
+        .hud__button {
+            font: inherit; font-size: 14px; color: var(--ink); background: var(--panel);
+            border: 1px solid var(--edge); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+        }
+        .hud__button:hover { border-color: var(--ink); }
+        .hud__overlay {
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+            padding: 16px 24px; border-radius: 12px; background: var(--panel); border: 1px solid var(--edge);
+            font-size: 18px; text-align: center; max-width: calc(100vw - 48px);
+        }
+        @media (max-width: 640px) {
+            .title { font-size: 17px; top: 64px; }
+            .hud__banner { font-size: 15px; }
+            .hud__tally { top: 100px; font-size: 11px; }
+            .hud__help { font-size: 11px; }
+        }
+    </style>
+</head>
+<body data-app="crossbows">
+<div class="title">Crossbows &amp; Catapults<a href="../index.html">allgo demos</a></div>
+<div id="crossbows"></div>
+<script src="../js/compiled/allgo.js"></script>
+</body>
+</html>

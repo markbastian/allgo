@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Motorcycle</title>
+    <!-- The demo page's stylesheet: the readout and the fps meter are
+         styled there, and this page only has to make them fill a window. -->
+    <link href="../css/style.css" rel="stylesheet" type="text/css">
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+        #motorcycle { position: fixed; inset: 0; }
+        #motorcycle canvas { display: block; }
+        /* The controls float over the scene rather than hanging below it,
+           which is where a demo card puts them. */
+        #motorcycle .lil-gui.lil-root {
+            position: absolute; top: 12px; right: 12px; z-index: 6;
+            max-height: calc(100vh - 24px); overflow-y: auto;
+        }
+        .app-title {
+            position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7;
+            padding: 6px 14px; border-radius: 999px; background: rgba(5, 7, 13, 0.66);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            color: #e8eaf2; font: 600 15px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+            white-space: nowrap;
+        }
+        .app-title a { color: #9aa3c0; font-weight: 400; font-size: 13px; margin-left: 10px; }
+        @media (max-width: 640px) {
+            .app-title { top: 34px; left: 8px; transform: none; font-size: 13px; }
+            #motorcycle .lil-gui.lil-root { max-height: 45vh; }
+        }
+    </style>
+</head>
+<body data-app="motorcycle">
+<div class="app-title">Motorcycle<a href="../index.html">allgo demos</a></div>
+<div id="motorcycle"></div>
+<script src="../js/compiled/allgo.js"></script>
+</body>
+</html>
