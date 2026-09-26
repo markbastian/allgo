@@ -484,6 +484,65 @@
             :id :sphere-box
             :depth (- r dist)}])))))
 
+;; Tori
+
+(def ^:private torus-samples
+  "How many points round the ring are tried before refining. Enough that
+  the deepest one is never missed between two of them on anything the
+  size of a tyre against anything the size of a floor or a kerb."
+  24)
+
+(defn- ring-point
+  "The point at angle `t` on the circle a torus's tube is swept along."
+  [{:keys [pos rot major]} ^double t]
+  (let [big (double major)]
+    (v/add pos (q/rotate rot [(* big (Math/cos t)) (* big (Math/sin t)) 0.0]))))
+
+(defn- torus-box-deepest
+  [ia ib a b margin]
+  (let [r (double (:minor a))
+        depth-at (fn ^double [^double t]
+                   (let [cs (sphere-box ia ib {:pos (ring-point a t) :radius r} b margin)]
+                     (if (seq cs) (double (:depth (first cs))) ##-Inf)))
+        step (/ (* 2.0 Math/PI) torus-samples)
+        best (apply max-key #(depth-at (double %))
+                    (map #(* step (double %)) (range torus-samples)))]
+    (if (= ##-Inf (depth-at best))
+      []
+      (let [phi (/ (- (Math/sqrt 5.0) 1.0) 2.0)
+            t (loop [lo (- (double best) step) hi (+ (double best) step) k 0]
+                (if (= k 24)
+                  (* 0.5 (+ lo hi))
+                  (let [m1 (- hi (* phi (- hi lo)))
+                        m2 (+ lo (* phi (- hi lo)))]
+                    (if (> (depth-at m1) (depth-at m2))
+                      (recur lo m2 (inc k))
+                      (recur m1 hi (inc k))))))
+            t (if (>= (depth-at t) (depth-at best)) t best)]
+        (mapv #(assoc % :id :torus-box)
+              (sphere-box ia ib {:pos (ring-point a t) :radius r} b margin))))))
+
+(defn torus-box
+  "Torus `a` against box `b`.
+
+  A torus is every point within `minor` of a circle, so where it meets a
+  box is where a ball of radius `minor`, somewhere on that circle, meets
+  it -- and `sphere-box` already answers that. What is left is *where*
+  on the circle, which is the one-dimensional question of which angle
+  goes deepest: try evenly spaced angles, then narrow in on the best by
+  golden section between its neighbours.
+
+  One contact, not a manifold. A tyre on the road touches in one patch,
+  and that is the case this is for; a torus lying flat on a floor touches
+  all the way round and will rock until something else is resting on it."
+  [ia ib a b margin]
+  (if (empty? (sphere-box ia ib {:pos (:pos a) :radius (+ (double (:major a)) (double (:minor a)))}
+                          b margin))
+    ;; Not even the ball the whole torus fits inside reaches the box, and
+    ;; one test says so where finding the deepest point takes seventy.
+    []
+    (torus-box-deepest ia ib a b margin)))
+
 ;; ---------------------------------------------------------------------------
 ;; Dispatch
 
@@ -501,6 +560,12 @@
       (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
             (sphere-box ib ia b a margin))
       (and (= sa :box) (= sb :box)) (box-box ia ib fa fb margin)
+      (and (= sa :torus) (= sb :box)) (torus-box ia ib a b margin)
+      (and (= sa :box) (= sb :torus))
+      (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
+            (torus-box ib ia b a margin))
+      ;; A torus against a ball or another torus is not asked for yet:
+      ;; tyres meet the road, and the road is made of boxes.
       :else [])))
 
 (defn between

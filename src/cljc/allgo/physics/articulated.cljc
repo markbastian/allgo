@@ -57,7 +57,8 @@
   ## Shapes
 
   A part gains geometry by being given a `:shape` -- `:box` with a
-  `:size` or `:ball` with a `:radius` -- and it sits at the part's
+  `:size`, `:ball` with a `:radius`, or `:torus` with a `:major` and
+  `:minor` radius about its own z axis -- and it sits at the part's
   centre of mass unless `:shape-pose` says otherwise. A link's frame is
   at its *joint*, not in the middle of it, so a shape left at the frame
   origin would stick out of the elbow.
@@ -1908,7 +1909,8 @@
           common {:pos pos :rot rot :density 1.0}]
       (case kind
         :box (rigid/box (assoc common :size (:size part)))
-        :ball (rigid/ball (assoc common :radius (:radius part)))))))
+        :ball (rigid/ball (assoc common :radius (:radius part)))
+        :torus (rigid/torus (assoc common :major (:major part) :minor (:minor part)))))))
 
 (defn collision-bodies
   "Every shaped part of the model, as `[{:link i :body b} ...]`.
@@ -2145,6 +2147,20 @@
                     :m (if (> wgt 1e-12) (/ 1.0 wgt) 0.0)
                     :bias (min max-push (/ (* bias-factor (double depth)) dt))})))))
           (range (count parts)))))
+
+(defn limit-constraints
+  "The joint limits a model is currently past, as one-sided rows a
+  contact solver can take alongside its contacts.
+
+  Each is `{:g :delta :m :bias}`: the generalised direction to push the
+  joint back along, the velocity a unit push along it buys, the
+  effective mass, and how fast the overlap should be closed. The same
+  rows `solve-constraints` builds for itself, given to a caller that has
+  a sweep of its own -- `allgo.physics.world`, which has other bodies to
+  solve in the same pass. `config` is `configuration`'s."
+  [model {:keys [ls ai q]} dt {:keys [bias-factor max-push-speed]
+                               :or {bias-factor 0.2 max-push-speed 3.0}}]
+  (limit-rows model ls ai q dt bias-factor max-push-speed))
 
 (defn solve-constraints
   "`state` with its velocities corrected so that neither the contacts nor

@@ -28,6 +28,7 @@
             [allgo.demo.joints :as joints]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.lorenz :as lorenz]
+            [allgo.demo.motorcycle :as motorcycle]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.planet :as planet]
             [allgo.demo.ragdoll :as ragdoll]
@@ -60,6 +61,7 @@
    "rigid"    {:start rigid/start!    :stop rigid/stop!}
    "bricks"   {:start bricks/start!   :stop bricks/stop!}
    "ragdoll"  {:start ragdoll/start!  :stop ragdoll/stop!}
+   "motorcycle" {:start motorcycle/start! :stop motorcycle/stop!}
    "arm"      {:start arm/start!      :stop arm/stop!}
    "human-arm" {:start human-arm/start! :stop human-arm/stop!}
    "joints"   {:start joints/start!   :stop joints/stop!}

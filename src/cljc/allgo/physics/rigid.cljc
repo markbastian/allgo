@@ -102,6 +102,26 @@
     (assoc (body (assoc opts :mass mass :inertia (when (pos? mass) [i i i])))
            :shape :ball :radius r :size [(* 2 r) (* 2 r) (* 2 r)])))
 
+(defn torus
+  "A solid torus: a tube of radius `minor` swept round a circle of radius
+  `major`, about the body's own z axis. What a tyre is, near enough, and
+  the reason for having it: a wheel modelled as a ball touches the ground
+  directly beneath its centre however far it leans, which is a tyre as
+  wide as the wheel is tall.
+
+  `:size` is the box it fits in, which is what the broad phase asks for."
+  [{:keys [major minor density] :as opts}]
+  (let [big (double major)
+        r (double minor)
+        d (double (or density 0.0))
+        mass (* d 2.0 Math/PI Math/PI big r r)
+        axial (* mass (+ (* big big) (* 0.75 r r)))
+        diametral (* mass (+ (* 0.5 big big) (* 0.625 r r)))]
+    (assoc (body (assoc opts :mass mass
+                        :inertia (when (pos? mass) [diametral diametral axial])))
+           :shape :torus :major big :minor r
+           :size [(* 2.0 (+ big r)) (* 2.0 (+ big r)) (* 2.0 r)])))
+
 (defn static?
   "A body nothing can move."
   [{:keys [inv-mass]}]

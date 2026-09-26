@@ -368,3 +368,39 @@ button {
 button:hover {
   filter: brightness(1.1);
 }
+
+/* ---- motorcycle ---- */
+
+.moto-hud {
+  font-size: 0.78rem;
+  min-width: 15rem;
+}
+
+.moto-hud b {
+  font-size: 1.35rem;
+  color: var(--text);
+}
+
+.moto-hud em {
+  color: #f0b43c;
+  font-style: normal;
+}
+
+.moto-bar {
+  display: inline-block;
+  width: 4.2rem;
+  height: 0.45rem;
+  margin: 0 0.4rem 0 0.2rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  vertical-align: 0.05rem;
+}
+
+.moto-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.moto-keys { color: #6b7189; }

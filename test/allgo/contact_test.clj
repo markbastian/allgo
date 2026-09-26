@@ -178,3 +178,37 @@
       (let [cs (ct/all [floor ball] nil (/ 1.0 60.0))]
         (is (= 1 (count cs)))
         (is (neg? (:depth (first cs))))))))
+
+(deftest torus-box-test
+  (let [floor (rigid/box {:pos [0.0 -0.5 0.0] :size [20.0 1.0 20.0]})
+        big 0.3 r 0.06
+        wheel (fn [pos rot] (rigid/torus {:pos pos :rot rot :major big :minor r :density 1.0}))]
+    (testing "an upright wheel touches the floor once, straight under its hub"
+      (let [cs (ct/between 0 1 (wheel [0.2 (- (+ big r) 0.01) 0.1] q/identity-q) floor)
+            c (first cs)]
+        (is (= 1 (count cs)))
+        (is (< (abs (- 0.01 (double (:depth c)))) 1e-6))
+        (is (< (v/distance (:point c) [0.2 0.0 0.1]) 1e-4))
+        (is (< (v/distance (:normal c) [0.0 -1.0 0.0]) 1e-9) "from the wheel towards the floor")))
+    (testing "a leaning wheel touches at the bottom of its own rim, not under its hub"
+      ;; This is the whole reason for a torus. Leaned 40 degrees, a ball
+      ;; would still touch directly beneath its centre; a tyre touches
+      ;; where its rim is lowest, which is out in the plane of the wheel.
+      (let [lean 0.7
+            rot (q/from-axis-angle [1.0 0.0 0.0] lean)
+            axis (q/rotate rot [0.0 0.0 1.0])
+            hub [0.0 (- (+ (* big (Math/cos lean)) r) 0.005) 0.0]
+            c (first (ct/between 0 1 (wheel hub rot) floor))
+            ;; The point is on the floor's surface, so the tube's centre is
+            ;; the tube's radius less the overlap above it.
+            tube-centre (v/add (:point c) [0.0 (- r (double (:depth c))) 0.0])]
+        (is (some? c))
+        (is (< (abs (- 0.005 (double (:depth c)))) 1e-4))
+        (is (< (abs (v/dot (v/sub tube-centre hub) axis)) 1e-4) "in the plane of the wheel")
+        (is (< (abs (- big (v/distance tube-centre hub))) 1e-4) "on the rim")
+        (is (> (abs (double (nth (:point c) 2))) 0.15) "well out from under the hub")))
+    (testing "a wheel clear of the floor by more than the margin does not touch it"
+      (is (empty? (ct/between 0 1 (wheel [0.0 (+ big r 0.1) 0.0] q/identity-q) floor))))
+    (testing "the pair works in either order"
+      (let [c (first (ct/between 0 1 floor (wheel [0.0 (- (+ big r) 0.01) 0.0] q/identity-q)))]
+        (is (< (v/distance (:normal c) [0.0 1.0 0.0]) 1e-9))))))

@@ -75,7 +75,20 @@
   "A scene of loose `bodies` and jointed `models`.
 
   Each model is `{:model m :pose p}` -- the description and the state
-  `allgo.physics.articulated` keeps apart, kept apart here too."
+  `allgo.physics.articulated` keeps apart, kept apart here too. A model
+  may also carry `:tau`, the generalised forces on its joints for the
+  next step, one per degree of freedom: a motor's torque, a spring's
+  push. It stays until replaced, so a caller driving the model sets it
+  before each step from wherever the model has got to.
+
+  `:pins` in `opts` joins two bodies at a point: each is
+  `{:a side :pa local :b side :pb local}`, where a side is `[:rigid i]`,
+  `[:link model-index link-index]` or `[:static]` and the points are in
+  that body's own frame. A pin given a `:break-force` lets go when the
+  force through it exceeds that, and moves to `:broken-pins`.
+
+  Joint limits on the models are solved in the same sweep as the
+  contacts and pins."
   ([] (world nil nil nil))
   ([bodies models] (world bodies models nil))
   ([bodies models opts]
@@ -174,8 +187,11 @@
 
 (defn- prepare-side
   [{:keys [bodies models]} configs side point dir]
-  (if (rigid-side? side)
+  (cond
+    (= :static (first side)) {:kind :static}
+    (rigid-side? side)
     (prepare-rigid bodies (second side) point dir)
+    :else
     (let [[_ mi li] side
           {:keys [model]} (nth models mi)
           {:keys [force delta mass] :as _r} (let [r (ab/response-at model (nth configs mi)
@@ -200,6 +216,69 @@
 
 ;; ---------------------------------------------------------------------------
 ;; The sweep
+
+;; ---------------------------------------------------------------------------
+;; Pins and limits
+
+(defn- side-frame
+  "Where the body on this side of a pin is now."
+  [{:keys [bodies models]} configs side]
+  (case (first side)
+    :static {:pos v/zero :rot q/identity-q}
+    :rigid (let [b (nth bodies (second side))] {:pos (:pos b) :rot (:rot b)})
+    :link (let [[_ mi li] side
+                {:keys [model pose]} (nth models mi)]
+            (ab/frame-of model (:q pose) (:base pose) li (:frames (nth configs mi))))))
+
+(defn pin-points
+  "Both ends of `pin`, in the world, as `[pa pb]`."
+  [w configs {:keys [a b pa pb]}]
+  (let [fa (side-frame w configs a)
+        fb (side-frame w configs b)]
+    [(v/add (:pos fa) (q/rotate (:rot fa) pa))
+     (v/add (:pos fb) (q/rotate (:rot fb) pb))]))
+
+(def ^:private axes [[1.0 0.0 0.0] [0.0 1.0 0.0] [0.0 0.0 1.0]])
+
+(defn- prepare-pin
+  "A pin as three rows, one per world axis, each asking the two ends to
+  close whatever gap has opened along it this step.
+
+  Bilateral, where a contact is one-sided: a pin pulls as readily as it
+  pushes, so its impulse is never clamped. That is what makes it a joint
+  rather than a surface -- and what lets it close a loop that a tree of
+  reduced coordinates cannot, a rider's two hands on one handlebar."
+  [w configs pin dt opts]
+  (let [{:keys [a b]} pin
+        [pa pb] (pin-points w configs pin)
+        gap (v/sub pb pa)
+        dt (double dt)
+        bias-factor (double (or (:pin-bias opts) 0.3))
+        max-push (* 2.0 (double (:max-push-speed opts)))
+        pair? (same-model? a b)
+        mid (v/scale (v/add pa pb) 0.5)]
+    {:rows (mapv (fn [d]
+                   (if pair?
+                     (let [s (prepare-pair w configs a b mid d)]
+                       {:pair s :w (double (:w s))})
+                     (let [sa (prepare-side w configs a pa d)
+                           sb (prepare-side w configs b pb d)]
+                       {:a sa :b sb :w (+ (double (or (:w sa) 0.0))
+                                          (double (or (:w sb) 0.0)))})))
+                 axes)
+     :bias (mapv (fn [d]
+                   (max (- max-push) (min max-push (/ (* bias-factor (v/dot gap d)) dt))))
+                 axes)}))
+
+(defn- prepare-limits
+  "Every model's joints that are past their limits, as one-sided rows on
+  that model's generalised velocity."
+  [{:keys [models] :as opts} configs dt]
+  (into []
+        (for [[mi {:keys [model]}] (map-indexed vector models)
+              :when (ab/limited? model)
+              row (ab/limit-constraints model (nth configs mi) dt opts)]
+          (assoc row :mi mi))))
 
 (defn- body-arrays
   "Velocities out of the bodies and into two flat arrays."
@@ -325,14 +404,44 @@
   a brick being pushed by a ragdoll's hand and by the brick beneath it
   has to see both pushes in the same iteration, or the two answers are
   computed against a velocity neither of them ends up with."
-  [prepared ^doubles vel ^doubles omega us opts]
+  [prepared limits pins ^doubles vel ^doubles omega us opts]
   (let [{:keys [iterations friction restitution]} opts
         k (count prepared)
+        nl (count limits)
+        np (count pins)
+        lacc (a/f64 (max 1 nl))
+        pacc (a/f64 (max 1 (* 3 np)))
         approach (a/f64 (mapv (fn [row]
                                 (speed-of (nth (:dirs row) 0) vel omega us))
                               prepared))
         acc (a/f64 (* 3 k))]
     (dotimes [_ (long iterations)]
+      ;; Limits, then pins, then contacts: a knee folded backwards is a
+      ;; worse thing to see than a hand a millimetre off the bars, and
+      ;; both are worse than a foot a millimetre into the floor.
+      (dotimes [i nl]
+        (let [{:keys [m bias mi]} (nth limits i)
+              ^doubles g (:g (nth limits i))
+              ^doubles d (:delta (nth limits i))
+              ^doubles u (nth us mi)
+              vn (loop [j 0 acc 0.0]
+                   (if (= j (alength g)) acc (recur (inc j) (+ acc (* (aget g j) (aget u j))))))
+              old (aget lacc i)
+              nw (max 0.0 (+ old (* (double m) (- (double bias) vn))))
+              dl (- nw old)]
+          (dotimes [j (alength d)]
+            (aset u j (+ (aget u j) (* dl (aget d j)))))
+          (aset lacc i nw)))
+      (dotimes [i np]
+        (let [{:keys [rows bias]} (nth pins i)]
+          (dotimes [r 3]
+            (let [row (nth rows r)
+                  wr (double (:w row))]
+              (when (> wr 1e-12)
+                (let [lambda (/ (- (double (nth bias r)) (speed-of row vel omega us)) wr)
+                      idx (+ (* 3 i) r)]
+                  (apply-to! row vel omega us lambda)
+                  (aset pacc idx (+ (aget pacc idx) lambda))))))))
       (dotimes [i k]
         (let [row (nth prepared i)
               dirs (:dirs row)
@@ -358,7 +467,12 @@
                                        (+ o (if (> wt 1e-12) (/ (- vt) wt) 0.0))))]
                 (apply-to! row' vel omega us (- a' o))
                 (aset acc idx a')))))))
-    nil))
+    ;; What each pin carried over the step, as one impulse magnitude.
+    (mapv (fn [i]
+            (Math/sqrt (+ (* (aget pacc (* 3 i)) (aget pacc (* 3 i)))
+                          (* (aget pacc (+ (* 3 i) 1)) (aget pacc (+ (* 3 i) 1)))
+                          (* (aget pacc (+ (* 3 i) 2)) (aget pacc (+ (* 3 i) 2))))))
+          (range np))))
 
 ;; ---------------------------------------------------------------------------
 ;; A step
@@ -381,11 +495,11 @@
                      bodies)
         ;; And the jointed ones, whose accelerations come from the whole
         ;; tree at once.
-        models (mapv (fn [{:keys [model pose] :as m}]
+        models (mapv (fn [{:keys [model pose tau] :as m}]
                        (let [root (ab/base model)
                              {:keys [qdd base-acc]}
                              (ab/forward-dynamics model (:q pose) (:qd pose)
-                                                  (vec (repeat (ab/dof model) 0.0))
+                                                  (or tau (vec (repeat (ab/dof model) 0.0)))
                                                   (cond-> {:gravity gravity}
                                                     root (assoc :base (:base pose))))
                              accel (if root (vec (concat base-acc qdd)) (vec qdd))]
@@ -400,25 +514,41 @@
                         (ab/configuration model (:q pose) (:base pose)))
                       models)
         cs (contacts w configs)
+        limits (prepare-limits w configs dt)
+        pins (mapv #(prepare-pin w configs % dt w) (:pins w))
         [vel omega] (body-arrays bodies)
-        us (mapv (fn [{:keys [model pose]}] (a/f64 (ab/velocity model pose))) models)]
-    (when (seq cs)
-      (solve! (mapv #(prepare w configs % dt w) cs) vel omega us w))
-    (let [bodies (write-back bodies vel omega)
-          models (mapv (fn [m i]
-                         (update m :pose
-                                 #(ab/with-velocity (:model m) % (vec (seq ^doubles (nth us i))))))
-                       models
-                       (range (count models)))]
-      (assoc w
-             ;; Positions last, from whatever the sweep left behind.
-             :bodies (mapv (fn [b]
-                             (if (rigid/static? b)
-                               b
-                               (rigid/integrate b dt [0.0 0.0 0.0])))
-                           bodies)
-             ;; Only moved, not accelerated again: everything that was
-             ;; going to change a velocity has already changed it.
-             :models (mapv (fn [{:keys [model pose] :as m}]
-                             (assoc m :pose (ab/advance pose model dt)))
-                           models)))))
+        us (mapv (fn [{:keys [model pose]}] (a/f64 (ab/velocity model pose))) models)
+        carried (if (or (seq cs) (seq limits) (seq pins))
+                  (solve! (mapv #(prepare w configs % dt w) cs) limits pins vel omega us w)
+                  [])
+        ;; A pin pulled harder than it can hold lets go, and stays gone.
+        held? (mapv (fn [pin impulse]
+                      (let [limit (:break-force pin)]
+                        (or (nil? limit) (<= (/ (double impulse) dt) (double limit)))))
+                    (:pins w) carried)
+        w (if (every? true? held?)
+            w
+            (assoc w
+                   :pins (vec (keep-indexed (fn [i p] (when (nth held? i) p)) (:pins w)))
+                   :broken-pins (into (vec (:broken-pins w))
+                                      (keep-indexed (fn [i p] (when-not (nth held? i) p))
+                                                    (:pins w)))))
+        bodies (write-back bodies vel omega)
+        models (mapv (fn [m i]
+                       (update m :pose
+                               #(ab/with-velocity (:model m) % (vec (seq ^doubles (nth us i))))))
+                     models
+                     (range (count models)))]
+    (assoc w
+           :pin-impulses carried
+           ;; Positions last, from whatever the sweep left behind.
+           :bodies (mapv (fn [b]
+                           (if (rigid/static? b)
+                             b
+                             (rigid/integrate b dt [0.0 0.0 0.0])))
+                         bodies)
+           ;; Only moved, not accelerated again: everything that was
+           ;; going to change a velocity has already changed it.
+           :models (mapv (fn [{:keys [model pose] :as m}]
+                           (assoc m :pose (ab/advance pose model dt)))
+                         models))))
