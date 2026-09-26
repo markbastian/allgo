@@ -467,3 +467,41 @@ button:hover {
   border-radius: 50%;
   background: rgba(240, 180, 60, 0.85);
 }
+
+/* ---- solar system: names on the sky ---- */
+
+/* The layer three.js's label renderer draws into, over the scene; it
+   must let the mouse through to the scene's controls. */
+.sky-labels {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.sky-label {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sky-label--constellation {
+  color: rgba(140, 165, 215, 0.75);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Beside the star rather than on it. three.js centers the label on the
+   star and owns its transform, so the text moves inside it: by half its
+   own width, to start at the star, and a little more. */
+.sky-label--star {
+  color: rgba(245, 232, 200, 0.85);
+  font-size: 0.72rem;
+}
+
+.sky-label--star span {
+  display: inline-block;
+  transform: translate(calc(50% + 0.5rem), -0.5rem);
+}
