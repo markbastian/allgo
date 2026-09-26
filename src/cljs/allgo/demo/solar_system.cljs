@@ -199,6 +199,21 @@
       (-> .-frustumCulled (set! false))
       (-> .-renderOrder (set! -1)))))
 
+(defn- asset
+  "The URL of `path` in the site, wherever the page asking for it is.
+
+  Relative to the bundle, not to the page: the demo page is at the top of
+  the site and this demo's own full-window page is one folder down, and
+  a plain `data/bsc5.tsv` would be looked for next to each. The bundle is
+  in one place, `js/compiled/allgo.js` under the site's root, so that is
+  where the root is found."
+  [path]
+  (let [src (some (fn [^js s] (let [u (.-src s)] (when (re-find #"js/compiled/allgo\.js" u) u)))
+                  (array-seq (js/document.getElementsByTagName "script")))]
+    (if src
+      (str (subs src 0 (.indexOf src "js/compiled/allgo.js")) path)
+      path)))
+
 (defn- figures
   "The constellations' figures as one set of faint line segments on the
   sky sphere, a little inside the stars so a line never covers one."
@@ -275,8 +290,8 @@
     (let [text (fn [url] (-> (js/fetch url)
                              (.then (fn [^js r] (if (.-ok r) (.text r)
                                                     (throw (js/Error. (str url ": HTTP " (.-status r)))))))))]
-      (-> (js/Promise.all #js [(text "data/bsc5.tsv") (text "data/constellations.tsv")
-                               (text "data/star-names.tsv")])
+      (-> (js/Promise.all #js [(text (asset "data/bsc5.tsv")) (text (asset "data/constellations.tsv"))
+                               (text (asset "data/star-names.tsv"))])
           (.then (fn [^js texts]
                    (let [catalogue (stars/parse (aget texts 0))
                          constellations (stars/parse-constellations (aget texts 1))
@@ -413,7 +428,11 @@
           (-> (.add gui controls "showConNames") (.name "constellation names"))
           (-> (.add gui controls "showStarNames") (.name "star names"))
           (.add gui controls "running")
-          (.add gui #js {:toJ2000 (fn [] (swap! state assoc :mjd c/mjd-J2000) (rebuild-orbits!))} "toJ2000"))
+          (.add gui #js {:toJ2000 (fn [] (swap! state assoc :mjd c/mjd-J2000) (rebuild-orbits!))} "toJ2000")
+          ;; On a phone the panel would cover half the sky; it starts
+          ;; closed, a tap on its title away.
+          (when (.-matches (js/window.matchMedia "(max-width: 640px)"))
+            (.close gui)))
         {:start (fn [] (when-not @running? (reset! running? true) (on-resize) (animate)))
          :stop  (fn [] (reset! running? false))}))))
 

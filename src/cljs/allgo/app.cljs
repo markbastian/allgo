@@ -6,11 +6,13 @@
   demo page; this starts whichever it names, full window, and does
   nothing on a page that names none."
   (:require [allgo.demo.motorcycle :as motorcycle]
+            [allgo.demo.solar-system :as solar-system]
             [allgo.game.crossbows :as crossbows]))
 
 (def ^:private apps
   {"crossbows" crossbows/start!
-   "motorcycle" motorcycle/start!})
+   "motorcycle" motorcycle/start!
+   "solar-system" solar-system/start!})
 
 (defonce started
   ;; `getAttribute`, not `(.. body -dataset -app)`: a release build

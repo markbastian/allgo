@@ -73,7 +73,9 @@ open <http://localhost:3000>. The page groups the demos as follows:
 The motorcycle is ridden with the keys, on a loop, an Excitebike lane or
 a trials section. With no key down, the course's autopilot rides it. It
 also has a full-window page of its own, `moto/`:
-<https://markbastian.github.io/allgo/moto/>.
+<https://markbastian.github.io/allgo/moto/>. So does the solar system,
+with its nine thousand stars, `solar/`:
+<https://markbastian.github.io/allgo/solar/>.
 
 ## Crossbows & Catapults
 
@@ -113,7 +115,7 @@ readable names and source maps back.
 
 The live site is GitHub Pages serving the `gh-pages` branch, which
 holds nothing but the built pages: `index.html`, `cnc/index.html`,
-`moto/index.html`, `css/style.css`, `js/compiled/allgo.js`,
+`moto/index.html`, `solar/index.html`, `css/style.css`, `js/compiled/allgo.js`,
 `data/bsc5.tsv` (the star catalogue, fetched by the solar system demo)
 and an empty `.nojekyll`. Nothing rebuilds it; to publish, run
 `make release`, copy those files onto `gh-pages`, commit and push.
