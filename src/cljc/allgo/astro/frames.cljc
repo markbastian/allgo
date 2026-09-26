@@ -254,3 +254,16 @@
      (chain (polar-motion xp yp)
             (rz (+ (time/gmst mjd-ut1) eqeq))
             pn))))
+
+;; ------------------------------------------------------------------- drawing
+
+(defn y-up
+  "EME2000 components into a frame with y up where EME2000 has z: the
+  frame a y-up renderer like three.js draws in, with the equinox still
+  along x and the celestial pole along y.
+
+  A rotation, the quarter turn `rx(pi/2)` -- `[x z -y]`. The tempting
+  `[x z y]`, swapping two axes, is a reflection, and drew every orbit
+  going the wrong way round and every constellation back to front."
+  [[x y z]]
+  [x z (- y)])

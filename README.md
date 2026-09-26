@@ -112,10 +112,11 @@ file the development build writes, so run `make dev` afterward to get
 readable names and source maps back.
 
 The live site is GitHub Pages serving the `gh-pages` branch, which
-holds nothing but the built page: `index.html`, `css/style.css`,
-`js/compiled/allgo.js` and an empty `.nojekyll`. Nothing rebuilds it;
-to publish, run `make release`, copy those files onto `gh-pages`, commit
-and push.
+holds nothing but the built pages: `index.html`, `cnc/index.html`,
+`moto/index.html`, `css/style.css`, `js/compiled/allgo.js`,
+`data/bsc5.tsv` (the star catalogue, fetched by the solar system demo)
+and an empty `.nojekyll`. Nothing rebuilds it; to publish, run
+`make release`, copy those files onto `gh-pages`, commit and push.
 
     encoding      size
     identity      1.6M
