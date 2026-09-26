@@ -418,6 +418,45 @@ button:hover {
   pointer-events: none;
 }
 
+/* What the keys do, for where there are none. */
+.moto-buttons {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+}
+
+.moto-button {
+  min-width: 3.4rem;
+  min-height: 2.75rem;
+  padding: 0 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(5, 7, 13, 0.72);
+  color: var(--text);
+  font: 600 0.85rem system-ui, -apple-system, "Segoe UI", sans-serif;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.moto-button:active { background: rgba(240, 180, 60, 0.35); }
+
+/* Stacked on a phone, so they stay clear of the readout beside them. */
+@media (max-width: 640px) {
+  .moto-buttons { flex-direction: column; }
+  .moto-hud { min-width: 0; max-width: calc(100% - 96px); white-space: normal; }
+}
+
+/* The keys only where there are keys, and tilt only where there is
+   something to tilt. */
+.moto-keys--touch { display: none; }
+@media (pointer: coarse) {
+  .moto-keys--keyboard { display: none; }
+  .moto-keys--touch { display: inline; }
+}
+
 .moto-drag__dot {
   position: absolute;
   left: 50%;
