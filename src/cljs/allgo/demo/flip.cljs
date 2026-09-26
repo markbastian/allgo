@@ -155,9 +155,16 @@
                                :obstacle   (when (.-obstacle controls) obstacle)})
                   (draw! ctx st (:bounds st))
                   (tick-fps! (- (js/performance.now) t0)))))]
-      (.addEventListener canvas "mousemove"
+      ;; Pointer events, so a finger drags it as a mouse does. The canvas
+      ;; claims touches for itself, or a drag would scroll the page, and
+      ;; holds on to the pointer so the drag goes on past its edge.
+      (set! (.. canvas -style -touchAction) "none")
+      (.addEventListener canvas "pointerdown"
+                         (fn [^js e]
+                           (try (.setPointerCapture canvas (.-pointerId e)) (catch :default _ nil))
+                           (move-obstacle! e)))
+      (.addEventListener canvas "pointermove"
                          (fn [^js e] (when (pos? (.-buttons e)) (move-obstacle! e))))
-      (.addEventListener canvas "mousedown" move-obstacle!)
       (.observe (js/ResizeObserver. resize!) container)
       (resize!)
       (let [gui (GUI. #js {:container container})]
