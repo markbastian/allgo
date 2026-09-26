@@ -3,7 +3,7 @@
 
   Everything that moves is `allgo.simulation.motorcycle`: one articulated
   model -- frame, swingarm, two wheels, steering head and fork, joined by
-  exact joints -- on a floor, with the tyres' grip solved by
+  exact joints -- on a floor, with the tires' grip solved by
   `allgo.physics.world`'s sequential impulse sweep at four substeps a
   frame. The docstring there says why that and not the other two
   solvers; this namespace only draws it and reads the keys.
@@ -24,7 +24,7 @@
   light and locks: a rear wheel with most of the weight gone from it
   skids, and you can see it stop turning while the bike is still moving.
 
-  **Ride over the kerbs.** The front drops the fork a few centimetres,
+  **Ride over the curbs.** The front drops the fork a few centimeters,
   the rear shock -- the rod between the frame and the swingarm -- takes
   it a moment later, and both settle in a couple of bounces.
 
@@ -48,26 +48,24 @@
   the frame. The front goes light as weight comes off it.
 
   Until a key is pressed the rider laps a circle on their own, over a
-  ring of kerbs, holding about 12 m/s -- so there is something to watch,
+  ring of curbs, holding about 12 m/s -- so there is something to watch,
   and it is the same rider doing it: the autopilot only chooses the lean
   to ask for. Take over and the ramp is off to the right of the start."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.physics.articulated :as ab]
-            [allgo.physics.rigid :as rigid]
+            [allgo.simulation.courses :as c]
             [allgo.simulation.motorcycle :as m]
             ["lil-gui" :default GUI]
             ["three" :as THREE]))
 
 (def ^:private ^js controls
-  #js {:riderBody true
+  #js {:course "Excitebike"
+       :riderBody true
        :handsOn true
        :autopilot true
        :maxLean 40
-       :kerbs true
-       :ramp true
-       :startSpeed 10
        :substeps 4
        :rearRate 25
        :frontRate 20
@@ -78,40 +76,13 @@
 ;; ---------------------------------------------------------------------------
 ;; The course
 
-(def ^:private loop-radius
-  "The circle the autopilot laps, which starts where the bike does and
-  turns left."
-  35.0)
+(defn- current-course []
+  (or (some #(when (= (.-course controls) (:name %)) %) c/courses)
+      (first c/courses)))
 
-(def ^:private loop-centre [0.0 0.0 (- loop-radius)])
-
-(defn- on-loop
-  "The point `theta` radians round the loop from the start, and the angle
-  of its tangent about the vertical."
-  [theta]
-  (let [theta (double theta)]
-    [[(* loop-radius (Math/sin theta)) 0.0 (- (* loop-radius (Math/cos theta)) loop-radius)]
-     theta]))
-
-(defn- kerbs
-  "Low kerbs laid across the loop, so the autopilot rides over them every
-  lap and the suspension has something to do."
-  []
-  (vec (for [theta [0.55 1.5 2.5 3.4 4.5 5.5]
-             :let [[[x _ z] across] (on-loop theta)]]
-         (rigid/box {:pos [x 0.04 z] :size [0.45 0.08 4.0]
-                     :rot (q/from-axis-angle [0.0 1.0 0.0] across)}))))
-
-(defn- ramp
-  "A kicker off to the side of the loop, for when you take over."
-  []
-  (rigid/box {:pos [0.0 0.35 22.0] :size [5.0 0.3 4.0]
-              :rot (q/from-axis-angle [0.0 0.0 1.0] (/ (* 9.0 Math/PI) 180.0))}))
-
-(defn- obstacles []
-  (cond-> [(m/ground 4000.0)]
-    (.-kerbs controls) (into (kerbs))
-    (.-ramp controls) (conj (ramp))))
+(def ^:private kind-colors
+  {:ramp 0x8a6a45 :whoop 0x7d5f3e :barrier 0xc9a74a :curb 0xc0c4cc
+   :log 0x6b4a2b :rock 0x7d7f86})
 
 (defn- config []
   (let [d (.-damping controls)]
@@ -129,7 +100,7 @@
                                     :metalness (or metal 0.1)}))
 
 (defn- box-mesh
-  "A box of `size` centred at `pos` in its parent, turned by `rot`."
+  "A box of `size` centered at `pos` in its parent, turned by `rot`."
   [size pos material & [rot]]
   (let [[sx sy sz] size
         [x y z] pos
@@ -165,24 +136,24 @@
                          (.normalize (THREE/Vector3. (nth d 0) (nth d 1) (nth d 2))))))
 
 (defn- wheel-group
-  "A tyre as the torus the physics uses, a rim, and spokes -- the spokes
+  "A tire as the torus the physics uses, a rim, and spokes -- the spokes
   are what show it turning."
   [cfg]
-  (let [{:keys [wheel-radius tyre-radius]} cfg
-        major (- wheel-radius tyre-radius)
+  (let [{:keys [wheel-radius tire-radius]} cfg
+        major (- wheel-radius tire-radius)
         g (THREE/Group.)
-        tyre (THREE/Mesh. (THREE/TorusGeometry. major tyre-radius 12 40) (mat 0x15161a 0.9))
-        rim (THREE/Mesh. (THREE/TorusGeometry. (- major tyre-radius 0.005) 0.012 6 40)
+        tire (THREE/Mesh. (THREE/TorusGeometry. major tire-radius 12 40) (mat 0x15161a 0.9))
+        rim (THREE/Mesh. (THREE/TorusGeometry. (- major tire-radius 0.005) 0.012 6 40)
                          (mat 0xb8bcc6 0.3 0.8))
         hub (THREE/Mesh. (THREE/CylinderGeometry. 0.05 0.05 0.12 12) (mat 0x8d93a1 0.4 0.7))]
     (.set (.-rotation hub) (/ Math/PI 2) 0 0)
-    (.add g tyre)
+    (.add g tire)
     (.add g rim)
     (.add g hub)
     (dotimes [i 6]
       (let [a (* i (/ Math/PI 3))
             spoke (rod [0.0 0.0 0.0]
-                       [(* (- major tyre-radius) (Math/cos a)) (* (- major tyre-radius) (Math/sin a)) 0.0]
+                       [(* (- major tire-radius) (Math/cos a)) (* (- major tire-radius) (Math/sin a)) 0.0]
                        0.01 (mat 0xd0d4dc 0.3 0.8))]
         (.add g spoke)))
     g))
@@ -274,48 +245,36 @@
   (let [x (double x) step (* (double rate) (double dt))]
     (+ x (max (- step) (min step (- (double target) x))))))
 
-(def ^:private cruise 12.0)
-
-(defn- autopilot
-  "Lap the loop: the lean a steady turn of its radius needs at this speed,
-  plus whatever turns the bike toward where it should be heading -- along
-  the circle, drawn back onto it if it has drifted off."
-  [pose speed max-lean]
-  (let [{:keys [pos rot]} (:base pose)
-        fwd (let [f (q/rotate rot [1.0 0.0 0.0])] (v/normalize [(nth f 0) 0.0 (nth f 2)]))
-        r (let [d (v/sub pos loop-centre)] [(nth d 0) 0.0 (nth d 2)])
-        dist (max 1e-6 (v/length r))
-        out (v/scale r (/ 1.0 dist))
-        along [(nth out 2) 0.0 (- (double (nth out 0)))]
-        want (v/normalize (v/sub along (v/scale out (* 0.08 (- dist loop-radius)))))
-        err (Math/atan2 (nth (v/cross fwd want) 1) (v/dot fwd want))
-        steady (Math/atan (/ (* speed speed) (* 9.81 loop-radius)))]
-    (max (- max-lean) (min max-lean (+ steady (* 1.4 err))))))
-
 (defn- rider-inputs
   "What the rider is asking for this frame, smoothed toward what the keys
-  (or the autopilot) want."
-  [inputs held pose speed dt]
+  -- or, with no key down, the course's own autopilot -- want."
+  [inputs held pose cfg dt]
   (let [max-lean (* (/ Math/PI 180.0) (.-maxLean controls))
-        auto? (and (.-autopilot controls) (empty? held))
-        want-throttle (cond (held :throttle) 1.0
-                            auto? (max 0.0 (min 1.0 (+ 0.1 (* 0.3 (- cruise (double speed))))))
-                            :else 0.0)
-        want-brake (if (held :brake) 1.0 0.0)
+        auto (when (and (.-autopilot controls) (empty? held))
+               ((:autopilot (current-course)) pose (m/telemetry cfg pose)
+                                              {:cfg cfg :max-lean max-lean}))
+        want-throttle (cond (held :throttle) 1.0 auto (:throttle auto 0.0) :else 0.0)
+        want-brake (cond (held :brake) 1.0 auto (:brake auto 0.0) :else 0.0)
         want-lean (cond
-                    auto? (autopilot pose (double speed) max-lean)
+                    auto (:lean auto 0.0)
                     (and (held :left) (not (held :right))) max-lean
                     (and (held :right) (not (held :left))) (- max-lean)
                     :else 0.0)]
-    {:throttle (approach (:throttle inputs) want-throttle 2.5 dt)
-     :brake (approach (:brake inputs) want-brake 4.0 dt)
-     :lean (approach (:lean inputs) want-lean 1.2 dt)
-     :hands? (boolean (.-handsOn controls))}))
+    (if auto
+      ;; The autopilot's asks go straight through. Smoothed like a key
+      ;; press, the throttle and brake it flies the bike with in the air
+      ;; arrive a quarter of a second late, and the landing is missed.
+      {:throttle want-throttle :brake want-brake :lean want-lean
+       :hands? (boolean (.-handsOn controls))}
+      {:throttle (approach (:throttle inputs) want-throttle 2.5 dt)
+       :brake (approach (:brake inputs) want-brake 4.0 dt)
+       :lean (approach (:lean inputs) want-lean 1.2 dt)
+       :hands? (boolean (.-handsOn controls))})))
 
 ;; ---------------------------------------------------------------------------
 ;; Readout
 
-(defn- hud! [^js el cfg pose inputs rider]
+(defn- hud! [^js el cfg pose inputs rider {:keys [t finished]}]
   (let [{:keys [speed lean steer rear-travel front-travel upright?
                 rear-wheel-speed]} (m/telemetry cfg pose)
         deg #(Math/round (* (/ 180.0 Math/PI) (double %)))
@@ -333,6 +292,10 @@
                (when (and upright? (false? (:attached? rider)))
                  " &nbsp;<em>rider thrown &mdash; R to reset</em>")
                (when skid? " &nbsp;<em>rear skid</em>")
+               (when (:finish (current-course))
+                 (if finished
+                   (str "<br><em>finished in " (.toFixed finished 2) " s</em>")
+                   (str "<br>time " (.toFixed (double t) 1) " s")))
                "<br>lean " (deg lean) "&deg; &nbsp; steer " (deg steer) "&deg;"
                "<br>rear " (bar rear-travel rlo rhi) " front " (bar front-travel flo fhi)
                "<br>throttle " (bar (:throttle inputs) 0 1) " brake " (bar (:brake inputs) 0 1)
@@ -369,16 +332,30 @@
       (.add scene grid)
       (.add scene course)
       (letfn [(build-course! []
-                (doseq [c (vec (.-children course))] (.remove course c))
-                (doseq [b (rest (obstacles))]
-                  (let [[sx sy sz] (:size b)]
-                    (.add course (doto (box-mesh [sx sy sz] (:pos b) (mat 0x7d869c 0.8) (:rot b)))))))
+                (doseq [^js c (vec (.-children course))]
+                  (.remove course c)
+                  (.dispose (.-geometry c)))
+                (let [crs (current-course)]
+                  (doseq [b ((:obstacles crs))]
+                    (let [[sx sy sz] (:size b)]
+                      (.add course (box-mesh [sx sy sz] (:pos b)
+                                             (mat (kind-colors (:kind b) 0x7d869c) 0.85)
+                                             (:rot b)))))
+                  ;; A course with a finish is a lane: dirt down it, and
+                  ;; lines across at the start and the end.
+                  (when-let [finish (:finish crs)]
+                    (let [width (if (= :excitebike (:id crs)) 7.0 4.0)
+                          len (+ (double finish) 30.0)]
+                      (.add course (box-mesh [len 0.01 width] [(- (* 0.5 len) 10.0) 0.004 0.0]
+                                             (mat 0x5a4632 1.0)))
+                      (doseq [x [0.0 finish]]
+                        (.add course (box-mesh [0.4 0.012 width] [x 0.006 0.0]
+                                               (mat 0xe8e8ee 0.6))))))))
               (reset-bike! []
                 (build-course!)
                 (let [cfg (config)
                       rider? (boolean (.-riderBody controls))
-                      sim (m/scene cfg (obstacles) (m/start-pose cfg (.-startSpeed controls))
-                                   {:rider? rider?})
+                      sim (c/scene cfg (current-course) {:rider? rider?})
                       meshes (bike-meshes cfg (not rider?))
                       people (when rider?
                                (let [{:keys [model pose]} (second (:models sim))]
@@ -392,7 +369,10 @@
                                  :meshes meshes
                                  :people people
                                  :scene sim
-                                 :inputs {:throttle 0.0 :brake 0.0 :lean 0.0 :hands? true}})))
+                                 :inputs {:throttle 0.0 :brake 0.0 :lean 0.0 :hands? true}
+                                 ;; The clock, when the course finished,
+                                 ;; and since when the rider has been off.
+                                 :t 0.0 :finished nil :off-since nil})))
               (sync! []
                 (let [{:keys [cfg meshes scene people]} @state
                       model (:model (first (:models scene)))
@@ -472,16 +452,27 @@
                         n (max 1 (long (.-substeps controls)))
                         h (/ frame-dt n)
                         ;; Not `scene`: that name is the one being drawn.
-                        {:keys [cfg inputs] sim :scene} @state
+                        {:keys [cfg inputs t finished off-since] sim :scene} @state
                         pose (m/bike-pose sim)
-                        inputs (rider-inputs inputs @held pose
-                                             (:speed (m/telemetry cfg pose)) frame-dt)]
-                    (swap! state assoc :inputs inputs)
+                        inputs (rider-inputs inputs @held pose cfg frame-dt)
+                        t (+ (double t) frame-dt)
+                        crs (current-course)
+                        finished (or finished (when (c/finished? crs pose) t))
+                        off? (or (false? (get-in sim [:rider :attached?]))
+                                 (not (:upright? (m/telemetry cfg pose))))
+                        off-since (when off? (or off-since t))]
+                    (swap! state assoc :inputs inputs :t t :finished finished :off-since off-since)
                     (dotimes [_ n]
                       (swap! state update :scene #(m/step cfg % inputs h)))
                     (let [pose (sync!)]
                       (chase! pose frame-dt)
-                      (hud! hud cfg pose inputs (:rider (:scene @state))))
+                      (hud! hud cfg pose inputs (:rider (:scene @state)) @state))
+                    ;; Riding itself, it goes round again: a few seconds
+                    ;; after the finish, or after coming off.
+                    (when (and (.-autopilot controls) (empty? @held)
+                               (or (and finished (> (- t finished) 3.0))
+                                   (and off-since (> (- t off-since) 4.0))))
+                      (reset-bike!))
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
         (let [kd (partial on-key true)
@@ -497,12 +488,10 @@
               (-> (.add controls "bail") (.name "bail out (B)"))
               (-> (.add controls "riderBody") (.name "ragdoll rider") (.onChange reset-bike!))
               (-> (.add controls "handsOn") (.name "hands on bars"))
-              (-> (.add controls "autopilot") (.name "lap until a key"))
+              (-> (.add controls "course" (clj->js (mapv :name c/courses)))
+                  (.onChange reset-bike!))
+              (-> (.add controls "autopilot") (.name "ride itself until a key"))
               (-> (.add controls "maxLean" 10 55 1) (.name "max lean°"))
-              (-> (.add controls "startSpeed" 2 25 1) (.name "start speed m/s")
-                  (.onFinishChange reset-bike!))
-              (-> (.add controls "kerbs") (.onChange reset-bike!))
-              (-> (.add controls "ramp") (.onChange reset-bike!))
               (-> (.add controls "rearRate" 8 60 1) (.name "rear spring kN/m")
                   (.onFinishChange reset-bike!))
               (-> (.add controls "frontRate" 8 60 1) (.name "front spring kN/m")

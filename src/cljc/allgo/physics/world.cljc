@@ -14,7 +14,7 @@
   of velocity, inverse mass and inverse inertia. That is most of why it
   is fast and it is not an accident. An articulated model has no `1/m`
   to put in one: its answer to *how much velocity does a push here buy*
-  is a walk through a tree, and an impulse on it changes a generalised
+  is a walk through a tree, and an impulse on it changes a generalized
   velocity rather than one body's own.
 
   So this is not a connector between two solvers. The split that works
@@ -77,7 +77,7 @@
 
   Each model is `{:model m :pose p}` -- the description and the state
   `allgo.physics.articulated` keeps apart, kept apart here too. A model
-  may also carry `:tau`, the generalised forces on its joints for the
+  may also carry `:tau`, the generalized forces on its joints for the
   next step, one per degree of freedom: a motor's torque, a spring's
   push. It stays until replaced, so a caller driving the model sets it
   before each step from wherever the model has got to.
@@ -131,7 +131,7 @@
         (contact/between 0 1 body-a body-b)))
 
 (defn- reach
-  "How far a body's shape extends from its centre, at most: the radius of
+  "How far a body's shape extends from its center, at most: the radius of
   a ball that holds it, which is all the test below needs."
   ^double [{:keys [shape radius size major minor]}]
   (case shape
@@ -172,6 +172,10 @@
         ;; Every model's parts against every rigid body.
         (into (for [{:keys [side body]} parts
                     [bi rb] (map-indexed vector bodies)
+                    ;; A course is dozens of boxes and a part is near
+                    ;; two or three of them; the rest are ruled out by
+                    ;; their bounding balls before any exact test.
+                    :when (near? body rb)
                     c (pair-contacts side body [:rigid bi] rb)]
                 c))
         ;; One model's parts against another's. Each side answers for its
@@ -201,7 +205,7 @@
 ;; inverse mass, and the angular response `I^-1 (r x d)` already turned
 ;; into the world -- `allgo.physics.solver` recomputes those cross
 ;; products every sweep, and there is no need to. For a link it is the
-;; generalised force and the response to it, which came from one walk of
+;; generalized force and the response to it, which came from one walk of
 ;; its tree.
 
 (defn- prepare-rigid
@@ -307,7 +311,7 @@
 
 (defn- prepare-limits
   "Every model's joints that are past their limits, as one-sided rows on
-  that model's generalised velocity."
+  that model's generalized velocity."
   [{:keys [models] :as opts} configs dt]
   (into []
         (for [[mi {:keys [model]}] (map-indexed vector models)
@@ -367,7 +371,7 @@
 (defn- push!
   "Give this side an impulse of `lambda` along the contact direction.
 
-  `sign` is +1 for the side the normal points towards and -1 for the
+  `sign` is +1 for the side the normal points toward and -1 for the
   other, which is the whole of Newton's third law as this solver needs
   to know it."
   [side ^doubles vel ^doubles omega us lambda sign]
@@ -451,9 +455,9 @@
                               prepared))
         acc (a/f64 (* 3 k))]
     (dotimes [_ (long iterations)]
-      ;; Limits, then pins, then contacts: a knee folded backwards is a
-      ;; worse thing to see than a hand a millimetre off the bars, and
-      ;; both are worse than a foot a millimetre into the floor.
+      ;; Limits, then pins, then contacts: a knee folded backward is a
+      ;; worse thing to see than a hand a millimeter off the bars, and
+      ;; both are worse than a foot a millimeter into the floor.
       (dotimes [i nl]
         (let [{:keys [m bias mi]} (nth limits i)
               ^doubles g (:g (nth limits i))
@@ -518,7 +522,7 @@
   Velocities first for everybody, then one contact sweep over all of
   them together, then positions. The order is the same one the other
   two solvers use and for the same reason: a body is stopped before it
-  moves into something, rather than pulled back out afterwards."
+  moves into something, rather than pulled back out afterward."
   [{:keys [bodies models gravity] :as w} dt]
   (let [dt (double dt)
         ;; Gravity on the loose bodies. `rigid/integrate` moves them as

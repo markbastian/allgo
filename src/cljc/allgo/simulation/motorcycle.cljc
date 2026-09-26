@@ -13,7 +13,7 @@
 
   It also has the mass ratios that constraint formulations lose joints
   over. A 180 kilogram frame and rider on a 12 kilogram wheel is fifteen
-  to one across the axle, and a pinned axle that drifts a few millimetres
+  to one across the axle, and a pinned axle that drifts a few millimeters
   is a wheel that wobbles. In reduced coordinates the axle is a single
   angle and cannot drift at all. So the bike is one articulated model and
   the joints are exact.
@@ -27,10 +27,10 @@
 
   ## Wheels
 
-  Tori, not balls. A ball touches the ground straight under its centre
-  however far it leans, which is a tyre as wide as the wheel is tall and
+  Tori, not balls. A ball touches the ground straight under its center
+  however far it leans, which is a tire as wide as the wheel is tall and
   a bike that corners like a beach ball. A torus touches at the bottom of
-  its own rim, out in the plane of the wheel, which is where a tyre does.
+  its own rim, out in the plane of the wheel, which is where a tire does.
   See `allgo.physics.contact/torus-box`.
 
   ## What is a force and what is a joint
@@ -38,7 +38,7 @@
   The joints are the structure: a hinge for the swingarm, one for each
   axle, one for the steering head raked back along the steering axis, and
   a slider for the fork tubes. Everything that *acts* on the bike is a
-  generalised force on those joints, recomputed every substep from where
+  generalized force on those joints, recomputed every substep from where
   the bike has got to and handed to the world as `:tau`:
 
     shocks      a spring and damper on the swingarm angle and on the
@@ -54,7 +54,7 @@
 
   The one thing that is not a joint force is what slows the bike down --
   air and rolling loss. It acts on the machine as a whole, so it goes in
-  as an impulse through the frame's centre each substep.
+  as an impulse through the frame's center each substep.
 
   The springs are explicit, so they want the substeps: at a substep of
   1/480s the stiffest of them, a bump stop, turns through a third of a
@@ -75,7 +75,7 @@
   The gains fall with the square of speed. The steering that rights a
   bike does it through the sideways acceleration of the wheels, which
   goes as speed squared over turning radius; at walking pace it takes a
-  lot of handlebar and at motorway speed very little.
+  lot of handlebar and at highway speed very little.
 
   ## Axes
 
@@ -95,9 +95,9 @@
 
 (def defaults
   "Everything about the machine, in SI units. Positions are in the
-  frame's coordinates, whose origin is the sprung mass's centre."
-  {:wheel-radius 0.32            ; outside of the tyre
-   :tyre-radius 0.06             ; the tube of the torus
+  frame's coordinates, whose origin is the sprung mass's center."
+  {:wheel-radius 0.32            ; outside of the tire
+   :tire-radius 0.06             ; the tube of the torus
    :rake (/ (* 25.0 Math/PI) 180.0)
    :head [0.45 0.25 0.0]         ; where the steering axis meets the frame
    :fork-length 0.65             ; head to axle, along the steering axis
@@ -116,7 +116,7 @@
    :front-rate 20000.0
    :front-damping 1400.0
    :rear-travel [-0.22 0.10]     ; swingarm angle, radians
-   :front-travel [-0.12 0.05]    ; fork slide, metres
+   :front-travel [-0.12 0.05]    ; fork slide, meters
    :bump-stiffness 15.0          ; times the spring rate
    ;; Drive.
    :peak-torque 320.0            ; N m at the rear wheel
@@ -140,7 +140,7 @@
 
 (defn- wheel-inertia
   "Most of a wheel's mass is out at the rim, so it is nearer a hoop than
-  a disc about its axle."
+  a disk about its axle."
   [m r]
   (let [m (double m) r (double r)
         axial (* 0.8 m r r)
@@ -177,10 +177,10 @@
   joint's index in `:links` is also its index in `q`, `qd` and `tau`."
   ([] (model defaults))
   ([cfg]
-   (let [{:keys [wheel-radius tyre-radius head pivot swingarm fork-length
+   (let [{:keys [wheel-radius tire-radius head pivot swingarm fork-length
                  frame-mass swingarm-mass steering-mass fork-mass wheel-mass]} cfg
-         tyre {:shape :torus :major (- (double wheel-radius) (double tyre-radius))
-               :minor tyre-radius :shape-pose {:rot idq :pos [0.0 0.0 0.0]}}
+         tire {:shape :torus :major (- (double wheel-radius) (double tire-radius))
+               :minor tire-radius :shape-pose {:rot idq :pos [0.0 0.0 0.0]}}
          spin [0.0 0.0 -1.0]]
      {:base {:mass frame-mass :com [0.0 0.0 0.0]
              :inertia (box-inertia [1.3 0.6 0.45] frame-mass)
@@ -197,7 +197,7 @@
                :origin {:rot nil :pos swingarm}
                :mass wheel-mass :com [0.0 0.0 0.0]
                :inertia (wheel-inertia wheel-mass wheel-radius)}
-              tyre)
+              tire)
        {:parent -1 :joint :revolute :axis (steering-axis cfg)
         :origin {:rot nil :pos head}
         :mass steering-mass :com [0.0 0.08 0.0]
@@ -210,13 +210,13 @@
                :origin {:rot nil :pos (front-axle cfg)}
                :mass wheel-mass :com [0.0 0.0 0.0]
                :inertia (wheel-inertia wheel-mass wheel-radius)}
-              tyre)]})))
+              tire)]})))
 
 ;; ---------------------------------------------------------------------------
 ;; Where it starts
 
 (defn ride-height
-  "How high the frame's origin sits with both tyres on the ground and the
+  "How high the frame's origin sits with both tires on the ground and the
   suspension at its sag, which the springs are preloaded to make zero."
   [{:keys [wheel-radius pivot swingarm]}]
   (- (double wheel-radius) (+ (double (nth pivot 1)) (double (nth swingarm 1)))))
@@ -249,6 +249,7 @@
      :lean (Math/asin (max -1.0 (min 1.0 (double (nth lateral 1)))))
      :lean-rate (- (double wx))
      :heading (Math/atan2 (- (double (nth forward 2))) (double (nth forward 0)))
+     :pitch (Math/asin (max -1.0 (min 1.0 (double (nth forward 1)))))
      :steer (double (nth q steering))
      :steer-rate (double (nth qd steering))
      :rear-travel (double (nth q swingarm))
@@ -349,7 +350,7 @@
      (max (- (double max-steer)) (min (double max-steer) want)))))
 
 (defn forces
-  "The generalised forces on every joint, given where the bike is and
+  "The generalized forces on every joint, given where the bike is and
   what the rider is asking for.
 
   `controls` is `{:throttle 0..1 :brake 0..1 :lean radians :hands? bool}`,
@@ -394,7 +395,7 @@
 ;; A world to ride it in
 
 (def world-defaults
-  "Tyres grip better than bricks, and a bike wants more iterations than a
+  "Tires grip better than bricks, and a bike wants more iterations than a
   pile of them: two contacts carry the whole machine."
   {:gravity [0.0 -9.81 0.0]
    :friction 1.1
@@ -403,7 +404,7 @@
    :self-collide? false})
 
 (defn ground
-  "A floor to ride on: a slab `size` metres square with its top at y = 0."
+  "A floor to ride on: a slab `size` meters square with its top at y = 0."
   [size]
   (rigid/box {:pos [0.0 -0.5 0.0] :size [size 1.0 size]}))
 
@@ -502,7 +503,7 @@
 
 (defn resistance
   "The force holding the bike back at `speed`: air, which goes as the
-  square of it, and the tyres' rolling loss, which does not. Without
+  square of it, and the tires' rolling loss, which does not. Without
   these a steady throttle accelerates for ever."
   ^double [{:keys [drag-area rolling-resistance] :as cfg} ^double speed]
   (+ (* 0.5 1.2 (double drag-area) speed speed)
@@ -510,7 +511,7 @@
 
 (defn- slow
   "`pose` after one substep of resistance, as an impulse through the
-  frame's centre against the way it is going over the ground."
+  frame's center against the way it is going over the ground."
   [cfg model pose dt]
   (let [{:keys [rot vel pos]} (:base pose)
         ground-vel (let [w (q/rotate rot (subvec (vec vel) 3 6))] [(nth w 0) 0.0 (nth w 2)])
@@ -521,7 +522,7 @@
                         (* (resistance cfg speed) (double dt))))))
 
 (defn step
-  "One substep: slow the bike by what the air and the tyres cost it, work
+  "One substep: slow the bike by what the air and the tires cost it, work
   out the forces from where it is now, hand them to the world, and step
   it."
   [cfg scene controls dt]

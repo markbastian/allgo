@@ -12,7 +12,7 @@
   the steering head. So the rider is a second model of its own -- a
   ragdoll with a free pelvis -- and the loops are closed by pins
   (`allgo.physics.world`), which are solved as bilateral impulses in the
-  same sweep as the tyres' contacts. Inside each model the joints are
+  same sweep as the tires' contacts. Inside each model the joints are
   exact; between them they are iterated. That is the right split, because
   it puts the iteration where the loop is and nowhere else.
 
@@ -30,7 +30,7 @@
 
   Each joint is the right kind -- a hinge at the elbows and knees, a ball
   joint at the hips, shoulders, spine and neck -- and each is sprung
-  toward its rest angle with a spring and a damper, as a generalised
+  toward its rest angle with a spring and a damper, as a generalized
   force on that joint. Stiff enough that the rider sits up and does not
   fold over the tank; soft enough that the arms follow the bars and the
   body sways as the bike leans and pitches. The torques are a proportional
@@ -224,19 +224,21 @@
   "The five places the rider is fixed to the bike, as world pins between
   model `bike` (its frame, and `steering` for the grips) and model
   `rider`. Each lets go past its `:break-force`: a rider is thrown when
-  something asks the seat or the grips to hold more than a person would."
+  something asks the seat or the grips to hold more than a person would.
+  A landing off a well-built jump stays under them; coming down flat
+  from a couple of meters does not."
   [bike-cfg bike rider steering]
   (let [{:keys [seat pelvis elbow hand knee foot]} (layout bike-cfg)
         {:keys [grip-local pegs]} (anchors bike-cfg)]
     (into [{:a [:link rider pelvis-link] :pa (v/sub seat pelvis)
-            :b [:link bike -1] :pb seat :break-force 9000.0 :part :seat}]
+            :b [:link bike -1] :pb seat :break-force 20000.0 :part :seat}]
           (for [s [:left :right]
                 pin [{:a [:link rider (forearms s)] :pa (v/sub (hand s) (elbow s))
                       :b [:link bike steering] :pb (grip-local s)
-                      :break-force 3000.0 :part [:hand s]}
+                      :break-force 4500.0 :part [:hand s]}
                      {:a [:link rider (shins s)] :pa (v/sub (foot s) (knee s))
                       :b [:link bike -1] :pb (pegs s)
-                      :break-force 4000.0 :part [:foot s]}]]
+                      :break-force 8000.0 :part [:foot s]}]]
             pin))))
 
 ;; ---------------------------------------------------------------------------
