@@ -245,20 +245,37 @@
   (let [x (double x) step (* (double rate) (double dt))]
     (+ x (max (- step) (min step (- (double target) x))))))
 
+(defn- drag-controls
+  "Lean, throttle and brake from a drag `dx` `dy` pixels from where it
+  began, each at full once the drag reaches `reach`: left and right lean,
+  up -- forward, away from the rider -- opens the throttle, and down
+  brakes. Proportional, not on and off, which is the thing a finger can
+  do that a key cannot. A few pixels either way count as nothing, so a
+  tap or a wobble of the thumb does not twitch the bike."
+  [dx dy reach]
+  (let [dead 6.0
+        scale (fn [d] (let [m (- (abs (double d)) dead)]
+                        (if (pos? m) (* (Math/sign (double d)) (min 1.0 (/ m (- (double reach) dead)))) 0.0)))
+        x (scale dx)
+        y (scale dy)]
+    ;; Screen y runs down, so up the screen is negative.
+    {:lean (- x) :throttle (max 0.0 (- y)) :brake (max 0.0 y)}))
+
 (defn- rider-inputs
   "What the rider is asking for this frame, smoothed toward what the keys
-  -- or, with no key down, the course's own autopilot -- want."
-  [inputs held pose cfg dt]
+  or a drag -- or, with neither, the course's own autopilot -- want."
+  [inputs held drag pose cfg dt]
   (let [max-lean (* (/ Math/PI 180.0) (.-maxLean controls))
-        auto (when (and (.-autopilot controls) (empty? held))
+        auto (when (and (.-autopilot controls) (empty? held) (nil? drag))
                ((:autopilot (current-course)) pose (m/telemetry cfg pose)
                                               {:cfg cfg :max-lean max-lean}))
-        want-throttle (cond (held :throttle) 1.0 auto (:throttle auto 0.0) :else 0.0)
-        want-brake (cond (held :brake) 1.0 auto (:brake auto 0.0) :else 0.0)
+        want-throttle (cond (held :throttle) 1.0 drag (:throttle drag) auto (:throttle auto 0.0) :else 0.0)
+        want-brake (cond (held :brake) 1.0 drag (:brake drag) auto (:brake auto 0.0) :else 0.0)
         want-lean (cond
                     auto (:lean auto 0.0)
                     (and (held :left) (not (held :right))) max-lean
                     (and (held :right) (not (held :left))) (- max-lean)
+                    drag (* max-lean (:lean drag))
                     :else 0.0)]
     (if auto
       ;; The autopilot's asks go straight through. Smoothed like a key
@@ -300,7 +317,8 @@
                "<br>rear " (bar rear-travel rlo rhi) " front " (bar front-travel flo fhi)
                "<br>throttle " (bar (:throttle inputs) 0 1) " brake " (bar (:brake inputs) 0 1)
                "<br><span class='moto-keys'>W/&uarr; throttle &middot; S/&darr; brake &middot; "
-               "A D/&larr; &rarr; lean &middot; B bail &middot; R reset</span>"))))
+               "A D/&larr; &rarr; lean &middot; B bail &middot; R reset"
+               "<br>or drag: &larr; &rarr; lean &middot; &uarr; throttle &middot; &darr; brake</span>"))))
 
 ;; ---------------------------------------------------------------------------
 
@@ -313,6 +331,12 @@
         hud (doto (js/document.createElement "div")
               (-> .-className (set! "numeric-readout moto-hud")))
         held (atom #{})
+        ;; Lean, throttle and brake from a mouse or finger held down on
+        ;; the scene, or nil when nothing is.
+        drag (atom nil)
+        ;; Where a drag began and where it has got to: a ring and a dot.
+        ring (doto (js/document.createElement "div")
+               (-> .-className (set! "moto-drag")))
         state (atom nil)
         course (THREE/Group.)]
     (set! (.-background scene) (THREE/Color. 0x0b0d15))
@@ -320,6 +344,61 @@
     (.setPixelRatio renderer (min 2 (or js/window.devicePixelRatio 1)))
     (.appendChild container (.-domElement renderer))
     (.appendChild container hud)
+    (.appendChild container ring)
+    ;; Mouse and touch alike, through pointer events: press on the scene
+    ;; and drag. Left and right lean, up opens the throttle, down brakes,
+    ;; each in proportion to how far; let go and the bike is left to
+    ;; the keys, or to itself. The ring shows how far is full.
+    (let [^js canvas (.-domElement renderer)
+          ^js dot (doto (js/document.createElement "div") (-> .-className (set! "moto-drag__dot")))
+          origin (atom nil)
+          reach (fn [] (max 60.0 (* 0.18 (min (.-clientWidth container) (.-clientHeight container)))))
+          local (fn [^js e]
+                  (let [^js r (.getBoundingClientRect container)]
+                    [(- (.-clientX e) (.-left r)) (- (.-clientY e) (.-top r))]))
+          show! (fn [[x0 y0] [x y]]
+                  (let [r (reach)
+                        dx (- x x0) dy (- y y0)
+                        d (Math/hypot dx dy)
+                        k (if (> d r) (/ r d) 1.0)
+                        ^js s (.-style ring)]
+                    (set! (.-display s) "block")
+                    (set! (.-left s) (str x0 "px"))
+                    (set! (.-top s) (str y0 "px"))
+                    (set! (.-width s) (str (* 2 r) "px"))
+                    (set! (.-height s) (str (* 2 r) "px"))
+                    (set! (.. dot -style -transform)
+                          (str "translate(" (* k dx) "px," (* k dy) "px)"))))
+          end! (fn [^js e]
+                 (when (= (:id @origin) (.-pointerId e))
+                   (reset! origin nil)
+                   (reset! drag nil)
+                   (set! (.. ring -style -display) "none")))]
+      (.appendChild ring dot)
+      ;; Without this a finger dragged on the scene scrolls the page.
+      (set! (.. canvas -style -touchAction) "none")
+      (.addEventListener canvas "pointerdown"
+                         (fn [^js e]
+                           (when (and (nil? @origin) (zero? (.-button e)))
+                             (.preventDefault e)
+                             ;; So the drag goes on when the finger slides off
+                             ;; the scene. Some browsers refuse it; the drag
+                             ;; still works, just not past the edge.
+                             (try (.setPointerCapture canvas (.-pointerId e)) (catch :default _ nil))
+                             (let [p (local e)]
+                               (reset! origin {:id (.-pointerId e) :at p})
+                               (reset! drag (drag-controls 0.0 0.0 (reach)))
+                               (show! p p)))))
+      (.addEventListener canvas "pointermove"
+                         (fn [^js e]
+                           (when-let [{:keys [id at]} @origin]
+                             (when (= id (.-pointerId e))
+                               (let [[x0 y0] at
+                                     [x y :as p] (local e)]
+                                 (reset! drag (drag-controls (- x x0) (- y y0) (reach)))
+                                 (show! at p))))))
+      (.addEventListener canvas "pointerup" end!)
+      (.addEventListener canvas "pointercancel" end!))
     (.add scene (THREE/HemisphereLight. 0xcfd8ff 0x20242e 0.7))
     (let [sun (THREE/DirectionalLight. 0xfff1d8 1.1)]
       (.set (.-position sun) 30 60 20)
@@ -469,7 +548,7 @@
                         ;; Not `scene`: that name is the one being drawn.
                         {:keys [cfg inputs t finished off-since] sim :scene} @state
                         pose (m/bike-pose sim)
-                        inputs (rider-inputs inputs @held pose cfg frame-dt)
+                        inputs (rider-inputs inputs @held @drag pose cfg frame-dt)
                         t (+ (double t) frame-dt)
                         crs (current-course)
                         finished (or finished (when (c/finished? crs pose) t))
@@ -484,7 +563,7 @@
                       (hud! hud cfg pose inputs (:rider (:scene @state)) @state))
                     ;; Riding itself, it goes round again: a few seconds
                     ;; after the finish, or after coming off.
-                    (when (and (.-autopilot controls) (empty? @held)
+                    (when (and (.-autopilot controls) (empty? @held) (nil? @drag)
                                (or (and finished (> (- t finished) 3.0))
                                    (and off-since (> (- t off-since) 4.0))))
                       (reset-bike!))
