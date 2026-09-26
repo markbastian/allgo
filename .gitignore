@@ -28,3 +28,6 @@ pom.xml.asc
 scratch.clj
 *.log
 /tmp
+
+# scratch demo pages
+/resources/public/_*.html
