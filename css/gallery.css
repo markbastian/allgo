@@ -253,7 +253,32 @@ a { color: inherit; }
   filter: drop-shadow(0 4px 14px hsl(var(--hue) 80% 50% / 0.5));
 }
 
+/* The demo's screenshot, over the topic's picture. */
+.tile__shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 300ms ease;
+}
+
+.tile:hover .tile__shot { transform: scale(1.04); }
+
+/* A shade at the top, so the badges read over a bright scene. */
+.tile__art::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 38%;
+  background: linear-gradient(rgba(5, 7, 13, 0.55), transparent);
+  pointer-events: none;
+}
+
+.tile__art { overflow: hidden; }
+
 .badges {
+  z-index: 1;
   position: absolute;
   top: 8px;
   left: 8px;
@@ -342,5 +367,5 @@ footer a { color: var(--text-dim); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile, .tile:hover { transition: none; transform: none; }
+  .tile, .tile:hover, .tile__shot, .tile:hover .tile__shot { transition: none; transform: none; }
 }

@@ -80,6 +80,17 @@
         a.dataset.text = (d.label + " " + d.blurb + " " + d.group + " " + d.badges.join(" ")).toLowerCase();
         var art = el("div", "tile__art");
         art.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + t.glyph + '</svg>';
+        // A screenshot of the demo over the topic's picture, which shows
+        // while it loads and stays if there is none (script/thumbnails.mjs
+        // makes them). Lazily: a phone should not fetch thirty-seven
+        // images to show the first six.
+        var img = el("img", "tile__shot");
+        img.alt = "";
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.addEventListener("error", function () { img.remove(); });
+        img.src = "thumbs/" + d.id + ".webp";
+        art.appendChild(img);
         if (d.badges.length) {
             var bs = el("div", "badges");
             d.badges.forEach(function (b) {

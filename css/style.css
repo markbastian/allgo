@@ -248,3 +248,18 @@ button:hover {
   display: inline-block;
   transform: translate(calc(50% + 0.5rem), -0.5rem);
 }
+
+/* ---- thumbnails ---- */
+
+/* `?thumb` on any demo page: the scene and nothing else, for the
+   gallery's screenshots. See `allgo.app`. */
+.thumb .lil-gui,
+.thumb .fps-meter,
+.thumb .numeric-readout,
+.thumb .play-bar,
+.thumb .app-title,
+.thumb .moto-buttons,
+.thumb .moto-drag,
+.thumb .sky-labels {
+  display: none !important;
+}
