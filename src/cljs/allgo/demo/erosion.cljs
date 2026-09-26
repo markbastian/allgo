@@ -227,11 +227,11 @@
         running? (atom false)
         tick-fps! (fps/meter! container)
         state (atom {:size (:size config)})
-        controls #js {:rain true
-                      :droplets (:droplets-per-frame config)
-                      :show "drainage"
-                      :size (:size config)
-                      :exaggeration 1.0
+        ^js controls #js {:rain true
+                          :droplets (:droplets-per-frame config)
+                          :show "drainage"
+                          :size (:size config)
+                          :exaggeration 1.0
                       ;; No hyphen in this name, and that is not a style
                       ;; choice. `#js {}` keeps the key it is given, but
                       ;; `(.-min-slope o)` compiles to `o.min_slope`, so a
@@ -241,15 +241,15 @@
                       ;; NaN, which spread to every height and left the
                       ;; geometry with nothing finite to draw. The label
                       ;; below puts the hyphen back for the reader.
-                      :minSlope (:min-slope erosion/defaults)
-                      :capacity (:capacity erosion/defaults)
-                      :erosion (:erosion erosion/defaults)
-                      :deposition (:deposition erosion/defaults)
-                      :inertia (:inertia erosion/defaults)
-                      :radius (:radius erosion/defaults)
-                      :border (:border erosion/defaults)
-                      :rained "0.0 per cell"
-                      :reset (fn [])}]
+                          :minSlope (:min-slope erosion/defaults)
+                          :capacity (:capacity erosion/defaults)
+                          :erosion (:erosion erosion/defaults)
+                          :deposition (:deposition erosion/defaults)
+                          :inertia (:inertia erosion/defaults)
+                          :radius (:radius erosion/defaults)
+                          :border (:border erosion/defaults)
+                          :rained "0.0 per cell"
+                          :reset (fn [])}]
     (set! (.-background scene) (THREE/Color. 0x0b0d14))
     (.setPixelRatio renderer (min 2 (or js/window.devicePixelRatio 1)))
     (.appendChild container (.-domElement renderer))

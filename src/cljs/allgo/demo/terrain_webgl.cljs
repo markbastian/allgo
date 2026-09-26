@@ -196,9 +196,9 @@
         (.addEventListener js/window "keydown" on-key-down)
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (let [gui       (GUI. #js {:container container})
-              gui-state #js {:generator (name (:generator @state))
-                             :size (:size @state)
-                             :wireframe false :regenerate regenerate!}]
+              ^js gui-state #js {:generator (name (:generator @state))
+                                 :size (:size @state)
+                                 :wireframe false :regenerate regenerate!}]
           ;; The size control is rebuilt when the generator changes, because
           ;; the two do not offer the same sizes.
           (let [size-ctl (atom nil)
