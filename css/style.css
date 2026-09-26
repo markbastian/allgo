@@ -1,0 +1,406 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0b12;
+  --card-bg: #14141f;
+  --border: #262636;
+  --text: #e6e6f0;
+  --text-dim: #9494ab;
+  --accent: #6c8cff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+}
+
+.page-header {
+  padding: 2.5rem 2rem 1rem;
+  text-align: center;
+}
+
+.page-header h1 {
+  margin: 0 0 0.4rem;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.page-header p {
+  margin: 0 auto;
+  max-width: 48ch;
+  color: var(--text-dim);
+}
+
+/* ---- demo picker ---- */
+
+.demo-picker {
+  position: relative;
+  display: inline-block;
+  width: min(380px, calc(100vw - 3rem));
+  margin-top: 1.5rem;
+  text-align: left;
+}
+
+.demo-picker__trigger,
+.demo-picker__option {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.demo-picker__trigger {
+  padding: 0.7rem 0.9rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.demo-picker__trigger:hover {
+  border-color: #3a3a52;
+}
+
+.demo-picker__trigger:focus-visible,
+.demo-picker__option:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.28);
+}
+
+.demo-picker__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.demo-picker__name {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* Which group the current demo belongs to, above its name on the trigger.
+   Cheap orientation: the menu is grouped, so the closed state says where
+   in that grouping you are without having to open it. */
+.demo-picker__group {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--text-dim);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.demo-picker__blurb {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.demo-picker__chevron {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  transition: transform 0.18s ease;
+}
+
+.demo-picker[data-open="true"] .demo-picker__chevron {
+  transform: rotate(180deg);
+}
+
+.demo-picker__panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  /* The list is the only part that scrolls, so the search box stays put
+     while the options move under it. Without a cap the panel grew with the
+     number of demos until it ran off the bottom of the window. */
+  max-height: min(62vh, 30rem);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.6);
+  animation: picker-in 0.15s ease;
+  overflow: hidden;
+}
+
+.demo-picker__searchbar {
+  flex-shrink: 0;
+  padding: 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.demo-picker__search {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: #14141f;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.demo-picker__search::placeholder {
+  color: var(--text-dim);
+}
+
+.demo-picker__search:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.28);
+}
+
+.demo-picker__list {
+  flex: 1;
+  min-height: 0;
+  padding: 0.35rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.demo-picker__group-block + .demo-picker__group-block {
+  margin-top: 0.15rem;
+}
+
+/* Sticky, so the heading of the group you are scrolled into stays
+   readable -- which is the whole value of grouping a list this long. */
+.demo-picker__heading {
+  position: sticky;
+  top: -0.35rem;
+  z-index: 1;
+  padding: 0.45rem 0.55rem 0.3rem;
+  background: var(--card-bg);
+  color: var(--text-dim);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.demo-picker__empty {
+  margin: 0;
+  padding: 1rem 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+@keyframes picker-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.demo-picker__option {
+  padding: 0.5rem 0.55rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.demo-picker__option:hover {
+  background: #1e1e2e;
+}
+
+.demo-picker__option[aria-selected="true"] .demo-picker__name {
+  color: var(--accent);
+}
+
+.demo-picker__check {
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0;
+}
+
+.demo-picker__option[aria-selected="true"] .demo-picker__check {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-picker__panel,
+  .demo-card.is-entering { animation: none; }
+  .demo-picker__chevron { transition: none; }
+}
+
+.demo-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 1rem 2rem 3rem;
+}
+
+.demo-card[hidden] {
+  display: none;
+}
+
+.demo-card.is-entering {
+  animation: card-in 0.22s ease;
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.demo-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  width: calc(var(--viewport) + 2rem);
+}
+
+/* The tile is as large as the window allows rather than a fixed 480px.
+   Width and height both have a say because the tile is square and the
+   header above it is not free: 82vh leaves room for the title and the
+   picker on a laptop without the page scrolling, and the vw term takes
+   over on a narrow window. Every demo sizes its canvas or renderer from
+   the container through a ResizeObserver, so they all follow. */
+:root {
+  --viewport: clamp(320px, min(88vw, 82vh), 1024px);
+}
+
+.demo-viewport {
+  width: var(--viewport);
+  height: var(--viewport);
+  border-radius: 8px;
+  background: #000;
+  position: relative;
+}
+
+.demo-viewport svg {
+  display: block;
+  border-radius: 8px;
+}
+
+.fps-meter {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(5, 7, 13, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
+.numeric-readout {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 5;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(5, 7, 13, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+  white-space: pre;
+}
+
+.numeric-chart {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  pointer-events: none;
+}
+
+.demo-controls {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.demo-controls input[type="range"] {
+  accent-color: var(--accent);
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button:hover {
+  filter: brightness(1.1);
+}
+
+/* ---- motorcycle ---- */
+
+.moto-hud {
+  font-size: 0.78rem;
+  min-width: 15rem;
+}
+
+.moto-hud b {
+  font-size: 1.35rem;
+  color: var(--text);
+}
+
+.moto-hud em {
+  color: #f0b43c;
+  font-style: normal;
+}
+
+.moto-bar {
+  display: inline-block;
+  width: 4.2rem;
+  height: 0.45rem;
+  margin: 0 0.4rem 0 0.2rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  vertical-align: 0.05rem;
+}
+
+.moto-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.moto-keys { color: #6b7189; }

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="css/style.css" rel="stylesheet" type="text/css">
+    <title>allgo</title>
+</head>
+<body>
+<header class="page-header">
+    <h1>allgo</h1>
+    <p>Procedural generation, computational geometry, numerical integration
+        and astrodynamics &mdash; each one running live.</p>
+    <div id="demo-picker"></div>
+</header>
+<!-- Every card ships hidden: the shell reveals the selected one once it
+     mounts. Without this the browser paints all of them for as long as it
+     takes to parse and run the bundle, and a refresh flashes the whole
+     stack before collapsing to one. The shell clears `hidden` on the
+     active card before starting its renderer, so a demo is still visible
+     -- and therefore measurable -- by the time it is built. -->
+<main class="demo-grid">
+    <section class="demo-card" hidden data-demo="caves"
+             data-group="Procedural Generation"
+             data-label="Cellular Caves"
+             data-blurb="Cellular automata carving connected caverns">
+        <div id="caves" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="dungeon"
+             data-group="Procedural Generation"
+             data-label="Dungeon Generation"
+             data-blurb="Scatter, separate, triangulate, span, carve">
+        <div id="dungeon" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="terrain"
+             data-group="Procedural Generation"
+             data-label="Fractal Terrain"
+             data-blurb="Diamond-square and TIN heightmaps in WebGL">
+        <div id="terrain" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="erosion"
+             data-group="Procedural Generation"
+             data-label="Hydraulic Erosion"
+             data-blurb="Droplets carving valleys and a drainage network">
+        <div id="erosion" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="dla"
+             data-group="Procedural Generation"
+             data-label="Diffusion-Limited Aggregation"
+             data-blurb="Random walkers branching into mountain ridges">
+        <div id="dla" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="island"
+             data-group="Procedural Generation"
+             data-label="Island Generation"
+             data-blurb="A polygon map: coastline, rivers, biomes, towns, borders">
+        <div id="island" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="planet"
+             data-group="Procedural Generation"
+             data-label="Procedural Planets"
+             data-blurb="Multifractal terrain, clouds and air on a sphere">
+        <div id="planet" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="sphere-fluid"
+             data-group="Simulation"
+             data-label="Fluid on a Sphere"
+             data-blurb="Vorticity, streamfunction and Coriolis bands">
+        <div id="sphere-fluid" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="hex"
+             data-group="Geometry"
+             data-label="Hex Grids"
+             data-blurb="Coordinates, regions and pathfinding on hexagons">
+        <div id="hex" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="delaunay"
+             data-group="Geometry"
+             data-label="Delaunay / Voronoi"
+             data-blurb="Bowyer&ndash;Watson triangulation and its dual">
+        <div id="delaunay"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="spatial-hash"
+             data-group="Spatial Queries"
+             data-label="Spatial Hashing"
+             data-blurb="Overlaps among thousands of objects, in linear time">
+        <div id="spatial-hash" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="arm"
+             data-group="Robotics"
+             data-label="Inverse Kinematics"
+             data-blurb="Click a target: all eight ways the arm can reach it">
+        <div id="arm" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="human-arm"
+             data-group="Robotics"
+             data-label="Redundancy &mdash; Human Arm"
+             data-blurb="Seven joints for six: the elbow swings, the hand stays">
+        <div id="human-arm" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="broad-phase"
+             data-group="Spatial Queries"
+             data-label="Broad Phase"
+             data-blurb="Hashing, sweep and prune and a Morton BVH, raced">
+        <div id="broad-phase" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="soft-body"
+             data-group="Soft Bodies"
+             data-label="Soft Bodies &mdash; XPBD"
+             data-blurb="Unbreakable position based dynamics on tetrahedra">
+        <div id="soft-body" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="skinning"
+             data-group="Soft Bodies"
+             data-label="Soft Bodies &mdash; Skinning"
+             data-blurb="A detailed surface carried by a coarse tetrahedral cage">
+        <div id="skinning" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="cloth"
+             data-group="Soft Bodies"
+             data-label="Cloth &mdash; XPBD"
+             data-blurb="Stretching and bending as two distance constraints">
+        <div id="cloth" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="bricks"
+             data-group="Rigid Bodies"
+             data-label="Bricks"
+             data-blurb="Four things to knock down, three contact solvers">
+        <div id="bricks" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="ragdoll"
+             data-group="Rigid Bodies"
+             data-label="Ragdoll"
+             data-blurb="A jointed figure in reduced coordinates">
+        <div id="ragdoll" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="motorcycle"
+             data-group="Rigid Bodies"
+             data-label="Motorcycle"
+             data-blurb="Exact joints, springs and a rider: lean it with the keys">
+        <div id="motorcycle" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="rigid"
+             data-group="Rigid Bodies"
+             data-label="Rigid Bodies &mdash; XPBD"
+             data-blurb="Boxes and links: corrections that turn as well as move">
+        <div id="rigid" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="joints"
+             data-group="Rigid Bodies"
+             data-label="Joints"
+             data-blurb="Ball, hinge, servo and motor, from three primitives">
+        <div id="joints" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="fluid"
+             data-group="Fluids"
+             data-label="Eulerian Fluid"
+             data-blurb="A wind tunnel: projection, advection and an obstacle">
+        <div id="fluid" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="flip"
+             data-group="Fluids"
+             data-label="FLIP Fluid"
+             data-blurb="Particles carry the fluid, a grid keeps it incompressible">
+        <div id="flip" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="fire"
+             data-group="Fluids"
+             data-label="Fire &amp; Smoke"
+             data-blurb="Buoyancy, cooling and vortex particles on a grid fluid">
+        <div id="fire" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="water"
+             data-group="Fluids"
+             data-label="Height-Field Water"
+             data-blurb="Waves, buoyancy and Archimedes on a grid of columns">
+        <div id="water" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="boids"
+             data-group="Flocking"
+             data-label="Flocking &mdash; 2D"
+             data-blurb="Reynolds' boids on a canvas">
+        <div id="boids" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="dungeon-boids"
+             data-group="Flocking"
+             data-label="Flocking &mdash; Dungeon"
+             data-blurb="A flock finding its way through generated corridors">
+        <div id="dungeon-boids" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="boids-voronoi"
+             data-group="Flocking"
+             data-label="Flocking &mdash; Voronoi"
+             data-blurb="The flock's Voronoi diagram, retriangulated each frame">
+        <div id="boids-voronoi" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="boids-3d"
+             data-group="Flocking"
+             data-label="Flocking &mdash; 3D"
+             data-blurb="The same rules in three dimensions">
+        <div id="boids-3d" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="boids-voronoi-3d"
+             data-group="Flocking"
+             data-label="Flocking &mdash; Voronoi 3D"
+             data-blurb="Voronoi polyhedra of the flock, rebuilt each frame">
+        <div id="boids-voronoi-3d" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="lorenz"
+             data-group="Orbits &amp; Numerics"
+             data-label="Lorenz &mdash; Numerical Integration"
+             data-blurb="Chapter 4 of Montenbruck &amp; Gill, integrating in real time">
+        <div id="lorenz" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="kepler"
+             data-group="Orbits &amp; Numerics"
+             data-label="Kepler &mdash; Nystrom Integration"
+             data-blurb="Two-body motion, and how each method holds energy">
+        <div id="kepler" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="satellite"
+             data-group="Orbits &amp; Numerics"
+             data-label="Satellite &mdash; Orbit Perturbations"
+             data-blurb="Perturbing forces, and the integrators for them">
+        <div id="satellite" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="orbit-determination"
+             data-group="Orbits &amp; Numerics"
+             data-label="Orbit Determination"
+             data-blurb="Recovering an orbit from noisy ranges">
+        <div id="orbit-determination" class="demo-viewport"></div>
+    </section>
+    <section class="demo-card" hidden data-demo="solar-system"
+             data-group="Orbits &amp; Numerics"
+             data-label="Solar System"
+             data-blurb="Planets, Moon and satellite in one J2000 frame">
+        <div id="solar-system" class="demo-viewport"></div>
+    </section>
+</main>
+<script src="js/compiled/allgo.js" type="text/javascript"></script>
+</body>
+</html>
