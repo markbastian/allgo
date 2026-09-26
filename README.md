@@ -71,7 +71,23 @@ open <http://localhost:3000>. The page groups the demos as follows:
 | Orbits & Numerics     | Lorenz, Kepler, satellite perturbations, orbit determination, the solar system                 |
 
 The motorcycle is ridden with the keys, on a loop, an Excitebike lane or
-a trials section. With no key down, the course's autopilot rides it.
+a trials section. With no key down, the course's autopilot rides it. It
+also has a full-window page of its own, `moto/`:
+<https://markbastian.github.io/allgo/moto/>.
+
+## Crossbows & Catapults
+
+A game on the rigid-body engine, after Lakeside's 1983 *Crossbows and
+Catapults* playset: two castles across a board, and discs flung at them
+until one side's tower goes over. The catapult throws a disc through the
+air; the crossbow slides one along the ground like a puck, through the
+gate. Play against the computer or a second player, at
+<https://markbastian.github.io/allgo/cnc/> or, under `make serve`,
+<http://localhost:3000/cnc/index.html>.
+
+The pieces are counted off a photograph of the set; the rules are a plain
+version of the idea rather than Lakeside's. The rules and physics are
+`allgo.simulation.crossbows`, and the page is `allgo.game.crossbows`.
 
 ## Usage
 
