@@ -383,3 +383,82 @@
               (+ (* 2.0 math/PI revs) math/PI (* sign (- beta (math/sin beta)))))
       :tof-parabolic (* (/ 1.0 3.0) (math/sqrt (/ 2.0 mu))
                         (+ (math/pow s 1.5) (* sign (math/pow (- s c) 1.5))))})))
+
+;; ------------------------------------------- Lambert by Lagrange's equation
+
+(defn- lagrange-branches
+  "Lagrange's time of flight as a function of the semi-major axis, for
+  each branch the orbits through the two points divide into: `[[time-fn
+  p-fn] ...]` over a > s/2 for ellipses -- the upper and lower branches,
+  alpha and 2 pi - alpha -- and over a < 0 for hyperbolas."
+  [mu s c m1 m2 long? revs]
+  (let [sgn (if long? -1.0 1.0)
+        pk (/ (* 4.0 (- s m1) (- s m2)) (* c c))
+        ellipse (fn [upper?]
+                  (let [angles (fn [a]
+                                 (let [a0 (* 2.0 (math/asin (math/sqrt (min 1.0 (/ s (* 2.0 a))))))
+                                       b0 (* 2.0 (math/asin (math/sqrt (min 1.0 (/ (- s c) (* 2.0 a))))))]
+                                   [(if upper? (- (* 2.0 math/PI) a0) a0) (* sgn b0)]))]
+                    [(fn [a] (let [[al be] (angles a)]
+                               (* (math/sqrt (/ (* a a a) mu))
+                                  (- (+ (* 2.0 math/PI revs) (- al (math/sin al))) (- be (math/sin be))))))
+                     (fn [a] (let [[al be] (angles a)]
+                               (* pk a (math/pow (math/sin (* 0.5 (+ al be))) 2))))]))
+        hyperbola (let [angles (fn [a]
+                                 [(* 2.0 (am/asinh (math/sqrt (/ s (* -2.0 a)))))
+                                  (* sgn 2.0 (am/asinh (math/sqrt (/ (- s c) (* -2.0 a)))))])]
+                    [(fn [a] (let [[g d] (angles a)]
+                               (* (math/sqrt (/ (- (* a a a)) mu))
+                                  (- (- (math/sinh g) g) (- (math/sinh d) d)))))
+                     (fn [a] (let [[g d] (angles a)]
+                               (* (- pk) a (math/pow (math/sinh (* 0.5 (+ g d))) 2))))])]
+    (concat [[:ellipse (ellipse false)] [:ellipse (ellipse true)]]
+            (when (zero? revs) [[:hyperbola hyperbola]]))))
+
+(defn lambert-lagrange
+  "Every transfer from `r1` to `r2` in `dt` seconds, the short way or
+  with `:long?` the long, with `:revs` complete revolutions: `[[v1 v2]
+  ...]`, found from Lagrange's equation for the time of flight,
+
+    sqrt(mu) t = a^3/2 [2 pi k + (alpha - sin alpha) -+ (beta - sin beta)],
+    sin^2(alpha/2) = s / 2a,  sin^2(beta/2) = (s - c) / 2a,
+
+  s the semiperimeter and c the chord (with sinh for hyperbolas), solved
+  for the semi-major axis on each branch; the semilatus rectum, p = 4a
+  (s - r1)(s - r2) / c^2 sin^2((alpha + beta) / 2), then gives the
+  velocities through f and g. Independent of the universal-variable
+  `lambert`, and a check on it: with revolutions it finds both orbits
+  for each time, where `lambert` gives the one asked for."
+  ([r1 r2 dt] (lambert-lagrange mu r1 r2 dt {}))
+  ([r1 r2 dt opts] (lambert-lagrange mu r1 r2 dt opts))
+  ([mu r1 r2 dt {:keys [long? revs] :or {revs 0}}]
+   (let [m1 (v3/length r1) m2 (v3/length r2)
+         c (v3/distance r1 r2)
+         s (* 0.5 (+ m1 m2 c))
+         cdn (/ (v3/dot r1 r2) (* m1 m2))
+         sdn (* (if long? -1.0 1.0) (math/sqrt (max 0.0 (- 1.0 (* cdn cdn)))))
+         velocities (fn [p]
+                      (let [f (- 1.0 (* (/ m2 p) (- 1.0 cdn)))
+                            g (/ (* m1 m2 sdn) (math/sqrt (* mu p)))
+                            gd (- 1.0 (* (/ m1 p) (- 1.0 cdn)))]
+                        [(v3/scale (v3/sub r2 (v3/scale r1 f)) (/ 1.0 g))
+                         (v3/scale (v3/sub (v3/scale r2 gd) r1) (/ 1.0 g))]))
+         ;; a on a log scale: ellipses from s/2 out; hyperbolas over every
+         ;; size, their time falling to nothing as a does
+         grid (fn [kind] (let [base (* 0.5 s)]
+                           (if (= kind :ellipse)
+                             (map #(* base (math/pow 10.0 (/ % 100.0))) (range 0 601))
+                             (map #(- (* base (math/pow 10.0 (/ % 100.0)))) (range 600 -601 -1)))))
+         root (fn [f lo hi]
+                (loop [lo lo hi hi i 0]
+                  (let [mid (* 0.5 (+ lo hi))]
+                    (if (or (> i 200) (<= (abs (- hi lo)) (* 1e-15 (abs mid))))
+                      mid
+                      (if (= (neg? (f lo)) (neg? (f mid))) (recur mid hi (inc i)) (recur lo mid (inc i)))))))]
+     (vec
+      (for [[kind [tf pf]] (lagrange-branches mu s c m1 m2 long? revs)
+            :let [f #(- (tf %) dt) as (grid kind)]
+            [lo hi] (map vector as (rest as))
+            :when (not= (neg? (f lo)) (neg? (f hi)))
+            :let [a (root f lo hi)]]
+        (velocities (pf a)))))))

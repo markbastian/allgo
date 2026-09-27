@@ -160,3 +160,29 @@
             energy (kep/specific-energy mu r1 a)]
         (is (< tof-parabolic tof))
         (is (< (abs energy) (* 1e-3 (/ mu (v3/length r1)))))))))
+
+(deftest lambert-by-lagrange
+  (let [[r1 v1] (at 0.0)
+        period (kep/period mu 12000.0)
+        same? (fn [[a b] [a' b']] (and (< (rel-err a a') 1e-7) (< (rel-err b b') 1e-7)))]
+    (testing "the short way, the long way, and a hyperbola: one orbit each, the universal solver's"
+      (doseq [[r2 dt opts] [[(first (at 2400.0)) 2400.0 {}]
+                            [(first (at (* 0.7 period))) (* 0.7 period) {:long? true}]
+                            [(first (at 2400.0)) 600.0 {}]]]
+        (let [sols (iod/lambert-lagrange r1 r2 dt opts)]
+          (is (= 1 (count sols)) (str opts))
+          (is (same? (first sols) (iod/lambert r1 r2 dt opts)) (str opts))
+          (is (arrives? r1 (ffirst sols) r2 dt)))))
+    (testing "the true orbit is among them"
+      (let [dt 2400.0 [r2 v2] (at dt)]
+        (is (same? (first (iod/lambert-lagrange r1 r2 dt)) [v1 v2]))))
+    (testing "with a revolution: both orbits for the time, each the universal solver's high or low"
+      (let [r2 (first (at 3000.0)) dt (* 1.6 period)]
+        (doseq [long? [false true]]
+          (let [sols (iod/lambert-lagrange r1 r2 dt {:long? long? :revs 1})
+                univ (for [high? [false true]] (iod/lambert r1 r2 dt {:long? long? :revs 1 :high? high?}))]
+            (is (= 2 (count sols)) (str long?))
+            (doseq [u univ] (is (some #(same? u %) sols) (str long?)))
+            (doseq [[a] sols] (is (arrives? r1 a r2 dt)))))))
+    (testing "too little time for a revolution: none"
+      (is (empty? (iod/lambert-lagrange r1 (first (at 3000.0)) 4560.0 {:revs 1}))))))
