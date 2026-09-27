@@ -78,7 +78,7 @@
       (let [m (* 0.5 (+ a b))]
         (if (pred m) (recur m b) (recur a m))))))
 
-(defn- transitions
+(defn transitions
   "Where `pred` changes between `t0` and `t1`, sampling every `step` and
   refining each change to `tol`: `[[t from-value] ...]`."
   [pred t0 t1 step tol]

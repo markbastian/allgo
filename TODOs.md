@@ -113,8 +113,8 @@ of expected return:
       of influence, departure, capture and flyby hyperbolas, Hohmann and
       Lambert transfers between planets.
   11. ~~Encke's method (ch. 8)~~ -- `allgo.astro.encke`.
-  12. Satellite pass prediction (ch. 11): rise, culmination and set of a
-      satellite over a site, and visibility during it.
+  12. ~~Satellite pass prediction (ch. 11)~~ -- `allgo.astro.passes`, with
+      naked-eye visibility from `allgo.astro.visibility`.
   13. The circular restricted three-body problem (ch. 2): the Jacobi
       constant, the Lagrange points and their stability, zero-velocity
       surfaces.
