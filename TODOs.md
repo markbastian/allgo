@@ -104,8 +104,8 @@ of expected return:
      `allgo.astro.gravity` (Pines and the spherical partials) -- except
      J2's short-period terms and Gottlieb's and Lear's formulations, which
      await the book's pages.
-  8. Mission geometry (ch. 11): repeat ground tracks, sun-synchronous and
-     frozen orbits, field of view, range and azimuth between sites.
+  8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
+     sun-synchronous inclination in `allgo.astro.perturbations`.
   9. Covariance transformations between Cartesian, classical, equinoctial,
      flight and RSW/NTW.
 
