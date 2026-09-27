@@ -112,8 +112,7 @@ of expected return:
   10. ~~Interplanetary (ch. 12)~~ -- `allgo.astro.interplanetary`: spheres
       of influence, departure, capture and flyby hyperbolas, Hohmann and
       Lambert transfers between planets.
-  11. Encke's method (ch. 8): perturbations integrated as the deviation
-      from a reference conic, rectified when it grows.
+  11. ~~Encke's method (ch. 8)~~ -- `allgo.astro.encke`.
   12. Satellite pass prediction (ch. 11): rise, culmination and set of a
       satellite over a site, and visibility during it.
   13. The circular restricted three-body problem (ch. 2): the Jacobi
