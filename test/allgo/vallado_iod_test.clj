@@ -64,6 +64,33 @@
       (is (< (rel-err r2 r-true) 0.02))
       (is (< (rel-err v2 v-true) 0.05)))))
 
+(defn- sightings
+  "Sightings of the true orbit at `ts` from a site at 40 degrees north."
+  [ts]
+  (let [sites (map #(site (math/to-radians 40) %) ts)]
+    [(map (fn [t s]
+            (let [[x y z] (v3/normalize (v3/sub (first (at t)) s))]
+              [(math/atan2 y x) (math/asin z)]))
+          ts sites)
+     sites]))
+
+(deftest double-r
+  (testing "refines Gauss to the orbit itself"
+    (doseq [ts [[-480.0 0.0 480.0] [-900.0 0.0 1200.0]]]
+      (let [[obs sites] (sightings ts)
+            {:keys [r2 v2]} (iod/double-r obs ts sites)
+            gauss (iod/gauss obs ts sites)
+            [r-true v-true] (at 0.0)]
+        (is (< (rel-err r2 r-true) 1e-9) (str ts))
+        (is (< (rel-err v2 v-true) 1e-9) (str ts))
+        (is (> (rel-err (:r2 gauss) r-true) 1e-4) "where Gauss alone was off"))))
+  (testing "from a guess well away from the answer"
+    (let [ts [-480.0 0.0 480.0]
+          [obs sites] (sightings ts)
+          [r-true] (at 0.0)
+          {:keys [r2]} (iod/double-r c/GM-earth obs ts sites [9000.0 9000.0])]
+      (is (< (rel-err r2 r-true) 1e-9)))))
+
 (defn- arrives? [r1 v1 r2 dt]
   (let [[r _] (u/propagate mu r1 v1 dt)]
     (< (v3/distance r r2) (* 1e-6 (v3/length r2)))))

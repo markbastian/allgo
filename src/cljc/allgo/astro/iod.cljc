@@ -14,6 +14,7 @@
 
   Kilometers, seconds, radians; `mu` defaults to the Earth's."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.kepler :as kepler]
             [allgo.astro.universal :as universal]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
@@ -129,6 +130,109 @@
          close? (and (< theta12 (math/to-radians 1.0)) (< theta23 (math/to-radians 1.0)))]
      {:r2 r2 :v2 (:v2 (if close? (herrick-gibbs mu r1 r2 r3 t1 t2 t3) g))
       :ranges [rho1 rho2 rho3] :u u})))
+
+;; ------------------------------------------------------- double-r
+
+(defn- range-at
+  "The range along unit `L` from site `R` at which the distance from the
+  center is `r`: the far root of |R + rho L| = r, nil where the line never
+  gets that far out."
+  [L R r]
+  (let [c (* 2.0 (v3/dot L R))
+        disc (- (* c c) (* 4.0 (- (v3/dot R R) (* r r))))]
+    (when (>= disc 0.0) (* 0.5 (+ (- c) (math/sqrt disc))))))
+
+(defn- solve3
+  "x of the 3x3 linear system m x = b, by Cramer's rule."
+  [m b]
+  (let [det (fn [[[a b c] [d e f] [g h i]]]
+              (- (+ (* a (- (* e i) (* f h))) (* c (- (* d h) (* e g))))
+                 (* b (- (* d i) (* f g)))))
+        d (det m)
+        col (fn [k] (mapv (fn [row bi] (assoc row k bi)) m b))]
+    (mapv #(/ (det (col %)) d) (range 3))))
+
+(defn- double-r-step
+  "For radii `r1m` `r2m` at the first two sightings: the three positions,
+  the conic through them, and how far its timing misses the observation
+  times -- `{:F [F1 F2] :r [r1 r2 r3] :conic ...}`, nil where the guess
+  puts no conic through them."
+  [mu [L1 L2 L3] [tau1 tau3] [R1 R2 R3] r1m r2m]
+  (when-let [rho1 (range-at L1 R1 r1m)]
+    (when-let [rho2 (range-at L2 R2 r2m)]
+      (let [r1 (v3/add R1 (v3/scale L1 rho1))
+            r2 (v3/add R2 (v3/scale L2 rho2))
+            W (v3/normalize (v3/cross r1 r2))
+            ;; the third position is where its line of sight meets the plane
+            rho3 (- (/ (v3/dot R3 W) (v3/dot L3 W)))
+            r3 (v3/add R3 (v3/scale L3 rho3))
+            r3m (v3/length r3)
+            ;; angles swept, signed about W
+            sweep (fn [a b] (math/atan2 (v3/dot (v3/cross a b) W) (v3/dot a b)))
+            dnu21 (sweep r1 r2) dnu32 (sweep r2 r3)
+            ;; p, e cos nu2, e sin nu2 from p/r - 1 = e cos nu at each point
+            [p X Y] (solve3 [[(/ 1.0 r1m) (- (math/cos dnu21)) (- (math/sin dnu21))]
+                             [(/ 1.0 r2m) -1.0 0.0]
+                             [(/ 1.0 r3m) (- (math/cos dnu32)) (math/sin dnu32)]]
+                            [1.0 1.0 1.0])
+            e (math/hypot X Y)
+            a (/ p (- 1.0 (* e e)))
+            nu2 (math/atan2 Y X)
+            mean (fn [nu] (second (kepler/true->anomaly-and-mean e nu)))
+            anomaly (fn [nu] (first (kepler/true->anomaly-and-mean e nu)))
+            n (math/sqrt (/ mu (abs (* a a a))))
+            dM (fn [nu] (if (< e 1.0) (am/wrap-angle (- (mean nu) (mean nu2))) (- (mean nu) (mean nu2))))]
+        (when (and (pos? p) (not= e 1.0) (pos? rho3))
+          {:F [(- tau1 (/ (dM (- nu2 dnu21)) n)) (- tau3 (/ (dM (+ nu2 dnu32)) n))]
+           :r [r1 r2 r3] :a a :e e
+           :dx (let [d (- (anomaly (+ nu2 dnu32)) (anomaly nu2))]
+                 (if (< e 1.0) (am/wrap-angle d) d))})))))
+
+(defn double-r
+  "An orbit from three sightings of direction alone, as `gauss` takes
+  them, by Escobal's double-r iteration: guess the distances from the
+  center at the first two sightings, which places all three positions and
+  a conic through them, and adjust the two by Newton's method until that
+  conic's timing matches the observations. Exact, where Gauss's method
+  truncates a series, and so the way to refine it: the guesses default to
+  `gauss`'s. Returns `{:r2 :v2}` at the middle sighting, nil if the
+  iteration does not converge."
+  ([observations ts sites] (double-r mu observations ts sites nil))
+  ([mu observations [t1 t2 t3 :as ts] sites guesses]
+   (let [Ls (map (fn [[ra dec]] (line-of-sight ra dec)) observations)
+         taus [(- t1 t2) (- t3 t2)]
+         [g1 g2] (or guesses
+                     (let [{[rho1 rho2] :ranges} (gauss mu observations ts sites)]
+                       [(v3/length (v3/add (first sites) (v3/scale (first Ls) rho1)))
+                        (v3/length (v3/add (second sites) (v3/scale (second Ls) rho2)))]))
+         step (fn [r1m r2m] (double-r-step mu Ls taus sites r1m r2m))
+         scale (max (abs (first taus)) (abs (second taus)))]
+     (loop [r1m g1 r2m g2 i 0]
+       (when-let [{[F1 F2] :F :as here} (step r1m r2m)]
+         (if (< (max (abs F1) (abs F2)) (* 1e-12 scale))
+           (let [{[_ r2 r3] :r :keys [a dx]} here
+                 tau3 (second taus)
+                 r2m' (v3/length r2)
+                 ;; f and g from the middle position to the third
+                 [f g] (if (pos? a)
+                         [(- 1.0 (* (/ a r2m') (- 1.0 (math/cos dx))))
+                          (- tau3 (* (math/sqrt (/ (* a a a) mu)) (- dx (math/sin dx))))]
+                         [(- 1.0 (* (/ a r2m') (- 1.0 (math/cosh dx))))
+                          (- tau3 (* (math/sqrt (/ (- (* a a a)) mu)) (- (math/sinh dx) dx)))])]
+             {:r2 r2 :v2 (v3/scale (v3/sub r3 (v3/scale r2 f)) (/ 1.0 g))})
+           (when (< i 50)
+             ;; Newton, with the partials by central differences
+             (let [h1 (* 1e-6 r1m) h2 (* 1e-6 r2m)
+                   d (fn [a b] (map #(/ (- %1 %2) (* 2.0 %3)) (:F a) (:F b) (repeat 1.0)))
+                   p1 (step (+ r1m h1) r2m) m1 (step (- r1m h1) r2m)
+                   p2 (step r1m (+ r2m h2)) m2 (step r1m (- r2m h2))]
+               (when (and p1 m1 p2 m2)
+                 (let [[a11 a21] (map #(/ % h1) (d p1 m1))
+                       [a12 a22] (map #(/ % h2) (d p2 m2))
+                       det (- (* a11 a22) (* a12 a21))
+                       dr1 (/ (- (* a22 F1) (* a12 F2)) det)
+                       dr2 (/ (- (* a11 F2) (* a21 F1)) det)]
+                   (recur (- r1m dr1) (- r2m dr2) (inc i))))))))))))
 
 ;; ------------------------------------------------------------- Lambert
 
