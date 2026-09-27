@@ -60,3 +60,18 @@
   "Neither NaN nor an infinity. Worth asserting after a solve."
   [^double x]
   (not (or (NaN? x) (infinite? x))))
+
+(defn atanh
+  "The inverse hyperbolic tangent, which `clojure.math` does not have."
+  ^double [^double x]
+  (* 0.5 (math/log (/ (+ 1.0 x) (- 1.0 x)))))
+
+(defn acosh
+  "The inverse hyperbolic cosine, for x >= 1."
+  ^double [^double x]
+  (math/log (+ x (math/sqrt (- (* x x) 1.0)))))
+
+(defn asinh
+  "The inverse hyperbolic sine."
+  ^double [^double x]
+  (math/log (+ x (math/sqrt (+ (* x x) 1.0)))))

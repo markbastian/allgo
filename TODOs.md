@@ -77,7 +77,32 @@ of expected return:
 
 ## Astronomical and Astrodynamic Calculations
 
-- Everything in Fundamentals of Astrodynamics and Applications by David Vallado
+- **Vallado, *Fundamentals of Astrodynamics and Applications*.** Worked
+  through in chunks, each built on what `allgo.astro` already has from
+  Montenbruck & Gill and Meeus, implemented from the book's equations and
+  algorithms. The tests check each result independently: by flying it
+  with the two-body propagator, by the identities it must satisfy, and
+  against ERFA and published standards where those cover it.
+  1. Two-body core (ch. 2): universal-variable Kepler for every conic,
+     Stumpff functions, f and g, anomalies of hyperbolas and parabolas,
+     time of flight, hit-the-Earth test, J2 secular propagation.
+  2. Maneuvers (ch. 6): Hohmann, bi-elliptic, one-tangent, plane changes,
+     combined changes, rendezvous, low thrust, Hill/Clohessy-Wiltshire.
+  3. Initial orbit determination (ch. 7): Gibbs, Herrick-Gibbs, Laplace,
+     Gauss, double-r, Lambert (universal variables, Battin, minimum
+     energy and time).
+  4. Coordinates and frames (ch. 3-4): range-azimuth-elevation, topocentric
+     SEZ, RSW/NTW/PQW, flight and equinoctial elements, TEME, FK5 chain
+     with EOP, IAU 2006/2000 CIO.
+  5. SGP4/SDP4 and TLEs.
+  6. Celestial (ch. 5): Sun and Moon positions, rise and set, satellite
+     eclipses (shadow), sight and light.
+  7. Perturbations (ch. 8-9): J2 secular and periodic rates, gravity
+     field algorithms (Pines, Gottlieb, Lear), drag and SRP analytic.
+  8. Mission geometry (ch. 11): repeat ground tracks, sun-synchronous and
+     frozen orbits, field of view, range and azimuth between sites.
+  9. Covariance transformations between Cartesian, classical, equinoctial,
+     flight and RSW/NTW.
 
 ## Time
 

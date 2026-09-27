@@ -96,6 +96,79 @@
   [M e]
   (am/wrap-2pi (math/atan2 (math/sin M) (- (math/cos M) e))))
 
+;; ------------------------------------ every conic (Vallado, chapter 2)
+;;
+;; The eccentric anomaly has a counterpart on each conic: E on an ellipse,
+;; the hyperbolic anomaly H on a hyperbola, and on a parabola B = tan(nu/2),
+;; Barker's parabolic anomaly. Each has its own Kepler's equation --
+;;
+;;   ellipse    M = E - e sin E
+;;   hyperbola  M = e sinh H - H
+;;   parabola   M = B + B^3 / 3
+;;
+;; -- and the three functions below do the conversions for whichever the
+;; eccentricity says, as Vallado's NEWTONE, NEWTONNU and NEWTONM do. The
+;; parabola's M here is Vallado's, not a mean anomaly in time: t - T =
+;; sqrt(p^3 / mu) M / 2.
+
+(def ^:private parabolic-tol 1e-12)
+
+(defn- conic [e]
+  (cond (< (abs (- e 1.0)) parabolic-tol) :parabola
+        (< e 1.0) :ellipse
+        :else :hyperbola))
+
+(defn anomaly->mean-and-true
+  "`[M nu]` from the eccentric, hyperbolic or parabolic anomaly `x` of an
+  orbit of eccentricity `e`."
+  [e x]
+  (case (conic e)
+    :ellipse   [(am/wrap-2pi (- x (* e (math/sin x)))) (eccentric->true x e)]
+    :hyperbola [(- (* e (math/sinh x)) x)
+                (* 2.0 (math/atan (* (math/sqrt (/ (+ e 1.0) (- e 1.0))) (math/tanh (* 0.5 x)))))]
+    :parabola  [(+ x (/ (* x x x) 3.0)) (* 2.0 (math/atan x))]))
+
+(defn true->anomaly-and-mean
+  "`[x M]`, the eccentric, hyperbolic or parabolic anomaly and the mean
+  anomaly, from the true anomaly `nu`."
+  [e nu]
+  (case (conic e)
+    :ellipse   (let [E (true->eccentric nu e)] [E (eccentric->mean E e)])
+    :hyperbola (let [H (* 2.0 (am/atanh (* (math/sqrt (/ (- e 1.0) (+ e 1.0))) (math/tan (* 0.5 nu)))))]
+                 [H (- (* e (math/sinh H)) H)])
+    :parabola  (let [B (math/tan (* 0.5 nu))] [B (+ B (/ (* B B B) 3.0))])))
+
+(defn kepler-hyperbolic
+  "Solve M = e sinh H - H for the hyperbolic anomaly by Newton's method,
+  from Vallado's starting guess."
+  [M e]
+  (let [H0 (cond
+             (< e 1.6) (if (or (and (< M 0.0) (> M (- math/PI))) (> M math/PI)) (- M e) (+ M e))
+             (and (< e 3.6) (> (abs M) math/PI)) (- M (* (math/signum M) e))
+             :else (/ M (- e 1.0)))]
+    (loop [H H0 n 0]
+      (let [dH (/ (- (* e (math/sinh H)) H M) (- (* e (math/cosh H)) 1.0))]
+        (if (or (< (abs dH) 1e-13) (>= n 60))
+          (- H dH)
+          (recur (- H dH) (inc n)))))))
+
+(defn kepler-parabolic
+  "Solve M = B + B^3/3 for Barker's parabolic anomaly: a cubic, so in
+  closed form."
+  [M]
+  (let [s (* 0.5 (- (/ math/PI 2) (math/atan (* 1.5 M))))
+        w (math/atan (math/cbrt (math/tan s)))]
+    (/ 2.0 (math/tan (* 2.0 w)))))
+
+(defn mean->anomaly-and-true
+  "`[x nu]`, the eccentric, hyperbolic or parabolic anomaly and the true
+  anomaly, from the mean anomaly `M`."
+  [e M]
+  (case (conic e)
+    :ellipse   (let [E (kepler-equation M e)] [E (eccentric->true E e)])
+    :hyperbola (let [H (kepler-hyperbolic M e)] [H (second (anomaly->mean-and-true e H))])
+    :parabola  (let [B (kepler-parabolic M)] [B (* 2.0 (math/atan B))])))
+
 ;; --------------------------------------------- parabolic orbits (Meeus 34)
 
 (defn parabolic
