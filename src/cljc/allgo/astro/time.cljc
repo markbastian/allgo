@@ -137,7 +137,9 @@
   [mjd-ut1]
   (let [t   (centuries-J2000 mjd-ut1)
         deg (+ 280.46061837
-               (* 360.98564736629 (- (mjd->jd mjd-ut1) 2451545.0))
+               ;; days from J2000 taken in MJD: going through the JD first rounds
+               ;; them to 5e-10 days, a few 1e-9 radians of sidereal time
+               (* 360.98564736629 (- mjd-ut1 51544.5))
                (* 0.000387933 t t)
                (- (/ (* t t t) 38710000.0)))
         rad (* (rem deg 360.0) c/degrees)]

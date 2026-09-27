@@ -211,6 +211,13 @@ The demos draw on other people's data, used under their terms:
   Cartographic Coordinates and Rotational Elements' 2015 report (Archinal
   et al. 2018), as distributed by NASA's NAIF in the planetary constants
   kernel `pck00011.tpc`.
+- **IAU 1980 nutation** (`allgo.astro.frames`): the 106 terms of Table I
+  of Seidelmann, "1980 IAU Theory of Nutation: The Final Report of the
+  IAU Working Group on Nutation", *Celestial Mechanics* 27 (1982) 79,
+  as the IERS also distributes them (`nut_IAU1980.dat`).
+- **ERFA** ([liberfa/erfa](https://github.com/liberfa/erfa), derived from
+  the IAU's SOFA library): the FK5 reduction's tests compare against
+  values computed with it.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
