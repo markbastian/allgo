@@ -83,14 +83,12 @@ of expected return:
   algorithms. The tests check each result independently: by flying it
   with the two-body propagator, by the identities it must satisfy, and
   against ERFA and published standards where those cover it.
-  1. Two-body core (ch. 2): universal-variable Kepler for every conic,
-     Stumpff functions, f and g, anomalies of hyperbolas and parabolas,
-     time of flight, hit-the-Earth test, J2 secular propagation.
-  2. Maneuvers (ch. 6): Hohmann, bi-elliptic, one-tangent, plane changes,
-     combined changes, rendezvous, low thrust, Hill/Clohessy-Wiltshire.
-  3. Initial orbit determination (ch. 7): Gibbs, Herrick-Gibbs, Laplace,
-     Gauss, double-r, Lambert (universal variables, Battin, minimum
-     energy and time).
+  1. ~~Two-body core (ch. 2)~~ -- `allgo.astro.universal`.
+  2. ~~Maneuvers (ch. 6)~~ -- `allgo.astro.maneuvers`.
+  3. Initial orbit determination (ch. 7): done except Laplace's method,
+     the double-r iteration that refines Gauss, and Battin's Lambert
+     solver (a second, independent one to check the universal solver
+     against).
   4. Coordinates and frames (ch. 3-4): range-azimuth-elevation, topocentric
      SEZ, RSW/NTW/PQW, flight and equinoctial elements, TEME, FK5 chain
      with EOP, IAU 2006/2000 CIO.
