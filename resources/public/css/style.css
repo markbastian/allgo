@@ -270,6 +270,17 @@ button:hover {
   transform: translate(calc(50% + 0.5rem), -0.5rem);
 }
 
+/* A satellite's name, beside it like a star's. */
+.sky-label--moon {
+  color: rgba(200, 212, 230, 0.8);
+  font-size: 0.68rem;
+}
+
+.sky-label--moon span {
+  display: inline-block;
+  transform: translate(calc(50% + 0.4rem), -0.4rem);
+}
+
 /* ---- thumbnails ---- */
 
 /* `?thumb` on any demo page: the scene and nothing else, for the

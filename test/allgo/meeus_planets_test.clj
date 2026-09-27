@@ -10,6 +10,7 @@
             [allgo.astro.physical :as phys]
             [allgo.astro.planet-orbits :as po]
             [allgo.astro.precession :as pr]
+            [allgo.astro.rotation :as rot]
             [allgo.astro.saturn-moons :as sm]
             [allgo.astro.time :as t]
             [allgo.meeus-support :refer [->arcsec ->deg close? deg dms hms jd->mjd mjd->jd]]
@@ -198,3 +199,25 @@
         (let [[x y] (pos moon)]
           (is (close? x' x 0.002) (str moon))
           (is (close? y' y 0.002) (str moon)))))))
+
+(defn- angle-to-plane
+  "Angle of vector `v` out of the plane whose pole is the unit vector `n`."
+  [v n]
+  (math/asin (/ (reduce + (map * v n)) (math/sqrt (reduce + (map * v v))))))
+
+(deftest satellites-in-three-dimensions
+  (testing "the Galilean moons circle in Jupiter's equator, as the IAU has its pole"
+    (doseq [mjd [51544.5 55000.0 60000.0]]
+      (let [pole (rot/pole :jupiter mjd)]
+        (doseq [[moon r] (map vector jm/names (jm/positions-3d mjd))]
+          (is (< (abs (angle-to-plane r pole)) (deg 0.6)) (str moon " at " mjd))))))
+  (testing "at their own distances"
+    (doseq [[r lo hi] (map vector (jm/positions-3d 60000.0) [5.8 9.3 14.9 26.2] [6.0 9.5 15.1 26.6])]
+      (is (< lo (math/sqrt (reduce + (map * r r))) hi))))
+  (testing "Saturn's inner seven circle in its equator; Iapetus is tilted to it"
+    (doseq [mjd [51544.5 55000.0 60000.0]]
+      (let [pole (rot/pole :saturn mjd)
+            pos (sm/positions-3d mjd)]
+        (doseq [moon [:mimas :enceladus :tethys :dione :rhea :titan :hyperion]]
+          (is (< (abs (angle-to-plane (pos moon) pole)) (deg 2.0)) (str moon " at " mjd)))
+        (is (< (abs (angle-to-plane (pos :iapetus) pole)) (deg 20.0)) (str "iapetus at " mjd))))))

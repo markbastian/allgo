@@ -58,11 +58,13 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.ephemeris :as eph]
             [allgo.astro.frames :as frames]
+            [allgo.astro.jupiter-moons :as jmoons]
             [allgo.astro.kepler :as kep]
             [allgo.astro.moon :as lunar]
             [allgo.astro.planet-orbits :as orbits]
             [allgo.astro.planets :as pl]
             [allgo.astro.rotation :as rot]
+            [allgo.astro.saturn-moons :as smoons]
             [allgo.astro.stars :as stars]
             [allgo.astro.time :as atime]
             [allgo.astro.vsop87 :as vsop87]
@@ -114,11 +116,13 @@
 
 (def ^:private ^js controls
   #js {:focus         "Overview"
+       :date          ""
        :ephemeris     "VSOP87 + ELP"
        :scale         "logarithmic"
        :daysPerSecond 12.0
        :moonZoom      400.0
        :showOrbits    true
+       :showMoons     true
        :showEcliptic  true
        :showStars     true
        :starLimit     6.5
@@ -166,6 +170,21 @@
 (def ^:private pluto-span
   "The years Meeus's Pluto covers, as MJD."
   [(atime/calendar->mjd 1885 1 1) (atime/calendar->mjd 2099 12 31)])
+
+(defn- format-date
+  "`mjd` as the panel shows and takes it: YYYY-MM-DD HH:MM, TT."
+  [mjd]
+  (let [[y m d h] (atime/mjd->calendar mjd)
+        mins (math/round (* 60.0 h))
+        pad (fn [n] (.padStart (str n) 2 "0"))]
+    (str y "-" (pad m) "-" (pad d) " " (pad (quot mins 60)) ":" (pad (mod mins 60)))))
+
+(defn- parse-date
+  "The MJD of a date typed as YYYY-MM-DD, optionally with HH:MM, or nil."
+  [text]
+  (when-let [[_ y m d h mi] (re-matches #"\s*(-?\d+)-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?\s*" text)]
+    (atime/calendar->mjd (js/parseInt y) (js/parseInt m) (js/parseInt d)
+                         (+ (js/parseInt (or h "0")) (/ (js/parseInt (or mi "0")) 60.0)))))
 
 (defn- radial
   "Map a distance in AU onto the view. Logarithmic keeps all eight orbits on
@@ -381,6 +400,101 @@
                            :side THREE/DoubleSide :depthWrite false
                            :roughness 1.0 :metalness 0.0}))))
 
+(def ^:private satellite-systems
+  "The moons drawn around Jupiter and Saturn: where each is, from Meeus's
+  chapters 44 and 46 in three dimensions, in its planet's equatorial
+  radii; and each one's radius and color. Drawn at true scale against the
+  planet -- which is itself drawn far larger than the solar system's
+  scale allows -- so they appear only once the view is close to it."
+  {:jupiter {:positions (fn [mjd] (zipmap jmoons/names (jmoons/positions-3d mjd)))
+             :radii jmoons/radii
+             :names {:io "Io" :europa "Europa" :ganymede "Ganymede" :callisto "Callisto"}
+             :colors {:io 0xd9c26a :europa 0xcdbfa4 :ganymede 0x9d9282 :callisto 0x6f675d}}
+   :saturn  {:positions smoons/positions-3d
+             :radii smoons/radii
+             :names {:mimas "Mimas" :enceladus "Enceladus" :tethys "Tethys" :dione "Dione"
+                     :rhea "Rhea" :titan "Titan" :hyperion "Hyperion" :iapetus "Iapetus"}
+             :colors {:mimas 0xb8b4ae :enceladus 0xf2f2f2 :tethys 0xd6d4d0 :dione 0xc8c5c0
+                      :rhea 0xbdb9b2 :titan 0xd49a52 :hyperion 0xa89886 :iapetus 0x8e877c}}})
+
+(def ^:private max-occluders 9)
+
+(defn- shadowed!
+  "Teaches a standard material the shadows of up to `max-occluders`
+  spheres -- a planet's moons on its cloud tops, the planet on its moons,
+  moons on moons -- and returns the uniforms to feed them.
+
+  Traced rather than mapped: each fragment asks whether the line from it
+  to the Sun, at the origin, passes through any occluder, with an edge as
+  soft as the Sun's own disk seen from there. A shadow map at this scale
+  would put Io's shadow, a few hundredths of a view unit, across one
+  texel."
+  [^js material]
+  (let [uniforms #js {:occluders #js {:value (into-array (repeatedly max-occluders #(THREE/Vector4.)))}
+                      :occluderCount #js {:value 0}
+                      :sunSize #js {:value 0.0}}]
+    (set! (.-onBeforeCompile material)
+          (fn [^js shader]
+            (js/Object.assign (.-uniforms shader) uniforms)
+            (set! (.-vertexShader shader)
+                  (-> (.-vertexShader shader)
+                      (.replace "#include <common>" "#include <common>\nvarying vec3 vSunWorld;")
+                      (.replace "#include <project_vertex>"
+                                "#include <project_vertex>\nvSunWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;")))
+            (set! (.-fragmentShader shader)
+                  (-> (.-fragmentShader shader)
+                      (.replace "#include <common>"
+                                (str "#include <common>\n"
+                                     "varying vec3 vSunWorld;\n"
+                                     "uniform vec4 occluders[" max-occluders "];\n"
+                                     "uniform int occluderCount;\n"
+                                     "uniform float sunSize;\n"
+                                     "float sunlit() {\n"
+                                     "  vec3 d = normalize(-vSunWorld);\n"
+                                     "  float lit = 1.0;\n"
+                                     "  for (int i = 0; i < " max-occluders "; i++) {\n"
+                                     "    if (i >= occluderCount) break;\n"
+                                     "    vec3 oc = occluders[i].xyz - vSunWorld;\n"
+                                     "    float t = dot(oc, d);\n"
+                                     "    if (t <= 0.0) continue;\n"
+                                     "    float miss = length(oc - d * t);\n"
+                                     "    float pen = max(t * sunSize, 1e-5);\n"
+                                     "    lit *= smoothstep(occluders[i].w - pen, occluders[i].w + pen, miss);\n"
+                                     "  }\n"
+                                     "  return lit;\n"
+                                     "}\n"))
+                      (.replace "#include <lights_fragment_end>"
+                                (str "#include <lights_fragment_end>\n"
+                                     "float sunLight = sunlit();\n"
+                                     "reflectedLight.directDiffuse *= sunLight;\n"
+                                     "reflectedLight.directSpecular *= sunLight;\n"))))))
+    (set! (.-needsUpdate material) true)
+    uniforms))
+
+(defn- feed-occluders!
+  "Sets a shadowed material's occluders to `spheres`, `[[x y z r] ...]` in
+  view coordinates, and the Sun's angular radius as seen from there."
+  [^js uniforms spheres sun-size]
+  (let [^js arr (.. uniforms -occluders -value)]
+    (doseq [[i [x y z r]] (map-indexed vector (take max-occluders spheres))]
+      (.set (aget arr i) x y z r))
+    (set! (.. uniforms -occluderCount -value) (min max-occluders (count spheres)))
+    (set! (.. uniforms -sunSize -value) sun-size)))
+
+(defn- circle-points
+  "A circle of radius `r` about the origin in the plane whose pole is the
+  unit vector `n` (view coordinates)."
+  [n r]
+  (let [^js pole (THREE/Vector3. (n 0) (n 1) (n 2))
+        ^js u (.normalize (.cross (THREE/Vector3. 0 1 0) pole))
+        u (if (< (.length u) 1e-6) (THREE/Vector3. 1 0 0) u)
+        ^js v (.cross (.clone pole) u)]
+    (for [k (range 97)]
+      (let [a (* 2.0 math/PI (/ k 96.0))
+            p (.add (.multiplyScalar (.clone u) (* r (math/cos a)))
+                    (.multiplyScalar (.clone v) (* r (math/sin a))))]
+        [(.-x p) (.-y p) (.-z p)]))))
+
 (def ^:private named-brighter-than
   "The faintest star given its name: the IAU has named 333 of the
   catalogue's stars, and all of them at once would bury the sky in
@@ -402,6 +516,28 @@
                                                #js {:color (get palette k 0xcfd6e0)
                                                     :roughness 1.0 :metalness 0.0})))]))
         bodies   (select-keys meshes pl/order)
+        ;; each giant's moons: a group carried to the planet each frame,
+        ;; in units of the planet's drawn radius
+        systems  (into {}
+                       (for [[planet {:keys [radii names colors]}] satellite-systems]
+                         (let [group (THREE/Group.)
+                               per-km (/ 1.0 (rot/radius planet))
+                               moons (into {}
+                                           (for [[k r] radii]
+                                             (let [^js m (THREE/Mesh. sphere
+                                                                      (THREE/MeshStandardMaterial.
+                                                                       #js {:color (colors k) :roughness 1.0 :metalness 0.0}))]
+                                               (.setScalar (.-scale m) (* r per-km))
+                                               (.add group m)
+                                               [k {:mesh m :shadow (shadowed! (.-material m))
+                                                   :label (let [^js o (label (names k) "sky-label sky-label--moon" [0 0])]
+                                                            (.add m o)
+                                                            (.set (.-position o) 0 0 0)
+                                                            o)}])))
+                               paths (THREE/Group.)]
+                           (.add group paths)
+                           [planet {:group group :moons moons :paths paths
+                                    :shadow (shadowed! (.-material (meshes planet)))}])))
         rings    (ring)
         ;; The Sun is a point of light at the center, and since the radial
         ;; scale keeps every direction from the Sun true, it lights each
@@ -476,6 +612,7 @@
     (.appendChild container back)
     (doseq [[_ m] meshes] (.add scene m))
     (.add (bodies :saturn) rings)
+    (doseq [[_ {:keys [group]}] systems] (.add scene group))
     (.add scene sunlight)
     (.add scene ambient)
     (.add scene moon-line)
@@ -600,7 +737,10 @@
                     ;; down, eased at both ends.
                     (let [u (min 1.0 (/ (- (js/performance.now) t0) flight-ms))
                           e (- (* 3.0 u u) (* 2.0 u u u))
-                          dist (if-let [k (focused)] (* 4.0 (dot-size k)) 48.0)
+                          dist (if-let [k (focused)]
+                                 ;; outside the innermost moon's orbit, for a giant
+                                 (* (if (satellite-systems k) 7.0 4.0) (dot-size k))
+                                 48.0)
                           len (+ (.length offset) (* e (- dist (.length offset))))
                           target (.lerp (.clone from) p e)
                           dir0 (.normalize (.clone offset))
@@ -691,11 +831,75 @@
                       arcmin (/ (math/acos (min 1.0 cosang)) (/ math/PI 10800.0))]
                   (str "\n" (if (= k :moon) "The short lunar series is " "Standish's elements are ")
                        (.toFixed arcmin 1) "' from " (if (= k :moon) "ELP" "VSOP87"))))
+              (update-moons!
+                ;; The satellites, for a giant the view is close to: placed
+                ;; about it at true scale against its drawn radius, their
+                ;; orbits traced as circles in its equator, and every body
+                ;; of the system given the others' shadows.
+                []
+                (let [mjd (:mjd @state)
+                      {:keys [planet]} (ephemeris mjd)]
+                  (doseq [[k {:keys [^js group moons ^js paths shadow]}] systems]
+                    (let [^js pm (meshes k)
+                          scale (dot-size k)
+                          ;; the focused giant's moons, or, with nothing in
+                          ;; focus, those of a giant zoomed in on by hand
+                          near? (if-let [f (focused)]
+                                  (= k f)
+                                  (< (.distanceTo (.-position camera) (.-position pm)) (* 15.0 scale)))
+                          show? (and near? (.-showMoons controls))]
+                      (set! (.-visible group) show?)
+                      (when-not show?
+                        (doseq [[_ {:keys [^js label]}] moons] (set! (.-visible label) false)))
+                      (if-not show?
+                        (feed-occluders! shadow [] 0.0)
+                        (let [pos ((:positions (satellite-systems k)) mjd)
+                              sun-size (/ (rot/radius :sun)
+                                          (let [[x y z] (planet k)] (math/sqrt (+ (* x x) (* y y) (* z z)))))
+                              r-of (fn [^js m] (* scale (.. m -scale -x)))]
+                          (.copy (.-position group) (.-position pm))
+                          (.setScalar (.-scale group) scale)
+                          (doseq [[mk {:keys [^js mesh]}] moons]
+                            (let [[x y z] (to-view (pos mk))]
+                              (.set (.-position mesh) x y z)))
+                          ;; orbits, redrawn as the moons move out and in
+                          (doseq [^js child (vec (.-children paths))] (.remove paths child))
+                          (let [n (to-view (rot/pole k mjd))]
+                            (doseq [[mk _] moons]
+                              (let [[x y z] (pos mk)]
+                                (.add paths (line-of (circle-points n (math/sqrt (+ (* x x) (* y y) (* z z))))
+                                                     0x7f8aa0 0.25)))))
+                          (.updateMatrixWorld group true)
+                          ;; a label is HTML over the scene and nothing
+                          ;; hides it, so a moon behind the planet's disk
+                          ;; has its name taken away by hand
+                          (let [^js eye (.-position camera)
+                                ^js center (.-position pm)]
+                            (doseq [[_ {:keys [^js mesh ^js label]}] moons]
+                              (let [^js p (.getWorldPosition mesh (THREE/Vector3.))
+                                    ^js d (.sub (.clone p) eye)
+                                    len (.length d)
+                                    ^js dir (.normalize d)
+                                    t (.dot (.sub (.clone center) eye) dir)
+                                    miss (.distanceTo center (.add (.multiplyScalar (.clone dir) t) eye))]
+                                (set! (.-visible label) (not (and (< 0 t len) (< miss scale)))))))
+                          (let [spheres (into {}
+                                              (cons [k (let [p (.-position pm)] [(.-x p) (.-y p) (.-z p) scale])]
+                                                    (for [[mk {:keys [^js mesh]}] moons]
+                                                      (let [p (.getWorldPosition mesh (THREE/Vector3.))]
+                                                        [mk [(.-x p) (.-y p) (.-z p) (r-of mesh)]]))))
+                                others (fn [self] (vals (dissoc spheres self)))]
+                            (feed-occluders! shadow (sort-by #(- (nth % 3)) (others k)) sun-size)
+                            (doseq [[mk {:keys [shadow]}] moons]
+                              (feed-occluders! shadow (others mk) sun-size)))))))))
               (publish! []
                 (let [mjd (:mjd @state)
                       [yr mo dy hr] (atime/mjd->calendar mjd)
                       moon-km (let [[a b cc] ((:moon (ephemeris mjd)))]
                                 (math/sqrt (+ (* a a) (* b b) (* cc cc))))]
+                  ;; not while it is being typed into
+                  (when-not (some-> ^js (.-activeElement js/document) (.closest ".lil-gui"))
+                    (set! (.-date controls) (format-date mjd)))
                   (when-let [^js s @stars-at]
                     (set! (.-visible s) (.-showStars controls)))
                   (when-let [^js l @lines-at]
@@ -728,6 +932,7 @@
                     (swap! state assoc :last t0)
                     (update-bodies!)
                     (layout!)
+                    (update-moons!)
                     (follow!)
                     (publish!)
                     (.update orbit)
@@ -773,9 +978,14 @@
           (-> (.add gui controls "ephemeris" #js [precise-source "Keplerian elements"])
               (.onChange (fn [_] (reset! moon-path nil) (rebuild-orbits!))))
           (-> (.add gui controls "scale" #js ["logarithmic" "linear"]) (.onChange rebuild-orbits!))
-          (.add gui controls "daysPerSecond" 0 200 1)
+          (-> (.add gui controls "date") (.name "date (TT)") (.listen)
+              (.onFinishChange (fn [v] (when-let [mjd (parse-date v)]
+                                         (swap! state assoc :mjd mjd)
+                                         (rebuild-orbits!)))))
+          (.add gui controls "daysPerSecond" 0 200 0.01)
           (.add gui controls "moonZoom" 1 2000 1)
           (.add gui controls "showOrbits")
+          (-> (.add gui controls "showMoons") (.name "moons of Jupiter, Saturn"))
           (.add gui controls "showEcliptic")
           (-> (.add gui controls "showStars") (.name "stars"))
           (-> (.add gui controls "starLimit" 1.0 6.5 0.1) (.name "faintest star")

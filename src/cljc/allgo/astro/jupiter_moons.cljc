@@ -23,6 +23,7 @@
             [allgo.astro.planet-orbits :as orbits]
             [allgo.astro.solar :as solar]
             [allgo.astro.vsop87 :as vsop87]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (defn- deg [x] (* x c/degrees))
@@ -324,27 +325,16 @@
   body in front of the disk is displaced by the planet's curvature."
   [17295.0 21819.0 27558.0 36548.0])
 
-(defn positions
-  "`[[x y] ...]` of Io, Europa, Ganymede and Callisto at `mjd-tt`, in
-  Jupiter radii, by the E5 theory."
-  [mjd-tt]
+(defn- ecliptic-orbits
+  "The E5 theory evaluated for the satellites as they were at `jd-light`
+  (the Julian Day the theory is run for, less any light time), and turned
+  onto the ecliptic of `mjd-tt`: `{:xyz [[x y z] x4 + the pole] :radii}`,
+  in Jupiter radii about Jupiter's center. The fifth vector is the unit
+  vector along Jupiter's pole, which the view needs to find the disk's
+  orientation."
+  [jd-light mjd-tt]
   (let [jd (+ mjd-tt c/jd-mjd-offset)
-        ;; Jupiter seen from the Earth, light time included
-        [s b-sun R] (solar/geometric mjd-tt)
-        earth [(* R (math/cos b-sun) (math/cos s)) (* R (math/cos b-sun) (math/sin s)) (* R (math/sin b-sun))]
-        [[x y z] delta tau]
-        (loop [delta 5.0 i 0]
-          (let [tau (elliptic/light-time delta)
-                [l b r] (vsop87/heliocentric :jupiter (- mjd-tt tau))
-                xyz (mapv + [(* r (math/cos b) (math/cos l)) (* r (math/cos b) (math/sin l)) (* r (math/sin b))]
-                          earth)
-                delta' (math/sqrt (reduce + (map * xyz xyz)))]
-            (if (or (< (abs (- delta' delta)) 1e-9) (> i 10))
-              [xyz delta' (elliptic/light-time delta')]
-              (recur delta' (inc i)))))
-        lam0 (math/atan2 y x)
-        bet0 (math/atan (/ z (math/hypot x y)))
-        t  (- jd 2443000.5 tau)
+        t  (- jd-light 2443000.5)
         lin (fn [a b] (deg (+ a (* b t))))
         args0 {:l1 (lin 106.07719 203.48895579) :l2 (lin 175.73161 101.374724735)
                :l3 (lin 120.55883 50.317609207) :l4 (lin 84.44459 21.571071177)
@@ -374,19 +364,63 @@
                   [0.0 0.0 1.0])            ; a fictitious fifth body on the pole
         {:keys [raan i]} (orbits/mean-elements :jupiter mjd-tt)
         rot (fn [a b th] [(- (* a (math/cos th)) (* b (math/sin th)))
-                          (+ (* a (math/sin th)) (* b (math/cos th)))])
-        view (mapv (fn [[X Y Z]]
-                     (let [a X
-                           b (- (* Y (math/cos I)) (* Z (math/sin I)))
-                           c (+ (* Y (math/sin I)) (* Z (math/cos I)))
-                           [a b] (rot a b (- psi raan))
-                           [b c] (rot b c i)
-                           [a b] (rot a b raan)
-                           a' (- (* a (math/sin lam0)) (* b (math/cos lam0)))
+                          (+ (* a (math/sin th)) (* b (math/cos th)))])]
+    {:radii Rs
+     :xyz (mapv (fn [[X Y Z]]
+                  (let [a X
+                        b (- (* Y (math/cos I)) (* Z (math/sin I)))
+                        c (+ (* Y (math/sin I)) (* Z (math/cos I)))
+                        [a b] (rot a b (- psi raan))
+                        [b c] (rot b c i)
+                        [a b] (rot a b raan)]
+                    [a b c]))
+                xyz)}))
+
+(defn positions-3d
+  "Where Io, Europa, Ganymede and Callisto are at `mjd-tt`: `[[x y z]
+  ...]` in Jupiter's equatorial radii from its center, in EME2000 --
+  geometric, with no light time, for a model rather than an eyepiece.
+  The same E5 evaluation as `positions`, stopped before the projection
+  onto the sky."
+  [mjd-tt]
+  (let [to-J2000 (vsop87/ecliptic-of-date->J2000 mjd-tt)
+        {:keys [xyz]} (ecliptic-orbits (+ mjd-tt c/jd-mjd-offset) mjd-tt)]
+    (mapv #(lin/mat-vec to-J2000 %) (pop xyz))))
+
+(def radii
+  "The satellites' mean radii, km: the means of the triaxial radii in
+  NAIF's pck00011.tpc."
+  {:io 1821.5 :europa 1560.8 :ganymede 2631.2 :callisto 2410.3})
+
+(def names [:io :europa :ganymede :callisto])
+
+(defn positions
+  "`[[x y] ...]` of Io, Europa, Ganymede and Callisto at `mjd-tt`, in
+  Jupiter radii, by the E5 theory."
+  [mjd-tt]
+  (let [jd (+ mjd-tt c/jd-mjd-offset)
+        ;; Jupiter seen from the Earth, light time included
+        [s b-sun R] (solar/geometric mjd-tt)
+        earth [(* R (math/cos b-sun) (math/cos s)) (* R (math/cos b-sun) (math/sin s)) (* R (math/sin b-sun))]
+        [[x y z] delta tau]
+        (loop [delta 5.0 i 0]
+          (let [tau (elliptic/light-time delta)
+                [l b r] (vsop87/heliocentric :jupiter (- mjd-tt tau))
+                xyz (mapv + [(* r (math/cos b) (math/cos l)) (* r (math/cos b) (math/sin l)) (* r (math/sin b))]
+                          earth)
+                delta' (math/sqrt (reduce + (map * xyz xyz)))]
+            (if (or (< (abs (- delta' delta)) 1e-9) (> i 10))
+              [xyz delta' (elliptic/light-time delta')]
+              (recur delta' (inc i)))))
+        lam0 (math/atan2 y x)
+        bet0 (math/atan (/ z (math/hypot x y)))
+        {Rs :radii ecl :xyz} (ecliptic-orbits (- jd tau) mjd-tt)
+        view (mapv (fn [[a b c]]
+                     (let [a' (- (* a (math/sin lam0)) (* b (math/cos lam0)))
                            b' (+ (* a (math/cos lam0)) (* b (math/sin lam0)))]
                        [a' (+ (* c (math/sin bet0)) (* b' (math/cos bet0)))
                         (- (* c (math/cos bet0)) (* b' (math/sin bet0)))]))
-                   xyz)
+                   ecl)
         [A5 _ C5] (peek view)
         D (math/atan2 A5 C5)]
     (mapv (fn [[A B C] r k]

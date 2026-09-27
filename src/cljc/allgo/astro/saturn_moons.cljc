@@ -15,11 +15,13 @@
   (TT)."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.elliptic :as elliptic]
+            [allgo.astro.frames :as frames]
             [allgo.astro.precession :as precession]
             [allgo.astro.solar :as solar]
             [allgo.astro.time :as time]
             [allgo.astro.vsop87 :as vsop87]
             [allgo.numerics.interpolation :refer [horner]]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (def names [:mimas :enceladus :tethys :dione :rhea :titan :hyperion :iapetus])
@@ -222,6 +224,49 @@
      (+ i' (* 0.04204 d (cos* (+ u5 psi))) (* 0.00235 d (cos* (+ l g1 lT gT phi)))
         (* 0.0036 d (cos* (+ u2 phi)))))))
 
+(defn- equatorial-orbits
+  "Each satellite's position and Saturn's pole, in Saturn radii, on the
+  ecliptic and equinox of B1950 -- the frame Dourneau's theory is in --
+  from the theory run at `jde`."
+  [jde]
+  (let [orbits (mapv #(% (arguments jde)) [mimas enceladus tethys dione rhea titan hyperion iapetus])
+        xyz (conj (mapv (fn [{:keys [lam r gamma om]}]
+                          (let [u (- lam om) w (- om (* 168.8112 d))]
+                            [(* r (- (* (math/cos u) (math/cos w)) (* (math/sin u) (math/cos gamma) (math/sin w))))
+                             (* r (+ (* (math/sin u) (math/cos w) (math/cos gamma)) (* (math/cos u) (math/sin w))))
+                             (* r (math/sin u) (math/sin gamma))]))
+                        orbits)
+                  [0.0 0.0 1.0])]
+    {:orbits orbits
+     :xyz (mapv (fn [[X Y Z]]
+                  (let [a X
+                        b (- (* c1 Y) (* s1 Z))
+                        c (+ (* s1 Y) (* c1 Z))]
+                    [(- (* c2 a) (* s2 b)) (+ (* s2 a) (* c2 b)) c]))
+                xyz)}))
+
+(defn positions-3d
+  "Where the eight satellites are at `mjd-tt`: `{satellite [x y z]}` in
+  Saturn's equatorial radii from its center, in EME2000 -- geometric, no
+  light time -- for a model rather than an eyepiece. The same theory as
+  `positions`, turned from its B1950 ecliptic rather than projected onto
+  the sky."
+  [mjd-tt]
+  (let [b1950 (time/besselian-epoch->mjd 1950.0)
+        eps (frames/mean-obliquity b1950)
+        ce (math/cos eps) se (math/sin eps)
+        to-J2000 (precession/equatorial-matrix b1950 c/mjd-J2000)
+        {:keys [xyz]} (equatorial-orbits (+ mjd-tt c/jd-mjd-offset))]
+    (zipmap names
+            (map (fn [[x y z]] (lin/mat-vec to-J2000 [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))]))
+                 (pop xyz)))))
+
+(def radii
+  "The satellites' mean radii, km: the means of the triaxial radii in
+  NAIF's pck00011.tpc. Hyperion is a tumbling potato, 180 by 103 km."
+  {:mimas 198.4 :enceladus 252.1 :tethys 531.0 :dione 561.4 :rhea 763.5
+   :titan 2574.8 :hyperion 138.6 :iapetus 734.5})
+
 (def ^:private perspective
   [20947.0 23715.0 26382.0 29876.0 35313.0 53800.0 59222.0 91820.0])
 
@@ -244,21 +289,9 @@
               (recur delta' (inc i)))))
         [lam0 bet0] (precession/ecliptic [(math/atan2 y x) (math/atan (/ z (math/hypot x y)))]
                                          mjd-tt (time/besselian-epoch->mjd 1950.0))
-        args (arguments (+ (- mjd-tt tau) c/jd-mjd-offset))
-        orbits (mapv #(% args) [mimas enceladus tethys dione rhea titan hyperion iapetus])
-        xyz (conj (mapv (fn [{:keys [lam r gamma om]}]
-                          (let [u (- lam om) w (- om (* 168.8112 d))]
-                            [(* r (- (* (math/cos u) (math/cos w)) (* (math/sin u) (math/cos gamma) (math/sin w))))
-                             (* r (+ (* (math/sin u) (math/cos w) (math/cos gamma)) (* (math/cos u) (math/sin w))))
-                             (* r (math/sin u) (math/sin gamma))]))
-                        orbits)
-                  [0.0 0.0 1.0])
-        view (mapv (fn [[X Y Z]]
-                     (let [a X
-                           b (- (* c1 Y) (* s1 Z))
-                           c (+ (* s1 Y) (* c1 Z))
-                           [a b] [(- (* c2 a) (* s2 b)) (+ (* s2 a) (* c2 b))]
-                           A (- (* a (math/sin lam0)) (* b (math/cos lam0)))
+        {:keys [orbits xyz]} (equatorial-orbits (+ (- mjd-tt tau) c/jd-mjd-offset))
+        view (mapv (fn [[a b c]]
+                     (let [A (- (* a (math/sin lam0)) (* b (math/cos lam0)))
                            b (+ (* a (math/cos lam0)) (* b (math/sin lam0)))]
                        [A (+ (* b (math/cos bet0)) (* c (math/sin bet0)))
                         (- (* c (math/cos bet0)) (* b (math/sin bet0)))]))
