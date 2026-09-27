@@ -1,0 +1,92 @@
+(ns allgo.vallado-covariance-test
+  "Vallado's covariance transformations, checked three ways: the
+  numerical Jacobian against one known in closed form, each
+  transformation against its inverse, and the transformed covariance
+  against the sample covariance of a cloud of states converted one by
+  one -- the definition it approximates."
+  (:require [allgo.astro.constants :as c]
+            [allgo.astro.covariance :as cov]
+            [allgo.astro.kepler :as kep]
+            [allgo.astro.states :as st]
+            [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
+            [clojure.math :as math]
+            [clojure.test :refer [deftest is testing]]))
+
+(def ^:private s (kep/elements->state c/GM-earth {:a 8000.0 :e 0.12 :i 0.9 :raan 0.6 :argp 1.4 :M 2.2}))
+
+(def ^:private P
+  "A plausible Cartesian covariance: tens of meters and centimeters per
+  second, correlated."
+  (let [L [[0.030 0 0 0 0 0] [0.010 0.020 0 0 0 0] [-0.005 0.004 0.025 0 0 0]
+           [1e-5 -2e-5 3e-6 3e-5 0 0] [-4e-6 1e-5 2e-6 5e-6 2e-5 0] [2e-6 3e-6 -1e-5 -2e-6 4e-6 2.5e-5]]]
+    (lin/mat-mul L (lin/transpose L))))
+
+(defn- max-rel
+  "The largest difference between two matrices, relative to each entry's
+  natural scale sqrt(A_ii A_jj)."
+  [A B]
+  (apply max (for [i (range 6) j (range 6)]
+               (/ (abs (- (get-in A [i j]) (get-in B [i j])))
+                  (math/sqrt (* (get-in B [i i]) (get-in B [j j])))))))
+
+(deftest numerical-jacobian
+  (testing "against the Jacobian of polar coordinates, known in closed form"
+    (let [f (fn [[x y]] [(math/hypot x y) (math/atan2 y x)])
+          [x y] [3.0 -4.0] r2 25.0 r 5.0
+          J (cov/jacobian f [x y] {:angles #{1}})]
+      (is (every? #(< (abs %) 1e-10)
+                  (flatten (lin/mat-sub J [[(/ x r) (/ y r)] [(- (/ y r2)) (/ x r2)]]))))))
+  (testing "and across the 2 pi seam, which the wrapping keeps smooth"
+    (let [J (cov/jacobian (fn [[x y]] [(math/atan2 y x)]) [-1.0 1e-12] {:angles #{0}})]
+      (is (< (abs (- (get-in J [0 1]) -1.0)) 1e-8)))))
+
+(deftest round-trips
+  (testing "classical and back"
+    (let [{:keys [a e i raan argp M]} (kep/state->elements c/GM-earth (first s) (second s))
+          Pc (cov/cartesian->classical P s)]
+      (is (< (max-rel (cov/classical->cartesian Pc [a e i raan argp M]) P) 1e-7))))
+  (testing "equinoctial and back"
+    (let [eq (st/state->equinoctial s)]
+      (is (< (max-rel (cov/equinoctial->cartesian (cov/cartesian->equinoctial P s) eq) P) 1e-7))))
+  (testing "RSW and NTW are rotations: back exactly, and the trace kept"
+    (doseq [[to from] [[cov/cartesian->rsw cov/rsw->cartesian] [cov/cartesian->ntw cov/ntw->cartesian]]]
+      (let [P' (to P s)]
+        (is (< (max-rel (from P' s) P) 1e-12))
+        (is (< (abs (- (reduce + (map #(get-in P' [% %]) (range 3)))
+                       (reduce + (map #(get-in P [% %]) (range 3)))))
+               1e-15)))))
+  (testing "the radial variance is the covariance seen along r"
+    (let [R (lin/normalize (first s))
+          Pr (mapv #(subvec % 0 3) (subvec P 0 3))]
+      (is (< (abs (- (get-in (cov/cartesian->rsw P s) [0 0]) (lin/dot R (lin/mat-vec Pr R)))) 1e-15)))))
+
+(defn- sample-covariance [xs]
+  (let [n (count xs)
+        m (lin/scale (reduce lin/add xs) (/ 1.0 n))
+        ds (map #(lin/sub % m) xs)]
+    (lin/mat-scale (reduce lin/mat-add (map (fn [d] (mapv (fn [a] (mapv #(* a %) d)) d)) ds)) (/ 1.0 (dec n)))))
+
+(deftest monte-carlo
+  (testing "a cloud of states, each converted, has the covariance the transformation gives"
+    (let [rng (java.util.Random. 20260927)
+          L (lin/cholesky P)
+          x0 (vec (concat (first s) (second s)))
+          n 20000
+          draws (repeatedly n #(lin/add x0 (lin/mat-vec L (vec (repeatedly 6 (fn [] (.nextGaussian rng)))))))
+          center (cov/classical-vector x0)
+          ;; differences from the center, the angles wrapped
+          elements (map (fn [x] (vec (map-indexed (fn [k [a b]] (if (>= k 2) (+ b (am/wrap-angle (- a b))) a))
+                                                  (map vector (cov/classical-vector x) center))))
+                        draws)
+          sampled (sample-covariance elements)
+          transformed (cov/cartesian->classical P [(subvec x0 0 3) (subvec x0 3 6)])]
+      ;; a sample of 20000 pins a covariance to a percent or two
+      (is (< (max-rel sampled transformed) 0.03)))))
+
+(deftest flight-elements
+  (testing "the radius's variance is the position covariance seen along r, whatever the Earth's turn"
+    (let [Pf (cov/cartesian->flight P s 60580.0 60580.0 {})
+          R (lin/normalize (first s))
+          Pr (mapv #(subvec % 0 3) (subvec P 0 3))]
+      (is (< (abs (- (get-in Pf [0 0]) (lin/dot R (lin/mat-vec Pr R)))) (* 1e-8 (get-in Pf [0 0])))))))

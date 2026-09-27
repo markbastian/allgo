@@ -106,8 +106,9 @@ of expected return:
      await the book's pages.
   8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
      sun-synchronous inclination in `allgo.astro.perturbations`.
-  9. Covariance transformations between Cartesian, classical, equinoctial,
-     flight and RSW/NTW.
+  9. ~~Covariance transformations~~ -- `allgo.astro.covariance`, the
+     element sets' Jacobians taken numerically; the book's analytic ones
+     await its pages.
 
 ## Time
 
