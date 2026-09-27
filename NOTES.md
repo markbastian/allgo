@@ -965,3 +965,96 @@ quasi-statically -- stepping with every velocity zeroed after each step
 -- and found a pose that was at rest but not the rest the solver keeps:
 an eight course TGS column sat still for half a second and then rattled.
 The solver's own rest is the only one it will hold.
+
+# Astronomy
+
+## Meeus, *Astronomical Algorithms*
+
+Every chapter of the second edition that is an algorithm is implemented,
+spread over the package by topic rather than gathered in one namespace,
+because half of them already had a home. Where Montenbruck & Gill had
+already supplied something -- Julian dates, sidereal time, nutation,
+precession to J2000, Kepler's equation, vis-viva -- the Meeus chapter
+extends that code instead of repeating it.
+
+| Chapter | Topic                                          | Where                                                     |
+|---------|------------------------------------------------|-----------------------------------------------------------|
+| 3       | Interpolation                                  | `allgo.numerics.interpolation`                            |
+| 4, 5    | Curve fitting, iteration                       | `allgo.numerics.fit`                                      |
+| 7       | Julian Day, day of week and year               | `allgo.astro.time`, `allgo.astro.calendar`                |
+| 8, 9    | Easter; Jewish and Moslem calendars            | `allgo.astro.calendar`                                    |
+| 10      | ΔT                                             | `allgo.astro.time/delta-t`                                |
+| 11      | The Earth's globe                              | `allgo.astro.geodesy`                                     |
+| 12      | Sidereal time                                  | `allgo.astro.time/gmst`, `allgo.astro.frames/gast` (existing) |
+| 13, 14  | Coordinate transformations, parallactic angle  | `allgo.astro.coordinates`                                 |
+| 15      | Rising, transit and setting                    | `allgo.astro.rise`                                        |
+| 16-20   | Refraction, separation, conjunctions, alignments, smallest circle | `allgo.astro.coordinates`              |
+| 21, 24  | Precession, reduction of elements              | `allgo.astro.precession`                                  |
+| 22      | Nutation and obliquity                         | `allgo.astro.frames`                                      |
+| 23      | Apparent place of a star                       | `allgo.astro.apparent`                                    |
+| 25-29   | The Sun, seasons, equation of time, solar disk | `allgo.astro.solar`                                       |
+| 30, 34, 35 | Kepler's equation, parabolic and near-parabolic orbits, ellipse length | `allgo.astro.kepler`           |
+| 31, 37-39 | Mean elements, Pluto, apsides, nodes         | `allgo.astro.planet-orbits`                               |
+| 32      | VSOP87                                         | `allgo.astro.vsop87`, `allgo.astro.vsop87-data`           |
+| 33      | Elliptic motion                                | `allgo.astro.elliptic`                                    |
+| 36      | Planetary phenomena                            | `allgo.astro.phenomena`                                   |
+| 40      | Parallax                                       | `allgo.astro.coordinates`                                 |
+| 41, 55  | Illumination, magnitudes, semidiameters        | `allgo.astro.illumination`                                |
+| 42, 43, 45 | Mars, Jupiter, Saturn's ring                | `allgo.astro.physical`                                    |
+| 44, 46  | Satellites of Jupiter and Saturn               | `allgo.astro.jupiter-moons`, `allgo.astro.saturn-moons`   |
+| 47, 48, 53 | The Moon's position, phase and libration    | `allgo.astro.moon`                                        |
+| 49-52   | Lunar phases, apsides, nodes, declinations     | `allgo.astro.lunar-events`                                |
+| 54      | Eclipses                                       | `allgo.astro.eclipse`                                     |
+| 56, 57  | Stellar magnitudes, binary stars               | `allgo.astro.stars`                                       |
+| 58      | Sundials                                       | `allgo.astro.sundial`                                     |
+
+Chapters 1, 2 and 6 (hints, accuracy, sorting) are advice rather than
+algorithms, and have no code.
+
+**Conventions.** The package's, not the book's: radians, MJD (TT unless
+a name says otherwise), geographic longitude positive east, azimuth
+from north. Meeus counts longitude west and azimuth from the south, so
+his hour angle θ0 − L − α is θ0 + L − α here and his azimuths are 180°
+off. VSOP87 and the planets' orbits are in AU; the Moon's distance is in
+kilometers.
+
+**Where the data comes from.** Nothing was typed in from memory. The
+coefficient tables -- nutation, the Moon, the lunar events, Pluto, E5 for
+Jupiter's moons, Saturn's satellites, the phenomena -- were converted
+by script from Sonia Keys's MIT-licensed Go port of the book
+([soniakeys/meeus](https://github.com/soniakeys/meeus)), whose tests
+also supplied most of the worked examples the `meeus-*-test` namespaces
+check against. VSOP87 came from the original files instead (CDS
+catalog VI/81), since Meeus's appendix is a truncation that no open
+source reproduces term for term.
+
+**The VSOP87 truncation.** Every term of at least 2e-7 rad in longitude
+and latitude, and 2e-7 times the mean distance in radius: 2802 terms,
+about the size of Meeus's appendix. Against the full series at forty
+random epochs from 2000 BC to AD 3000 the worst errors were 1.7″ in
+longitude (Jupiter), 1.8″ in latitude (Saturn) and 1.5″ in the radius
+as seen from the Sun. 1e-7 would halve those at 3755 terms; 5e-7 doubles
+them at 1895. The one place it shows in the book's examples is an apsis:
+the distance is flat there, and Saturn's 1944 perihelion comes out 1944
+September 7 at 22h rather than on the 8th.
+
+**What the book had and this does not.** Table 36.B's rows could only be
+checked for the phenomena Keys transcribed, so Venus's superior
+conjunction, elongations and stations, the other stations of Mercury and
+Mars, and the conjunctions of Mars, Jupiter, Uranus and Neptune are
+missing rather than entered unverified. Table 31.B, the mean elements
+referred to J2000, is derived from 31.A by precessing the orbit
+(agreeing with chapter 24's formulae to 1e-12), not copied.
+
+**Changes to what was there.**
+
+- `time/calendar->mjd` put every Julian-calendar date -- anything before
+  1582 October 15 -- two days early: it used B = -2 where the formula
+  has B = 0. The existing tests only looked at dates after the reform.
+- `frames/nutation-angles` now sums the 63 terms of Meeus's table 22.A
+  rather than 20, which takes the truncation from about 0.01″ to
+  0.0003″. The frame cache makes the extra terms free for the orbit
+  propagator.
+- One transcription error in the source was corrected: Venus's 1984
+  Almanac magnitude has +0.000239 i² − 0.00000065 i³, not the reverse,
+  which would have Venus brightening as it thinned.

@@ -58,3 +58,13 @@ of expected return:
 - A single model cannot close a loop (it is a tree). Pinning two models
   together through `allgo.physics.world` is the workaround the motorcycle
   rider uses.
+
+## Astronomical and Astrodynamic Calculations
+
+- Everything in Fundamentals of Astrodynamics and Applications by David Vallado
+
+## Time
+
+- All calculations from Calendrical Calculations by Edward M. Reingold and Nachum Dershowitz
+  - See also https://www.cs.tau.ac.il/~nachum/calendar-book/third-edition/CIIT.html
+  - Apparently the book examples and the calendrica library are written in Lisp, which should be easy to port to Clojure.

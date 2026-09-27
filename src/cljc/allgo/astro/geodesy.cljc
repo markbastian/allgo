@@ -70,6 +70,57 @@
   [[x y z]]
   (math/atan2 z (math/sqrt (+ (* x x) (* y y)))))
 
+;; ------------------------------------------------ the Earth's globe (Meeus 11)
+
+(defn parallax-constants
+  "`[rho-sin rho-cos]` -- rho sin phi' and rho cos phi', the observer's
+  distance from the Earth's axis and from the equatorial plane in
+  equatorial radii -- for geodetic latitude `lat` and height `h` km. They
+  are what diurnal parallax and eclipse work need, and are simply the
+  observer's Earth-fixed position scaled and projected."
+  [lat h]
+  (let [[x y z] (geodetic->cartesian lat 0.0 h)]
+    [(/ z a-earth) (/ (math/hypot x y) a-earth)]))
+
+(defn radius-of-parallel
+  "Radius of the circle of latitude `lat` on the ellipsoid, km. One degree
+  of longitude there is this times pi/180."
+  [lat]
+  (* (math/cos lat) (prime-vertical (math/sin lat))))
+
+(defn radius-of-curvature
+  "Radius of curvature of the meridian at latitude `lat`, km. One degree
+  of latitude is this times pi/180 -- longer at the poles than at the
+  equator, which is how the Earth's flattening was first measured."
+  [lat]
+  (let [s (math/sin lat)]
+    (/ (* a-earth (- 1.0 e2)) (math/pow (- 1.0 (* e2 s s)) 1.5))))
+
+(defn geodetic->geocentric-latitude
+  "Geocentric latitude of a point on the surface at geodetic latitude
+  `lat`."
+  [lat]
+  (math/atan (* (- 1.0 e2) (math/tan lat))))
+
+(defn distance
+  "Distance along the ellipsoid between two places given as geodetic
+  `[lat lon]`, km, by Andoyer's formula as Meeus gives it. Good to about
+  50 meters on intercontinental distances -- the flattening enters only to
+  first order -- and unusable for points nearly antipodal."
+  [[lat1 lon1] [lat2 lon2]]
+  (let [sq (fn [x] (* x x))
+        F (* 0.5 (+ lat1 lat2)) G (* 0.5 (- lat1 lat2)) L (* 0.5 (- lon1 lon2))
+        s2F (sq (math/sin F)) c2F (sq (math/cos F))
+        s2G (sq (math/sin G)) c2G (sq (math/cos G))
+        s2L (sq (math/sin L)) c2L (sq (math/cos L))
+        S (+ (* s2G c2L) (* c2F s2L))
+        C (+ (* c2G c2L) (* s2F s2L))
+        w (math/atan (math/sqrt (/ S C)))
+        R (/ (math/sqrt (* S C)) w)
+        H1 (/ (- (* 3.0 R) 1.0) (* 2.0 C))
+        H2 (/ (+ (* 3.0 R) 1.0) (* 2.0 S))]
+    (* 2.0 w a-earth (+ 1.0 (* c/flattening (- (* H1 s2F c2G) (* H2 c2F s2G)))))))
+
 ;; ---------------------------------------------------------------- local frames
 
 (defn east-north-up

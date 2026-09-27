@@ -22,7 +22,8 @@
   temperature a color by the usual fit to the blackbody's chromaticity.
   `flux` is brightness on the linear scale, from the magnitude's
   logarithmic one: five magnitudes is a factor of a hundred."
-  (:require [allgo.math :as am]
+  (:require [allgo.astro.kepler :as kepler]
+            [allgo.math :as am]
             [clojure.math :as math]
             [clojure.string :as str]))
 
@@ -161,3 +162,71 @@
   factor of a hundred, and brighter is smaller."
   ^double [vmag]
   (math/pow 10.0 (* -0.4 (double vmag))))
+
+;; ---------------------------------------------------------------------------
+;; Magnitudes (Meeus, *Astronomical Algorithms*, chapter 56)
+
+(defn- log10 [x] (/ (math/log x) (math/log 10.0)))
+
+(defn combined-magnitude
+  "The magnitude of several stars seen as one -- a double too close to
+  split, or a cluster. Fluxes add; magnitudes do not."
+  [& magnitudes]
+  (* -2.5 (log10 (reduce + (map flux magnitudes)))))
+
+(defn brightness-ratio
+  "How many times brighter a star of magnitude `m1` is than one of `m2`."
+  [m1 m2]
+  (/ (flux m1) (flux m2)))
+
+(defn magnitude-difference
+  "The magnitude difference corresponding to a brightness `ratio`."
+  [ratio]
+  (* 2.5 (log10 ratio)))
+
+(defn absolute-magnitude
+  "Absolute magnitude -- the magnitude at 10 parsecs -- of a star of
+  apparent magnitude `m` at `distance` parsecs."
+  [m distance]
+  (- (+ m 5.0) (* 5.0 (log10 distance))))
+
+(defn absolute-magnitude-from-parallax
+  "Absolute magnitude of a star of apparent magnitude `m` and annual
+  parallax `parallax` radians."
+  [m parallax]
+  (absolute-magnitude m (/ 1.0 (/ parallax (/ math/PI 648000.0)))))
+
+;; ---------------------------------------------------------------------------
+;; Binary stars (Meeus, chapter 57)
+
+(defn binary-position
+  "`[theta rho]` of the companion of a visual binary relative to its
+  primary at the decimal `year`: position angle, from north through east,
+  and angular separation, in the units of `a`.
+
+  The orbit is the true relative orbit -- period `P` years, periastron at
+  year `T`, eccentricity `e`, angular semi-major axis `a`, inclination
+  `i`, node `om` and periastron argument `w` -- projected onto the sky.
+  The mean anomaly is solved for the eccentric one by Kepler's equation,
+  exactly as for a planet."
+  [{:keys [P T e a i om w]} year]
+  (let [M  (* (/ am/two-pi P) (- year T))
+        E  (kepler/kepler-equation M e)
+        r  (* a (- 1.0 (* e (math/cos E))))
+        nu (kepler/eccentric->true E e)
+        y  (* (math/sin (+ nu w)) (math/cos i))
+        x  (math/cos (+ nu w))]
+    [(am/wrap-2pi (+ (math/atan2 y x) om))
+     (* r (math/hypot x y))]))
+
+(defn apparent-eccentricity
+  "Eccentricity of the ellipse the companion traces on the sky -- which is
+  not the true orbit's: projection can make a circle look eccentric and an
+  eccentric orbit look round."
+  [e i w]
+  (let [ci (math/cos i) sw (math/sin w) cw (math/cos w)
+        A (* (- 1.0 (* e e cw cw)) ci ci)
+        B (* e e sw cw ci)
+        C (- 1.0 (* e e sw sw))
+        D (math/sqrt (+ (* (- A C) (- A C)) (* 4.0 B B)))]
+    (math/sqrt (/ (* 2.0 D) (+ A C D)))))

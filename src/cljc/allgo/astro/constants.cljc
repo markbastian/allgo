@@ -43,6 +43,16 @@
   "Astronomical unit, km (IAU 2012)."
   149597870.7)
 
+(def gaussian-k
+  "The Gaussian gravitational constant, radians a day: the Sun's mean
+  motion for an orbit of one AU, and so the square root of GM-sun in AU and
+  days. Heliocentric orbits in Meeus are written in it."
+  0.01720209895)
+
+(def light-time-au
+  "Days light takes to cross one astronomical unit, 8.3 minutes."
+  0.0057755183)
+
 (def R-sun  696000.0)
 (def R-moon 1738.0)
 

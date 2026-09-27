@@ -24,8 +24,8 @@ discipline:
 | `allgo.kinematics` | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm                                                                                 |
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
 | `allgo.simulation` | Reynolds' boids, and a motorcycle with a rider and courses to ride                                                                                                           |
-| `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, extrapolation, FFT, tridiagonal and small dense linear solves                                                             |
-| `allgo.astro`      | Force models, frames, time scales, geodesy, Kepler elements, ephemerides, orbit determination, the three-body problem                                                        |
+| `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, extrapolation, FFT, tridiagonal and small dense linear solves, table interpolation, least-squares fits                     |
+| `allgo.astro`      | Force models, frames, time scales, geodesy, Kepler elements, ephemerides, orbit determination, the three-body problem; calendars, coordinates, VSOP87, the Sun, Moon, planets and their satellites, eclipses, rising and setting, sundials |
 | `allgo.demo`       | ClojureScript demo viewers (browser)                                                                                                                                         |
 | `allgo.desktop`    | JVM-only renderers (Quil, Swing, Lanterna)                                                                                                                                   |
 
@@ -42,6 +42,11 @@ Where a namespace follows a book, it says so. The main ones:
   *Fundamentals of Astrodynamics and Applications*. Everything
   astrodynamical is expressed in EME2000, so the pieces can be
   visualized in one frame.
+- **Meeus, *Astronomical Algorithms* (2nd ed.)**: all of its chapters
+  that are algorithms, across `allgo.astro` and
+  `allgo.numerics.interpolation` / `allgo.numerics.fit`, built on the
+  Montenbruck & Gill pieces where the two books overlap. NOTES has the
+  map from chapters to namespaces.
 - **Ebert et al., *Texturing & Modeling: A Procedural Approach***:
   seven namespaces under `allgo.procedural`, built as small parts that
   compose freely rather than as finished effects.

@@ -72,6 +72,111 @@
 (defn mean->true [M e] (eccentric->true (kepler-equation M e) e))
 (defn true->mean [nu e] (eccentric->mean (true->eccentric nu e) e))
 
+(defn kepler-bisection
+  "Solve Kepler's equation by Sinnott's binary search (Meeus 30, third
+  method): fifty-odd halvings of a quarter circle, each fixing one bit of
+  the eccentric anomaly.
+
+  Newton's method can fail near e = 1 and M = 0, where the curve is almost
+  flat and a first step overshoots wildly; this cannot, for any
+  eccentricity below one."
+  [M e]
+  (let [M  (am/wrap-2pi M)
+        [M sign] (if (> M math/PI) [(- c/two-pi M) -1.0] [M 1.0])]
+    (loop [E (* 0.5 math/PI) d (* 0.25 math/PI) i 0]
+      (if (= i 53)
+        (am/wrap-2pi (* sign E))
+        (recur (if (neg? (- M (- E (* e (math/sin E))))) (- E d) (+ E d))
+               (* 0.5 d) (inc i))))))
+
+(defn kepler-approximate
+  "The eccentric anomaly to first order in `e` (Meeus 30.8), tan E =
+  sin M / (cos M - e): a hundredth of a degree for e = 0.1, and a start for
+  something better."
+  [M e]
+  (am/wrap-2pi (math/atan2 (math/sin M) (- (math/cos M) e))))
+
+;; --------------------------------------------- parabolic orbits (Meeus 34)
+
+(defn parabolic
+  "`[nu r]`, true anomaly and distance in AU, `t` days after perihelion on
+  a parabola of perihelion distance `q` AU about the Sun -- Barker's
+  equation, which unlike Kepler's has a closed-form solution, a cube root."
+  [q t]
+  (let [W (/ (* 3.0 c/gaussian-k t) (* (math/sqrt 2.0) q (math/sqrt q)))
+        G (* 0.5 W)
+        Y (math/cbrt (+ G (math/sqrt (+ (* G G) 1.0))))
+        s (- Y (/ 1.0 Y))]
+    [(* 2.0 (math/atan s)) (* q (+ 1.0 (* s s)))]))
+
+;; ---------------------------------------- near-parabolic orbits (Meeus 35)
+
+(defn near-parabolic
+  "`[nu r]` `t` days after perihelion on an orbit of perihelion distance
+  `q` AU and eccentricity `e` near one, by Landgraf's method, or nil if it
+  does not converge.
+
+  A comet with e = 0.99 is poorly served by both Kepler's equation, whose
+  mean anomaly then crawls, and Barker's, which ignores the difference from
+  a parabola. Landgraf expands about the parabola instead, in a series
+  that converges fast for e near one on either side of it."
+  [q e t]
+  (if (zero? t)
+    [0.0 q]
+    (let [q1 (/ (* c/gaussian-k (math/sqrt (/ (+ 1.0 e) q))) (* 2.0 q))
+          g  (/ (- 1.0 e) (+ 1.0 e))
+          q2 (* q1 t)
+          s0 (/ 2.0 (* 3.0 (abs q2)))
+          s0 (/ 2.0 (math/tan (* 2.0 (math/atan (math/cbrt (math/tan (* 0.5 (math/atan s0))))))))
+          s0 (if (neg? t) (- s0) s0)
+          tol 1e-9
+          ;; the series of Landgraf's line 42 onward, summed for one s
+          q3-of (fn [s]
+                  (let [y (* s s)]
+                    (loop [z 1.0 g1 (- (* y s)) q3 (+ q2 (/ (* 2.0 g s y) 3.0))]
+                      (let [z  (inc z)
+                            g1 (* (- g1) g y)
+                            f  (* g1 (/ (- z (* (inc z) g)) (inc (* 2.0 z))))
+                            q3 (+ q3 f)]
+                        (cond
+                          (or (> z 50.0) (> (abs f) 10000.0)) nil
+                          (<= (abs f) tol) q3
+                          :else (recur z g1 q3))))))
+          solve (fn [s q3]
+                  (loop [s s i 0]
+                    (let [s' (/ (+ (/ (* 2.0 s s s) 3.0) q3) (+ (* s s) 1.0))]
+                      (if (or (<= (abs (- s' s)) tol) (> i 1000)) s' (recur s' (inc i))))))
+          s  (if (= e 1.0)
+               s0
+               (loop [s s0 l 0]
+                 (when (<= l 50)
+                   (when-let [q3 (q3-of s)]
+                     (let [s' (solve s q3)]
+                       (if (<= (abs (- s' s)) tol) s' (recur s' (inc l))))))))]
+      (when s
+        (let [nu (* 2.0 (math/atan s))]
+          [(am/wrap-2pi nu) (/ (* q (+ 1.0 e)) (+ 1.0 (* e (math/cos nu))))])))))
+
+;; ------------------------------------------------ the ellipse (Meeus 33.d)
+
+(defn ellipse-circumference
+  "Circumference of an ellipse of semi-major axis `a` and eccentricity `e`.
+  Ramanujan's approximation, exact for a circle and within 0.3 percent up
+  to e = 0.97, unless `exact?`, when it sums the series in
+  m = (a - b)/(a + b) to convergence."
+  ([a e] (ellipse-circumference a e false))
+  ([a e exact?]
+   (let [b (* a (math/sqrt (- 1.0 (* e e))))]
+     (if-not exact?
+       (* math/PI (- (* 3.0 (+ a b)) (math/sqrt (* (+ a (* 3.0 b)) (+ (* 3.0 a) b)))))
+       (let [m  (/ (- a b) (+ a b))
+             m2 (* m m)]
+         (loop [sum 1.0 term (* 0.25 m2) nf 1.0 df 4.0]
+           (let [sum' (+ sum term)]
+             (if (= sum' sum)
+               (/ (* c/two-pi a sum) (+ 1.0 m))
+               (recur sum' (/ (* term nf nf m2) (* df df)) (+ nf 2.0) (+ df 2.0))))))))))
+
 ;; ------------------------------------------------------ state and elements
 
 (def ^:private circular-tol 1e-11)

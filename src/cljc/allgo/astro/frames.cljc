@@ -59,37 +59,95 @@
   (let [T (time/centuries-J2000 mjd-tt)]
     (* c/arcsec (+ 84381.448 (* -46.8150 T) (* -0.00059 T T) (* 0.001813 T T T)))))
 
+(defn mean-obliquity-laskar
+  "Mean obliquity from Laskar's polynomial, radians (Meeus 22.3).
+
+  The IAU expression above is a cubic fitted over a few centuries and
+  drifts by some arcseconds two thousand years out. Laskar's runs to the
+  tenth power of ten-thousand-year units and holds to 0.01 arcsecond over
+  a thousand years and a few arcseconds over ten thousand -- useful
+  wherever the sky is wanted far from the present."
+  [mjd-tt]
+  (let [U (/ (time/centuries-J2000 mjd-tt) 100.0)]
+    (* c/arcsec
+       (reduce (fn [acc k] (+ (* acc U) k)) 0.0
+               [2.45 5.79 27.87 7.12 -39.05 -249.67 -51.38 1999.25 -1.55 -4680.93
+                84381.448]))))
+
 ;; ------------------------------------------------------------------ nutation
 
 (def ^:private nutation-series
-  "The largest terms of the IAU 1980 theory. Each row is the multipliers of
-  the five Delaunay arguments, then the coefficients of sin for longitude
-  and cos for obliquity, in units of 0.0001 arcsecond.
+  "The IAU 1980 theory to the 63 terms of Meeus's table 22.A. Each row is
+  the multipliers of the five Delaunay arguments, then the coefficients of
+  sin for longitude and cos for obliquity, in units of 0.0001 arcsecond.
 
-  The full theory runs to 106 terms; these twenty give better than a
-  hundredth of an arcsecond, which is centimeters at geostationary radius
-  and far below everything else in the model."
-  ;;  l  l'  F  D  Om     dpsi(sin)          deps(cos)
-  [[0  0  0  0  1  -171996.0 -174.2  92025.0  8.9]
-   [0  0  2 -2  2   -13187.0   -1.6   5736.0 -3.1]
-   [0  0  2  0  2    -2274.0   -0.2    977.0 -0.5]
-   [0  0  0  0  2     2062.0    0.2   -895.0  0.5]
-   [0  1  0  0  0     1426.0   -3.4     54.0 -0.1]
-   [1  0  0  0  0      712.0    0.1     -7.0  0.0]
-   [0  1  2 -2  2     -517.0    1.2    224.0 -0.6]
-   [0  0  2  0  1     -386.0   -0.4    200.0  0.0]
-   [1  0  2  0  2     -301.0    0.0    129.0 -0.1]
-   [0 -1  2 -2  2      217.0   -0.5    -95.0  0.3]
-   [1  0  0 -2  0     -158.0    0.0     -1.0  0.0]
-   [0  0  2 -2  1      129.0    0.1    -70.0  0.0]
-   [-1  0  2  0  2      123.0    0.0    -53.0  0.0]
-   [1  0  0  0  1       63.0    0.1    -33.0  0.0]
-   [0  0  0  2  0       63.0    0.0     -2.0  0.0]
-   [-1  0  2  2  2      -59.0    0.0     26.0  0.0]
-   [-1  0  0  0  1      -58.0   -0.1     32.0  0.0]
-   [1  0  2  0  1      -51.0    0.0     27.0  0.0]
-   [2  0  0 -2  0       48.0    0.0      1.0  0.0]
-   [-2  0  2  0  1       46.0    0.0    -24.0  0.0]])
+  The full theory runs to 106 terms. The ones dropped are each under
+  0.0003 arcsecond -- millimeters at geostationary radius, and far below
+  everything else in the model."
+  ;;  l  l'  F  D Om   dpsi(sin)         deps(cos)
+  [[0  0  0  0  1  -171996.0 -174.2  92025.0   8.9]
+   [0  0  2 -2  2   -13187.0   -1.6   5736.0  -3.1]
+   [0  0  2  0  2    -2274.0   -0.2    977.0  -0.5]
+   [0  0  0  0  2     2062.0    0.2   -895.0   0.5]
+   [0  1  0  0  0     1426.0   -3.4     54.0  -0.1]
+   [1  0  0  0  0      712.0    0.1     -7.0   0.0]
+   [0  1  2 -2  2     -517.0    1.2    224.0  -0.6]
+   [0  0  2  0  1     -386.0   -0.4    200.0   0.0]
+   [1  0  2  0  2     -301.0    0.0    129.0  -0.1]
+   [0 -1  2 -2  2      217.0   -0.5    -95.0   0.3]
+   [1  0  0 -2  0     -158.0    0.0      0.0   0.0]
+   [0  0  2 -2  1      129.0    0.1    -70.0   0.0]
+   [-1  0  2  0  2      123.0    0.0    -53.0   0.0]
+   [0  0  0  2  0       63.0    0.0      0.0   0.0]
+   [1  0  0  0  1       63.0    0.1    -33.0   0.0]
+   [-1  0  2  2  2      -59.0    0.0     26.0   0.0]
+   [-1  0  0  0  1      -58.0   -0.1     32.0   0.0]
+   [1  0  2  0  1      -51.0    0.0     27.0   0.0]
+   [2  0  0 -2  0       48.0    0.0      0.0   0.0]
+   [-2  0  2  0  1       46.0    0.0    -24.0   0.0]
+   [0  0  2  2  2      -38.0    0.0     16.0   0.0]
+   [2  0  2  0  2      -31.0    0.0     13.0   0.0]
+   [2  0  0  0  0       29.0    0.0      0.0   0.0]
+   [1  0  2 -2  2       29.0    0.0    -12.0   0.0]
+   [0  0  2  0  0       26.0    0.0      0.0   0.0]
+   [0  0  2 -2  0      -22.0    0.0      0.0   0.0]
+   [-1  0  2  0  1       21.0    0.0    -10.0   0.0]
+   [0  2  0  0  0       17.0   -0.1      0.0   0.0]
+   [-1  0  0  2  1       16.0    0.0     -8.0   0.0]
+   [0  2  2 -2  2      -16.0    0.1      7.0   0.0]
+   [0  1  0  0  1      -15.0    0.0      9.0   0.0]
+   [1  0  0 -2  1      -13.0    0.0      7.0   0.0]
+   [0 -1  0  0  1      -12.0    0.0      6.0   0.0]
+   [2  0 -2  0  0       11.0    0.0      0.0   0.0]
+   [-1  0  2  2  1      -10.0    0.0      5.0   0.0]
+   [1  0  2  2  2       -8.0    0.0      3.0   0.0]
+   [0  1  2  0  2        7.0    0.0     -3.0   0.0]
+   [1  1  0 -2  0       -7.0    0.0      0.0   0.0]
+   [0 -1  2  0  2       -7.0    0.0      3.0   0.0]
+   [0  0  2  2  1       -7.0    0.0      3.0   0.0]
+   [1  0  0  2  0        6.0    0.0      0.0   0.0]
+   [2  0  2 -2  2        6.0    0.0     -3.0   0.0]
+   [1  0  2 -2  1        6.0    0.0     -3.0   0.0]
+   [-2  0  0  2  1       -6.0    0.0      3.0   0.0]
+   [0  0  0  2  1       -6.0    0.0      3.0   0.0]
+   [1 -1  0  0  0        5.0    0.0      0.0   0.0]
+   [0 -1  2 -2  1       -5.0    0.0      3.0   0.0]
+   [0  0  0 -2  1       -5.0    0.0      3.0   0.0]
+   [2  0  2  0  1       -5.0    0.0      3.0   0.0]
+   [2  0  0 -2  1        4.0    0.0      0.0   0.0]
+   [0  1  2 -2  1        4.0    0.0      0.0   0.0]
+   [1  0 -2  0  0        4.0    0.0      0.0   0.0]
+   [1  0  0 -1  0       -4.0    0.0      0.0   0.0]
+   [0  1  0 -2  0       -4.0    0.0      0.0   0.0]
+   [0  0  0  1  0       -4.0    0.0      0.0   0.0]
+   [1  0  2  0  0        3.0    0.0      0.0   0.0]
+   [-2  0  2  0  2       -3.0    0.0      0.0   0.0]
+   [1 -1  0 -1  0       -3.0    0.0      0.0   0.0]
+   [1  1  0  0  0       -3.0    0.0      0.0   0.0]
+   [1 -1  2  0  2       -3.0    0.0      0.0   0.0]
+   [-1 -1  2  2  2       -3.0    0.0      0.0   0.0]
+   [3  0  2  0  2       -3.0    0.0      0.0   0.0]
+   [0 -1  2  2  2       -3.0    0.0      0.0   0.0]])
 
 (defn delaunay
   "The five fundamental arguments of lunar and solar theory, radians:
@@ -119,6 +177,28 @@
                  (+ deps (* c/arcsec 1e-4 (+ ce (* ce-t T)) (math/cos a)))]))
             [0.0 0.0]
             nutation-series)))
+
+(defn nutation-angles-low-precision
+  "Nutation in longitude and obliquity from the four largest terms, good to
+  half an arcsecond and a tenth of one respectively (Meeus 22). Enough
+  wherever nutation is only a correction to something coarser, as it is
+  for the Sun's apparent longitude to the nearest arcsecond or two."
+  [mjd-tt]
+  (let [T  (time/centuries-J2000 mjd-tt)
+        om (* c/degrees (- 125.04452 (* 1934.136261 T)))
+        L  (* c/degrees (+ 280.4665 (* 36000.7698 T)))
+        L' (* c/degrees (+ 218.3165 (* 481267.8813 T)))]
+    [(* c/arcsec (+ (* -17.20 (math/sin om)) (* -1.32 (math/sin (* 2.0 L)))
+                    (* -0.23 (math/sin (* 2.0 L'))) (* 0.21 (math/sin (* 2.0 om)))))
+     (* c/arcsec (+ (* 9.20 (math/cos om)) (* 0.57 (math/cos (* 2.0 L)))
+                    (* 0.10 (math/cos (* 2.0 L'))) (* -0.09 (math/cos (* 2.0 om)))))]))
+
+(defn true-obliquity
+  "The obliquity of the true equator of date: the mean obliquity plus the
+  nutation in obliquity. This is the angle to rotate apparent ecliptic
+  coordinates by."
+  [mjd-tt]
+  (+ (mean-obliquity mjd-tt) (second (nutation-angles mjd-tt))))
 
 (defn nutation
   "Rotation from the mean equator and equinox of date to the true one."
