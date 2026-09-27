@@ -6,10 +6,15 @@
   one, the full one is the target: the truncation here is not his term
   for term, so it agrees with the complete theory to about an arcsecond
   rather than with his rounding of it."
-  (:require [allgo.astro.solar :as sun]
+  (:require [allgo.astro.constants :as c]
+            [allgo.astro.ephemeris :as eph]
+            [allgo.astro.moon :as moon]
+            [allgo.astro.planets :as pl]
+            [allgo.astro.solar :as sun]
             [allgo.astro.time :as t]
             [allgo.astro.vsop87 :as vsop]
             [allgo.meeus-support :refer [->arcsec ->deg close? deg dms hms jd->mjd]]
+            [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private arcsec (dms 0 0 1))
@@ -95,3 +100,25 @@
       (is (close? 238.63 (->deg L0) 0.005))))
   (testing "Carrington rotation 1699"
     (is (close? 2444480.7230 (+ 2400000.5 (sun/carrington-rotation 1699)) 1e-4))))
+
+(deftest into-EME2000
+  (testing "the Earth from VSOP87 is the Sun of chapter 26, turned around"
+    (doseq [mjd [40000.0 51544.5 60000.0 70000.0]]
+      (let [earth (vsop/equatorial-J2000 :earth mjd)
+            sun   (sun/rectangular-J2000 mjd)]
+        ;; the Sun's is corrected to FK5, a tenth of an arcsecond
+        (is (every? true? (map #(close? (- %1) %2 1e-6) earth sun)) (str mjd)))))
+  (testing "and agrees with Standish's elements to their arcminutes"
+    (doseq [p [:mercury :venus :mars :jupiter :saturn :uranus :neptune]]
+      (let [a (vsop/equatorial-J2000 p 60000.0)
+            b (mapv #(/ % c/AU) (pl/heliocentric p 60000.0))
+            cosang (/ (reduce + (map * a b))
+                      (math/sqrt (* (reduce + (map * a a)) (reduce + (map * b b)))))]
+        (is (< (math/acos (min 1.0 cosang)) (deg (/ 5 60.0))) (str p)))))
+  (testing "the ELP Moon agrees with Montenbruck and Gill's to their few arcminutes"
+    (doseq [mjd [51544.5 60000.0 60010.3]]
+      (let [a (moon/geocentric-J2000 mjd)
+            b (eph/moon mjd)
+            cosang (/ (reduce + (map * a b))
+                      (math/sqrt (* (reduce + (map * a a)) (reduce + (map * b b)))))]
+        (is (< (math/acos (min 1.0 cosang)) (deg 0.2)) (str mjd))))))

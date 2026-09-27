@@ -9,6 +9,7 @@
             [allgo.astro.precession :as pr]
             [allgo.astro.time :as t]
             [allgo.meeus-support :refer [->arcsec ->deg close? deg dms hms]]
+            [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private eps-J2000 (deg 23.4392911))
@@ -58,7 +59,7 @@
       (is (close? (dms 349 21 30) l2 (* 0.5 arcsec)))
       (is (close? (dms 61 53 14) i (* 0.5 arcsec)))))
   (testing "the diurnal path at the horizon"
-    (is (close? (- (/ Math/PI 2) (deg 40)) (co/diurnal-path-at-horizon 0.0 (deg 40)) 1e-15))
+    (is (close? (- (/ math/PI 2) (deg 40)) (co/diurnal-path-at-horizon 0.0 (deg 40)) 1e-15))
     (is (close? (dms 45 31 0) (co/diurnal-path-at-horizon (deg 23.44) (deg 40)) (deg 0.05)))))
 
 (deftest refraction
@@ -70,8 +71,8 @@
       (is (close? 28.754 (* 60 (->deg R)) 0.0005))
       (is (close? 24.618 (* 60 (->deg (co/refraction upper))) 0.0005))))
   (testing "p. 106: at the zenith Bennett is 0.08'' out, and his correction 0.89''"
-    (is (close? -0.08 (->arcsec (co/refraction-from-apparent (/ Math/PI 2))) 0.01))
-    (is (close? -0.89 (->arcsec (co/refraction-from-apparent (/ Math/PI 2) true)) 0.01)))
+    (is (close? -0.08 (->arcsec (co/refraction-from-apparent (/ math/PI 2))) 0.01))
+    (is (close? -0.89 (->arcsec (co/refraction-from-apparent (/ math/PI 2) true)) 0.01)))
   (testing "above 15 degrees the series agrees with Bennett, to Bennett's 0.07'"
     (is (close? (co/refraction-from-apparent (deg 30)) (co/refraction-high (deg 30) true)
                 (* 4.2 arcsec)))))
@@ -225,7 +226,7 @@
     (testing "40.a, by the hour angle"
       (let [H (co/hour-angle (first pos) lon theta)
             [H' d] (co/topocentric-hour-angle H (second pos) 0.37276 rho)]
-        (is (close? (- (* 2 Math/PI) (hms 4 44 50.28)) H' (* 15 0.01 arcsec)))
+        (is (close? (- (* 2 math/PI) (hms 4 44 50.28)) H' (* 15 0.01 arcsec)))
         (is (close? (dms -1 15 46 30.0) d (* 0.1 arcsec))))))
   (testing "exercise p. 282: the Moon in ecliptic coordinates"
     (let [rho (gd/parallax-constants (dms 50 5 7.8) 0.0)

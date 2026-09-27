@@ -4,8 +4,12 @@
   Everything here comes from `allgo.astro` already referred to the
   mean equator and equinox of J2000, so no body needs rotating to sit
   beside another. That is the point of the demo as much as the picture is:
-  the planets come from Vallado's Keplerian elements, the Moon from an
-  entirely separate analytical series, and they can simply be added.
+  the planets come from VSOP87 and the Moon from ELP, both as Meeus
+  abridges them, and they can simply be added. The panel switches both to
+  a coarser pair -- Standish's Keplerian elements and Montenbruck and
+  Gill's short lunar series -- and the readout says, for the body in
+  focus, how far apart the two put it: arcminutes, which is what the
+  coarse ones are worth.
 
   Scale is the real difficulty. Neptune is 30 AU out and the Moon is 0.0026
   AU from Earth -- a ratio of twelve thousand to one, so any single linear
@@ -50,15 +54,19 @@
             [allgo.astro.ephemeris :as eph]
             [allgo.astro.frames :as frames]
             [allgo.astro.kepler :as kep]
+            [allgo.astro.moon :as lunar]
+            [allgo.astro.planet-orbits :as orbits]
             [allgo.astro.planets :as pl]
             [allgo.astro.rotation :as rot]
             [allgo.astro.stars :as stars]
             [allgo.astro.time :as atime]
+            [allgo.astro.vsop87 :as vsop87]
             [allgo.demo.fps :as fps]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]
-            ["three/examples/jsm/renderers/CSS2DRenderer.js" :refer [CSS2DObject CSS2DRenderer]]))
+            ["three/examples/jsm/renderers/CSS2DRenderer.js" :refer [CSS2DObject CSS2DRenderer]]
+            [clojure.math :as math]))
 
 (def ^:private view-radius 26.0)
 (def ^:private outer-au 31.0)
@@ -100,6 +108,7 @@
 
 (def ^:private ^js controls
   #js {:focus         "Overview"
+       :ephemeris     "VSOP87 + ELP"
        :scale         "logarithmic"
        :daysPerSecond 12.0
        :moonZoom      400.0
@@ -117,13 +126,32 @@
   its test: this was once a swap of y and z, which is a mirror."
   frames/y-up)
 
+(def ^:private precise-source "VSOP87 + ELP")
+
+(defn- precise? [] (= precise-source (.-ephemeris controls)))
+
+(defn- ephemeris
+  "Where the bodies are at `mjd`, from whichever source is chosen: the
+  heliocentric positions of the planets and the geocentric position of the
+  Moon, km, in EME2000. VSOP87 and ELP are Meeus's, good to an arcsecond
+  or so; the elements and the short lunar series are good to arcminutes,
+  and the readout says how far apart the two are for the body in focus."
+  ([mjd] (ephemeris mjd (precise?)))
+  ([mjd precise]
+   (if precise
+     (let [m (vsop87/ecliptic-of-date->J2000 mjd)]
+       {:planet (fn [k] (mapv #(* c/AU %) (vsop87/equatorial-J2000 k mjd m)))
+        :moon   (fn [] (lunar/geocentric-J2000 mjd m))})
+     {:planet (fn [k] (pl/heliocentric k mjd))
+      :moon   (fn [] (eph/moon mjd))})))
+
 (defn- radial
   "Map a distance in AU onto the view. Logarithmic keeps all eight orbits on
   screen at once; linear is true and needs zooming."
   [au]
   (* view-radius
      (if (= "logarithmic" (.-scale controls))
-       (/ (js/Math.log (+ 1.0 (* 3.0 au))) (js/Math.log (+ 1.0 (* 3.0 outer-au))))
+       (/ (math/log (+ 1.0 (* 3.0 au))) (math/log (+ 1.0 (* 3.0 outer-au))))
        (/ au outer-au))))
 
 (defn- place
@@ -131,7 +159,7 @@
   preserved exactly; only the radius is rescaled, so angles stay true
   whichever mode is chosen."
   [[x y z]]
-  (let [r  (js/Math.sqrt (+ (* x x) (* y y) (* z z)))]
+  (let [r  (math/sqrt (+ (* x x) (* y y) (* z z)))]
     (if (< r 1e-9)
       [0.0 0.0 0.0]
       (let [s (/ (radial (/ r c/AU)) r)]
@@ -139,13 +167,17 @@
 
 (defn- orbit-points
   "One full revolution of a planet, sampled in mean anomaly rather than in
-  time, so a slow outer planet costs no more samples than a fast inner one."
+  time, so a slow outer planet costs no more samples than a fast inner one.
+  The orbit is the mean one of the chosen source: Meeus's mean elements
+  referred to J2000 alongside VSOP87, Standish's alongside his."
   [planet mjd n]
-  (let [el (pl/elements-at planet mjd)
-        ce (js/Math.cos eph/obliquity-J2000)
-        se (js/Math.sin eph/obliquity-J2000)]
+  (let [el (if (precise?)
+             (update (orbits/mean-elements-J2000 planet mjd) :a * c/AU)
+             (pl/elements-at planet mjd))
+        ce (math/cos eph/obliquity-J2000)
+        se (math/sin eph/obliquity-J2000)]
     (for [k (range (inc n))]
-      (let [M  (* 2.0 js/Math.PI (/ k n))
+      (let [M  (* 2.0 math/PI (/ k n))
             nu (kep/mean->true M (:e el))
             [r _] (kep/elements->state 1.0 (assoc el :nu nu :M nil))
             [x y z] r]
@@ -186,14 +218,14 @@
       (let [[x y z] (to-view (stars/direction s))
             v (double (:vmag s))
             [r g b] (stars/color (:bv s))
-            glow (min 1.0 (+ 0.4 (* 0.6 (js/Math.sqrt (/ (stars/flux v) (stars/flux 1.0))))))]
+            glow (min 1.0 (+ 0.4 (* 0.6 (math/sqrt (/ (stars/flux v) (stars/flux 1.0))))))]
         (aset pos (* 3 i) (* sky-radius x))
         (aset pos (+ 1 (* 3 i)) (* sky-radius y))
         (aset pos (+ 2 (* 3 i)) (* sky-radius z))
         (aset col (* 3 i) (* glow r))
         (aset col (+ 1 (* 3 i)) (* glow g))
         (aset col (+ 2 (* 3 i)) (* glow b))
-        (aset size i (max 2.4 (* 9.0 (js/Math.pow 10.0 (* -0.2 (+ v 1.46))))))
+        (aset size i (max 2.4 (* 9.0 (math/pow 10.0 (* -0.2 (+ v 1.46))))))
         (aset mag i v)))
     (doto (THREE/Points.
            (doto (THREE/BufferGeometry.)
@@ -320,8 +352,8 @@
         uv  (.getAttribute geo "uv")]
     (dotimes [i (.-count pos)]
       (let [x (.getX pos i) y (.getY pos i)]
-        (.setXY uv i (/ (- (js/Math.sqrt (+ (* x x) (* y y))) r0) (- r1 r0)) 0.5)))
-    (.rotateX geo (- (/ js/Math.PI 2.0)))
+        (.setXY uv i (/ (- (math/sqrt (+ (* x x) (* y y))) r0) (- r1 r0)) 0.5)))
+    (.rotateX geo (- (/ math/PI 2.0)))
     (THREE/Mesh. geo (THREE/MeshStandardMaterial.
                       #js {:color 0xd8c8a0 :transparent true :opacity 0.5
                            :side THREE/DoubleSide :depthWrite false
@@ -348,7 +380,6 @@
                                                #js {:color (get palette k 0xcfd6e0)
                                                     :roughness 1.0 :metalness 0.0})))]))
         bodies   (select-keys meshes pl/order)
-        moon     (meshes :moon)
         rings    (ring)
         ;; The Sun is a point of light at the center, and since the radial
         ;; scale keeps every direction from the Sun true, it lights each
@@ -358,6 +389,7 @@
         ambient  (THREE/AmbientLight. 0xffffff 0.07)
         loaded   (atom #{})
         flight   (atom nil)
+        moon-path (atom nil)
         focus-ctl (atom nil)
         back     (doto (js/document.createElement "button")
                    (-> .-className (set! "focus-back"))
@@ -438,14 +470,14 @@
                 (doseq [^js child (vec (.-children ecliptic))] (.remove ecliptic child))
                 ;; A ring in the ecliptic plane, tilted into the equatorial
                 ;; frame -- the visible reminder of which frame this is.
-                (let [ce (js/Math.cos eph/obliquity-J2000)
-                      se (js/Math.sin eph/obliquity-J2000)
+                (let [ce (math/cos eph/obliquity-J2000)
+                      se (math/sin eph/obliquity-J2000)
                       r  (radial 31.0)]
                   (.add ecliptic
                         (line-of (for [k (range 129)]
-                                   (let [a (* 2.0 js/Math.PI (/ k 128.0))
-                                         x (* r (js/Math.cos a))
-                                         y (* r (js/Math.sin a))]
+                                   (let [a (* 2.0 math/PI (/ k 128.0))
+                                         x (* r (math/cos a))
+                                         y (* r (math/sin a))]
                                      (to-view [x (* ce y) (* se y)])))
                                  0x445070 0.5))))
               (focused []
@@ -479,15 +511,15 @@
                 ;; Earth itself is seen from sunward and a little north,
                 ;; and the overview from wherever the view already is.
                 [k]
-                (let [mjd (:mjd @state)
+                (let [{:keys [planet moon]} (ephemeris (:mjd @state))
                       v (fn [[x y z]] (.normalize (THREE/Vector3. x y z)))
-                      earth (to-view (pl/heliocentric :earth mjd))]
+                      earth (to-view (planet :earth))]
                   (case k
                     nil nil
                     :sun (v earth)
                     :earth (.normalize (.add (.negate (v earth)) (THREE/Vector3. 0 0.6 0)))
-                    :moon (.negate (v (to-view (eph/moon mjd))))
-                    (v (mapv - earth (to-view (pl/heliocentric k mjd)))))))
+                    :moon (.negate (v (to-view (moon))))
+                    (v (mapv - earth (to-view (planet k)))))))
               (set-focus!
                 ;; Through the panel's own control, so the menu shows it
                 ;; and its change handler does the flying.
@@ -502,7 +534,7 @@
                       rect (.getBoundingClientRect el)
                       w (.-width rect) h (.-height rect)
                       x (- cx (.-left rect)) y (- cy (.-top rect))
-                      per-unit (/ (* 0.5 h) (js/Math.tan (* 0.5 (/ (* js/Math.PI (.-fov camera)) 180.0))))]
+                      per-unit (/ (* 0.5 h) (math/tan (* 0.5 (/ (* math/PI (.-fov camera)) 180.0))))]
                   (->> meshes
                        (keep (fn [[k ^js m]]
                                (when (.-visible m)
@@ -513,7 +545,7 @@
                                      (let [sx (* 0.5 (+ 1.0 (.-x v)) w)
                                            sy (* 0.5 (- 1.0 (.-y v)) h)
                                            r (max 18.0 (/ (* (.. m -scale -x) per-unit) dist))
-                                           d (js/Math.hypot (- sx x) (- sy y))]
+                                           d (math/hypot (- sx x) (- sy y))]
                                        (when (<= d r) [k d])))))))
                        (sort-by second)
                        ffirst)))
@@ -574,32 +606,61 @@
                     (.setSize labels w h))))
               (update-bodies! []
                 (let [mjd (:mjd @state)
-                      earth (pl/heliocentric :earth mjd)]
+                      {:keys [planet moon]} (ephemeris mjd)
+                      earth (planet :earth)]
                   (doseq [k pl/order]
-                    (let [[x y z] (place (pl/heliocentric k mjd))
+                    (let [[x y z] (place (if (= k :earth) earth (planet k)))
                           ^js m (bodies k)]
                       (.set (.-position m) x y z)))
                   ;; The Moon is geocentric already; adding it to the Earth's
                   ;; heliocentric place is legitimate only because both are in
                   ;; the same frame, which is the whole point.
                   (let [[ex ey ez] (place earth)
-                        [mx my mz] (to-view (eph/moon mjd))
-                        k (* (.-moonZoom controls) (/ view-radius outer-au) (/ 1.0 c/AU))]
-                    (.set (.-position moon) (+ ex (* k mx)) (+ ey (* k my)) (+ ez (* k mz)))
-                    ;; and its orbit, drawn at the same magnification
+                        [mx my mz] (to-view (moon))
+                        k (* (.-moonZoom controls) (/ view-radius outer-au) (/ 1.0 c/AU))
+                        precise (precise?)]
+                    (.set (.-position (meshes :moon)) (+ ex (* k mx)) (+ ey (* k my)) (+ ez (* k mz)))
+                    ;; and its orbit, drawn at the same magnification: a
+                    ;; month ahead, sampled afresh only when the Moon has
+                    ;; moved on by a sample or the source has changed --
+                    ;; the ELP series is 120 terms a point
+                    (let [key [precise (math/round (/ mjd 0.2))]]
+                      (when (not= key (:key @moon-path))
+                        (reset! moon-path
+                                {:key key
+                                 :points (vec (for [i (range 130)]
+                                                (let [t (+ mjd (* 27.32 (/ i 129.0)))]
+                                                  (to-view ((:moon (ephemeris t precise)))))))})))
                     (let [arr (.-array (.getAttribute (.-geometry moon-line) "position"))]
-                      (doseq [i (range 130)]
-                        (let [[ox oy oz] (to-view (eph/moon (+ mjd (* 27.32 (/ i 129.0)))))]
-                          (aset arr (* i 3) (+ ex (* k ox)))
-                          (aset arr (+ (* i 3) 1) (+ ey (* k oy)))
-                          (aset arr (+ (* i 3) 2) (+ ez (* k oz)))))
+                      (doseq [[i [ox oy oz]] (map-indexed vector (:points @moon-path))]
+                        (aset arr (* i 3) (+ ex (* k ox)))
+                        (aset arr (+ (* i 3) 1) (+ ey (* k oy)))
+                        (aset arr (+ (* i 3) 2) (+ ez (* k oz))))
                       (.setDrawRange (.-geometry moon-line) 0 130)
                       (set! (.-needsUpdate (.getAttribute (.-geometry moon-line) "position")) true)))))
+              (sources-apart
+                ;; How far apart the two ephemerides put `k` as seen from
+                ;; the Earth -- the Sun and the Earth itself as seen from
+                ;; the other -- which is the honest measure of the coarse
+                ;; one's error.
+                [k mjd]
+                (let [a (ephemeris mjd true) b (ephemeris mjd false)
+                      seen (fn [{:keys [planet moon]}]
+                             (case k
+                               :moon (moon)
+                               (:sun :earth) (planet :earth)
+                               (mapv - (planet k) (planet :earth))))
+                      u (seen a) v (seen b)
+                      cosang (/ (reduce + (map * u v))
+                                (math/sqrt (* (reduce + (map * u u)) (reduce + (map * v v)))))
+                      arcmin (/ (math/acos (min 1.0 cosang)) (/ math/PI 10800.0))]
+                  (str "\n" (if (= k :moon) "The short lunar series is " "Standish's elements are ")
+                       (.toFixed arcmin 1) "' from " (if (= k :moon) "ELP" "VSOP87"))))
               (publish! []
                 (let [mjd (:mjd @state)
                       [yr mo dy hr] (atime/mjd->calendar mjd)
-                      moon-km (let [[a b cc] (eph/moon mjd)]
-                                (js/Math.sqrt (+ (* a a) (* b b) (* cc cc))))]
+                      moon-km (let [[a b cc] ((:moon (ephemeris mjd)))]
+                                (math/sqrt (+ (* a a) (* b b) (* cc cc))))]
                   (when-let [^js s @stars-at]
                     (set! (.-visible s) (.-showStars controls)))
                   (when-let [^js l @lines-at]
@@ -613,9 +674,10 @@
                              "  " (.toFixed hr 0) "h   MJD " (.toFixed mjd 1)
                              (if-let [k (focused)]
                                (let [h (rot/sidereal-day k)]
-                                 (str "\n" (body-names k) ": radius " (.toLocaleString (js/Math.round (rot/radius k))) " km,"
+                                 (str "\n" (body-names k) ": radius " (.toLocaleString (math/round (rot/radius k))) " km,"
                                       " turns in " (if (< (abs h) 48) (str (.toFixed (abs h) 2) " h") (str (.toFixed (/ (abs h) 24) 2) " d"))
-                                      (when (neg? h) " (backward)")))
+                                      (when (neg? h) " (backward)")
+                                      (sources-apart k mjd)))
                                (str "\n" (.-scale controls) " radial scale"
                                     "   Moon at " (.toFixed moon-km 0) " km, drawn "
                                     (.toFixed (.-moonZoom controls) 0) "x"))))))
@@ -648,7 +710,7 @@
                              (fn [^js e]
                                (when-let [[x0 y0 t0] @down]
                                  (reset! down nil)
-                                 (when (and (< (js/Math.hypot (- (.-clientX e) x0) (- (.-clientY e) y0)) 6)
+                                 (when (and (< (math/hypot (- (.-clientX e) x0) (- (.-clientY e) y0)) 6)
                                             (< (- (js/performance.now) t0) 500))
                                    (when-let [k (pick (.-clientX e) (.-clientY e))]
                                      (when (not= k (focused)) (set-focus! (body-names k))))))))
@@ -671,6 +733,8 @@
           (reset! focus-ctl
                   (-> (.add gui controls "focus" (clj->js (into ["Overview"] (map body-names focus-order))))
                       (.onChange refocus!)))
+          (-> (.add gui controls "ephemeris" #js [precise-source "Keplerian elements"])
+              (.onChange (fn [_] (reset! moon-path nil) (rebuild-orbits!))))
           (-> (.add gui controls "scale" #js ["logarithmic" "linear"]) (.onChange rebuild-orbits!))
           (.add gui controls "daysPerSecond" 0 200 1)
           (.add gui controls "moonZoom" 1 2000 1)

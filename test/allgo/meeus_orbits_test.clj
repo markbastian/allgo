@@ -9,6 +9,7 @@
             [allgo.astro.precession :as pr]
             [allgo.astro.time :as t]
             [allgo.meeus-support :refer [->arcsec ->deg close? deg dms hms]]
+            [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private arcsec (dms 0 0 1))
@@ -47,7 +48,7 @@
     (is (close? 1.066997365282 (kep/kepler-bisection 0.2 0.99) 1e-12)))
   (testing "the bisection handles the second half of the orbit"
     (let [E (kep/kepler-bisection 4.0 0.5)]
-      (is (close? 4.0 (- E (* 0.5 (Math/sin E))) 1e-13))))
+      (is (close? 4.0 (- E (* 0.5 (math/sin E))) 1e-13))))
   (testing "p. 207: the first-order formula"
     (is (close? 5.554599 (->deg (kep/kepler-approximate (deg 5) 0.1)) 1e-6))))
 

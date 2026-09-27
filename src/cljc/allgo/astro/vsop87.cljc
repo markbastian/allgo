@@ -23,8 +23,10 @@
   catalog frame by a small rotation; `->fk5` removes it, and matters only
   at the level of a tenth of an arcsecond."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.frames :as frames]
             [allgo.astro.vsop87-data :as data]
             [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (def planets
@@ -72,3 +74,22 @@
     [(* r (math/cos b) (math/cos l))
      (* r (math/cos b) (math/sin l))
      (* r (math/sin b))]))
+
+(defn ecliptic-of-date->J2000
+  "A matrix taking rectangular coordinates on the mean ecliptic and
+  equinox of `mjd-tt` to the mean equator and equinox of J2000 -- EME2000,
+  the frame the rest of `allgo.astro` works in. Tilt by the obliquity of
+  date, then undo the precession since J2000."
+  [mjd-tt]
+  (let [eps (frames/mean-obliquity mjd-tt)
+        ce (math/cos eps) se (math/sin eps)]
+    (lin/mat-mul (lin/transpose (frames/precession mjd-tt))
+                 [[1.0 0.0 0.0] [0.0 ce (- se)] [0.0 se ce]])))
+
+(defn equatorial-J2000
+  "Heliocentric position of `planet`, AU, in EME2000 -- geometric, with no
+  light time: where the planet is, which is what a model of the solar
+  system draws."
+  ([planet mjd-tt] (equatorial-J2000 planet mjd-tt (ecliptic-of-date->J2000 mjd-tt)))
+  ([planet mjd-tt to-J2000]
+   (lin/mat-vec to-J2000 (rectangular planet mjd-tt))))

@@ -9,6 +9,7 @@
             [allgo.astro.time :as t]
             [allgo.math :as am]
             [allgo.meeus-support :refer [->arcsec ->deg close? deg mjd->jd]]
+            [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private apr-12 (t/calendar->mjd 1992 4 12))
@@ -23,9 +24,9 @@
   (testing "p. 344: the mean node at the dates it passes 0 and 180 degrees"
     (doseq [[y m d] [[1913 5 27] [1950 8 17] [2006 6 19] [2099 7 13]]]
       (let [n (moon/mean-node (t/calendar->mjd y m d))]
-        (is (< (min n (- (* 2 Math/PI) n)) 1e-3) (str y))))
+        (is (< (min n (- (* 2 math/PI) n)) 1e-3) (str y))))
     (doseq [[y m d] [[1922 9 16] [1978 7 19] [2034 5 21]]]
-      (is (close? Math/PI (moon/mean-node (t/calendar->mjd y m d)) 1e-3) (str y)))))
+      (is (close? math/PI (moon/mean-node (t/calendar->mjd y m d)) 1e-3) (str y)))))
 
 (deftest illuminated-fraction
   (testing "48.a: from the positions"
@@ -69,7 +70,7 @@
       (let [mjd (ev/moon-phase 2024.3 q)
             [lm] (moon/apparent mjd)
             [ls] (sun/apparent mjd)]
-        (is (close? 0.0 (am/wrap-angle (- lm ls (* q 2 Math/PI))) (* 20 (deg (/ 1 3600.0))))
+        (is (close? 0.0 (am/wrap-angle (- lm ls (* q 2 math/PI))) (* 20 (deg (/ 1 3600.0))))
             (str q))))))
 
 (deftest perigee-and-apogee

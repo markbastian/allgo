@@ -13,6 +13,7 @@
             [allgo.astro.saturn-moons :as sm]
             [allgo.astro.time :as t]
             [allgo.meeus-support :refer [->arcsec ->deg close? deg dms hms jd->mjd mjd->jd]]
+            [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private arcsec (dms 0 0 1))
@@ -59,7 +60,7 @@
                               [:uranus-opposition (t/calendar->mjd 1780 12 17) 14]
                               [:neptune-opposition (t/calendar->mjd 1846 8 20) 4]]]
       (let [got (ph/phenomenon event (t/mjd->julian-epoch mjd))]
-        (is (= hour (long (Math/floor (+ 0.5 (* 24 (- got mjd)))))) (str event))))))
+        (is (= hour (long (math/floor (+ 0.5 (* 24 (- got mjd)))))) (str event))))))
 
 (deftest pluto
   (testing "37.a: 1992 October 13"
@@ -95,7 +96,7 @@
     (let [[y m dd] (t/mjd->calendar (po/perihelion :earth-moon 1990.0))]
       (is (= [1990 1 3] [y m dd])))
     (let [[y m dd h] (t/mjd->calendar (po/perihelion :earth 1990.0))]
-      (is (= [1990 1 4 16] [y m dd (long (Math/floor (+ 0.5 h)))])))))
+      (is (= [1990 1 4 16] [y m dd (long (math/floor (+ 0.5 h)))])))))
 
 (deftest node-passages
   (let [perihelion (t/calendar->mjd 1986 2 9.45891)]
@@ -122,9 +123,9 @@
 
 (deftest illumination
   (testing "41.a: Venus"
-    (is (close? 0.29312 (Math/cos (il/phase-angle 0.724604 0.910947 0.983824)) 5e-6))
+    (is (close? 0.29312 (math/cos (il/phase-angle 0.724604 0.910947 0.983824)) 5e-6))
     (is (close? 0.647 (il/illuminated-fraction 0.724604 0.910947 0.983824) 5e-4))
-    (is (close? 0.29312 (Math/cos (il/phase-angle-from-positions
+    (is (close? 0.29312 (math/cos (il/phase-angle-from-positions
                                    [(deg 26.10588) (deg -2.62102) 0.724604]
                                    [(deg 88.35704) 0.0 0.983824] 0.910947))
                 5e-6)))

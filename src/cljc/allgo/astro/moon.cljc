@@ -19,8 +19,10 @@
             [allgo.astro.frames :as frames]
             [allgo.astro.solar :as solar]
             [allgo.astro.time :as time]
+            [allgo.astro.vsop87 :as vsop87]
             [allgo.math :as am]
             [allgo.numerics.interpolation :refer [horner]]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (defn- deg [x] (* x c/degrees))
@@ -194,6 +196,16 @@
                       (* 175 (math/sin (+ A1 F))) (* 127 (math/sin (- L' M'))) (* -115 (math/sin (+ L' M'))))
                    latitude-terms)]
     [(am/wrap-2pi (+ L' (deg (* sl 1e-6)))) (deg (* sb 1e-6)) (+ 385000.56 (* sr 1e-3))]))
+
+(defn geocentric-J2000
+  "The Moon's geocentric position, km, in EME2000: `position` turned from
+  the ecliptic of date into the frame the rest of `allgo.astro` uses."
+  ([mjd-tt] (geocentric-J2000 mjd-tt (vsop87/ecliptic-of-date->J2000 mjd-tt)))
+  ([mjd-tt to-J2000]
+   (let [[l b r] (position mjd-tt)]
+     (lin/mat-vec to-J2000 [(* r (math/cos b) (math/cos l))
+                            (* r (math/cos b) (math/sin l))
+                            (* r (math/sin b))]))))
 
 (defn horizontal-parallax
   "The Moon's equatorial horizontal parallax at `distance` km: the Earth's
