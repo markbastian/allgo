@@ -186,6 +186,27 @@ button:hover {
 
 .moto-button:active { background: rgba(240, 180, 60, 0.35); }
 
+/* The way back out of a close-up in the solar system, under the title. */
+.focus-back {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  min-height: 2.5rem;
+  padding: 0 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(5, 7, 13, 0.72);
+  color: var(--text);
+  font: 600 0.85rem system-ui, -apple-system, "Segoe UI", sans-serif;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.focus-back:hover { border-color: rgba(255, 255, 255, 0.3); }
+.focus-back[hidden] { display: none; }
+
 /* Stacked on a phone, so they stay clear of the readout beside them. */
 @media (max-width: 640px) {
   .moto-buttons { flex-direction: column; }
@@ -260,6 +281,7 @@ button:hover {
 .thumb .play-bar,
 .thumb .app-title,
 .thumb .moto-buttons,
+.thumb .focus-back,
 .thumb .moto-drag,
 .thumb .sky-labels {
   display: none !important;
