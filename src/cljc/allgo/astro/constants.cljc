@@ -39,6 +39,14 @@
 (def GM-sun  1.32712440018e11)
 (def GM-moon 4902.801)
 
+(def GM-planet
+  "Gravitational parameters of the planets with their moons, km^3/s^2, from
+  JPL's planetary ephemeris DE440 (Park et al. 2021) to the digits given:
+  what a spacecraft far enough away to treat each system as one body
+  feels."
+  {:mercury 22031.87 :venus 324858.6 :earth 403503.2 :mars 42828.38
+   :jupiter 1.267128e8 :saturn 3.794058e7 :uranus 5.794556e6 :neptune 6.836527e6})
+
 (def AU
   "Astronomical unit, km (IAU 2012)."
   149597870.7)

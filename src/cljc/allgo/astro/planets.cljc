@@ -76,19 +76,25 @@
      :argp (am/wrap-2pi (* (- per nod) c/degrees))
      :M    (am/wrap-angle (* (- L per) c/degrees))}))
 
-(defn heliocentric
-  "Position of `planet` relative to the Sun, km, in equatorial J2000."
+(defn heliocentric-state
+  "Position and velocity `[r v]` of `planet` relative to the Sun, km and
+  km/s, in equatorial J2000: the Kepler orbit the elements describe at that
+  moment (their slow drift, a few arcseconds a century, left out of the
+  velocity)."
   [planet mjd-tt]
   (let [{:keys [a e i raan argp M]} (elements-at planet mjd-tt)
         nu (kep/mean->true M e)
-        ;; Kepler's own routine, in the ecliptic frame the elements live in.
-        ;; Position does not depend on mu -- only the discarded velocity does
-        ;; -- but passing the real one keeps the call honest.
-        [r _] (kep/elements->state c/GM-sun {:a a :e e :i i :raan raan :argp argp :nu nu})
+        ;; Kepler's own routine, in the ecliptic frame the elements live in
+        s (kep/elements->state c/GM-sun {:a a :e e :i i :raan raan :argp argp :nu nu})
         ce (math/cos eph/obliquity-J2000)
         se (math/sin eph/obliquity-J2000)
-        [x y z] r]
-    [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))]))
+        eq (fn [[x y z]] [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))])]
+    (mapv eq s)))
+
+(defn heliocentric
+  "Position of `planet` relative to the Sun, km, in equatorial J2000."
+  [planet mjd-tt]
+  (first (heliocentric-state planet mjd-tt)))
 
 (defn geocentric
   "Position of `planet` as seen from the Earth, km, in equatorial J2000.
