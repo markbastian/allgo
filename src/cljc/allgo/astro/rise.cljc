@@ -104,3 +104,17 @@
   (let [[_ _ r] (moon/position mjd)]
     (day-events #(vec (take 2 (moon/apparent-equatorial %))) place
                 (moon-standard-altitude (moon/horizontal-parallax r)) mjd)))
+
+(def twilight-altitude
+  "The Sun's center below the horizon that begins morning twilight and
+  ends evening twilight: civil (enough light to work by), nautical (the
+  horizon still visible at sea) and astronomical (the sky fully dark)."
+  {:civil (* -6.0 c/degrees) :nautical (* -12.0 c/degrees) :astronomical (* -18.0 c/degrees)})
+
+(defn twilight
+  "Dawn, the Sun's transit and dusk for twilight `kind` -- :civil,
+  :nautical or :astronomical -- on the UT day beginning at `mjd`: `{:rise
+  :transit :set}`, the first when morning twilight begins and the last
+  when evening twilight ends; nil where the Sun never gets that low."
+  [kind place mjd]
+  (day-events #(vec (take 2 (solar/apparent-equatorial %))) place (twilight-altitude kind) mjd))

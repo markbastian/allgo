@@ -96,8 +96,9 @@ of expected return:
   4. Coordinates and frames (ch. 3-4): done -- `allgo.astro.reduction` and
      `allgo.astro.states` -- except the IAU 2006/2000 CIO-based reduction.
   5. ~~SGP4/SDP4 and TLEs~~ -- `allgo.astro.sgp4`.
-  6. Celestial (ch. 5): Sun and Moon positions, rise and set, satellite
-     eclipses (shadow), sight and light.
+  6. ~~Celestial (ch. 5)~~ -- `allgo.astro.visibility` for sight, shadow,
+     eclipses and naked-eye visibility, and twilight in `allgo.astro.rise`;
+     Sun and Moon positions and rise and set were already there.
   7. Perturbations (ch. 8-9): J2 secular and periodic rates, gravity
      field algorithms (Pines, Gottlieb, Lear), drag and SRP analytic.
   8. Mission geometry (ch. 11): repeat ground tracks, sun-synchronous and
