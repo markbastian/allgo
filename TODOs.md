@@ -98,8 +98,12 @@ of expected return:
   6. ~~Celestial (ch. 5)~~ -- `allgo.astro.visibility` for sight, shadow,
      eclipses and naked-eye visibility, and twilight in `allgo.astro.rise`;
      Sun and Moon positions and rise and set were already there.
-  7. Perturbations (ch. 8-9): J2 secular and periodic rates, gravity
-     field algorithms (Pines, Gottlieb, Lear), drag and SRP analytic.
+  7. Perturbations (ch. 8-9): done -- `allgo.astro.perturbations` (Gauss's
+     variational equations, orbit-averaged rates, J2's secular rates,
+     King-Hele's drag decay, radiation pressure's secular rates) and
+     `allgo.astro.gravity` (Pines and the spherical partials) -- except
+     J2's short-period terms and Gottlieb's and Lear's formulations, which
+     await the book's pages.
   8. Mission geometry (ch. 11): repeat ground tracks, sun-synchronous and
      frozen orbits, field of view, range and azimuth between sites.
   9. Covariance transformations between Cartesian, classical, equinoctial,
