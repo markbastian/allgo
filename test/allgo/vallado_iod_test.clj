@@ -91,6 +91,23 @@
           {:keys [r2]} (iod/double-r c/GM-earth obs ts sites [9000.0 9000.0])]
       (is (< (rel-err r2 r-true) 1e-9)))))
 
+(deftest laplace
+  (testing "Laplace's method, from three sightings a few minutes apart"
+    (let [ts [-480.0 0.0 480.0]
+          [obs sites] (sightings ts)
+          {:keys [r2 v2]} (iod/laplace obs ts sites)
+          [r-true v-true] (at 0.0)]
+      ;; the derivatives are a quadratic's, so it is close, not exact:
+      ;; 0.4% in position here, where Gauss's single pass is 1.1% off
+      (is (< (rel-err r2 r-true) 0.01))
+      (is (< (rel-err v2 v-true) 0.03))))
+  (testing "and closer as the sightings close up, as its derivatives do"
+    (let [err (fn [dt] (let [ts [(- dt) 0.0 dt] [obs sites] (sightings ts)]
+                         (rel-err (:r2 (iod/laplace obs ts sites)) (first (at 0.0)))))]
+      ;; a quarter the error for half the arc
+      (is (< (* 3.0 (err 120.0)) (err 240.0)))
+      (is (< (* 3.0 (err 240.0)) (err 480.0))))))
+
 (defn- arrives? [r1 v1 r2 dt]
   (let [[r _] (u/propagate mu r1 v1 dt)]
     (< (v3/distance r r2) (* 1e-6 (v3/length r2)))))

@@ -131,6 +131,58 @@
      {:r2 r2 :v2 (:v2 (if close? (herrick-gibbs mu r1 r2 r3 t1 t2 t3) g))
       :ranges [rho1 rho2 rho3] :u u})))
 
+;; -------------------------------------------------------- Laplace
+
+(defn- derivatives-at-middle
+  "The first and second derivatives at the middle time of the quadratic
+  through three vectors at times `tau1` 0 `tau3` (relative to the middle)."
+  [[x1 x2 x3] tau1 tau3]
+  (let [comb (fn [k1 k2 k3] (v3/add (v3/add (v3/scale x1 k1) (v3/scale x2 k2)) (v3/scale x3 k3)))]
+    [(comb (- (/ tau3 (* tau1 (- tau1 tau3))))
+           (- (/ (+ tau1 tau3) (* tau1 tau3)))
+           (- (/ tau1 (* tau3 (- tau3 tau1)))))
+     (comb (/ 2.0 (* tau1 (- tau1 tau3)))
+           (/ 2.0 (* tau1 tau3))
+           (/ 2.0 (* tau3 (- tau3 tau1))))]))
+
+(defn laplace
+  "An orbit from three sightings of direction alone, as `gauss` takes
+  them, by Laplace's method: the line of sight L and the site R are
+  differentiated at the middle sighting through the quadratic that passes
+  their three values, and the equation of motion of r = rho L + R,
+
+    rho'' L + 2 rho' L' + rho (L'' + mu L / r^3) + R'' + mu R / r^3 = 0,
+
+  dotted with L x L' leaves the range, rho = -(R''.(LxL') + mu/r^3
+  R.(LxL')) / L''.(LxL'), which with r^2 = rho^2 + 2 rho L.R + R^2 is an
+  eighth-degree polynomial in r; dotted with L x L'' it leaves the range
+  rate. Returns `{:r2 :v2}` at the middle sighting.
+
+  The derivatives come from three points, so the answer is as good as a
+  quadratic is over the arc: a percent or so, like Gauss's."
+  ([observations ts sites] (laplace mu observations ts sites))
+  ([mu observations [t1 t2 t3] [_ R :as sites]]
+   (let [Ls (mapv (fn [[ra dec]] (line-of-sight ra dec)) observations)
+         tau1 (- t1 t2) tau3 (- t3 t2)
+         L (second Ls)
+         [L' L''] (derivatives-at-middle Ls tau1 tau3)
+         [R' R''] (derivatives-at-middle sites tau1 tau3)
+         n1 (v3/cross L L') n2 (v3/cross L L'')
+         D (v3/dot L'' n1)
+         ;; rho = A + B / r^3
+         A (- (/ (v3/dot R'' n1) D))
+         B (- (/ (* mu (v3/dot R n1)) D))
+         C (v3/dot L R)
+         r (largest-positive-root (- (+ (* A A) (* 2.0 A C) (v3/dot R R)))
+                                  (* -2.0 B (+ A C))
+                                  (- (* B B)))
+         r3 (* r r r)
+         rho (+ A (/ B r3))
+         rho' (- (/ (+ (v3/dot R'' n2) (* (/ mu r3) (v3/dot R n2)))
+                    (* 2.0 (v3/dot L' n2))))]
+     {:r2 (v3/add R (v3/scale L rho))
+      :v2 (v3/add (v3/add (v3/scale L rho') (v3/scale L' rho)) R')})))
+
 ;; ------------------------------------------------------- double-r
 
 (defn- range-at

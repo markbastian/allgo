@@ -89,9 +89,9 @@ of expected return:
     printed values, alongside the independent checks.
   1. ~~Two-body core (ch. 2)~~ -- `allgo.astro.universal`.
   2. ~~Maneuvers (ch. 6)~~ -- `allgo.astro.maneuvers`.
-  3. Initial orbit determination (ch. 7): done except Laplace's method
-     and Battin's Lambert solver (a second, independent one to check the
-     universal solver against).
+  3. Initial orbit determination (ch. 7): done except Battin's Lambert
+     solver (a second, independent one to check the universal solver
+     against).
   4. Coordinates and frames (ch. 3-4): done -- `allgo.astro.reduction` and
      `allgo.astro.states` -- except the IAU 2006/2000 CIO-based reduction.
   5. ~~SGP4/SDP4 and TLEs~~ -- `allgo.astro.sgp4`.
