@@ -117,3 +117,30 @@
                    (+ t (* dt (/ (- a a1) (- a a'))))
                    (recur a' (+ t dt)))))]
       (is (close? t t' 1e-4)))))
+
+(deftest steady-push
+  (let [el {:a 26000.0 :e 0.3 :i 0.6 :raan 0.4 :argp 1.3 :M 0.0}
+        F [3e-10 -1e-10 2e-10]
+        s (kep/elements->state mu el)
+        {he :e hh :h} (pt/steady-push-secular s F)
+        ;; the exact rates, averaged numerically round the orbit
+        n 720
+        states (for [k (range n)] (kep/elements->state mu (assoc el :M (* 2 math/PI (/ k n)))))
+        mean (fn [f] (v3/scale (reduce v3/add (map f states)) (/ 1.0 n)))
+        dh (mean (fn [[r _]] (v3/cross r F)))
+        de (mean (fn [[r v]] (v3/scale (v3/add (v3/cross F (v3/cross r v)) (v3/cross v (v3/cross r F))) (/ 1.0 mu))))]
+    (testing "the closed forms are the exact rates averaged"
+      (is (< (v3/distance hh dh) (* 1e-10 (v3/length dh))))
+      (is (< (v3/distance he de) (* 1e-10 (v3/length de)))))
+    (testing "and agree with Gauss's equations averaged: no change in a, and e's rate"
+      (let [averaged (pt/averaged-rates mu el (constantly F) 720)
+            e-hat (v3/normalize (pt/eccentricity-vector s))]
+        (is (< (abs (:a averaged)) 1e-15))
+        (is (close? (:e averaged) (v3/dot e-hat he) 1e-9)))))
+  (testing "radiation pressure pushes from the Sun"
+    (let [s (kep/elements->state mu {:a 26000.0 :e 0.3 :i 0.6 :raan 0.4 :argp 1.3 :M 0.0})
+          {:keys [e]} (pt/srp-secular s [c/AU 0.0 0.0] 0.02 1.3)
+          F (pt/steady-push-secular s [-1.0 0.0 0.0])]
+      ;; the push is along -x, so the rates are those of a push along -x, scaled
+      (is (< (v3/length (v3/cross e (:e F))) (* 1e-12 (v3/length e) (v3/length (:e F)))))
+      (is (pos? (v3/dot e (:e F)))))))

@@ -16,6 +16,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.geopotential :as geo]
             [allgo.astro.kepler :as kepler]
+            [allgo.astro.srp :as srp]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [clojure.math :as math]))
@@ -161,3 +162,43 @@
         (reduce + (for [k (range (inc n))
                         :let [w (cond (or (zero? k) (= k n)) 1.0 (odd? k) 4.0 :else 2.0)]]
                     (* w (f (+ a1 (* k h))))))))))
+
+;; ------------------------------------------------- a steady push: SRP
+
+(defn eccentricity-vector
+  "e, pointing to periapsis with the eccentricity for length: (v x h)/mu
+  - r/|r|."
+  ([s] (eccentricity-vector mu s))
+  ([mu [r v]]
+   (v3/sub (v3/scale (v3/cross v (v3/cross r v)) (/ 1.0 mu)) (v3/normalize r))))
+
+(defn steady-push-secular
+  "The secular rates of the angular momentum h = r x v and the eccentricity
+  vector e of the orbit through state `s` under an acceleration `F` that
+  holds steady over the orbit -- radiation pressure out of the Earth's
+  shadow, over the day or so the Sun takes to move a degree:
+
+    <dh/dt> = -3/2 a (e x F)
+    <de/dt> =  3/2 sqrt(p/mu) (F x h/|h|)
+
+  From dh/dt = r x F and de/dt = (F x h + v x (r x F))/mu, averaged over
+  the orbit: the mean position is -3/2 a e, and the mean of r v^T, whose
+  symmetric part is a derivative and averages away, leaves 1/2 F x h. The
+  semi-major axis has no secular change, as the mean velocity is zero.
+  Returns `{:h :e}`."
+  ([s F] (steady-push-secular mu s F))
+  ([mu [r v :as s] F]
+   (let [h (v3/cross r v)
+         e (eccentricity-vector mu s)
+         a (/ 1.0 (- (/ 2.0 (v3/length r)) (/ (v3/dot v v) mu)))
+         p (/ (v3/dot h h) mu)]
+     {:h (v3/scale (v3/cross e F) (* -1.5 a))
+      :e (v3/scale (v3/cross F (v3/normalize h)) (* 1.5 (math/sqrt (/ p mu))))})))
+
+(defn srp-secular
+  "`steady-push-secular` with the push radiation pressure gives a
+  satellite of `area-to-mass` m^2/kg and reflectivity `cr` with the Sun at
+  `r-sun` -- the Earth's shadow, which interrupts it, left out."
+  ([s r-sun area-to-mass cr] (srp-secular mu s r-sun area-to-mass cr))
+  ([mu s r-sun area-to-mass cr]
+   (steady-push-secular mu s (srp/acceleration [0.0 0.0 0.0] r-sun area-to-mass cr 1.0))))
