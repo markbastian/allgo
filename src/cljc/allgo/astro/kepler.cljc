@@ -15,9 +15,8 @@
   handled here by convention rather than by returning a NaN."
   (:require [allgo.astro.constants :as c]
             [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [clojure.math :as math]))
-
-(defn- wrap-2pi [x] (let [r (rem x c/two-pi)] (if (neg? r) (+ r c/two-pi) r)))
 
 ;; ------------------------------------------------------------ scalar results
 
@@ -48,7 +47,7 @@
   standard choice and converges in a handful of steps out to e = 0.99."
   ([M e] (kepler-equation M e 1e-13))
   ([M e tol]
-   (let [M (wrap-2pi M)]
+   (let [M (am/wrap-2pi M)]
      (loop [E (+ M (* e (math/sin M))) n 0]
        (let [f  (- E (* e (math/sin E)) M)
              fp (- 1.0 (* e (math/cos E)))
@@ -62,14 +61,14 @@
   anomaly at the focus. They agree at periapsis and apoapsis and nowhere
   else."
   [E e]
-  (wrap-2pi (* 2.0 (math/atan2 (* (math/sqrt (+ 1.0 e)) (math/sin (* 0.5 E)))
-                               (* (math/sqrt (- 1.0 e)) (math/cos (* 0.5 E)))))))
+  (am/wrap-2pi (* 2.0 (math/atan2 (* (math/sqrt (+ 1.0 e)) (math/sin (* 0.5 E)))
+                                  (* (math/sqrt (- 1.0 e)) (math/cos (* 0.5 E)))))))
 
 (defn true->eccentric [nu e]
-  (wrap-2pi (* 2.0 (math/atan2 (* (math/sqrt (- 1.0 e)) (math/sin (* 0.5 nu)))
-                               (* (math/sqrt (+ 1.0 e)) (math/cos (* 0.5 nu)))))))
+  (am/wrap-2pi (* 2.0 (math/atan2 (* (math/sqrt (- 1.0 e)) (math/sin (* 0.5 nu)))
+                                  (* (math/sqrt (+ 1.0 e)) (math/cos (* 0.5 nu)))))))
 
-(defn eccentric->mean [E e] (wrap-2pi (- E (* e (math/sin E)))))
+(defn eccentric->mean [E e] (am/wrap-2pi (- E (* e (math/sin E)))))
 (defn mean->true [M e] (eccentric->true (kepler-equation M e) e))
 (defn true->mean [nu e] (eccentric->mean (true->eccentric nu e) e))
 
@@ -95,33 +94,33 @@
         hm   (v3/length h)
         node (v3/cross [0.0 0.0 1.0] h)
         nm   (v3/length node)
-        evec (v3/scale (mapv - (v3/scale r (- (v3/dot v v) (/ mu rm)))
-                             (v3/scale v (v3/dot r v)))
+        evec (v3/scale (v3/sub (v3/scale r (- (v3/dot v v) (/ mu rm)))
+                               (v3/scale v (v3/dot r v)))
                        (/ 1.0 mu))
         e    (v3/length evec)
         en   (specific-energy mu r v)
         a    (if (< (abs en) 1e-15) ##Inf (/ (- mu) (* 2.0 en)))
-        i    (math/acos (max -1.0 (min 1.0 (/ (nth h 2) hm))))
+        i    (math/acos (am/clamp (/ (nth h 2) hm) -1.0 1.0))
         circular?   (< e circular-tol)
         equatorial? (< nm (* equatorial-tol hm))
-        raan (if equatorial? 0.0 (wrap-2pi (math/atan2 (nth node 1) (nth node 0))))
+        raan (if equatorial? 0.0 (am/wrap-2pi (math/atan2 (nth node 1) (nth node 0))))
         argp (cond
                circular?   0.0
-               equatorial? (wrap-2pi (math/atan2 (nth evec 1) (nth evec 0)))
-               :else       (let [ang (math/acos (max -1.0 (min 1.0 (/ (v3/dot node evec) (* nm e)))))]
-                             (wrap-2pi (if (neg? (nth evec 2)) (- c/two-pi ang) ang))))
+               equatorial? (am/wrap-2pi (math/atan2 (nth evec 1) (nth evec 0)))
+               :else       (let [ang (math/acos (am/clamp (/ (v3/dot node evec) (* nm e)) -1.0 1.0))]
+                             (am/wrap-2pi (if (neg? (nth evec 2)) (- c/two-pi ang) ang))))
         nu   (cond
                ;; circular and equatorial: measure from x, the only reference left
                (and circular? equatorial?)
-               (wrap-2pi (let [ang (math/atan2 (nth r 1) (nth r 0))]
-                           (if (neg? (nth h 2)) (- ang) ang)))
+               (am/wrap-2pi (let [ang (math/atan2 (nth r 1) (nth r 0))]
+                              (if (neg? (nth h 2)) (- ang) ang)))
                ;; circular: measure from the node -- argument of latitude
                circular?
-               (let [ang (math/acos (max -1.0 (min 1.0 (/ (v3/dot node r) (* nm rm)))))]
-                 (wrap-2pi (if (neg? (nth r 2)) (- c/two-pi ang) ang)))
+               (let [ang (math/acos (am/clamp (/ (v3/dot node r) (* nm rm)) -1.0 1.0))]
+                 (am/wrap-2pi (if (neg? (nth r 2)) (- c/two-pi ang) ang)))
                :else
-               (let [ang (math/acos (max -1.0 (min 1.0 (/ (v3/dot evec r) (* e rm)))))]
-                 (wrap-2pi (if (neg? (v3/dot r v)) (- c/two-pi ang) ang))))]
+               (let [ang (math/acos (am/clamp (/ (v3/dot evec r) (* e rm)) -1.0 1.0))]
+                 (am/wrap-2pi (if (neg? (v3/dot r v)) (- c/two-pi ang) ang))))]
     {:a a :e e :i i :raan raan :argp argp :nu nu
      :M (if (< e 1.0) (true->mean nu e) ##NaN)}))
 
@@ -156,7 +155,7 @@
   [mu r v dt]
   (let [{:keys [a] :as el} (state->elements mu r v)
         M' (+ (:M el) (* (mean-motion mu a) dt))]
-    (elements->state mu (assoc el :M (wrap-2pi M') :nu nil))))
+    (elements->state mu (assoc el :M (am/wrap-2pi M') :nu nil))))
 
 ;; ------------------------------------------------------ non-singular form
 
@@ -170,7 +169,7 @@
   form perturbation work and orbit determination use, because a filter
   cannot estimate an angle that does not exist."
   [{:keys [a e i raan argp nu]}]
-  (let [lam (wrap-2pi (+ raan argp nu))]
+  (let [lam (am/wrap-2pi (+ raan argp nu))]
     {:a a
      :h (* e (math/sin (+ raan argp)))
      :k (* e (math/cos (+ raan argp)))
@@ -183,7 +182,7 @@
   [{:keys [a h k p q lambda]}]
   (let [e    (math/sqrt (+ (* h h) (* k k)))
         i    (* 2.0 (math/atan (math/sqrt (+ (* p p) (* q q)))))
-        raan (if (and (zero? p) (zero? q)) 0.0 (wrap-2pi (math/atan2 p q)))
-        argp (wrap-2pi (- (if (and (zero? h) (zero? k)) 0.0 (math/atan2 h k)) raan))]
+        raan (if (and (zero? p) (zero? q)) 0.0 (am/wrap-2pi (math/atan2 p q)))
+        argp (am/wrap-2pi (- (if (and (zero? h) (zero? k)) 0.0 (math/atan2 h k)) raan))]
     {:a a :e e :i i :raan raan :argp argp
-     :nu (wrap-2pi (- lambda raan argp))}))
+     :nu (am/wrap-2pi (- lambda raan argp))}))

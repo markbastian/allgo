@@ -10,6 +10,7 @@
   and interpolates between them rather than pretending to a single value."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.geodesy :as geodesy]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
 
 (def table
@@ -90,8 +91,8 @@
              u   [(* (math/cos dec) (math/cos ra))
                   (* (math/cos dec) (math/sin ra))
                   (math/sin dec)]
-             rm  (math/sqrt (reduce + (map * r r)))
-             cos-psi (/ (reduce + (map * r u)) rm)
+             rm  (v3/length r)
+             cos-psi (/ (v3/dot r u) rm)
              ;; cos^n(psi/2), written through the half-angle identity so it
              ;; stays defined when the satellite is opposite the bulge
              f   (math/pow (max 0.0 (* 0.5 (+ 1.0 cos-psi))) (* 0.5 n))]
@@ -124,7 +125,7 @@
     (if (zero? rho)
       [0.0 0.0 0.0]
       (let [vr (relative-velocity r v)
-            s  (math/sqrt (reduce + (map * vr vr)))
+            s  (v3/length vr)
             ;; 1e3 converts the m/s^2 that the SI quantities yield into km/s^2
             ;; while velocities stay in km/s
             k  (* -0.5 cd area-to-mass rho 1e3 s)]

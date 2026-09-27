@@ -8,7 +8,8 @@
   and index them -- `allgo.simulation.boids-flat`, `allgo.physics.flip` --
   and simulations that track few use this, because a body is read far more
   often in code than in a loop."
-  (:require [clojure.math :as math]))
+  (:require [allgo.math :as am]
+            [clojure.math :as math]))
 
 (def zero [0.0 0.0 0.0])
 
@@ -62,6 +63,4 @@
 (defn finite?
   "Every component a real number. Worth asserting after a solve."
   [[x y z]]
-  #?(:clj (and (Double/isFinite (double x)) (Double/isFinite (double y))
-               (Double/isFinite (double z)))
-     :cljs (and (js/isFinite x) (js/isFinite y) (js/isFinite z))))
+  (and (am/finite? x) (am/finite? y) (am/finite? z)))

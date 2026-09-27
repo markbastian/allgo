@@ -20,6 +20,7 @@
   sub-simplex it has already rejected and stall the loop. The region tests
   need no such consistency between separately computed determinants."
   (:require [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (def ^:private origin [0.0 0.0 0.0])
@@ -59,7 +60,7 @@
         dd (v/length-squared ab)]
     (if (< dd 1e-20)
       {:weights {i 1.0}}
-      (let [t (max 0.0 (min 1.0 (/ (- (v/dot a ab)) dd)))]
+      (let [t (am/clamp (/ (- (v/dot a ab)) dd) 0.0 1.0)]
         {:weights {i (- 1.0 t) j t}}))))
 
 (defn- best [cands pts]

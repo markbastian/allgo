@@ -13,6 +13,7 @@
   applies to a satellite about a non-rotating central mass. The frame
   dragging and geodetic precession terms are smaller again and left out."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
 
 (defn acceleration
@@ -25,10 +26,10 @@
   is what makes the effect depend on eccentricity."
   ([r v] (acceleration r v c/GM-earth))
   ([r v GM]
-   (let [r2  (reduce + (map * r r))
+   (let [r2  (v3/length-squared r)
          rm  (math/sqrt r2)
-         v2  (reduce + (map * v v))
-         rv  (reduce + (map * r v))
+         v2  (v3/length-squared v)
+         rv  (v3/dot r v)
          k   (/ GM (* c/c-light c/c-light r2 rm))
          a   (- (/ (* 4.0 GM) rm) v2)
          b   (* 4.0 rv)]

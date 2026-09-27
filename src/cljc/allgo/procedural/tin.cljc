@@ -1,6 +1,8 @@
 (ns allgo.procedural.tin
   (:require [allgo.geometry.delaunay :as delaunay]
-            [allgo.procedural.perlin :as perlin]))
+            [allgo.math :as am]
+            [allgo.procedural.perlin :as perlin]
+            [allgo.random :as random]))
 
 ;; Triangulated Irregular Network terrain, per Paul Bourke's "An Algorithm
 ;; for Interpolating Irregularly-Spaced Data with Applications in Terrain
@@ -18,10 +20,11 @@
   world-space wavelength of the lowest (dominant) octave -- it must be
   well under `size`, or that octave never completes a cycle across the
   domain and the whole terrain reads as one smooth tilt instead of hills."
-  [n size noise-scale]
-  (vec (repeatedly n (fn []
-                       (let [x (rand size) y (rand size)]
-                         [x y (perlin/operlin (/ x noise-scale) (/ y noise-scale) 0.0 0.5 4)])))))
+  ([n size noise-scale] (scatter-points rand n size noise-scale))
+  ([rng n size noise-scale]
+   (vec (repeatedly n (fn []
+                        (let [x (random/uniform rng size) y (random/uniform rng size)]
+                          [x y (perlin/operlin (/ x noise-scale) (/ y noise-scale) 0.0 0.5 4)]))))))
 
 (defn triangulate-points
   "Delaunay-triangulates the (x,y) projection of 3D `points` [x y z],
@@ -67,13 +70,11 @@
   [triangles p]
   (some (fn [[a b c]] (when (point-in-triangle? p a b c) (plane-height a b c p))) triangles))
 
-(defn- sq [x] (* x x))
-
 (defn- nearest-height
   "Height of whichever sample `points` is closest to `p`, for filling in
   grid cells outside the triangulated convex hull."
   [points [x y]]
-  (let [[_ _ z] (apply min-key (fn [[px py _]] (+ (sq (- px x)) (sq (- py y)))) points)]
+  (let [[_ _ z] (apply min-key (fn [[px py _]] (+ (am/sq (- px x)) (am/sq (- py y)))) points)]
     z))
 
 (defn generate

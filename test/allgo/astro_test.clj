@@ -748,7 +748,7 @@
   (- (+ (* a e i) (* b f g) (* cc d h)) (+ (* cc e g) (* b d i) (* a f h))))
 
 (defn- orthogonality-error [m]
-  (let [p (fr/mul m (fr/transpose m))]
+  (let [p (lin/mat-mul m (lin/transpose m))]
     (apply max (for [i (range 3) j (range 3)]
                  (abs (- (nth (nth p i) j) (if (= i j) 1.0 0.0)))))))
 
@@ -773,8 +773,8 @@
   ;; The equinox slides along the ecliptic, completing a circuit in about
   ;; 26,000 years. It is why the pole star changes over history.
   (let [v [1.0 0.0 0.0]
-        a (fr/apply-m (fr/precession (t/calendar->mjd 2000 1 1)) v)
-        b (fr/apply-m (fr/precession (t/calendar->mjd 2100 1 1)) v)
+        a (lin/mat-vec (fr/precession (t/calendar->mjd 2000 1 1)) v)
+        b (lin/mat-vec (fr/precession (t/calendar->mjd 2100 1 1)) v)
         arcsec-per-year (/ (Math/acos (max -1.0 (min 1.0 (reduce + (map * a b))))) c/arcsec 100.0)]
     (is (close? 50.29 arcsec-per-year 0.05) (str "got " arcsec-per-year))
     (testing "which comes to a full circuit in about 26 millennia"
@@ -823,13 +823,13 @@
   (let [mjd (t/calendar->mjd 2024 6 1)
         p   (fr/precession mjd)
         n   (fr/nutation mjd)
-        both (fr/mul n p)
+        both (lin/mat-mul n p)
         v   [0.3 -0.5 0.81]]
     (is (close? 1.0 (det3 both) 1e-12))
     (testing "the transpose undoes the rotation, orthogonality being the point"
-      (is (< (mag (mapv - v (fr/apply-m (fr/transpose both) (fr/apply-m both v)))) 1e-14)))
+      (is (< (mag (mapv - v (lin/mat-vec (lin/transpose both) (lin/mat-vec both v)))) 1e-14)))
     (testing "and a rotation preserves length"
-      (is (close? (mag v) (mag (fr/apply-m both v)) 1e-14)))))
+      (is (close? (mag v) (mag (lin/mat-vec both v)) 1e-14)))))
 
 ;; ------------------------------------ the full celestial-terrestrial chain
 
@@ -841,15 +841,15 @@
           v   [0.4 -0.6 0.6928]]
       (is (close? 1.0 (det3 u) 1e-12) (str yr))
       (is (< (orthogonality-error u) 1e-12) (str yr))
-      (is (< (mag (mapv - v (fr/apply-m (fr/terrestrial->celestial tt utc) (fr/apply-m u v)))) 1e-13)
+      (is (< (mag (mapv - v (lin/mat-vec (fr/terrestrial->celestial tt utc) (lin/mat-vec u v)))) 1e-13)
           (str yr " round trip"))
-      (is (close? (mag v) (mag (fr/apply-m u v)) 1e-14) (str yr " length")))))
+      (is (close? (mag v) (mag (lin/mat-vec u v)) 1e-14) (str yr " length")))))
 
 (deftest a-ground-station-traces-a-circle-in-inertial-space
   (let [ground [c/R-earth 0.0 0.0]
         over-a-day (map (fn [k]
                           (let [utc (+ (t/calendar->mjd 2024 1 1) (/ k 24.0))]
-                            (fr/apply-m (fr/terrestrial->celestial (t/utc->tt utc) utc) ground)))
+                            (lin/mat-vec (fr/terrestrial->celestial (t/utc->tt utc) utc) ground)))
                         (range 25))]
     (testing "at constant radius, since a rotation cannot change length"
       (is (< (- (apply max (map mag over-a-day)) (apply min (map mag over-a-day))) 1e-9)))
@@ -870,7 +870,7 @@
   (let [err (fn [yr]
               (let [utc (t/calendar->mjd yr 1 1)
                     tt  (t/utc->tt utc)
-                    full (fr/apply-m (fr/celestial->terrestrial tt utc) [c/R-earth 0.0 0.0])
+                    full (lin/mat-vec (fr/celestial->terrestrial tt utc) [c/R-earth 0.0 0.0])
                     gmst-only (let [g (t/gmst utc)]
                                 [(* c/R-earth (Math/cos g)) (* c/R-earth (- (Math/sin g))) 0.0])]
                 (mag (mapv - full gmst-only))))]
@@ -883,7 +883,7 @@
   ;; 435-day Chandler wobble. Negligible for an orbit, decisive for geodesy.
   (let [utc (t/calendar->mjd 2024 1 1)
         tt  (t/utc->tt utc)
-        p   (fn [xp yp] (fr/apply-m (fr/celestial->terrestrial tt utc xp yp) [c/R-earth 0.0 0.0]))
+        p   (fn [xp yp] (lin/mat-vec (fr/celestial->terrestrial tt utc xp yp) [c/R-earth 0.0 0.0]))
         shift (* 1000.0 (mag (mapv - (p 0.0 0.0) (p (* 0.3 c/arcsec) (* 0.3 c/arcsec)))))]
     (is (< 1.0 shift 20.0) (str "moved " shift " m"))
     (testing "and zero polar motion is exactly no rotation"
@@ -1402,7 +1402,7 @@
         whole (:phi (var/unpack (propagate-variational (var/initial r0 v0) t2)))
         step1 (var/unpack (propagate-variational (var/initial r0 v0) t1))
         step2 (:phi (var/unpack (propagate-variational (var/initial (:r step1) (:v step1)) (- t2 t1))))
-        composed (var/mat-mul step2 (:phi step1))
+        composed (lin/mat-mul step2 (:phi step1))
         scale (apply max (for [i (range 6) j (range 6)] (abs (nth (nth whole i) j))))]
     (doseq [i (range 6) j (range 6)]
       (is (< (/ (abs (- (nth (nth whole i) j) (nth (nth composed i) j))) scale) 1e-7)
@@ -1517,7 +1517,7 @@
                        [[35.0 -117.0] [-25.0 28.0] [40.0 140.0]])
         st-eci (fn [s secs]
                  (let [mjd (+ c/mjd-J2000 (/ secs 86400.0))]
-                   (fr/apply-m (fr/terrestrial->celestial (t/utc->tt mjd) mjd) s)))
+                   (lin/mat-vec (fr/terrestrial->celestial (t/utc->tt mjd) mjd) s)))
         truth  (let [[r v] (kep/elements->state mu {:a 7500.0 :e 0.02 :i 0.95
                                                     :raan 1.1 :argp 2.0 :nu 0.4})]
                  (vec (concat r v)))
@@ -1592,7 +1592,7 @@
         sites (mapv (fn [[la lo]] (gd/geodetic->cartesian (* la c/degrees) (* lo c/degrees) 0.0))
                     [[35.0 -117.0] [-25.0 28.0] [40.0 140.0] [-33.0 151.0] [51.0 0.0]])
         st-eci (fn [s secs] (let [mjd (+ c/mjd-J2000 (/ secs 86400.0))]
-                              (fr/apply-m (fr/terrestrial->celestial (t/utc->tt mjd) mjd) s)))
+                              (lin/mat-vec (fr/terrestrial->celestial (t/utc->tt mjd) mjd) s)))
         truth (let [[r v] (kep/elements->state mu {:a 7500.0 :e 0.02 :i 0.95
                                                    :raan 1.1 :argp 2.0 :nu 0.4})]
                 (vec (concat r v)))

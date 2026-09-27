@@ -45,7 +45,8 @@
   a flaw to be fixed, it is what makes them do what they do -- but it does
   mean you have to measure before you can map one onto a color or a
   height. `value-range` is here for that."
-  (:require [allgo.procedural.noise :as noise]
+  (:require [allgo.math :as am]
+            [allgo.procedural.noise :as noise]
             [clojure.math :as math]))
 
 (def defaults
@@ -276,7 +277,7 @@
                 prev signal]
            (if (>= i whole)
              acc
-             (let [w (min 1.0 (max 0.0 (* prev gain)))
+             (let [w (am/clamp (* prev gain) 0.0 1.0)
                    s (* (fold (noise/sample basis x y z)) w)]
                (recur (inc i)
                       (* x lacunarity) (* y lacunarity) (* z lacunarity)

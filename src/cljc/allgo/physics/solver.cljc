@@ -104,6 +104,7 @@
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.contact :as contact]
             [allgo.physics.rigid :as rigid]
             [allgo.physics.toi :as toi]
@@ -770,7 +771,7 @@
                   lambda (if normal?
                            (- (* m ms (- target vd)) (* is old))
                            (* m (- target vd)))
-                  nw (min hi (max lo (+ old lambda)))
+                  nw (am/clamp (+ old lambda) lo hi)
                   d (- nw old)]
               (aset acc k nw)
               (when (pos? ima)
@@ -858,7 +859,7 @@
               (let [t (vec3-at ^doubles tarr k)
                     vt (v/dot rv t)
                     mt (effective-mass ii inv-mass ia ib ra rb t)
-                    j (max (- limit) (min limit (* mt (- vt))))
+                    j (am/clamp (* mt (- vt)) (- limit) limit)
                     p (v/scale t j)]
                 (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
                 (apply-impulse! vel omega ii inv-mass ib rb p 1.0)))))))))

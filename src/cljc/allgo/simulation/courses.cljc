@@ -22,8 +22,10 @@
     :trials      logs, steps and a rock garden, taken at a walk"
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.rigid :as rigid]
-            [allgo.simulation.motorcycle :as m]))
+            [allgo.simulation.motorcycle :as m]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shapes
@@ -38,9 +40,9 @@
   ([[x0 y0] [x1 y1] width thick]
    (let [dx (- (double x1) (double x0))
          dy (- (double y1) (double y0))
-         len (Math/sqrt (+ (* dx dx) (* dy dy)))
-         a (Math/atan2 dy dx)
-         normal [(- (Math/sin a)) (Math/cos a) 0.0]
+         len (math/sqrt (+ (* dx dx) (* dy dy)))
+         a (math/atan2 dy dx)
+         normal [(- (math/sin a)) (math/cos a) 0.0]
          mid [(* 0.5 (+ (double x0) (double x1))) (* 0.5 (+ (double y0) (double y1))) 0.0]]
      (tag (rigid/box {:pos (v/add mid (v/scale normal (* -0.5 (double thick))))
                       :size [len thick width]
@@ -81,13 +83,13 @@
   for goes wrong."
   [run h speed touch]
   (let [run (double run) h (double h) touch (double touch)
-        angle (Math/atan2 h run)
-        v (Math/sqrt (max 1.0 (- (* (double speed) (double speed)) (* 2.0 g h))))
-        vx (* v (Math/cos angle))
-        vy (* v (Math/sin angle))
+        angle (math/atan2 h run)
+        v (math/sqrt (max 1.0 (- (* (double speed) (double speed)) (* 2.0 g h))))
+        vx (* v (math/cos angle))
+        vy (* v (math/sin angle))
         ;; When the arc comes back down to the touchdown height.
         drop (* touch h)
-        t (/ (+ vy (Math/sqrt (+ (* vy vy) (* 2.0 g drop)))) g)
+        t (/ (+ vy (math/sqrt (+ (* vy vy) (* 2.0 g drop)))) g)
         descent (/ (- (* g t) vy) vx)
         ;; A little shallower than the fall, which makes the landing half
         ;; as long again: a bigger place to put the wheels, for a slightly
@@ -144,15 +146,15 @@
         ahead (max 4.0 (* 1.2 v))
         fwd (let [f (q/rotate rot [1.0 0.0 0.0])] (v/normalize [(nth f 0) 0.0 (nth f 2)]))
         want (v/normalize [ahead 0.0 (- (double (nth pos 2)))])
-        err (Math/atan2 (nth (v/cross fwd want) 1) (v/dot fwd want))
-        curvature (/ (* 2.0 (Math/sin err)) ahead)]
-    (max -0.35 (min 0.35 (Math/atan (/ (* v v curvature) 9.81))))))
+        err (math/atan2 (nth (v/cross fwd want) 1) (v/dot fwd want))
+        curvature (/ (* 2.0 (math/sin err)) ahead)]
+    (am/clamp (math/atan (/ (* v v curvature) 9.81)) -0.35 0.35)))
 
 (defn- cruise
   "Throttle to hold `speed`, and the brake if well over it."
   [speed target]
   (let [e (- (double target) (double speed))]
-    {:throttle (max 0.0 (min 1.0 (+ 0.1 (* 0.3 e))))
+    {:throttle (am/clamp (+ 0.1 (* 0.3 e)) 0.0 1.0)
      :brake (if (< e -3.0) (min 1.0 (* 0.2 (- -3.0 e))) 0.0)}))
 
 ;; ---------------------------------------------------------------------------
@@ -163,7 +165,7 @@
 
 (defn- on-loop [theta]
   (let [theta (double theta)]
-    [[(* loop-radius (Math/sin theta)) 0.0 (- (* loop-radius (Math/cos theta)) loop-radius)]
+    [[(* loop-radius (math/sin theta)) 0.0 (- (* loop-radius (math/cos theta)) loop-radius)]
      theta]))
 
 (defn- loop-obstacles []
@@ -174,7 +176,7 @@
                     :curb)))
         ;; A kicker off to the right of the start, for riding by hand.
         (tag (rigid/box {:pos [0.0 0.35 22.0] :size [5.0 0.3 4.0]
-                         :rot (q/from-axis-angle [0.0 0.0 1.0] (/ (* 9.0 Math/PI) 180.0))})
+                         :rot (q/from-axis-angle [0.0 0.0 1.0] (/ (* 9.0 math/PI) 180.0))})
              :ramp)))
 
 (defn- loop-autopilot
@@ -188,13 +190,13 @@
         out (v/scale r (/ 1.0 dist))
         along [(nth out 2) 0.0 (- (double (nth out 0)))]
         want (v/normalize (v/sub along (v/scale out (* 0.08 (- dist loop-radius)))))
-        err (Math/atan2 (nth (v/cross fwd want) 1) (v/dot fwd want))
-        steady (Math/atan (/ (* (double speed) (double speed)) (* 9.81 loop-radius)))
+        err (math/atan2 (nth (v/cross fwd want) 1) (v/dot fwd want))
+        steady (math/atan (/ (* (double speed) (double speed)) (* 9.81 loop-radius)))
         ;; Not quite as hard over as the keys allow: leaned right down, a
         ;; rider's inside boot is near enough the ground to catch a curb.
         cap (min 0.5 (double max-lean))]
     (merge (cruise speed 11.0)
-           {:lean (max (- cap) (min cap (+ steady (* 1.4 err))))})))
+           {:lean (am/clamp (+ steady (* 1.4 err)) (- cap) cap)})))
 
 ;; ---------------------------------------------------------------------------
 ;; Excitebike
@@ -236,7 +238,7 @@
         (conj (slope [215.0 0.0] [220.0 1.0] lane 2.0)
               (block 220.0 240.0 1.0 lane))
         (conj (slope [240.0 1.0] [244.0 1.8] lane 2.8))
-        (into (let [{:keys [gap landing]} (flight 4.0 0.8 (Math/sqrt (- (* v v) (* 2.0 g 1.0))) touch-down)]
+        (into (let [{:keys [gap landing]} (flight 4.0 0.8 (math/sqrt (- (* v v) (* 2.0 g 1.0))) touch-down)]
                 [(slope [(+ 244.0 gap) 1.8] [(+ 244.0 gap landing) 0.0] lane 2.8)]))
         ;; One more to finish on. Not too steep: a short, steep lip kicks
         ;; the rear of the bike up as it leaves, and the bike arrives
@@ -291,8 +293,8 @@
   which the tire meets the way it would meet a round one."
   [x d]
   (tag (rigid/box {:pos [(double x) (* 0.5 (double d)) 0.0]
-                   :size [(* (double d) (Math/sqrt 0.5)) (* (double d) (Math/sqrt 0.5)) 4.0]
-                   :rot (q/from-axis-angle [0.0 0.0 1.0] (/ Math/PI 4.0))})
+                   :size [(* (double d) (math/sqrt 0.5)) (* (double d) (math/sqrt 0.5)) 4.0]
+                   :rot (q/from-axis-angle [0.0 0.0 1.0] (/ math/PI 4.0))})
        :log))
 
 (defn- rocks

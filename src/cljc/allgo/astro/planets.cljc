@@ -20,6 +20,8 @@
             [allgo.astro.ephemeris :as eph]
             [allgo.astro.kepler :as kep]
             [allgo.astro.time :as time]
+            [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (def elements
@@ -56,8 +58,6 @@
 
 (def order [:mercury :venus :earth :mars :jupiter :saturn :uranus :neptune])
 
-(defn- wrap-180 [deg] (- (mod (+ deg 180.0) 360.0) 180.0))
-
 (defn elements-at
   "The classical elements of `planet` at `mjd-tt`, in the units the rest of
   this package uses: kilometers and radians."
@@ -71,10 +71,10 @@
         per (at :peri)
         nod (at :node)]
     {:a a :e e :i i
-     :raan (* (mod nod 360.0) c/degrees)
+     :raan (am/wrap-2pi (* nod c/degrees))
      ;; argument of periapsis is the longitude of perihelion less the node
-     :argp (* (mod (- per nod) 360.0) c/degrees)
-     :M    (* (wrap-180 (- L per)) c/degrees)}))
+     :argp (am/wrap-2pi (* (- per nod) c/degrees))
+     :M    (am/wrap-angle (* (- L per) c/degrees))}))
 
 (defn heliocentric
   "Position of `planet` relative to the Sun, km, in equatorial J2000."
@@ -96,7 +96,7 @@
   The Earth's own place is taken from the same table, so the two share a
   frame and their difference is meaningful even though neither is precise."
   [planet mjd-tt]
-  (mapv - (heliocentric planet mjd-tt) (heliocentric :earth mjd-tt)))
+  (v3/sub (heliocentric planet mjd-tt) (heliocentric :earth mjd-tt)))
 
 (defn sun-from-earth
   "The Sun's geocentric position implied by this table -- simply the
@@ -106,7 +106,7 @@
   entirely separate series. Two independent routes agreeing is a check that
   neither alone can give."
   [mjd-tt]
-  (mapv - (heliocentric :earth mjd-tt)))
+  (v3/negate (heliocentric :earth mjd-tt)))
 
 (defn period
   "Orbital period in days, from the semi-major axis and Kepler's third law."

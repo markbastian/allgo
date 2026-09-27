@@ -13,6 +13,7 @@
   Both conventions are common; mixing them silently gives rotations that
   look almost right."
   (:require [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (def identity-q
@@ -93,13 +94,13 @@
         s (math/sqrt (max 0.0 (- 1.0 (* w w))))]
     (if (< s 1e-9)
       [[1.0 0.0 0.0] 0.0]
-      [[(/ x s) (/ y s) (/ z s)] (* 2.0 (math/acos (min 1.0 (max -1.0 w))))])))
+      [[(/ x s) (/ y s) (/ z s)] (* 2.0 (math/acos (am/clamp w -1.0 1.0)))])))
 
 (defn angle
   "How far this quaternion turns, in radians, always the short way round."
   ^double [q]
   (let [[_ _ _ w] (normalize q)]
-    (* 2.0 (math/acos (min 1.0 (max -1.0 (abs w)))))))
+    (* 2.0 (math/acos (am/clamp (abs w) -1.0 1.0)))))
 
 (defn between
   "The rotation taking `a` to `b`, both unit quaternions."
@@ -119,7 +120,7 @@
       ;; Nearly parallel: lerp, because slerp divides by a sine going to
       ;; zero.
       (normalize (mapv (fn [x y] (+ x (* t (- y x)))) a b))
-      (let [theta (math/acos (min 1.0 (max -1.0 d)))
+      (let [theta (math/acos (am/clamp d -1.0 1.0))
             s (math/sin theta)
             wa (/ (math/sin (* (- 1.0 t) theta)) s)
             wb (/ (math/sin (* t theta)) s)]
@@ -151,7 +152,7 @@
       (< d -0.999999)
       (let [axis (v/cross f (if (< (abs (double (nth f 0))) 0.9) [1.0 0.0 0.0] [0.0 1.0 0.0]))]
         (from-axis-angle axis math/PI))
-      :else (from-axis-angle (v/cross f t) (math/acos (min 1.0 (max -1.0 d)))))))
+      :else (from-axis-angle (v/cross f t) (math/acos (am/clamp d -1.0 1.0))))))
 
 (defn to-matrix
   "The rotation as three rows, `[[r00 r01 r02] [r10 ...] [r20 ...]]`.

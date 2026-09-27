@@ -26,6 +26,7 @@
   4; grid keys, by contrast, are tile indices."
   (:require [allgo.geometry.delaunay :as delaunay]
             [allgo.graph :as graph]
+            [allgo.random :as random]
             [allgo.spatial.sweep :as sweep]
             [clojure.math :as math]))
 
@@ -46,7 +47,10 @@
    :min-hubs         3
    :extra-edge-ratio 0.10
    :corridor-width   3
-   :max-iterations   400})
+   :max-iterations   400
+   ;; `rand` for a new dungeon each time; `(allgo.random/rng seed)` for
+   ;; the same one again.
+   :rng              rand})
 
 ;; ---------------------------------------------------------------------------
 ;; Random helpers
@@ -57,27 +61,32 @@
   [n m]
   (int (* (math/floor (/ (dec (+ n m)) m)) m)))
 
-(defn random-point
-  "A point drawn uniformly from the disk of radius `radius`.
+(defn- unit-disk
+  "A point drawn uniformly from the unit disk.
 
   Two uniform draws are summed and the result folded back on itself past 1,
   which turns the flat distribution into a triangular one. That extra
   weight toward the rim is exactly what cancels the crowding you would
   otherwise get from sampling the radius directly."
-  [radius]
-  (let [t (* 2.0 math/PI (rand))
-        u (+ (rand) (rand))
+  [rng]
+  (let [t (* 2.0 math/PI (rng))
+        u (+ (rng) (rng))
         r (if (> u 1) (- 2 u) u)]
-    [(* radius r (math/cos t)) (* radius r (math/sin t))]))
+    [(* r (math/cos t)) (* r (math/sin t))]))
+
+(defn random-point
+  "A point drawn uniformly from the disk of radius `radius`."
+  ([radius] (random-point rand radius))
+  ([rng radius]
+   (let [[x y] (unit-disk rng)]
+     [(* radius x) (* radius y)])))
 
 (defn random-int-point
   "`random-point`, snapped to the tile grid."
-  [radius tile-size]
-  (let [t (* 2.0 math/PI (rand))
-        u (+ (rand) (rand))
-        r (if (> u 1) (- 2 u) u)]
-    [(roundm (* radius r (math/cos t)) tile-size)
-     (roundm (* radius r (math/sin t)) tile-size)]))
+  ([radius tile-size] (random-int-point rand radius tile-size))
+  ([rng radius tile-size]
+   (let [[x y] (random-point rng radius)]
+     [(roundm x tile-size) (roundm y tile-size)])))
 
 (defn random-ellipse-point
   "A point in the ellipse `ellipse-width` by `ellipse-height`, snapped to
@@ -87,32 +96,22 @@
   for rooms that are much wider than they are tall: separating those on a
   circle resolves most collisions vertically and grows a dungeon far taller
   than it is wide."
-  [ellipse-width ellipse-height tile-size]
-  (let [t (* 2.0 math/PI (rand))
-        u (+ (rand) (rand))
-        r (if (> u 1) (- 2 u) u)]
-    [(roundm (/ (* ellipse-width r (math/cos t)) 2.0) tile-size)
-     (roundm (/ (* ellipse-height r (math/sin t)) 2.0) tile-size)]))
-
-(defn gaussian
-  "One draw from a normal distribution, by the Box-Muller transform.
-
-  Room sizes are normal rather than uniform because it gives you a mean and
-  a spread to tune separately: the spread is what decides whether the hub
-  rooms stand out from the crowd enough to be worth singling out."
-  [mean sd]
-  (let [u1 (max 1e-12 (rand))
-        u2 (rand)]
-    (+ mean (* sd (math/sqrt (* -2.0 (math/log u1))) (math/cos (* 2.0 math/PI u2))))))
+  ([ellipse-width ellipse-height tile-size]
+   (random-ellipse-point rand ellipse-width ellipse-height tile-size))
+  ([rng ellipse-width ellipse-height tile-size]
+   (let [[x y] (unit-disk rng)]
+     [(roundm (/ (* ellipse-width x) 2.0) tile-size)
+      (roundm (/ (* ellipse-height y) 2.0) tile-size)])))
 
 (defn random-room
   "A room with a uniformly random size, centered somewhere in the disk of
   radius `radius`. Kept for callers that want one loose room; `scatter`
   is what the pipeline uses."
-  [radius max-width max-height]
-  {:center (random-point radius)
-   :width  (* (rand) max-width)
-   :height (* (rand) max-height)})
+  ([radius max-width max-height] (random-room rand radius max-width max-height))
+  ([rng radius max-width max-height]
+   {:center (random-point rng radius)
+    :width  (random/uniform rng max-width)
+    :height (random/uniform rng max-height)}))
 
 (defn center
   "Centroid of a collection of rooms."
@@ -166,16 +165,21 @@
   "Step 1. `room-count` rooms with normally distributed extents, centered on
   points drawn from the scatter region -- the disk of radius `:radius`, or
   the ellipse `:ellipse` when one is given. Sizes and positions are both
-  snapped to the tile grid."
+  snapped to the tile grid.
+
+  Room sizes are normal rather than uniform because it gives you a mean and
+  a spread to tune separately: the spread is what decides whether the hub
+  rooms stand out from the crowd enough to be worth singling out."
   [{:keys [room-count radius ellipse tile-size
-           width-mean width-sd height-mean height-sd min-size]}]
+           width-mean width-sd height-mean height-sd min-size rng]
+    :or {rng rand}}]
   (mapv (fn [id]
           {:id     id
            :center (if ellipse
-                     (random-ellipse-point (first ellipse) (second ellipse) tile-size)
-                     (random-int-point radius tile-size))
-           :width  (snap-size (gaussian width-mean width-sd) min-size tile-size)
-           :height (snap-size (gaussian height-mean height-sd) min-size tile-size)})
+                     (random-ellipse-point rng (first ellipse) (second ellipse) tile-size)
+                     (random-int-point rng radius tile-size))
+           :width  (snap-size (random/gaussian rng width-mean width-sd) min-size tile-size)
+           :height (snap-size (random/gaussian rng height-mean height-sd) min-size tile-size)})
         (range room-count)))
 
 ;; ---------------------------------------------------------------------------
@@ -419,7 +423,7 @@
   a corridor you walk down and back. Restoring a fraction of the discarded
   Delaunay edges buys loops and alternate routes. TinyKeep used 15%;
   Adonaac preferred 8-10%."
-  [rooms {:keys [nodes edges]} {:keys [extra-edge-ratio]}]
+  [rooms {:keys [nodes edges]} {:keys [extra-edge-ratio rng] :or {rng rand}}]
   (let [by-id  (into {} (map (juxt :id identity)) rooms)
         weight (fn [e]
                  (let [[u v] (vec e)
@@ -429,7 +433,7 @@
         tree   (graph/minimum-spanning-tree nodes edges weight)
         spare  (vec (graph/edges-not-in edges tree))
         extra  (int (math/round (* extra-edge-ratio (count spare))))]
-    (into tree (take extra (shuffle spare)))))
+    (into tree (take extra (random/shuffle rng spare)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 6. Corridors

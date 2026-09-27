@@ -1,5 +1,7 @@
 (ns allgo.procedural.cave
-  (:require [clojure.set :refer [difference intersection]]))
+  (:require [allgo.random :as random]
+            [clojure.math :as math]
+            [clojure.set :refer [difference intersection]]))
 
 (defn grid-data->ascii-lines [grid]
   (mapv
@@ -23,48 +25,61 @@
        ((juxt identity identity inc inc inc identity dec dec dec) y)))
 
 (defn random-walk-step
-  ([start] (mapv + start (rand-nth [[0 1] [0 -1] [1 0] [-1 0]])))
-  ([grid start]
-   (first (filter (partial get-in grid) (repeatedly #(random-walk-step start))))))
+  "One step in a random direction; with a grid, one that stays on it.
+  `rng` is a function of no arguments returning [0, 1): `rand`, or an
+  `allgo.random/rng` to get the same cave again."
+  ([rng start] (mapv + start (random/pick rng [[0 1] [0 -1] [1 0] [-1 0]])))
+  ([rng grid start]
+   (first (filter (partial get-in grid) (repeatedly #(random-walk-step rng start))))))
 
-(defn random-walk-cave-step [{:keys [current-location grid] :as m}]
-  (let [next-location (random-walk-step grid current-location)]
+(defn random-walk-cave-step [{:keys [current-location grid rng] :or {rng rand} :as m}]
+  (let [next-location (random-walk-step rng grid current-location)]
     (-> m
         (assoc :current-location next-location)
         (assoc-in (into [:grid] next-location) :floor))))
 
-(defn random-walk-cave-seq [start grid]
-  (->> {:current-location start :grid (assoc-in grid start :floor)}
-       (iterate random-walk-cave-step)
-       (map :grid)
-       distinct))
+(defn random-walk-cave-seq
+  ([start grid] (random-walk-cave-seq start grid rand))
+  ([start grid rng]
+   (->> {:current-location start :grid (assoc-in grid start :floor) :rng rng}
+        (iterate random-walk-cave-step)
+        (map :grid)
+        distinct)))
 
-(defn wander-caverns [start grid iterations]
-  (nth (random-walk-cave-seq start grid) iterations))
+(defn wander-caverns
+  ([start grid iterations] (wander-caverns start grid iterations rand))
+  ([start grid iterations rng]
+   (nth (random-walk-cave-seq start grid rng) iterations)))
 
 ;The frontier cave strategy randomly marks any "frontier" location of a grid as floor and
 ;then adds all wall neighbors of the selected location to the frontier. This tends to create
 ;larger more cavernous spaces than random walk as the space can expand from any location,
 ;not the location of the "walker"
-(defn frontier-cave-step [{:keys [frontier grid] :as m}]
-  (when-some [n (some-> frontier seq rand-nth)]
+(defn frontier-cave-step [{:keys [frontier grid rng] :or {rng rand} :as m}]
+  (when-some [n (some->> frontier seq (random/pick rng))]
     (-> m
         (assoc-in (into [:grid] n) :floor)
         (update :frontier disj n)
         (update :frontier into (filter #(= :wall (get-in grid %)) (ortho-neighbors n))))))
 
-(defn frontier-cave-seq [start grid]
-  (->> {:frontier #{start} :grid grid}
-       (iterate frontier-cave-step)
-       (map :grid)
-       (take-while identity)))
+(defn frontier-cave-seq
+  ([start grid] (frontier-cave-seq start grid rand))
+  ([start grid rng]
+   (->> {:frontier #{start} :grid grid :rng rng}
+        (iterate frontier-cave-step)
+        (map :grid)
+        (take-while identity))))
 
-(defn frontier-caverns [start grid iterations]
-  (nth (frontier-cave-seq start grid) iterations))
+(defn frontier-caverns
+  ([start grid iterations] (frontier-caverns start grid iterations rand))
+  ([start grid iterations rng]
+   (nth (frontier-cave-seq start grid rng) iterations)))
 
 ;Cellular automata caves
-(defn ca-grid [w h n]
-  (random-sample n (for [row (range h) col (range w)] [row col])))
+(defn ca-grid
+  ([w h n] (ca-grid w h n rand))
+  ([w h n rng]
+   (random/sample rng n (for [row (range h) col (range w)] [row col]))))
 
 (defn ca-cave-step [grid]
   (->> grid
@@ -75,14 +90,18 @@
 
 (def ca-cave-iterator #(iterate ca-cave-step %))
 
-(defn ca-cave-seq [w h pct]
-  (let [grid (init w h)]
-    (->> (ca-grid w h pct)
-         ca-cave-iterator
-         (map (partial reduce mark-floor grid)))))
+(defn ca-cave-seq
+  ([w h pct] (ca-cave-seq w h pct rand))
+  ([w h pct rng]
+   (let [grid (init w h)]
+     (->> (ca-grid w h pct rng)
+          ca-cave-iterator
+          (map (partial reduce mark-floor grid))))))
 
-(defn ca-caverns [w h pct iterations]
-  (nth (ca-cave-seq w h pct) iterations))
+(defn ca-caverns
+  ([w h pct iterations] (ca-caverns w h pct iterations rand))
+  ([w h pct iterations rng]
+   (nth (ca-cave-seq w h pct rng) iterations)))
 
 (defn floor-coords [grid]
   (set (for [i (range (count grid)) j (range (count (grid i)))
@@ -117,7 +136,7 @@
 
 (defn center [island]
   (mapv
-   (fn [v] (Math/round (double (/ v (count island)))))
+   (fn [v] (math/round (double (/ v (count island)))))
    (apply mapv + island)))
 
 (defn step-toward [a b]
@@ -135,30 +154,30 @@
 (defn shuffle-path-to
   "Generate a path from start to finish (inclusive of both ends) that randomly
   shuffles steps, producing equivalent manhattan distances along the path."
-  ([start finish]
+  ([start finish] (shuffle-path-to rand start finish))
+  ([rng start finish]
    (letfn [(signum [x] (cond (pos? x) 1 (neg? x) -1 :else 0))]
      (let [[dx dy] (map - finish start)
            x-steps (repeat (abs dx) [(signum dx) 0])
            y-steps (repeat (abs dy) [0 (signum dy)])]
        (->> (into x-steps y-steps)
-            shuffle
-            (reductions (partial mapv +) start)))))
-  ([[start finish]] (shuffle-path-to start finish)))
+            (random/shuffle rng)
+            (reductions (partial mapv +) start))))))
 
 (comment
-  (shuffle-path-to [0 0] [10 10])
-  (shuffle-path-to [[0 0] [10 10]]))
+  (shuffle-path-to [0 0] [10 10]))
 
 (defn connect
   "Add connective :floor cells to each cavern to ensure all are connected."
-  [cavern-data]
-  (let [islands (-> cavern-data meadow-coords find-islands)
-        centers (map center islands)
-        links (take (dec (count islands)) (partition 2 1 (shuffle centers)))]
-    (reduce
-     (fn [acc coord] (assoc-in acc coord :floor))
-     cavern-data
-     (mapcat shuffle-path-to links))))
+  ([cavern-data] (connect cavern-data rand))
+  ([cavern-data rng]
+   (let [islands (-> cavern-data meadow-coords find-islands)
+         centers (map center islands)
+         links (take (dec (count islands)) (partition 2 1 (random/shuffle rng centers)))]
+     (reduce
+      (fn [acc coord] (assoc-in acc coord :floor))
+      cavern-data
+      (mapcat (fn [[a b]] (shuffle-path-to rng a b)) links)))))
 
 (defn connect-caverns [caverns]
   (->> caverns connect grid-data->ascii-lines))

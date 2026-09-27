@@ -44,7 +44,8 @@
   for you -- it is a property of the traversal order, which is the
   caller's -- but `:t-min` is the hook: pass the last hit, less enough to
   be safe."
-  (:require [allgo.geometry.vec3 :as v3]))
+  (:require [allgo.geometry.vec3 :as v3]
+            [clojure.math :as math]))
 
 (defn intersect
   "Marches `altitude` along a ray and returns where it first goes below zero.
@@ -144,5 +145,5 @@
         c (- (v3/dot origin origin) (* r r))
         disk (- (* b b) c)]
     (when-not (neg? disk)
-      (let [s (Math/sqrt disk)]
+      (let [s (math/sqrt disk)]
         [(- (- b) s) (+ (- b) s)]))))

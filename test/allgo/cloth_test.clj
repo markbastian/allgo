@@ -1,10 +1,10 @@
 (ns allgo.cloth-test
   (:require [allgo.geometry.tri-mesh :as tri]
+            [allgo.math :as am]
             [allgo.physics.xpbd :as x]
             [clojure.test :refer [deftest is testing]]))
 
-(defn- finite? [v] (and (not (Double/isNaN v)) (not (Double/isInfinite v))))
-(defn- all-finite? [body] (every? finite? (x/positions body)))
+(defn- all-finite? [body] (every? am/finite? (x/positions body)))
 (defn- ys [body] (map second (partition 3 (x/positions body))))
 
 (defn- hung

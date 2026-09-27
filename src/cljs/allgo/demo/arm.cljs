@@ -40,6 +40,7 @@
             [allgo.kinematics.analytic :as ik]
             [allgo.kinematics.chain :as k]
             [allgo.kinematics.numeric :as nik]
+            [allgo.math :as am]
             [allgo.physics.joint :as joint]
             [allgo.physics.rigid :as rigid]
             ["lil-gui" :default GUI]
@@ -102,7 +103,7 @@
   [solutions from]
   (when (seq solutions)
     (apply min-key
-           (fn [s] (reduce + (map (fn [a b] (js/Math.abs (k/wrap-angle (- a b)))) s from)))
+           (fn [s] (reduce + (map (fn [a b] (js/Math.abs (am/wrap-angle (- a b)))) s from)))
            solutions)))
 
 ;; ---------------------------------------------------------------------------
@@ -228,7 +229,7 @@
   what a controller commands when it is told to go to a configuration
   rather than to follow a path."
   [current target dt speed]
-  (let [deltas (map (fn [a b] (k/wrap-angle (- b a))) current target)
+  (let [deltas (map (fn [a b] (am/wrap-angle (- b a))) current target)
         biggest (reduce max 0.0 (map js/Math.abs deltas))]
     (if (< biggest 1e-5)
       (vec target)

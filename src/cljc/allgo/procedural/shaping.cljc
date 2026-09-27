@@ -24,12 +24,8 @@
   language: the value being shaped comes last. That reads backward for
   Clojure's threading macros and is worth keeping anyway, because these are
   the names and the signatures a reader of the book already has."
-  (:require [clojure.math :as math]))
-
-(defn clamp
-  "`x` confined to [`a`, `b`]."
-  ^double [^double a ^double b ^double x]
-  (cond (< x a) a (> x b) b :else x))
+  (:require [allgo.math :as am]
+            [clojure.math :as math]))
 
 (defn mix
   "Linear blend: `a` at `t` = 0, `b` at `t` = 1.
@@ -37,7 +33,7 @@
   The book calls this `lerp`; RenderMan calls it `mix`. It is the join in
   every layered texture -- two materials and a mask."
   ^double [^double a ^double b ^double t]
-  (+ a (* t (- b a))))
+  (am/lerp a b t))
 
 (defn remap
   "`x`, which lies in [`a0`, `a1`], moved to where it falls in [`b0`, `b1`].
@@ -70,7 +66,7 @@
   apart and the edge is exactly one pixel wide. `smoothstep` is the same
   idea with the corners taken off."
   ^double [^double a ^double b ^double x]
-  (clamp 0.0 1.0 (/ (- x a) (if (== a b) 1e-30 (- b a)))))
+  (am/clamp (/ (- x a) (if (== a b) 1e-30 (- b a))) 0.0 1.0))
 
 (defn smoothstep
   "The Hermite ramp from 0 at `a` to 1 at `b`, flat at both ends.
@@ -152,10 +148,10 @@
         n (count knots)]
     (cond
       (zero? n) 0.0
-      (< n 4) (double (nth knots (long (clamp 0.0 (double (dec n)) (math/floor (* t (double n)))))))
+      (< n 4) (double (nth knots (long (am/clamp (math/floor (* t (double n))) 0.0 (double (dec n))))))
       :else
       (let [spans (double (- n 3))
-            x (* (clamp 0.0 1.0 t) spans)
+            x (* (am/clamp t 0.0 1.0) spans)
             i (long (min (double (dec spans)) (math/floor x)))
             u (- x i)
             k (fn ^double [^long j] (double (nth knots (+ i j))))

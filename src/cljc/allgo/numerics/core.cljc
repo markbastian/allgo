@@ -11,24 +11,16 @@
   An integrator is a map of state, advanced by `step`. Keeping it a value
   rather than a loop lets a caller drive it one step per animation frame,
   inspect the error estimate, or restart it."
-  (:require [clojure.math :as math]))
-
-(defn finite?
-  "Portable across Clojure and ClojureScript: NaN is the only value not
-  equal to itself, and the infinities compare equal to their literals."
-  [x]
-  (and (== x x) (not= x ##Inf) (not= x ##-Inf)))
-
-(defn v+ [a b] (mapv + a b))
-(defn v- [a b] (mapv - a b))
-(defn v* [v s] (mapv #(* % s) v))
+  (:require [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
+            [clojure.math :as math]))
 
 (defn combine
   "Sum of `vs` weighted by `ws`, skipping zero weights -- in a Butcher tableau
   most of them are zero, and each skipped term is a whole vector not built."
   [ws vs]
   (reduce (fn [acc [w v]]
-            (if (zero? w) acc (v+ acc (v* v w))))
+            (if (zero? w) acc (lin/add acc (lin/scale v w))))
           (vec (repeat (count (first vs)) 0.0))
           (map vector ws vs)))
 
@@ -124,12 +116,10 @@
 
   Returns `[accept? h-next]`."
   [err order {:keys [safety min-scale max-scale h-min h-max]} h]
-  (let [scale (if (or (zero? err) (not (finite? err)))
+  (let [scale (if (or (zero? err) (not (am/finite? err)))
                 max-scale
-                (-> (* safety (math/pow (/ 1.0 err) (/ 1.0 (inc order))))
-                    (max min-scale)
-                    (min max-scale)))
-        h'    (-> (* h scale) (max h-min) (min h-max))]
+                (am/clamp (* safety (math/pow (/ 1.0 err) (/ 1.0 (inc order)))) min-scale max-scale))
+        h'    (am/clamp (* h scale) h-min h-max)]
     [(<= err 1.0) h']))
 
 (defn settle

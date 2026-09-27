@@ -23,7 +23,7 @@
   cell gets, or where in the cell they sit, shows up in the texture as a
   grid. Space is cut into unit cells only so that the search can be
   finite; a cell's points are derived from its integer coordinates by
-  `allgo.procedural.noise/cell-seed`, so nothing is stored and the field
+  `allgo.random/cell-seed`, so nothing is stored and the field
   is unbounded.
 
   The search covers the 3x3x3 cells around the sample. That is an
@@ -34,6 +34,7 @@
   around three points per cell the chance of it mattering is not
   measurable in a picture."
   (:require [allgo.procedural.noise :as noise]
+            [allgo.random :as random]
             [clojure.math :as math]))
 
 (def metrics
@@ -62,20 +63,20 @@
   [{:keys [seed density jitter] :or {seed 0 density 3.0 jitter 1.0}} i j k]
   (let [seed (long seed) i (long i) j (long j) k (long k)
         density (double density) jitter (double jitter)
-        s0 (noise/cell-seed seed i j k)
-        m (noise/poisson-count density (noise/unit s0))
+        s0 (random/cell-seed seed i j k)
+        m (noise/poisson-count density (random/unit s0))
         center (* 0.5 (- 1.0 jitter))]
-    (loop [n 0 s (noise/advance s0) acc []]
+    (loop [n 0 s (random/advance s0) acc []]
       (if (>= n m)
         acc
-        (let [px (+ i center (* jitter (noise/unit s)))
-              s (noise/advance s)
-              py (+ j center (* jitter (noise/unit s)))
-              s (noise/advance s)
-              pz (+ k center (* jitter (noise/unit s)))
-              s (noise/advance s)
-              v (noise/signed s)]
-          (recur (inc n) (noise/advance s) (conj acc [px py pz v])))))))
+        (let [px (+ i center (* jitter (random/unit s)))
+              s (random/advance s)
+              py (+ j center (* jitter (random/unit s)))
+              s (random/advance s)
+              pz (+ k center (* jitter (random/unit s)))
+              s (random/advance s)
+              v (random/signed s)]
+          (recur (inc n) (random/advance s) (conj acc [px py pz v])))))))
 
 (defn- insert!
   "Slides `d` into `best`, an ascending array of the smallest distances so
@@ -116,27 +117,27 @@
             (let [i (+ ci (- (rem c 3) 1))
                   j (+ cj (- (rem (quot c 3) 3) 1))
                   k (+ ck (- (quot c 9) 1))
-                  s0 (noise/cell-seed seed i j k)
-                  m (noise/poisson-count density (noise/unit s0))]
+                  s0 (random/cell-seed seed i j k)
+                  m (noise/poisson-count density (random/unit s0))]
               (recur
                (inc c)
                (double
-                (loop [p 0 s (noise/advance s0) bd bd]
+                (loop [p 0 s (random/advance s0) bd bd]
                   (if (>= p m)
                     bd
-                    (let [px (+ i center (* jitter (noise/unit s)))
-                          s (noise/advance s)
-                          py (+ j center (* jitter (noise/unit s)))
-                          s (noise/advance s)
-                          pz (+ k center (* jitter (noise/unit s)))
-                          s (noise/advance s)
-                          v (noise/signed s)
+                    (let [px (+ i center (* jitter (random/unit s)))
+                          s (random/advance s)
+                          py (+ j center (* jitter (random/unit s)))
+                          s (random/advance s)
+                          pz (+ k center (* jitter (random/unit s)))
+                          s (random/advance s)
+                          v (random/signed s)
                           d (double (dist (- x px) (- y py) (- z pz)))]
                       (insert! best d)
                       (if (< d bd)
                         (do (aset bp 0 px) (aset bp 1 py) (aset bp 2 pz) (aset bp 3 v)
-                            (recur (inc p) (noise/advance s) d))
-                        (recur (inc p) (noise/advance s) bd))))))))))))))
+                            (recur (inc p) (random/advance s) d))
+                        (recur (inc p) (random/advance s) bd))))))))))))))
 
 (defn nearest
   "`(fn [x y z] -> {:distances [...] :value v :point [...]})`.

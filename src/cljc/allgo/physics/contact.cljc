@@ -74,8 +74,10 @@
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.rigid :as rigid]
-            [allgo.spatial.sweep :as sweep]))
+            [allgo.spatial.sweep :as sweep]
+            [clojure.math :as math]))
 
 (def ^:private eps 1e-9)
 
@@ -348,10 +350,10 @@
         b (v/dot d1 d2)
         denom (- (* a e) (* b b))
         s (if (> (abs denom) eps)
-            (min 1.0 (max 0.0 (/ (- (* b f) (* c e)) denom)))
+            (am/clamp (/ (- (* b f) (* c e)) denom) 0.0 1.0)
             0.0)
-        t (min 1.0 (max 0.0 (/ (+ (* b s) f) (max eps e))))
-        s (min 1.0 (max 0.0 (/ (- (* b t) c) (max eps a))))]
+        t (am/clamp (/ (+ (* b s) f) (max eps e)) 0.0 1.0)
+        s (am/clamp (/ (- (* b t) c) (max eps a)) 0.0 1.0)]
     (v/scale (v/add (v/add-scaled p1 d1 s) (v/add-scaled p2 d2 t)) 0.5)))
 
 (defn- edge-contact
@@ -457,7 +459,7 @@
         local (q/rotate (:inv-rot b) (v/sub (:pos a) (:pos b)))
         [hx hy hz] (half b)
         [lx ly lz] local
-        clamped [(min hx (max (- hx) lx)) (min hy (max (- hy) ly)) (min hz (max (- hz) lz))]
+        clamped [(am/clamp lx (- hx) hx) (am/clamp ly (- hy) hy) (am/clamp lz (- hz) hz)]
         inside? (= clamped (vec local))
         r (double (:radius a))]
     (if inside?
@@ -496,7 +498,7 @@
   "The point at angle `t` on the circle a torus's tube is swept along."
   [{:keys [pos rot major]} ^double t]
   (let [big (double major)]
-    (v/add pos (q/rotate rot [(* big (Math/cos t)) (* big (Math/sin t)) 0.0]))))
+    (v/add pos (q/rotate rot [(* big (math/cos t)) (* big (math/sin t)) 0.0]))))
 
 (defn- torus-box-deepest
   [ia ib a b margin]
@@ -504,12 +506,12 @@
         depth-at (fn ^double [^double t]
                    (let [cs (sphere-box ia ib {:pos (ring-point a t) :radius r} b margin)]
                      (if (seq cs) (double (:depth (first cs))) ##-Inf)))
-        step (/ (* 2.0 Math/PI) torus-samples)
+        step (/ (* 2.0 math/PI) torus-samples)
         best (apply max-key #(depth-at (double %))
                     (map #(* step (double %)) (range torus-samples)))]
     (if (= ##-Inf (depth-at best))
       []
-      (let [phi (/ (- (Math/sqrt 5.0) 1.0) 2.0)
+      (let [phi (/ (- (math/sqrt 5.0) 1.0) 2.0)
             t (loop [lo (- (double best) step) hi (+ (double best) step) k 0]
                 (if (= k 24)
                   (* 0.5 (+ lo hi))

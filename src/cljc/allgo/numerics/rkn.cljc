@@ -13,7 +13,9 @@
     k_i     = f(t + c_i h, y + c_i h y' + h^2 sum_j a_ij k_j)
     y_{n+1} = y + h y' + h^2 sum_i b_i k_i
     y'_{n+1}= y'     + h sum_i b'_i k_i"
-  (:require [allgo.numerics.core :as core]))
+  (:require [allgo.numerics.core :as core]
+            [allgo.numerics.linear :as lin]
+            [clojure.math :as math]))
 
 (defn tableau-step
   "One step from `(t, y, y')`. Returns `[y-next y'-next]`."
@@ -22,13 +24,13 @@
         ks (reduce (fn [ks i]
                      (let [ci  (nth c i)
                            row (nth a i)
-                           yi  (cond-> (core/v+ y (core/v* dy (* ci h)))
-                                 (seq row) (core/v+ (core/v* (core/combine row ks) h2)))]
+                           yi  (cond-> (lin/add y (lin/scale dy (* ci h)))
+                                 (seq row) (lin/add (lin/scale (core/combine row ks) h2)))]
                        (conj ks (f (+ t (* h ci)) yi))))
                    []
                    (range (count c)))]
-    [(core/v+ (core/v+ y (core/v* dy h)) (core/v* (core/combine b ks) h2))
-     (core/v+ dy (core/v* (core/combine b-dot ks) h))]))
+    [(lin/add (lin/add y (lin/scale dy h)) (lin/scale (core/combine b ks) h2))
+     (lin/add dy (lin/scale (core/combine b-dot ks) h))]))
 
 ;; -------------------------------------------------------------- the tables
 
@@ -79,15 +81,15 @@
         mid    (raw integ t y dy half)
         fine   (raw integ (+ t half) (:y mid) (:dy mid) half)
         p      (:order method)
-        denom  (- (Math/pow 2.0 p) 1.0)
-        diff   (core/v- (:y fine) (:y coarse))
-        e      (core/v* diff (/ 1.0 denom))
+        denom  (- (math/pow 2.0 p) 1.0)
+        diff   (lin/sub (:y fine) (:y coarse))
+        e      (lin/scale diff (/ 1.0 denom))
         err    (core/norm e (:y fine) (:tol-abs control) (:tol-rel control))]
     (core/settle integ err p
                  {:t  (+ t h)
-                  :y  (core/v+ (:y fine) e)
-                  :dy (core/v+ (:dy fine)
-                               (core/v* (core/v- (:dy fine) (:dy coarse)) (/ 1.0 denom)))})))
+                  :y  (lin/add (:y fine) e)
+                  :dy (lin/add (:dy fine)
+                               (lin/scale (lin/sub (:dy fine) (:dy coarse)) (/ 1.0 denom)))})))
 
 (defn integrator
   "An integrator for `y'' = (f t y)` from `y0`, `dy0` at `t0` with step `h`.

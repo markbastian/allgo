@@ -36,6 +36,7 @@
   wants. It is checked against Craig's matrix in the tests."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (def identity-transform {:rot q/identity-q :pos v/zero})
@@ -151,23 +152,10 @@
   [c values]
   (mapv (fn [lim value]
           (if lim
-            (min (double (second lim)) (max (double (first lim)) (double value)))
+            (am/clamp (double value) (double (first lim)) (double (second lim)))
             value))
         (limits c)
         values))
-
-(defn wrap-angle
-  "An angle brought into `(-pi, pi]`.
-
-  Joint solutions come out of inverse trigonometry anywhere on the circle,
-  and two that differ by a full turn are the same arm in the same place --
-  but only one of them is likely to be inside the joint's range."
-  ^double [theta]
-  (let [two-pi (* 2.0 math/PI)
-        r (rem (double theta) two-pi)]
-    (cond (> r math/PI) (- r two-pi)
-          (<= r (- math/PI)) (+ r two-pi)
-          :else r)))
 
 (defn home
   "Every joint at zero."

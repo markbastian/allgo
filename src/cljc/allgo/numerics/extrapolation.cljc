@@ -10,7 +10,8 @@
   *even* powers of h alone. Extrapolating against h^2 therefore kills two
   orders per level rather than one, so k levels reach order 2k -- orders
   which would be hopeless to construct as a tableau are routine here."
-  (:require [allgo.numerics.core :as core]))
+  (:require [allgo.numerics.core :as core]
+            [allgo.numerics.linear :as lin]))
 
 (defn modified-midpoint
   "Gragg's rule: cross `H` in `n` sub-steps by centered differences, then take
@@ -20,15 +21,15 @@
         f0 (f t y)]
     (loop [m     1
            prev  y
-           cur   (core/v+ y (core/v* f0 h))]
+           cur   (lin/add y (lin/scale f0 h))]
       (if (= m n)
         ;; The final average is what leaves an expansion in h^2 alone.
-        (core/v* (core/v+ (core/v+ cur prev)
-                          (core/v* (f (+ t H) cur) h))
-                 0.5)
+        (lin/scale (lin/add (lin/add cur prev)
+                            (lin/scale (f (+ t H) cur) h))
+                   0.5)
         (recur (inc m)
                cur
-               (core/v+ prev (core/v* (f (+ t (* m h)) cur) (* 2.0 h))))))))
+               (lin/add prev (lin/scale (f (+ t (* m h)) cur) (* 2.0 h))))))))
 
 (def step-sequence
   "Sub-step counts 2, 4, 6, 8, ... (Deuflhard). Every one is even, which the
@@ -51,16 +52,16 @@
       ;; nothing to push against.
       (if (>= j k)
         [(peek col) (if prev
-                      (core/v- (peek col) (peek prev))
-                      (core/v* (peek col) 0.0))]
+                      (lin/sub (peek col) (peek prev))
+                      (lin/scale (peek col) 0.0))]
         (let [next-col (vec (for [i (range k)]
                               (if (< i j)
                                 (nth col i)
                                 (let [a (nth col i)
                                       b (nth col (dec i))
                                       r (/ (double (nth ns i)) (nth ns (- i j)))]
-                                  (core/v+ a (core/v* (core/v- a b)
-                                                      (/ 1.0 (- (* r r) 1.0))))))))]
+                                  (lin/add a (lin/scale (lin/sub a b)
+                                                        (/ 1.0 (- (* r r) 1.0))))))))]
           (recur (inc j) next-col col))))))
 
 (defn- gbs-step
@@ -121,15 +122,15 @@
         f0 (f t y)]
     (loop [m    1
            prev y
-           cur  (core/v+ (core/v+ y (core/v* dy h)) (core/v* f0 (* 0.5 h2)))]
+           cur  (lin/add (lin/add y (lin/scale dy h)) (lin/scale f0 (* 0.5 h2)))]
       (if (= m n)
         (let [fn* (f (+ t H) cur)]
-          [cur (core/v+ (core/v* (core/v- cur prev) (/ 1.0 h))
-                        (core/v* fn* (* 0.5 h)))])
+          [cur (lin/add (lin/scale (lin/sub cur prev) (/ 1.0 h))
+                        (lin/scale fn* (* 0.5 h)))])
         (recur (inc m)
                cur
-               (core/v+ (core/v- (core/v* cur 2.0) prev)
-                        (core/v* (f (+ t (* m h)) cur) h2)))))))
+               (lin/add (lin/sub (lin/scale cur 2.0) prev)
+                        (lin/scale (f (+ t (* m h)) cur) h2)))))))
 
 (defn- gbs2-step [f t y dy H levels]
   (let [ns   (subvec step-sequence 0 levels)

@@ -13,6 +13,7 @@
   satellite is relative to where it was expected."
   (:require [allgo.astro.constants :as c]
             [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (def a-earth c/R-earth)
@@ -71,10 +72,6 @@
 
 ;; ---------------------------------------------------------------- local frames
 
-(defn- unit [v]
-  (let [m (math/sqrt (reduce + (map * v v)))]
-    (if (zero? m) v (mapv #(/ % m) v))))
-
 (defn east-north-up
   "The local horizon frame at a geodetic latitude and longitude: rows are
   the east, north and up directions in Earth-fixed coordinates.
@@ -97,8 +94,8 @@
   satellite is most of the time."
   [station target]
   (let [[lat lon _] (cartesian->geodetic station)
-        d     (mapv - target station)
-        [e n u] (mapv (fn [row] (reduce + (map * row d))) (east-north-up lat lon))
+        d     (v3/sub target station)
+        [e n u] (lin/mat-vec (east-north-up lat lon) d)
         rng   (math/sqrt (+ (* e e) (* n n) (* u u)))]
     {:azimuth   (let [az (math/atan2 e n)] (if (neg? az) (+ az c/two-pi) az))
      :elevation (math/asin (/ u rng))
@@ -121,12 +118,12 @@
   radially, so after a day a prediction is typically wrong by kilometers in
   one direction and meters in the others."
   [r v]
-  (let [R (unit r)
-        N (unit (v3/cross r v))
+  (let [R (v3/normalize r)
+        N (v3/normalize (v3/cross r v))
         T (v3/cross N R)]
     [R T N]))
 
 (defn to-rtn
   "Express a difference vector in the RTN frame of an orbit."
   [r v d]
-  (mapv (fn [row] (reduce + (map * row d))) (rtn-frame r v)))
+  (lin/mat-vec (rtn-frame r v) d))

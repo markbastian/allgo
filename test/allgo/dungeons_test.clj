@@ -1,6 +1,7 @@
 (ns allgo.dungeons-test
   (:require [allgo.graph :as graph]
             [allgo.procedural.dungeons :as d]
+            [allgo.random :as random]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- room [id [cx cy] w h]
@@ -44,14 +45,6 @@
   (testing "snapped variant lands on the grid"
     (is (every? (fn [[x y]] (and (zero? (mod x 4)) (zero? (mod y 4))))
                 (repeatedly 200 #(d/random-int-point 40 4))))))
-
-(deftest gaussian-test
-  (let [xs (repeatedly 20000 #(d/gaussian 24.0 8.0))
-        mean (/ (reduce + xs) (count xs))
-        sd   (Math/sqrt (/ (reduce + (map #(let [d (- % mean)] (* d d)) xs))
-                           (dec (count xs))))]
-    (is (< 23.5 mean 24.5))
-    (is (< 7.6 sd 8.4))))
 
 (deftest bounds-test
   (is (= [-10.0 -5.0 10.0 5.0] (d/bounds (room 0 [0 0] 20 10))))
@@ -273,3 +266,9 @@
                         (double (- (apply max ys) (apply min ys))))))]
       (is (> (aspect {:room-count 60 :ellipse [800 60]})
              (aspect {:room-count 60 :radius 80.0}))))))
+
+(deftest seeded-test
+  (testing "the same seed builds the same dungeon"
+    (let [build #(d/generate {:room-count 40 :radius 60.0 :rng (random/rng 11)})]
+      (is (= (:grid (build)) (:grid (build))))
+      (is (= (:edges (build)) (:edges (build)))))))

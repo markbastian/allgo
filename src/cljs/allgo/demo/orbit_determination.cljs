@@ -28,6 +28,8 @@
             [allgo.astro.variational :as va]
             [allgo.demo.fps :as fps]
             [allgo.numerics :as num]
+            [allgo.numerics.linear :as lin]
+            [allgo.random :as random]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
@@ -51,7 +53,7 @@
 
 (defn- station-eci [s secs]
   (let [mjd (+ c/mjd-J2000 (/ secs 86400.0))]
-    (fr/apply-m (fr/terrestrial->celestial (atime/utc->tt mjd) mjd) s)))
+    (lin/mat-vec (fr/terrestrial->celestial (atime/utc->tt mjd) mjd) s)))
 
 (defn- accel [_ r _]
   (let [d (Math/sqrt (reduce + (map * r r)))]
@@ -74,10 +76,6 @@
       (let [s (num/step-until integ (first ts))]
         (recur s (rest ts) (conj out (va/unpack (:y s))))))))
 
-(defn- gaussian [] (let [u (max 1e-12 (js/Math.random)) v (js/Math.random)]
-                     (* (js/Math.sqrt (* -2.0 (js/Math.log u)))
-                        (js/Math.cos (* 2.0 js/Math.PI v)))))
-
 (defn- setup
   "Build a truth orbit, simulate observations from it, and start the estimate
   somewhere wrong."
@@ -96,7 +94,7 @@
                           :when (> (:elevation (gd/look-angles se rs)) elevation-mask)]
                       {:i i :t secs :station idx
                        :measured (+ (Math/sqrt (reduce + (map * (mapv - rs se) (mapv - rs se))))
-                                    (* sigma (gaussian)))}))
+                                    (* sigma (random/gaussian rand 0.0 1.0)))}))
         e      (.-startErrorKm controls)
         guess  (mapv + truth [(* e 0.74) (* e -0.56) (* e 0.37)
                               (* e 7.4e-4) (* e 3.7e-4) (* e -5.6e-4)])]

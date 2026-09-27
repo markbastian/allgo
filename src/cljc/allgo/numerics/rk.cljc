@@ -8,7 +8,8 @@
   An embedded pair carries a second weight vector `b-hat` of lower order.
   The two solutions differ by the leading truncation error, which is what
   makes step-size control possible without integrating anything twice."
-    (:require [allgo.numerics.core :as core]))
+    (:require [allgo.numerics.core :as core]
+              [allgo.numerics.linear :as lin]))
 
 ;; ------------------------------------------------------------- the stepper
 
@@ -18,13 +19,13 @@
   [{:keys [a b b-hat]} c f t y h]
   (let [ks (reduce (fn [ks i]
                      (let [row (nth a i)
-                           yi  (if (seq row) (core/v+ y (core/v* (core/combine row ks) h)) y)]
+                           yi  (if (seq row) (lin/add y (lin/scale (core/combine row ks) h)) y)]
                        (conj ks (f (+ t (* h (nth c i))) yi))))
                    []
                    (range (count c)))]
-    [(core/v+ y (core/v* (core/combine b ks) h))
+    [(lin/add y (lin/scale (core/combine b ks) h))
      (when b-hat
-       (core/v* (core/combine (mapv - b b-hat) ks) h))]))
+       (lin/scale (core/combine (mapv - b b-hat) ks) h))]))
 
 ;; -------------------------------------------------------------- the tables
 

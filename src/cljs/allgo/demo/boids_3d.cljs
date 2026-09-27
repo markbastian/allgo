@@ -7,6 +7,7 @@
   (hue from compass bearing, brightness from climb), so a flock settling into
   alignment reads as the swarm converging on a single color."
   (:require [allgo.demo.fps :as fps]
+            [allgo.numerics.linear :as lin]
             [allgo.simulation.boids :as boids]
             [allgo.simulation.boids-flat :as flat]
             ["lil-gui" :default GUI]
@@ -79,10 +80,10 @@
                       :sphere (THREE/SphereGeometry. r 24 16)
                       :box    (let [[x0 y0 z0] lo [x1 y1 z1] hi]
                                 (THREE/BoxGeometry. (- x1 x0) (- y1 y0) (- z1 z0))))
-                [cx cy cz] (boids/v- (case kind
-                                       :sphere c
-                                       :box    (boids/v* (boids/v+ (vec lo) (vec hi)) 0.5))
-                                     offset)]]
+                [cx cy cz] (lin/sub (case kind
+                                      :sphere c
+                                      :box    (lin/scale (lin/add (vec lo) (vec hi)) 0.5))
+                                    offset)]]
       (doto (THREE/Mesh. geo material)
         (-> .-position (.set cx cy cz))))))
 
@@ -104,8 +105,8 @@
   [^js mesh ^js scratch ^js color flock [w h d]]
   (let [offset [(/ w 2) (/ h 2) (/ d 2)]]
     (doseq [[i {:keys [pos vel]}] (map-indexed vector flock)]
-      (let [[x y z]    (boids/v- pos offset)
-            [nx ny nz] (boids/normalize vel)]
+      (let [[x y z]    (lin/sub pos offset)
+            [nx ny nz] (lin/normalize vel)]
         (.set (.-position scratch) x y z)
         (.lookAt scratch (+ x nx) (+ y ny) (+ z nz))
         (.updateMatrix scratch)

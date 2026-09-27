@@ -13,9 +13,9 @@
   there is a penumbra where it is partly occulted, and a satellite crossing
   it sees the force ramp rather than switch."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [clojure.math :as math]))
-
-(defn- mag [v] (math/sqrt (reduce + (map * v v))))
 
 (defn- circle-overlap
   "Fraction of a disk of apparent radius `a` hidden behind one of apparent
@@ -43,14 +43,14 @@
   case fall out of the same comparison."
   ([r r-sun] (shadow r r-sun c/R-earth))
   ([r r-sun r-occulter]
-   (let [to-sun   (mapv - r-sun r)
-         d-sun    (mag to-sun)
-         d-earth  (mag r)
+   (let [to-sun   (v3/sub r-sun r)
+         d-sun    (v3/length to-sun)
+         d-earth  (v3/length r)
          ;; apparent radii, and the apparent separation of their centers
          a        (math/asin (min 1.0 (/ c/R-sun d-sun)))
          b        (math/asin (min 1.0 (/ r-occulter d-earth)))
-         cos-sep  (/ (reduce + (map * (mapv - r) to-sun)) (* d-earth d-sun))
-         sep      (math/acos (max -1.0 (min 1.0 cos-sep)))]
+         cos-sep  (/ (v3/dot (v3/negate r) to-sun) (* d-earth d-sun))
+         sep      (math/acos (am/clamp cos-sep -1.0 1.0))]
      (- 1.0 (circle-overlap a b sep)))))
 
 (defn acceleration
@@ -67,11 +67,11 @@
   ([r r-sun area-to-mass cr nu]
    (if (zero? nu)
      [0.0 0.0 0.0]
-     (let [d  (mapv - r r-sun)
-           dm (mag d)
+     (let [d  (v3/sub r r-sun)
+           dm (v3/length d)
            k  (* nu cr area-to-mass c/solar-pressure 1e-3
                  (/ (* c/AU c/AU) (* dm dm dm)))]
-       (mapv #(* k %) d)))))
+       (v3/scale d k)))))
 
 (defn umbra-length
   "How far behind the Earth its full shadow reaches, km.

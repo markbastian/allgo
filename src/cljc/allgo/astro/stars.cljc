@@ -22,7 +22,8 @@
   temperature a color by the usual fit to the blackbody's chromaticity.
   `flux` is brightness on the linear scale, from the magnitude's
   logarithmic one: five magnitudes is a factor of a hundred."
-  (:require [clojure.math :as math]
+  (:require [allgo.math :as am]
+            [clojure.math :as math]
             [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------
@@ -145,14 +146,13 @@
   Red for Betelgeuse, blue-white for Rigel, white for Vega."
   [bv]
   (let [t (/ (temperature bv) 100.0)
-        clamp (fn [x] (max 0.0 (min 255.0 x)))
-        r (if (<= t 66.0) 255.0 (clamp (* 329.698727446 (math/pow (- t 60.0) -0.1332047592))))
-        g (clamp (if (<= t 66.0)
-                   (- (* 99.4708025861 (math/log t)) 161.1195681661)
-                   (* 288.1221695283 (math/pow (- t 60.0) -0.0755148492))))
+        r (if (<= t 66.0) 255.0 (am/clamp (* 329.698727446 (math/pow (- t 60.0) -0.1332047592)) 0.0 255.0))
+        g (am/clamp (if (<= t 66.0)
+                      (- (* 99.4708025861 (math/log t)) 161.1195681661)
+                      (* 288.1221695283 (math/pow (- t 60.0) -0.0755148492))) 0.0 255.0)
         b (cond (>= t 66.0) 255.0
                 (<= t 19.0) 0.0
-                :else (clamp (- (* 138.5177312231 (math/log (- t 10.0))) 305.0447927307)))
+                :else (am/clamp (- (* 138.5177312231 (math/log (- t 10.0))) 305.0447927307) 0.0 255.0))
         m (max r g b)]
     [(/ r m) (/ g m) (/ b m)]))
 

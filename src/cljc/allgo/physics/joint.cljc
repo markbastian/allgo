@@ -37,6 +37,7 @@
   correction in full."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.rigid :as rigid]
             [clojure.math :as math]))
 
@@ -146,7 +147,7 @@
   cosine settles which half of the circle it is in."
   ^double [n a b]
   (let [s (v/dot (v/cross a b) n)
-        phi (math/asin (min 1.0 (max -1.0 s)))
+        phi (math/asin (am/clamp s -1.0 1.0))
         phi (if (neg? (v/dot a b)) (- math/PI phi) phi)]
     (cond (> phi math/PI) (- phi (* 2.0 math/PI))
           (< phi (- math/PI)) (+ phi (* 2.0 math/PI))
@@ -162,7 +163,7 @@
   (let [phi (signed-angle n a0 a1)]
     (if (<= (double lo) phi (double hi))
       bodies
-      (let [phi (min (double hi) (max (double lo) phi))
+      (let [phi (am/clamp phi (double lo) (double hi))
             ;; Where a0 would be at the limit; correcting a1 onto that is
             ;; the same align as before.
             target (q/rotate (q/from-axis-angle n phi) a0)]
@@ -186,7 +187,7 @@
   (let [[p0 r0 p1 _] (frames bodies j)
         local (q/rotate (q/conjugate r0) (v/sub p1 p0))
         [lx ly lz] local
-        target (min (double distance-max) (max (double distance-min) (double target-distance)))
+        target (am/clamp (double target-distance) (double distance-min) (double distance-max))
         lx' (cond
               (= kind :cylinder) (- lx target)
               (> lx (double distance-max)) (- lx (double distance-max))
@@ -317,7 +318,7 @@
   [constraints dt]
   (mapv (fn [{:keys [kind velocity] :as c}]
           (if (= :motor kind)
-            (let [step (min 1.0 (max -1.0 (* (double velocity) (double dt))))]
+            (let [step (am/clamp (* (double velocity) (double dt)) -1.0 1.0)]
               (-> c
                   (update :target-angle (fnil + 0.0) step)
                   (assoc :has-target-angle? true)))

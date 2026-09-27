@@ -42,6 +42,7 @@
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.kinematics.chain :as k]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (def ^:private half-pi (/ math/PI 2.0))
@@ -124,7 +125,7 @@
   it negative and the outer two turned half a circle."
   [m alpha4]
   (let [[[_ _ m02] [_ _ m12] [m20 m21 m22]] m
-        cb (min 1.0 (max -1.0 m22))
+        cb (am/clamp m22 -1.0 1.0)
         sb (math/sqrt (max 0.0 (- 1.0 (* cb cb))))
         ;; Which way joint 5's axis points depends on the sign of the
         ;; twist ahead of it.
@@ -196,7 +197,7 @@
                      m (q/to-matrix (q/mul (q/from-axis-angle [1.0 0.0 0.0] (- alpha3))
                                            (q/mul (q/inverse r3) (:rot f6))))]
                {:keys [theta4 theta5 theta6]} (solve-wrist m alpha4)]
-           (mapv k/wrap-angle
+           (mapv am/wrap-angle
                  [(- theta1 (rest 0)) (- theta2 (rest 1)) (- theta3 (rest 2))
                   (- theta4 (rest 3)) (- theta5 (rest 4)) (- theta6 (rest 5))]))]
      (cond->> (vec (distinct (filter #(reaches? chain target %) found)))
@@ -215,5 +216,5 @@
    (let [candidates (solutions chain target opts)]
      (when (seq candidates)
        (apply min-key
-              (fn [s] (reduce + (map (fn [a b] (abs (k/wrap-angle (- a b)))) s from)))
+              (fn [s] (reduce + (map (fn [a b] (abs (am/wrap-angle (- a b)))) s from)))
               candidates)))))

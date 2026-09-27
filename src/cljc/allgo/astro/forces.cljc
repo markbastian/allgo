@@ -19,6 +19,8 @@
             [allgo.astro.srp :as srp]
             [allgo.astro.tides :as tides]
             [allgo.astro.time :as time]
+            [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (defn earth-fixed
@@ -36,8 +38,8 @@
    (frames/celestial->terrestrial-cached
     mjd-tt (time/utc->ut1 (time/tt->utc mjd-tt) dut1))))
 
-(defn eci->ecef [r m] (frames/apply-m m r))
-(defn ecef->eci [r m] (frames/apply-m (frames/transpose m) r))
+(defn eci->ecef [r m] (lin/mat-vec m r))
+(defn ecef->eci [r m] (lin/mat-vec (lin/transpose m) r))
 
 (def defaults
   {:degree       4
@@ -106,8 +108,8 @@
     ;; them separately would mean evaluating the field twice on the hot
     ;; path that integrates the orbit.
     :acceleration (fn [{:keys [ecef u field degree point-mass]}]
-                    (ecef->eci (mapv - (geo/acceleration field ecef degree)
-                                     (geo/acceleration point-mass ecef 0))
+                    (ecef->eci (v3/sub (geo/acceleration field ecef degree)
+                                       (geo/acceleration point-mass ecef 0))
                                u))}
 
    {:name :sun
@@ -157,7 +159,7 @@
   to -- the field turns with the planet."
   [config mjd r v]
   (let [ctx (context config mjd r v)]
-    (reduce (fn [acc m] (mapv + acc ((:acceleration m) ctx)))
+    (reduce (fn [acc m] (v3/add acc ((:acceleration m) ctx)))
             [0.0 0.0 0.0]
             (active-models config))))
 

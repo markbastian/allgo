@@ -1,14 +1,13 @@
 (ns allgo.geometry.delaunay
-  (:require #?(:clj [clojure.math :as math] :cljs [cljs.math :as math])))
+  (:require [allgo.math :as am]
+            #?(:clj [clojure.math :as math] :cljs [cljs.math :as math])))
 
 ;; Bowyer-Watson incremental Delaunay triangulation, plus the Voronoi
 ;; diagram as its dual (Voronoi vertices are Delaunay triangle circumcenters;
 ;; a site's Voronoi cell is the fan of circumcenters of triangles incident
 ;; to it). https://en.wikipedia.org/wiki/Bowyer%E2%80%93Watson_algorithm
 
-(defn- sq [x] (* x x))
-
-(defn- distance-sq [[x1 y1] [x2 y2]] (+ (sq (- x2 x1)) (sq (- y2 y1))))
+(defn- distance-sq [[x1 y1] [x2 y2]] (+ (am/sq (- x2 x1)) (am/sq (- y2 y1))))
 
 (defn circumcircle
   "Center and squared radius of the circle through three points. nil if the
@@ -16,9 +15,9 @@
   [[ax ay] [bx by] [cx cy]]
   (let [d (* 2.0 (+ (* ax (- by cy)) (* bx (- cy ay)) (* cx (- ay by))))]
     (when-not (zero? d)
-      (let [ax2ay2 (+ (sq ax) (sq ay))
-            bx2by2 (+ (sq bx) (sq by))
-            cx2cy2 (+ (sq cx) (sq cy))
+      (let [ax2ay2 (+ (am/sq ax) (am/sq ay))
+            bx2by2 (+ (am/sq bx) (am/sq by))
+            cx2cy2 (+ (am/sq cx) (am/sq cy))
             ux     (/ (+ (* ax2ay2 (- by cy)) (* bx2by2 (- cy ay)) (* cx2cy2 (- ay by))) d)
             uy     (/ (+ (* ax2ay2 (- cx bx)) (* bx2by2 (- ax cx)) (* cx2cy2 (- bx ax))) d)]
         {:center [ux uy] :radius-sq (distance-sq [ux uy] [ax ay])}))))

@@ -45,6 +45,7 @@
   relief, so the terrain is a little over a thousandth of the sphere.
   Every rendering of a planet you have seen exaggerates it."
   (:require [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [allgo.procedural.fractal :as fractal]
             [allgo.procedural.noise :as noise]
             [allgo.procedural.shaping :as shaping]
@@ -353,7 +354,7 @@
   (^double [planet d epsilon]
    (let [d (v3/normalize d)
          n (surface-normal planet d epsilon)]
-     (math/acos (shaping/clamp -1.0 1.0 (v3/dot n d))))))
+     (math/acos (am/clamp (v3/dot n d) -1.0 1.0)))))
 
 (defn cloud-cover
   "Cloud opacity at `d`, in [0, 1].
@@ -425,7 +426,7 @@
        ;; shelf break. Depth is measured against the deepest the terrain
        ;; can go, so the shelf stays a shelf as the sea level moves.
        (let [deepest (max 1e-9 (+ relief sea-level))
-             t (shaping/clamp 0.0 1.0 (/ (- sea-level h) deepest))]
+             t (am/clamp (/ (- sea-level h) deepest) 0.0 1.0)]
          (if (< t 0.25)
            (v3/lerp shallow ocean (shaping/smoothstep 0.0 0.25 t))
            (v3/lerp ocean abyss (shaping/smoothstep 0.25 1.0 t))))
@@ -433,7 +434,7 @@
              ;; of the relief, so raising the sea level does not also
              ;; repaint the mountains.
              span (max 1e-9 (- relief sea-level))
-             t (shaping/clamp 0.0 1.0 (/ (- h sea-level) span))
+             t (am/clamp (/ (- h sea-level) span) 0.0 1.0)
              steepness (/ (double (or given-slope (slope planet d epsilon)))
                           (* 0.5 math/PI))
              ground (cond

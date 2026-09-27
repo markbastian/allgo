@@ -8,9 +8,11 @@
   actually wants."
   (:require [allgo.numerics.core :as core]
             [allgo.numerics.extrapolation :as ex]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.multistep :as ms]
             [allgo.numerics.rk :as rk]
-            [allgo.numerics.rkn :as rkn]))
+            [allgo.numerics.rkn :as rkn]
+            [clojure.math :as math]))
 
 (def first-order
   "Everything that integrates y' = f(t, y), in rough order of cost."
@@ -60,7 +62,7 @@
 (defn harmonic
   "y'' = -w^2 y, as a second-order system for the Nystrom family."
   ([] (harmonic 1.0))
-  ([w] (fn [_ y] (core/v* y (- (* w w))))))
+  ([w] (fn [_ y] (lin/scale y (- (* w w))))))
 
 (defn kepler
   "Two-body acceleration toward the origin: the problem the whole chapter is
@@ -68,9 +70,9 @@
   ([] (kepler 1.0))
   ([mu]
    (fn [_ r]
-     (let [d2 (reduce + (map * r r))
-           d3 (* d2 (Math/sqrt d2))]
-       (core/v* r (- (/ mu d3)))))))
+     (let [d2 (lin/length-squared r)
+           d3 (* d2 (math/sqrt d2))]
+       (lin/scale r (- (/ mu d3)))))))
 
 ;; Kepler motion has conserved quantities, and watching them decay is a
 ;; sharper test of an integrator than watching the position: a trajectory
@@ -79,8 +81,8 @@
 (defn specific-energy
   "v^2/2 - mu/r. Constant on an exact orbit, and equal to -mu/(2a)."
   [mu r v]
-  (- (* 0.5 (reduce + (map * v v)))
-     (/ mu (Math/sqrt (reduce + (map * r r))))))
+  (- (* 0.5 (lin/length-squared v))
+     (/ mu (lin/length r))))
 
 (defn angular-momentum
   "r x v, conserved in any central field."
@@ -92,7 +94,7 @@
 (defn orbital-period
   "2*pi*sqrt(a^3/mu)."
   [mu a]
-  (* 2.0 Math/PI (Math/sqrt (/ (* a a a) mu))))
+  (* 2.0 math/PI (math/sqrt (/ (* a a a) mu))))
 
 (defn periapsis-state
   "Position and velocity at closest approach of an ellipse of semi-major
@@ -101,5 +103,5 @@
   a fixed step is most exposed."
   [mu a e]
   (let [rp (* a (- 1.0 e))
-        vp (Math/sqrt (/ (* mu (+ 1.0 e)) rp))]
+        vp (math/sqrt (/ (* mu (+ 1.0 e)) rp))]
     [[rp 0.0 0.0] [0.0 vp 0.0]]))

@@ -10,6 +10,8 @@
   bodies queried through `allgo.geometry.gjk`, so anything with a support
   mapping serves."
   (:require [allgo.geometry.gjk :as gjk]
+            [allgo.numerics.linear :as lin]
+            [allgo.random :as random]
             [clojure.math :as math]))
 
 (def defaults
@@ -27,30 +29,16 @@
    :avoid-weight      2.2
    :restitution       0.85})
 
-;; Vector math, arity-generic.
-
-(defn v+ [a b] (mapv + a b))
-(defn v- [a b] (mapv - a b))
-(defn v* [v s] (mapv #(* % s) v))
-
-(defn dot [a b] (reduce + (map * a b)))
-(defn mag-sq [v] (reduce (fn [acc x] (+ acc (* x x))) 0 v))
-(defn mag [v] (math/sqrt (mag-sq v)))
-
-(defn normalize [v]
-  (let [m (mag v)]
-    (if (zero? m) v (v* v (/ m)))))
+;; Vector math is `allgo.numerics.linear`'s, which takes any length: the
+;; same rules steer a flock in the plane and one in space.
 
 (defn limit [v max-mag]
-  (if (> (mag-sq v) (* max-mag max-mag))
-    (v* (normalize v) max-mag)
+  (if (> (lin/length-squared v) (* max-mag max-mag))
+    (lin/scale (lin/normalize v) max-mag)
     v))
 
 (defn with-magnitude [v m]
-  (v* (normalize v) m))
-
-(defn dist-sq [a b] (mag-sq (v- a b)))
-(defn dist [a b] (mag (v- a b)))
+  (lin/scale (lin/normalize v) m))
 
 ;; Steering rules. Each returns a force, or a zero vector when the boid has
 ;; nobody to respond to.
@@ -61,19 +49,19 @@
   "Reynolds steering: the clamped correction that turns `vel` into a
   full-speed run along `desired`."
   [desired vel {:keys [max-speed max-force]}]
-  (if (zero? (mag-sq desired))
+  (if (zero? (lin/length-squared desired))
     (zero-like vel)
-    (limit (v- (with-magnitude desired max-speed) vel) max-force)))
+    (limit (lin/sub (with-magnitude desired max-speed) vel) max-force)))
 
 (defn separation
   "Steer away from neighbors, weighting each by inverse square distance so
   the nearest crowding dominates."
   [{:keys [pos vel]} neighbors {:keys [separation-radius] :as params}]
   (let [r2      (* separation-radius separation-radius)
-        close   (filter #(< 0 (dist-sq pos (:pos %)) r2) neighbors)
+        close   (filter #(< 0 (lin/distance-squared pos (:pos %)) r2) neighbors)
         desired (reduce (fn [acc {other :pos}]
-                          (let [away (v- pos other)]
-                            (v+ acc (v* (normalize away) (/ (mag-sq away))))))
+                          (let [away (lin/sub pos other)]
+                            (lin/add acc (lin/scale (lin/normalize away) (/ (lin/length-squared away))))))
                         (zero-like pos)
                         close)]
     (steer-toward desired vel params)))
@@ -82,7 +70,7 @@
   "Steer toward the average heading of the neighborhood."
   [{:keys [vel]} neighbors params]
   (if (seq neighbors)
-    (steer-toward (v* (reduce v+ (map :vel neighbors)) (/ (count neighbors)))
+    (steer-toward (lin/scale (reduce lin/add (map :vel neighbors)) (/ (count neighbors)))
                   vel params)
     (zero-like vel)))
 
@@ -90,8 +78,8 @@
   "Steer toward the center of mass of the neighborhood."
   [{:keys [pos vel]} neighbors params]
   (if (seq neighbors)
-    (steer-toward (v- (v* (reduce v+ (map :pos neighbors)) (/ (count neighbors)))
-                      pos)
+    (steer-toward (lin/sub (lin/scale (reduce lin/add (map :pos neighbors)) (/ (count neighbors)))
+                           pos)
                   vel params)
     (zero-like vel)))
 
@@ -99,9 +87,9 @@
   "The weighted sum of the three rules -- the total steering force on a boid."
   [boid neighbors {:keys [separation-weight alignment-weight cohesion-weight]
                    :as params}]
-  (-> (v* (separation boid neighbors params) separation-weight)
-      (v+ (v* (alignment boid neighbors params) alignment-weight))
-      (v+ (v* (cohesion boid neighbors params) cohesion-weight))))
+  (-> (lin/scale (separation boid neighbors params) separation-weight)
+      (lin/add (lin/scale (alignment boid neighbors params) alignment-weight))
+      (lin/add (lin/scale (cohesion boid neighbors params) cohesion-weight))))
 
 ;; Spatial index. A linear scan makes each tick O(n^2), which stops holding a
 ;; 60fps frame budget at a few hundred boids. Bucketing by a cell the size of
@@ -129,7 +117,7 @@
         home (cell-of pos cell-size)]
     (into []
           (comp (mapcat #(cells (mapv + home %)))
-                (filter #(< 0 (dist-sq pos (:pos %)) r2)))
+                (filter #(< 0 (lin/distance-squared pos (:pos %)) r2)))
           (cell-offsets (count pos)))))
 
 (defn wrap
@@ -171,11 +159,11 @@
   the flock's plane cuts it squarely rather than grazing a flat face."
   [lo hi]
   (let [flat? (= 2 (count lo))
-        depth (if flat? (max 1.0 (mag (v- (vec hi) (vec lo)))) 0.0)
+        depth (if flat? (max 1.0 (lin/length (lin/sub (vec hi) (vec lo)))) 0.0)
         lo3   (if flat? [(nth lo 0) (nth lo 1) (- depth)] (vec lo))
         hi3   (if flat? [(nth hi 0) (nth hi 1) depth] (vec hi))]
     {:support (gjk/box lo3 hi3)
-     :center  (v* (v+ lo3 hi3) 0.5)
+     :center  (lin/scale (lin/add lo3 hi3) 0.5)
      ;; The bounding sphere measures the body as the flock actually meets
      ;; it. For a flat box that is the rectangle, not the prism: the depth
      ;; is invented purely to keep GJK's simplex off a degenerate face, and
@@ -183,7 +171,7 @@
      ;; it in z. Including that depth inflates the radius by more than a
      ;; factor of two, which defeats the cull that is supposed to keep GJK
      ;; off obstacles it will never touch.
-     :radius  (* 0.5 (mag (v- (vec hi) (vec lo))))}))
+     :radius  (* 0.5 (lin/length (lin/sub (vec hi) (vec lo))))}))
 
 (defn index-obstacles
   "Bucket obstacles into cells of `cell-size` for reach lookup, the same way
@@ -221,7 +209,7 @@
   segment per floor tile, and at a few hundred of those it dominates the
   frame."
   [p3 {:keys [obstacles obstacle-index]} reach]
-  (let [in-reach? (fn [{:keys [center radius]}] (< (dist p3 center) (+ radius reach)))]
+  (let [in-reach? (fn [{:keys [center radius]}] (< (lin/distance p3 center) (+ radius reach)))]
     (if-let [{:keys [cell-size cells]} obstacle-index]
       (let [home (cell-of (subvec p3 0 2) cell-size)]
         (into [] (comp (mapcat #(cells (mapv + home %)))
@@ -246,10 +234,10 @@
                  (let [{:keys [distance direction]} (gjk/distance me support)]
                    (if (>= distance avoid-radius)
                      acc
-                     (let [away   (v* direction -1.0)
+                     (let [away   (lin/scale direction -1.0)
                            urgency (- 1.0 (/ distance avoid-radius))
-                           steer  (limit (v- (with-magnitude away max-speed) v3) max-force)]
-                       (v+ acc (v* steer urgency))))))
+                           steer  (limit (lin/sub (with-magnitude away max-speed) v3) max-force)]
+                       (lin/add acc (lin/scale steer urgency))))))
                [0.0 0.0 0.0]
                (near-obstacles p3 params (+ avoid-radius boid-radius)))
        n))))
@@ -272,18 +260,18 @@
               ;; EPA reports the shift that moves the obstacle clear, so the
               ;; boid takes the opposite; the surface normal it bounces off
               ;; points the same way.
-              (let [out (v* normal -1.0)
-                    vn  (dot v3 out)]
-                (recur (v+ p3 (v* out depth))
-                       (if (neg? vn) (v- v3 (v* out (* (+ 1.0 restitution) vn))) v3)
+              (let [out (lin/scale normal -1.0)
+                    vn  (lin/dot v3 out)]
+                (recur (lin/add p3 (lin/scale out depth))
+                       (if (neg? vn) (lin/sub v3 (lin/scale out (* (+ 1.0 restitution) vn))) v3)
                        more))
               (recur p3 v3 more))))))))
 
 (defn step-boid [boid index bounds {:keys [max-speed edges avoid-weight] :as params}]
-  (let [acc       (v+ (acceleration boid (neighbors boid index params) params)
-                      (v* (avoidance boid params) avoid-weight))
-        vel       (limit (v+ (:vel boid) acc) max-speed)
-        moved     (v+ (:pos boid) vel)
+  (let [acc       (lin/add (acceleration boid (neighbors boid index params) params)
+                           (lin/scale (avoidance boid params) avoid-weight))
+        vel       (limit (lin/add (:vel boid) acc) max-speed)
+        moved     (lin/add (:pos boid) vel)
         [pos vel] (if (= :bounce edges)
                     (bounce moved vel bounds)
                     [(wrap moved bounds) vel])
@@ -306,10 +294,13 @@
                          (index-obstacles obstacles (+ avoid-radius boid-radius))))]
      (mapv #(step-boid % index bounds params) flock))))
 
-(defn random-boid [bounds max-speed]
-  {:pos (mapv rand bounds)
-   :vel (with-magnitude (mapv (fn [_] (- (rand) 0.5)) bounds)
-          (* max-speed (+ 0.5 (rand 0.5))))})
+(defn random-boid
+  "A boid anywhere in `bounds`, heading anywhere at up to `max-speed`."
+  ([bounds max-speed] (random-boid rand bounds max-speed))
+  ([rng bounds max-speed]
+   {:pos (mapv #(random/uniform rng %) bounds)
+    :vel (with-magnitude (mapv (fn [_] (- (rng) 0.5)) bounds)
+           (* max-speed (+ 0.5 (random/uniform rng 0.5))))}))
 
 (defn flock
   "`n` boids at random positions and headings within `bounds`."

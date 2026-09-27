@@ -2,6 +2,7 @@
   (:require [allgo.numerics :as num]
             [allgo.numerics.core :as core]
             [allgo.numerics.extrapolation :as ex]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.multistep :as ms]
             [allgo.numerics.rk :as rk]
             [allgo.numerics.rkn :as rkn]
@@ -68,7 +69,7 @@
 (deftest adaptive-stepping-adjusts-the-step
   (testing "a stiffening problem forces the step down and it recovers after"
     ;; y' = -100 y for a while, then benign. The step must shrink and regrow.
-    (let [f     (fn [t y] (if (< t 0.2) (core/v* y -100.0) (core/v* y -0.1)))
+    (let [f     (fn [t y] (if (< t 0.2) (lin/scale y -100.0) (lin/scale y -0.1)))
           integ (rk/integrator rk/dopri54 f 0.0 [1.0] 0.05 {:tol-abs 1e-8 :tol-rel 1e-8})
           hs    (->> (core/trajectory integ)
                      (take-while #(< (:t %) 1.0))
@@ -102,7 +103,7 @@
 ;; y'' = -y, y(0)=1, y'(0)=0  =>  y = cos t. Measured away from a period
 ;; boundary: at a whole period the oscillator's symmetry cancels error and
 ;; every method reads a full order or two better than it really is.
-(defn- oscillator [_ y] (core/v* y -1.0))
+(defn- oscillator [_ y] (lin/scale y -1.0))
 
 (defn- rkn-order [method which t-end]
   (let [exact (if (= which :y) #(Math/cos %) #(- (Math/sin %)))

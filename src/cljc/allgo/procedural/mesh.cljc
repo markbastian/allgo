@@ -1,10 +1,8 @@
 (ns allgo.procedural.mesh
-  (:require [allgo.procedural.perlin :as perlin]
+  (:require [allgo.geometry.vec3 :as v3]
+            [allgo.procedural.perlin :as perlin]
+            [allgo.procedural.shaping :as shaping]
             #?(:clj [clojure.math :as math] :cljs [cljs.math :as math])))
-
-(defn smoothstep [edge0 edge1 x]
-  (let [t (-> (/ (double (- x edge0)) (- edge1 edge0)) (max 0.0) (min 1.0))]
-    (* t t (- 3.0 (* 2.0 t)))))
 
 (defn mix3 [[r1 g1 b1] [r2 g2 b2] t]
   [(+ r1 (* t (- r2 r1))) (+ g1 (* t (- g2 g1))) (+ b1 (* t (- b2 b1)))])
@@ -30,11 +28,11 @@
         grass     (mix3 grass-color-a grass-color-b noise-t)
         rock      (mix3 rock-color-a rock-color-b noise-t)
         base      (cond
-                    (< t 0.12) (mix3 water-color grass (smoothstep 0.02 0.12 t))
-                    (< t 0.55) (mix3 grass dirt-color (smoothstep 0.35 0.55 t))
-                    (< t 0.78) (mix3 dirt-color rock (smoothstep 0.55 0.78 t))
-                    :else (mix3 rock snow-color (smoothstep 0.78 0.9 t)))
-        rockiness (smoothstep 0.18 0.55 slope-t)
+                    (< t 0.12) (mix3 water-color grass (shaping/smoothstep 0.02 0.12 t))
+                    (< t 0.55) (mix3 grass dirt-color (shaping/smoothstep 0.35 0.55 t))
+                    (< t 0.78) (mix3 dirt-color rock (shaping/smoothstep 0.55 0.78 t))
+                    :else (mix3 rock snow-color (shaping/smoothstep 0.78 0.9 t)))
+        rockiness (shaping/smoothstep 0.18 0.55 slope-t)
         [r g b]   (mix3 base rock rockiness)]
     [(max 0 (min 255 r)) (max 0 (min 255 g)) (max 0 (min 255 b))]))
 
@@ -69,5 +67,5 @@
   [grid dim i j cell-scale height-scale y-sign]
   (let [[dzdx dzdz] (gradient-at grid dim i j cell-scale height-scale)
         n           [(- dzdx) y-sign (- dzdz)]
-        len         (math/sqrt (reduce + (map * n n)))]
-    (mapv #(/ % len) n)))
+        len         (v3/length n)]
+    (v3/scale n (/ 1.0 len))))

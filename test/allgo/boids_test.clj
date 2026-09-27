@@ -1,5 +1,6 @@
 (ns allgo.boids-test
   (:require [allgo.geometry.gjk :as gjk]
+            [allgo.numerics.linear :as lin]
             [allgo.simulation.boids :as b]
             [clojure.test :refer [deftest is testing]]))
 
@@ -16,7 +17,7 @@
 (defn- order
   "Polarization: 0 when headings are scattered, 1 when the flock is aligned."
   [flock]
-  (b/mag (b/v* (reduce b/v+ (map (comp b/normalize :vel) flock)) (/ 1.0 (count flock)))))
+  (lin/length (lin/scale (reduce lin/add (map (comp lin/normalize :vel) flock)) (/ 1.0 (count flock)))))
 
 (deftest flocking-emerges
   (testing "an initially scattered flock aligns"
@@ -38,7 +39,7 @@
         (is (and (<= 0 x 400) (<= 0 y 400)))))
     (testing "speed never exceeds the limit"
       (doseq [{:keys [vel]} final]
-        (is (<= (b/mag vel) (+ (:max-speed b/defaults) 1e-9)))))
+        (is (<= (lin/length vel) (+ (:max-speed b/defaults) 1e-9)))))
     (testing "no boid goes non-finite"
       (doseq [{:keys [pos vel]} final]
         (is (every? #(Double/isFinite (double %)) (concat pos vel)))))))
@@ -66,8 +67,8 @@
           reverse* (sort-by :pos (b/step (vec (reverse f)) bounds))]
       (is (= (count forward) (count reverse*)))
       (doseq [[x y] (map vector forward reverse*)]
-        (is (< (b/mag (b/v- (:pos x) (:pos y))) 1e-9) "same positions")
-        (is (< (b/mag (b/v- (:vel x) (:vel y))) 1e-9) "same velocities")))))
+        (is (< (lin/length (lin/sub (:pos x) (:pos y))) 1e-9) "same positions")
+        (is (< (lin/length (lin/sub (:vel x) (:vel y))) 1e-9) "same velocities")))))
 
 (defn- lift [pos]
   (if (= 3 (count pos)) (vec pos) [(nth pos 0) (nth pos 1) 0.0]))

@@ -42,75 +42,10 @@
   fourth coordinate, so clouds evolve and a planet's terrain can be
   dialed continuously from one variant to another, without any of the
   popping a reseed would cause."
-  (:require [allgo.procedural.shaping :as shaping]
+  (:require [allgo.math :as am]
+            [allgo.procedural.shaping :as shaping]
+            [allgo.random :as random]
             [clojure.math :as math]))
-
-;; ---------------------------------------------------------------------------
-;; Repeatable randomness
-;;
-;; Park-Miller, done in doubles rather than in bit twiddling, so that the
-;; JVM's 64-bit longs and JavaScript's 32-bit bitwise operators cannot
-;; disagree about what a seed means. Every product below stays under 2^53
-;; and so is exact on both.
-
-(def ^:private prng-modulus 2147483647.0)
-(def ^:private prng-multiplier 16807.0)
-
-(defn advance
-  "The next state of the random stream. Park-Miller's minimal standard.
-
-  The modulus is taken by hand rather than with `rem`, and that is worth a
-  paragraph because it is the innermost loop of every cellular and
-  sparse-convolution sample. A remainder of two large doubles misses the
-  integer fast path in a JavaScript engine and costs on the order of a
-  hundred nanoseconds; subtracting `m * floor(x / m)` costs a divide and a
-  floor, both of which are single instructions, and measured eight times
-  faster here.
-
-  It is also exact, which is the part that has to be argued rather than
-  measured. `16807 * s` never exceeds 2^53, so the product is an exact
-  integer. Its true quotient by `m` is either an integer -- in which case
-  the division is exact -- or at least `1/m` away from one, which is four
-  hundred times the largest error the division can introduce. So the floor
-  is never off by one, and neither platform can disagree with the other
-  about what a seed means."
-  ^double [^double s]
-  (let [x (* prng-multiplier s)
-        v (- x (* prng-modulus (math/floor (/ x prng-modulus))))]
-    (if (pos? v) v 1.0)))
-
-(defn unit
-  "A random stream state as a number in [0, 1)."
-  ^double [^double s]
-  (/ s prng-modulus))
-
-(defn signed
-  "A random stream state as a number in [-1, 1)."
-  ^double [^double s]
-  (- (* 2.0 (unit s)) 1.0))
-
-(defn- fold
-  "Mixes one integer into a stream state.
-
-  Coordinates are taken modulo 65536, so the lattice repeats every 65536
-  cells along each axis. That is no worse than the 256-entry permutation
-  table underneath the classic noise functions and far past anything a
-  scene will reach."
-  ^double [^double s ^long v]
-  ;; `bit-and` with a mask is `mod` by a power of two, on both platforms
-  ;; and for negative coordinates too, and it is a single instruction
-  ;; where `mod` is a call.
-  (advance (advance (+ s (double (bit-and v 0xFFFF)) 1.0))))
-
-(defn cell-seed
-  "A repeatable random stream for the lattice cell `[i j k]` of world `seed`.
-
-  This is what lets a procedural texture be unbounded and still be a
-  function: no cell is stored anywhere, and asking twice gives the same
-  answer because the answer is derived from the coordinates."
-  ^double [^long seed ^long i ^long j ^long k]
-  (-> (+ 1.0 (double (mod seed 2147483646)))
-      (fold i) (fold j) (fold k)))
 
 (defn poisson-count
   "How many feature points a cell gets, drawn from a Poisson distribution
@@ -141,23 +76,23 @@
   ^ints [seed]
   (let [n 256
         a (int-array (range n))]
-    (loop [i (dec n) s (double (cell-seed (long seed) 0 0 0))]
+    (loop [i (dec n) s (double (random/cell-seed (long seed) 0 0 0))]
       (when (pos? i)
-        (let [j (long (* (unit s) (inc i)))
+        (let [j (long (* (random/unit s) (inc i)))
               t (aget a i)]
           (aset a i (aget a j))
           (aset a j t)
-          (recur (dec i) (advance s)))))
+          (recur (dec i) (random/advance s)))))
     (int-array (concat (seq a) (seq a)))))
 
 (defn value-table
   "256 random values in [-1, 1], the payload of value noise."
   ^doubles [seed]
   (let [a (double-array 256)]
-    (loop [i 0 s (advance (double (cell-seed (long seed) 1 1 1)))]
+    (loop [i 0 s (random/advance (double (random/cell-seed (long seed) 1 1 1)))]
       (when (< i 256)
-        (aset a i (signed s))
-        (recur (inc i) (advance s))))
+        (aset a i (random/signed s))
+        (recur (inc i) (random/advance s))))
     a))
 
 (defn- wrap
@@ -185,12 +120,6 @@
                                          (bit-and (long j) 0xFF)))
                               (bit-and (long k) 0xFF)))
                    (bit-and (long l) 0xFF)))))
-
-(defn- lerp
-  "Hoisted out of the bases below, which would otherwise allocate one of
-  these per sample."
-  ^double [^double a ^double b ^double t]
-  (+ a (* t (- b a))))
 
 (defn- fade
   "Perlin's quintic fade curve.
@@ -280,11 +209,11 @@
        (let [i (long (math/floor x)) j (long (math/floor y)) k (long (math/floor z))
              fx (- x i) fy (- y j) fz (- z k)
              u (fade fx) v (fade fy) w (fade fz)]
-         (lerp (lerp (lerp (at i j k) (at (inc i) j k) u)
-                     (lerp (at i (inc j) k) (at (inc i) (inc j) k) u) v)
-               (lerp (lerp (at i j (inc k)) (at (inc i) j (inc k)) u)
-                     (lerp (at i (inc j) (inc k)) (at (inc i) (inc j) (inc k)) u) v)
-               w))))))
+         (am/lerp (am/lerp (am/lerp (at i j k) (at (inc i) j k) u)
+                           (am/lerp (at i (inc j) k) (at (inc i) (inc j) k) u) v)
+                  (am/lerp (am/lerp (at i j (inc k)) (at (inc i) j (inc k)) u)
+                           (am/lerp (at i (inc j) (inc k)) (at (inc i) (inc j) (inc k)) u) v)
+                  w))))))
 
 (defn gradient-basis
   "Perlin's improved gradient noise. The default basis everywhere here.
@@ -313,11 +242,11 @@
                                (wrap (+ j dj) period)
                                (wrap (+ k dk) period))
                         (- fx di) (- fy dj) (- fz dk)))]
-         (lerp (lerp (lerp (g 0 0 0) (g 1 0 0) u)
-                     (lerp (g 0 1 0) (g 1 1 0) u) v)
-               (lerp (lerp (g 0 0 1) (g 1 0 1) u)
-                     (lerp (g 0 1 1) (g 1 1 1) u) v)
-               w))))))
+         (am/lerp (am/lerp (am/lerp (g 0 0 0) (g 1 0 0) u)
+                           (am/lerp (g 0 1 0) (g 1 1 0) u) v)
+                  (am/lerp (am/lerp (g 0 0 1) (g 1 0 1) u)
+                           (am/lerp (g 0 1 1) (g 1 1 1) u) v)
+                  w))))))
 
 (defn gradient-basis-4d
   "Gradient noise in four dimensions: `(fn [x y z w] -> double)`.
@@ -338,12 +267,12 @@
                  (grad4 (hash4 p (+ i di) (+ j dj) (+ k dk) (+ l dl))
                         (- fx di) (- fy dj) (- fz dk) (- fw dl)))
              face (fn ^double [^long dl]
-                    (lerp (lerp (lerp (g 0 0 0 dl) (g 1 0 0 dl) su)
-                                (lerp (g 0 1 0 dl) (g 1 1 0 dl) su) sv)
-                          (lerp (lerp (g 0 0 1 dl) (g 1 0 1 dl) su)
-                                (lerp (g 0 1 1 dl) (g 1 1 1 dl) su) sv)
-                          sw))]
-         (lerp (face 0) (face 1) st))))))
+                    (am/lerp (am/lerp (am/lerp (g 0 0 0 dl) (g 1 0 0 dl) su)
+                                      (am/lerp (g 0 1 0 dl) (g 1 1 0 dl) su) sv)
+                             (am/lerp (am/lerp (g 0 0 1 dl) (g 1 0 1 dl) su)
+                                      (am/lerp (g 0 1 1 dl) (g 1 1 1 dl) su) sv)
+                             sw))]
+         (am/lerp (face 0) (face 1) st))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The simplex lattice
@@ -621,27 +550,27 @@
              (let [i (+ ci (- (rem c side) reach))
                    j (+ cj (- (rem (quot c side) side) reach))
                    k (+ ck (- (quot c (* side side)) reach))
-                   s0 (cell-seed seed i j k)
-                   m (poisson-count density (unit s0))]
+                   s0 (random/cell-seed seed i j k)
+                   m (poisson-count density (random/unit s0))]
                (recur
                 (inc c)
                 ;; Boxing the running sum would cost more than the impulses
                 ;; do, so the inner loop is pinned back to a double.
                 (double
-                 (loop [n 0 s (advance s0) acc sum]
+                 (loop [n 0 s (random/advance s0) acc sum]
                    (if (>= n m)
                      acc
-                     (let [px (+ i (unit s))
-                           s (advance s)
-                           py (+ j (unit s))
-                           s (advance s)
-                           pz (+ k (unit s))
-                           s (advance s)
-                           w (signed s)
+                     (let [px (+ i (random/unit s))
+                           s (random/advance s)
+                           py (+ j (random/unit s))
+                           s (random/advance s)
+                           pz (+ k (random/unit s))
+                           s (random/advance s)
+                           w (random/signed s)
                            dx (- x px) dy (- y py) dz (- z pz)
                            d2 (+ (* dx dx) (* dy dy) (* dz dz))]
                        (recur (inc n)
-                              (advance s)
+                              (random/advance s)
                               (if (< d2 r2)
                                ;; 1 - 3t^2 + 2t^3: one at the impulse, and
                                ;; zero with zero slope at the edge of its

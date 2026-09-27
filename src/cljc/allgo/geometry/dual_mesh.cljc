@@ -59,6 +59,7 @@
   assembly, which is one pass over the triangles and is now the larger
   half of building a mesh."
   (:require [allgo.geometry.delaunay :as delaunay]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (defn- angle-around [[ox oy] [x y]] (math/atan2 (- y oy) (- x ox)))
@@ -284,7 +285,7 @@
               (if (< (count ring) 3)
                 (:point c)
                 (let [[cx cy] (centroid ring)]
-                  [(min x1 (max x0 cx)) (min y1 (max y0 cy))]))))
+                  [(am/clamp cx x0 x1) (am/clamp cy y0 y1)]))))
           centers)))
 
 (defn relaxed

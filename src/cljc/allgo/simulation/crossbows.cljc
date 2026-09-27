@@ -44,8 +44,10 @@
   towers up is a draw."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.rigid :as rigid]
-            [allgo.physics.solver :as solver]))
+            [allgo.physics.solver :as solver]
+            [clojure.math :as math]))
 
 (def sides [:vikings :barbarians])
 
@@ -56,10 +58,6 @@
   {:tower 1 :wall 5 :flag 5 :warrior 4 :disc 10 :catapult 1 :crossbow 1})
 
 (def gravity [0.0 -10.0 0.0])
-
-;; Not `Math/toRadians`: that is the JVM's, and this runs in a browser too.
-(defn- radians ^double [d] (* (double d) (/ Math/PI 180.0)))
-(defn- degrees ^double [r] (* (double r) (/ 180.0 Math/PI)))
 
 ;; ---------------------------------------------------------------------------
 ;; Frames
@@ -82,7 +80,7 @@
 (defn- facing
   "The rotation that turns a piece built facing -z to face `side`'s enemy."
   [side]
-  (if (= side :vikings) q/identity-q (q/from-axis-angle [0.0 1.0 0.0] Math/PI)))
+  (if (= side :vikings) q/identity-q (q/from-axis-angle [0.0 1.0 0.0] math/PI)))
 
 ;; ---------------------------------------------------------------------------
 ;; The board
@@ -173,12 +171,12 @@
   [side weapon yaw pitch speed]
   (let [{:keys [right back]} (frame side)
         fwd (v/scale back -1.0)
-        y (radians (double yaw))
-        p (if (= weapon :crossbow) 0.0 (radians (double pitch)))
-        c (Math/cos p)]
-    (v/scale (v/add (v/add (v/scale fwd (* c (Math/cos y)))
-                           (v/scale right (* c (Math/sin y))))
-                    [0.0 (Math/sin p) 0.0])
+        y (math/to-radians (double yaw))
+        p (if (= weapon :crossbow) 0.0 (math/to-radians (double pitch)))
+        c (math/cos p)]
+    (v/scale (v/add (v/add (v/scale fwd (* c (math/cos y)))
+                           (v/scale right (* c (math/sin y))))
+                    [0.0 (math/sin p) 0.0])
              (double speed))))
 
 (defn flight-path
@@ -218,7 +216,7 @@
   "How far a body has turned from upright, in degrees."
   [b]
   (let [[_ uy _] (q/rotate (:rot b) [0.0 1.0 0.0])]
-    (degrees (Math/acos (max -1.0 (min 1.0 (double uy)))))))
+    (math/to-degrees (math/acos (am/clamp (double uy) -1.0 1.0)))))
 
 (defn down?
   "Tipped past forty-five degrees, or off the board."
@@ -315,18 +313,18 @@
         dx (v/sub target p0)
         along (v/dot dx fwd)
         across (v/dot dx right)
-        yaw (degrees (Math/atan2 across along))
-        d (Math/hypot along across)
+        yaw (math/to-degrees (math/atan2 across along))
+        d (math/hypot along across)
         g 10.0]
     (if (= weapon :crossbow)
       {:weapon :crossbow :yaw yaw :pitch 0.0
-       :speed (min 22.0 (+ 4.0 (Math/sqrt (* 2.0 0.6 g d))))}
+       :speed (min 22.0 (+ 4.0 (math/sqrt (* 2.0 0.6 g d))))}
       (let [pitch (double (or pitch 35.0))
-            p (radians pitch)
+            p (math/to-radians pitch)
             h (nth dx 1)
-            c (Math/cos p)
-            v2 (/ (* g d d) (* 2.0 c c (- (* d (Math/tan p)) h)))]
-        {:weapon :catapult :yaw yaw :pitch pitch :speed (Math/sqrt v2)}))))
+            c (math/cos p)
+            v2 (/ (* g d d) (* 2.0 c c (- (* d (math/tan p)) h)))]
+        {:weapon :catapult :yaw yaw :pitch pitch :speed (math/sqrt v2)}))))
 
 (defn tower-face
   "The point to aim a catapult at: high on the face of the enemy tower

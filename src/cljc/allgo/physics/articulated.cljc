@@ -316,9 +316,11 @@
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.numerics.linear :as lin]
             [allgo.physics.contact :as contact]
-            [allgo.physics.rigid :as rigid]))
+            [allgo.physics.rigid :as rigid]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Spatial algebra
@@ -2116,7 +2118,7 @@
                                  (let [r (vec x)] (if (neg? (double (nth r 3))) (mapv - r) r))
                                  q/identity-q)
                            bone (q/rotate rot rest-dir)
-                           swing (Math/acos (max -1.0 (min 1.0 (v/dot bone rest-dir))))
+                           swing (math/acos (am/clamp (v/dot bone rest-dir) -1.0 1.0))
                            cone (:cone link)
                            twist-max (:twist link)
                            ;; How far it has turned about the bone
@@ -2124,7 +2126,7 @@
                            ;; a head can be within forty degrees of
                            ;; upright and still be facing backward.
                            proj (v/dot [(nth rot 0) (nth rot 1) (nth rot 2)] rest-dir)
-                           twist (* 2.0 (Math/atan2 proj (double (nth rot 3))))]
+                           twist (* 2.0 (math/atan2 proj (double (nth rot 3))))]
                        (cond
                          (and cone (> swing (double cone)))
                          (let [n (v/cross bone rest-dir)
@@ -2279,8 +2281,7 @@
                         idx (+ b 1 t)
                         vt (dot-n gt u)
                         old (aget acc idx)
-                        a' (min limit (max (- limit)
-                                           (+ old (* (double (:m dir)) (- vt)))))]
+                        a' (am/clamp (+ old (* (double (:m dir)) (- vt))) (- limit) limit)]
                     (axpy-n! u dt' (- a' old))
                     (aset acc idx a')))))))
         (with-velocity model state (vec (seq u)))))))

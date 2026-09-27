@@ -33,7 +33,7 @@
   (reduce (fn [{:keys [N b]} {:keys [H residual weight]}]
             (let [w (or weight 1.0)]
               {:N (lin/mat-add N (lin/mat-scale (mapv (fn [hi] (mapv #(* hi %) H)) H) w))
-               :b (mapv + b (mapv #(* % w residual) H))}))
+               :b (lin/add b (lin/scale H (* w residual)))}))
           {:N (lin/mat-scale (lin/eye n) 0.0) :b (vec (repeat n 0.0))}
           rows))
 
@@ -80,9 +80,9 @@
   definiteness produces a negative variance, and the filter is finished."
   [x P H z-residual R]
   (let [PHt  (lin/mat-vec P H)                      ; P is symmetric
-        S    (+ (reduce + (map * H PHt)) R)
-        K     (mapv #(/ % S) PHt)
-        x'    (mapv + x (mapv #(* % z-residual) K))
+        S    (+ (lin/dot H PHt) R)
+        K     (lin/scale PHt (/ 1.0 S))
+        x'    (lin/add x (lin/scale K z-residual))
         n     (count x)
         IKH   (lin/mat-sub (lin/eye n) (mapv (fn [ki] (mapv #(* ki %) H)) K))
         joseph (lin/mat-add (lin/mat-mul (lin/mat-mul IKH P) (lin/transpose IKH))
@@ -106,14 +106,14 @@
   (let [m     (count rows)
         col   (mapv #(nth (first %) k) rows)
         tail  (subvec col k)
-        norm  (math/sqrt (reduce + (map * tail tail)))]
+        norm  (lin/length tail)]
     (if (< norm 1e-300)
       rows
       (let [x0    (nth col k)
             alpha (if (neg? x0) norm (- norm))
             v     (assoc (vec (repeat m 0.0)) k (- x0 alpha))
             v     (reduce (fn [v i] (assoc v i (nth col i))) v (range (inc k) m))
-            vv    (reduce + (map * v v))]
+            vv    (lin/length-squared v)]
         (if (< vv 1e-300)
           rows
           (let [;; H = I - 2 v v^T / (v^T v), applied to every column at once

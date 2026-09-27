@@ -11,21 +11,7 @@
 
 (defn- values [f n] (mapv (fn [[x y z]] (f x y z)) (points n)))
 
-(deftest prng-test
-  (testing "the stream is in range and never falls into the fixed point"
-    (loop [i 0 s (n/cell-seed 0 1 2 3)]
-      (when (< i 10000)
-        (is (pos? s))
-        (is (< s 2147483647.0))
-        (is (<= 0.0 (n/unit s)))
-        (is (< (n/unit s) 1.0))
-        (recur (inc i) (n/advance s)))))
-
-  (testing "a cell's stream is a function of the cell, and of nothing else"
-    (is (== (n/cell-seed 3 10 -4 7) (n/cell-seed 3 10 -4 7)))
-    (is (not= (n/cell-seed 3 10 -4 7) (n/cell-seed 3 10 -4 8)))
-    (is (not= (n/cell-seed 3 10 -4 7) (n/cell-seed 4 10 -4 7))))
-
+(deftest poisson-test
   (testing "Poisson counts average out to the mean asked for"
     (let [mean 3.0
           counts (map #(n/poisson-count mean (/ (double %) 20000)) (range 20000))]

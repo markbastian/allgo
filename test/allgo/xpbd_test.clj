@@ -1,13 +1,12 @@
 (ns allgo.xpbd-test
   (:require [allgo.geometry.tet-mesh :as tm]
+            [allgo.math :as am]
             [allgo.physics.xpbd :as x]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private no-gravity {:gravity [0.0 0.0 0.0] :floor nil})
 
-(defn- finite? [v] (and (not (Double/isNaN v)) (not (Double/isInfinite v))))
-
-(defn- all-finite? [body] (every? finite? (x/positions body)))
+(defn- all-finite? [body] (every? am/finite? (x/positions body)))
 
 (defn- ys [body] (map second (partition 3 (x/positions body))))
 

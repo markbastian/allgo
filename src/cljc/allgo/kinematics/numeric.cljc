@@ -34,7 +34,9 @@
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.kinematics.chain :as k]
+            [allgo.math :as am]
             [allgo.numerics.linear :as lin]
+            [allgo.random :as random]
             [clojure.math :as math]))
 
 (defn pose-error
@@ -108,7 +110,7 @@
            :else
            ;; Damping proportional to how far there is to go: bold while
            ;; the target is distant, careful as it arrives.
-           (let [lambda (* damping (max 1e-3 (min 1.0 total)))
+           (let [lambda (* damping (am/clamp total 1e-3 1.0))
                  dq (damped-step chain values err lambda orientation-weight)]
              (if (nil? dq)
                {:values values :error total :iterations i :converged? false}
@@ -128,19 +130,15 @@
   ([chain target seeds opts]
    (let [n (k/joint-count chain)
          rng-values (fn [seed]
-                      (let [r #?(:clj (java.util.Random. seed)
-                                 :cljs (atom seed))]
-                        (vec (repeatedly
-                              n #?(:clj #(* math/PI (- (.nextDouble ^java.util.Random r) 0.5) 2)
-                                   :cljs #(let [x (mod (* 1103515245 (swap! r inc)) 2147483648)]
-                                            (* math/PI (- (/ x 2147483648.0) 0.5) 2)))))))]
+                      (let [rng (random/rng seed)]
+                        (vec (repeatedly n #(random/uniform rng (- math/PI) math/PI)))))]
      (->> (cons (k/home chain) (map rng-values (range seeds)))
           (map #(solve chain target % opts))
           (filter :converged?)
           (map :values)
           (reduce (fn [acc s]
                     (if (some (fn [seen]
-                                (every? #(< (abs (k/wrap-angle %)) 1e-3) (map - seen s)))
+                                (every? #(< (abs (am/wrap-angle %)) 1e-3) (map - seen s)))
                               acc)
                       acc
                       (conj acc s)))

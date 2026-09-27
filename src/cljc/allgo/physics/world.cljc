@@ -58,9 +58,11 @@
   (:require [allgo.array :as a]
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.articulated :as ab]
             [allgo.physics.contact :as contact]
-            [allgo.physics.rigid :as rigid]))
+            [allgo.physics.rigid :as rigid]
+            [clojure.math :as math]))
 
 (def defaults
   {:gravity [0.0 -9.81 0.0]
@@ -143,7 +145,7 @@
   (case shape
     :ball (double radius)
     :torus (+ (double major) (double minor))
-    (* 0.5 (Math/sqrt (reduce + (map #(* (double %) (double %)) size))))))
+    (* 0.5 (math/sqrt (reduce + (map #(* (double %) (double %)) size))))))
 
 (defn- near?
   "Whether two bodies are close enough for a contact to be worth asking
@@ -312,7 +314,7 @@
                                           (double (or (:w sb) 0.0)))})))
                  axes)
      :bias (mapv (fn [d]
-                   (max (- max-push) (min max-push (/ (* bias-factor (v/dot gap d)) dt))))
+                   (am/clamp (/ (* bias-factor (v/dot gap d)) dt) (- max-push) max-push))
                  axes)}))
 
 (defn- prepare-limits
@@ -508,13 +510,12 @@
                     vt (speed-of row' vel omega us)
                     idx (+ b 1 t)
                     o (aget acc idx)
-                    a' (min limit (max (- limit)
-                                       (+ o (if (> wt 1e-12) (/ (- vt) wt) 0.0))))]
+                    a' (am/clamp (+ o (if (> wt 1e-12) (/ (- vt) wt) 0.0)) (- limit) limit)]
                 (apply-to! row' vel omega us (- a' o))
                 (aset acc idx a')))))))
     ;; What each pin carried over the step, as one impulse magnitude.
     (mapv (fn [i]
-            (Math/sqrt (+ (* (aget pacc (* 3 i)) (aget pacc (* 3 i)))
+            (math/sqrt (+ (* (aget pacc (* 3 i)) (aget pacc (* 3 i)))
                           (* (aget pacc (+ (* 3 i) 1)) (aget pacc (+ (* 3 i) 1)))
                           (* (aget pacc (+ (* 3 i) 2)) (aget pacc (+ (* 3 i) 2))))))
           (range np))))

@@ -14,20 +14,11 @@
   where A is the Jacobian of the equations of motion. It is integrated
   alongside the trajectory, 36 extra states for the six real ones, because
   A depends on where the satellite actually is."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.linear :as lin]
+            [clojure.math :as math]))
 
 ;; ------------------------------------------------------------ small matrices
-
-(defn identity-matrix [n]
-  (mapv (fn [i] (mapv (fn [j] (if (= i j) 1.0 0.0)) (range n))) (range n)))
-
-(defn mat-mul [a b]
-  (let [m (count (first b))]
-    (mapv (fn [row] (mapv (fn [j] (reduce + (map-indexed (fn [k v] (* v (nth (nth b k) j))) row)))
-                          (range m)))
-          a)))
-
-(defn mat-vec [m v] (mapv (fn [row] (reduce + (map * row v))) m))
 
 (defn det-3 [[[a b cc] [d e f] [g h i]]]
   (- (+ (* a e i) (* b f g) (* cc d h)) (+ (* cc e g) (* b d i) (* a f h))))
@@ -43,7 +34,7 @@
   everything else in the force model has to be differentiated numerically
   and there is otherwise nothing to test that machinery against."
   [mu r]
-  (let [r2 (reduce + (map * r r))
+  (let [r2 (v3/length-squared r)
         rm (math/sqrt r2)
         r3 (* r2 rm)
         r5 (* r3 r2)]
@@ -69,13 +60,13 @@
   [accel t r v]
   (let [step (fn [x] (max 1e-4 (* 1e-7 (abs x))))
         col  (fn [f x i] (let [h (step (nth x i))]
-                           (mapv #(/ % (* 2.0 h))
-                                 (mapv - (f (perturb x i h)) (f (perturb x i (- h)))))))
+                           (v3/scale (v3/sub (f (perturb x i h)) (f (perturb x i (- h))))
+                                     (/ 1.0 (* 2.0 h)))))
         dr   (mapv (fn [i] (col (fn [r'] (accel t r' v)) r i)) (range 3))
         dv   (mapv (fn [i] (col (fn [v'] (accel t r v')) v i)) (range 3))]
     ;; the columns above are gradients; transpose into Jacobians
-    {:d-dr (mapv (fn [i] (mapv (fn [j] (nth (nth dr j) i)) (range 3))) (range 3))
-     :d-dv (mapv (fn [i] (mapv (fn [j] (nth (nth dv j) i)) (range 3))) (range 3))}))
+    {:d-dr (lin/transpose dr)
+     :d-dv (lin/transpose dv)}))
 
 (defn jacobian
   "The 6x6 matrix A = d(state-rate)/d(state).
@@ -116,7 +107,7 @@
     (let [{:keys [r v phi]} (unpack y)
           a   (accel t r v)
           A   (jacobian accel t r v)
-          dphi (mat-mul A phi)]
+          dphi (lin/mat-mul A phi)]
       (pack v a dphi))))
 
 (defn initial
@@ -124,4 +115,4 @@
   the initial epoch the trajectory is exactly as sensitive to its own start
   as it could possibly be."
   [r v]
-  (pack r v (identity-matrix 6)))
+  (pack r v (lin/eye 6)))

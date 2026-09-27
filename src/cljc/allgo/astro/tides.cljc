@@ -14,6 +14,7 @@
   correction to the degree-2 harmonic coefficients, which then feed straight
   into `allgo.astro.geopotential` without it knowing anything happened."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
 
 (def k2
@@ -76,9 +77,9 @@
   Kept so that the induced correction can be checked against it: whatever
   the sign conventions, the Earth's response must come to k2 times this."
   [GM r-body surface-point]
-  (let [d  (math/sqrt (reduce + (map * r-body r-body)))
-        rs (math/sqrt (reduce + (map * surface-point surface-point)))
-        cos-psi (/ (reduce + (map * r-body surface-point)) (* d rs))
+  (let [d  (v3/length r-body)
+        rs (v3/length surface-point)
+        cos-psi (/ (v3/dot r-body surface-point) (* d rs))
         q  (/ rs d)]
     (* (/ GM d) q q 0.5 (- (* 3.0 cos-psi cos-psi) 1.0))))
 

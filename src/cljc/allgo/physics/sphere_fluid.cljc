@@ -135,6 +135,7 @@
   Fourier basis -- the tridiagonal system merely becomes complex. See
   `solve-rossby!`."
   (:require [allgo.array :as a]
+            [allgo.math :as am]
             [allgo.numerics.fft :as fft]
             [allgo.numerics.tridiagonal :as tri]
             [clojure.math :as math]))
@@ -516,8 +517,7 @@
   (let [nlat (long nlat) nlon (long nlon)
         dphi (double dphi) dlam (double dlam)
         phi (double phi) lam (double lam)
-        two-pi (* 2.0 math/PI)
-        lam (let [l (rem lam two-pi)] (if (neg? l) (+ l two-pi) l))
+        lam (am/wrap-2pi lam)
         fx (/ lam dlam)
         fy (- (/ (+ phi (* 0.5 math/PI)) dphi) 0.5)
         i0 (long (math/floor fx))
@@ -585,7 +585,7 @@
                 vz (+ (* ue clam) (* un (- sp) slam))
                 speed (math/sqrt (+ (* vx vx) (* vy vy) (* vz vz)))]
             (if (< speed 1e-14)
-              (do (aset dep-phi k (math/asin (max -1.0 (min 1.0 sp))))
+              (do (aset dep-phi k (math/asin (am/clamp sp -1.0 1.0)))
                   (aset dep-lam k (math/atan2 (* cp slam) (* cp clam))))
               (let [theta (/ (* speed dt) radius)
                     c (math/cos theta)
@@ -594,7 +594,7 @@
                     qy (- (* sp c) (* vy sc))
                     qz (- (* cp slam c) (* vz sc))
                     len (math/sqrt (+ (* qx qx) (* qy qy) (* qz qz)))]
-                (aset dep-phi k (math/asin (max -1.0 (min 1.0 (/ qy len)))))
+                (aset dep-phi k (math/asin (am/clamp (/ qy len) -1.0 1.0)))
                 (aset dep-lam k (math/atan2 qz qx))))))))
     dep-phi))
 
@@ -679,7 +679,7 @@
   [^doubles field ^doubles forward ^doubles round-trip ^doubles lo ^doubles hi ^doubles out]
   (dotimes [k (alength field)]
     (let [corrected (+ (aget forward k) (* 0.5 (- (aget field k) (aget round-trip k))))]
-      (aset out k (min (aget hi k) (max (aget lo k) corrected)))))
+      (aset out k (am/clamp corrected (aget lo k) (aget hi k)))))
   out)
 
 ;; ---------------------------------------------------------------------------
@@ -987,7 +987,7 @@
           (let [lam (* i dlam)
                 dot (+ (* cx cp (math/cos lam)) (* cy sp) (* cz cp (math/sin lam)))
                 ;; Great-circle angle to the center.
-                ang (math/acos (max -1.0 (min 1.0 dot)))
+                ang (math/acos (am/clamp dot -1.0 1.0))
                 k (+ base i)]
             (aset field k (+ (aget field k)
                              (* strength (math/exp (- (* ang ang inv))))))))))

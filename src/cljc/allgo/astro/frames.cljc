@@ -14,6 +14,7 @@
   offset that no amount of careful integration will recover."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.time :as time]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------------------------ matrices
@@ -27,22 +28,11 @@
 (defn rz [t] (let [s (math/sin t) k (math/cos t)]
                [[k s 0.0] [(- s) k 0.0] [0.0 0.0 1.0]]))
 
-(defn mul [a b]
-  (mapv (fn [row] (mapv (fn [j] (reduce + (map-indexed (fn [k v] (* v (nth (nth b k) j))) row)))
-                        (range 3)))
-        a))
-
-(defn apply-m [m v]
-  (mapv (fn [row] (reduce + (map * row v))) m))
-
-(defn transpose [m]
-  (mapv (fn [j] (mapv #(nth % j) m)) (range 3)))
-
 (defn chain
   "Compose rotations left to right, so `(chain a b c)` applied to a vector
   does c first."
   [& ms]
-  (reduce mul ms))
+  (reduce lin/mat-mul ms))
 
 ;; ---------------------------------------------------------------- precession
 
@@ -124,7 +114,7 @@
   (let [T    (time/centuries-J2000 mjd-tt)
         args (delaunay mjd-tt)]
     (reduce (fn [[dpsi deps] [ml ms mf md mo sp sp-t ce ce-t]]
-              (let [a (reduce + (map * [ml ms mf md mo] args))]
+              (let [a (lin/dot [ml ms mf md mo] args)]
                 [(+ dpsi (* c/arcsec 1e-4 (+ sp (* sp-t T)) (math/sin a)))
                  (+ deps (* c/arcsec 1e-4 (+ ce (* ce-t T)) (math/cos a)))]))
             [0.0 0.0]
@@ -180,7 +170,7 @@
   against an annual term. Like dUT1 this can only be measured and published,
   never predicted, and zero is the honest default when it is unknown."
   [xp yp]
-  (mul (ry (- xp)) (rx (- yp))))
+  (lin/mat-mul (ry (- xp)) (rx (- yp))))
 
 ;; --------------------------------------------------- the complete transform
 
@@ -204,8 +194,8 @@
 
 (defn terrestrial->celestial
   "The inverse, which for a rotation is simply the transpose."
-  ([mjd-tt mjd-ut1] (transpose (celestial->terrestrial mjd-tt mjd-ut1)))
-  ([mjd-tt mjd-ut1 xp yp] (transpose (celestial->terrestrial mjd-tt mjd-ut1 xp yp))))
+  ([mjd-tt mjd-ut1] (lin/transpose (celestial->terrestrial mjd-tt mjd-ut1)))
+  ([mjd-tt mjd-ut1 xp yp] (lin/transpose (celestial->terrestrial mjd-tt mjd-ut1 xp yp))))
 
 ;; ------------------------------------------------------------------ caching
 
@@ -230,7 +220,7 @@
   [mjd-tt]
   (let [k (math/round (/ mjd-tt pn-bucket))]
     (or (when-let [[ck v] @frame-cache] (when (= ck k) v))
-        (let [v [(mul (nutation mjd-tt) (precession mjd-tt))
+        (let [v [(lin/mat-mul (nutation mjd-tt) (precession mjd-tt))
                  (equation-of-equinoxes mjd-tt)]]
           (reset! frame-cache [k v])
           v))))

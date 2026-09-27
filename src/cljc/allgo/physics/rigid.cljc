@@ -36,7 +36,8 @@
   fluid has thousands of particles, and at tens the clarity is worth more
   than the allocation."
   (:require [allgo.geometry.quaternion :as q]
-            [allgo.geometry.vec3 :as v]))
+            [allgo.geometry.vec3 :as v]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Bodies
@@ -97,7 +98,7 @@
   [{:keys [radius density] :as opts}]
   (let [r (double radius)
         d (double (or density 0.0))
-        mass (* d (/ 4.0 3.0) Math/PI r r r)
+        mass (* d (/ 4.0 3.0) math/PI r r r)
         i (* 0.4 mass r r)]
     (assoc (body (assoc opts :mass mass :inertia (when (pos? mass) [i i i])))
            :shape :ball :radius r :size [(* 2 r) (* 2 r) (* 2 r)])))
@@ -114,7 +115,7 @@
   (let [big (double major)
         r (double minor)
         d (double (or density 0.0))
-        mass (* d 2.0 Math/PI Math/PI big r r)
+        mass (* d 2.0 math/PI math/PI big r r)
         axial (* mass (+ (* big big) (* 0.75 r r)))
         diametral (* mass (+ (* 0.5 big big) (* 0.625 r r)))]
     (assoc (body (assoc opts :mass mass

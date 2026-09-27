@@ -27,12 +27,12 @@
   which means adding a town, or naming them in a different order, does
   not rename everything else on the map.
 
-  The stream is `allgo.procedural.noise`'s Park-Miller, for the reason
+  The stream is `allgo.random`'s Park-Miller, for the reason
   given there: it is arithmetic on doubles under 2^53, so the JVM and a
   browser agree about what a seed means. A name generator that produced
   different names on the server and the client would be a strange thing
   to debug."
-  (:require [allgo.procedural.noise :as noise]
+  (:require [allgo.random :as random]
             [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------
@@ -59,15 +59,6 @@
   ["n" "r" "l" "s" "m" "th" "k" "t" "d" "ng" "rn" "rk" "ld" "lm" "st"
    "sk" "nd" "nt" "rd" "sh" "ch" "ss" "ll" "rr"])
 
-(defn- stream
-  "A repeatable stream of numbers in [0, 1) from three integer keys."
-  [seed a b]
-  (let [s (atom (double (noise/cell-seed (long seed) (long a) (long b) 977)))]
-    (fn [] (let [v (noise/unit @s)] (swap! s noise/advance) v))))
-
-(defn- pick [rng coll]
-  (nth coll (min (dec (count coll)) (long (* (rng) (count coll))))))
-
 (defn- pick-n
   "`n` distinct items, in a stable order."
   [rng n coll]
@@ -89,7 +80,7 @@
   thousand distinguishable names and few enough that they rhyme with each
   other."
   [seed]
-  (let [rng (stream seed 1 1)
+  (let [rng (random/rng seed 1 1 977)
         cluster? (< (rng) 0.55)
         simple (pick-n rng (+ 6 (long (* 6 (rng)))) simple-onsets)
         onsets (into simple
@@ -140,11 +131,11 @@
                 ;; One retry when the draw repeats the last onset.
                 ;; `Thiththi` is what happens without it, and a small
                 ;; inventory makes the collision common rather than rare.
-                (let [o (pick rng pool)]
-                  (if (= o previous-onset) (pick rng pool) o)))
-        nucleus (pick rng nuclei)
+                (let [o (random/pick rng pool)]
+                  (if (= o previous-onset) (random/pick rng pool) o)))
+        nucleus (random/pick rng nuclei)
         close? (< (rng) (if after-coda? (* 0.3 coda-rate) coda-rate))]
-    [(str onset nucleus (when close? (pick rng codas))) close? onset]))
+    [(str onset nucleus (when close? (random/pick rng codas))) close? onset]))
 
 (defn- tidy
   "Smooths the joins a syllable-at-a-time build leaves behind.
@@ -171,7 +162,7 @@
   Two different `k` give two different words; the same `k` always gives
   the same one, however many other names have been drawn."
   [{:keys [min-syllables max-syllables] :as lang} k]
-  (let [rng (stream (:seed lang) (inc (long k)) 7)
+  (let [rng (random/rng (:seed lang) (inc (long k)) 7 977)
         n (+ (long min-syllables)
              (long (* (rng) (inc (- (long max-syllables) (long min-syllables))))))
         raw (loop [i 0 acc "" after-coda? false prev nil]
@@ -201,5 +192,5 @@
   The occasional longer name is what stops a map reading as a list of
   interchangeable two-syllable tokens."
   [lang k]
-  (let [rng (stream (:seed lang) (+ 31 (long k)) 3)]
+  (let [rng (random/rng (:seed lang) (+ 31 (long k)) 3 977)]
     (if (< (rng) 0.22) (compound lang k) (word lang k))))

@@ -14,13 +14,36 @@
   mishap."
   (:require [clojure.math :as math]))
 
+;; ---------------------------------------------------------------- vectors
+;;
+;; Of any length: a state, a gradient, a row. `allgo.geometry.vec3` is the
+;; same vocabulary unrolled for exactly three, and is what to reach for
+;; when a vector is a position; these are for when it is not.
+
+(defn add [a b] (mapv + a b))
+(defn sub [a b] (mapv - a b))
+(defn scale [v s] (mapv #(* % s) v))
+(defn dot [a b] (reduce + (map * a b)))
+(defn length-squared [v] (dot v v))
+(defn length [v] (math/sqrt (dot v v)))
+(defn distance-squared [a b] (length-squared (sub a b)))
+(defn distance [a b] (length (sub a b)))
+
+(defn normalize
+  "A unit vector in the same direction, or `v` itself if it has none."
+  [v]
+  (let [l (length v)]
+    (if (zero? l) v (scale v (/ 1.0 l)))))
+
+;; ---------------------------------------------------------------- matrices
+
 (defn transpose [m] (apply mapv vector m))
 
 (defn mat-mul [a b]
   (let [bt (transpose b)]
-    (mapv (fn [row] (mapv (fn [col] (reduce + (map * row col))) bt)) a)))
+    (mapv (fn [row] (mapv #(dot row %) bt)) a)))
 
-(defn mat-vec [m v] (mapv (fn [row] (reduce + (map * row v))) m))
+(defn mat-vec [m v] (mapv #(dot % v) m))
 
 (defn mat-add [a b] (mapv (fn [r s] (mapv + r s)) a b))
 (defn mat-sub [a b] (mapv (fn [r s] (mapv - r s)) a b))

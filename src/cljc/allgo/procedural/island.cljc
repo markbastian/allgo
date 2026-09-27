@@ -54,6 +54,7 @@
   (:require [allgo.geometry.dual-mesh :as dm]
             [allgo.procedural.fractal :as fractal]
             [allgo.procedural.noise :as noise]
+            [allgo.random :as random]
             [clojure.math :as math]))
 
 (def defaults
@@ -99,15 +100,15 @@
   Predictable in a way the noise shape is not, which is what it is for --
   a map that must have exactly one island with a coast all the way round."
   [{:keys [seed bumps]}]
-  (let [rng-seed (double (noise/cell-seed (long seed) 7 7 7))
-        phase (* 2.0 math/PI (noise/unit rng-seed))
-        s2 (noise/advance rng-seed)
-        phase2 (* 2.0 math/PI (noise/unit s2))
+  (let [rng-seed (double (random/cell-seed (long seed) 7 7 7))
+        phase (* 2.0 math/PI (random/unit rng-seed))
+        s2 (random/advance rng-seed)
+        phase2 (* 2.0 math/PI (random/unit s2))
         ;; The lobe count comes from the seed unless it is asked for.
         ;; Fixing it and varying only the phase gives every seed the same
         ;; starfish rotated, which is worse than no variation at all --
         ;; it looks like a bug rather than like a family of islands.
-        bumps (long (or bumps (+ 3 (long (* 4.0 (noise/unit (noise/advance s2)))))))]
+        bumps (long (or bumps (+ 3 (long (* 4.0 (random/unit (random/advance s2)))))))]
     (fn [[nx ny]]
       (let [r (math/sqrt (+ (* nx nx) (* ny ny)))
             a (math/atan2 ny nx)

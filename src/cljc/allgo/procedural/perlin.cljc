@@ -1,5 +1,6 @@
 (ns allgo.procedural.perlin
-  (:require #?(:clj [clojure.math :as math] :cljs [cljs.math :as math])))
+  (:require [allgo.math :as am]
+            #?(:clj [clojure.math :as math] :cljs [cljs.math :as math])))
 
 ;I can't remember where I originally coded this from but here are some resources:
 ;  * https://mrl.nyu.edu/~perlin/noise/
@@ -18,8 +19,6 @@
 (defonce p (into permutation permutation))
 
 (defn fade [t] (* t t t (+ (* t (- (* t 6.0) 15.0)) 10.0)))
-
-(defn lerp [a b t] (+ a (* t (- b a))))
 
 (defn grad [hash x y z]
   (case (bit-and hash 0xF)
@@ -58,10 +57,10 @@
           bbb (f [(inc xi) (inc yi) (inc zi)])
           xf (- x x0) yf (- y y0) zf (- z z0)
           u (fade xf) v (fade yf) w (fade zf)]
-      (* 0.5 (inc (lerp (lerp (lerp (grad aaa xf yf zf) (grad baa (dec xf) yf zf) u)
-                              (lerp (grad aba xf (dec yf) zf) (grad bba (dec xf) (dec yf) zf) u) v)
-                        (lerp (lerp (grad aab xf yf (dec zf)) (grad bab (dec xf) yf (dec zf)) u)
-                              (lerp (grad abb xf (dec yf) (dec zf)) (grad bbb (dec xf) (dec yf) (dec zf)) u) v) w))))))
+      (* 0.5 (inc (am/lerp (am/lerp (am/lerp (grad aaa xf yf zf) (grad baa (dec xf) yf zf) u)
+                                    (am/lerp (grad aba xf (dec yf) zf) (grad bba (dec xf) (dec yf) zf) u) v)
+                           (am/lerp (am/lerp (grad aab xf yf (dec zf)) (grad bab (dec xf) yf (dec zf)) u)
+                                    (am/lerp (grad abb xf (dec yf) (dec zf)) (grad bbb (dec xf) (dec yf) (dec zf)) u) v) w))))))
 
 (defn operlin [x y z persistence octaves]
   (loop [total 0.0 freq 1.0 amp 1.0 max-val 0.0 octave 0]

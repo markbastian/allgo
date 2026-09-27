@@ -45,7 +45,9 @@
   what falls off is a plain ragdoll, held together only by its joint
   limits, and it lands on the bike as well as the road."
   (:require [allgo.geometry.quaternion :as q]
-            [allgo.geometry.vec3 :as v]))
+            [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Where the rider touches the bike, in the bike frame's coordinates
@@ -73,9 +75,9 @@
         len (v/length axis)
         c (double (nth d 1))]
     (cond
-      (> len 1e-9) (q/from-axis-angle (v/scale axis (/ 1.0 len)) (Math/atan2 len c))
+      (> len 1e-9) (q/from-axis-angle (v/scale axis (/ 1.0 len)) (math/atan2 len c))
       (pos? c) q/identity-q
-      :else (q/from-axis-angle [1.0 0.0 0.0] Math/PI))))
+      :else (q/from-axis-angle [1.0 0.0 0.0] math/PI))))
 
 (defn- box-inertia [[sx sy sz] m]
   (let [f (/ (double m) 12.0)
@@ -104,12 +106,12 @@
         d (min (- (+ len1 len2) 1e-3) (v/length ac))
         u (v/normalize ac)
         along (/ (+ (- (* len1 len1) (* len2 len2)) (* d d)) (* 2.0 d))
-        h (Math/sqrt (max 0.0 (- (* len1 len1) (* along along))))
+        h (math/sqrt (max 0.0 (- (* len1 len1) (* along along))))
         perp (v/normalize (v/sub hint (v/scale u (v/dot hint u))))]
     (v/add a (v/add (v/scale u along) (v/scale perp h)))))
 
 (defn- angle-between ^double [a b]
-  (Math/acos (max -1.0 (min 1.0 (v/dot (v/normalize a) (v/normalize b))))))
+  (math/acos (am/clamp (v/dot (v/normalize a) (v/normalize b)) -1.0 1.0)))
 
 (defn- bone
   "A limb from its joint to `bone` -- the vector to its far end -- with
@@ -294,10 +296,10 @@
   numbers a spring toward rest pulls against."
   [[x y z w]]
   (let [[x y z w] (if (neg? (double w)) [(- x) (- y) (- z) (- w)] [x y z w])
-        s (Math/sqrt (+ (* x x) (* y y) (* z z)))]
+        s (math/sqrt (+ (* x x) (* y y) (* z z)))]
     (if (< s 1e-9)
       [(* 2.0 x) (* 2.0 y) (* 2.0 z)]
-      (let [k (/ (* 2.0 (Math/atan2 s w)) s)]
+      (let [k (/ (* 2.0 (math/atan2 s w)) s)]
         [(* k x) (* k y) (* k z)]))))
 
 (defn muscles
@@ -359,7 +361,7 @@
   The figure's frames face +x with +y up, so a lean toward -z, the
   positive way, is a turn of the torso about +x the negative way."
   [lean]
-  (let [shift (max (- max-shift) (min max-shift (* 0.6 (double lean))))]
+  (let [shift (am/clamp (* 0.6 (double lean)) (- max-shift) max-shift)]
     {torso (q/from-axis-angle [1.0 0.0 0.0] (- shift))
      head (q/from-axis-angle [1.0 0.0 0.0] (* 0.6 shift))}))
 

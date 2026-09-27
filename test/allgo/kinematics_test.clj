@@ -5,6 +5,7 @@
             [allgo.kinematics.arm :as arm]
             [allgo.kinematics.chain :as k]
             [allgo.kinematics.numeric :as num]
+            [allgo.math :as am]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -129,7 +130,7 @@
         (let [qs (rng-angles r 6)
               target (k/pose puma qs)]
           (is (some (fn [s]
-                      (< (reduce max (map (fn [a b] (abs (k/wrap-angle (- a b)))) s qs))
+                      (< (reduce max (map (fn [a b] (abs (am/wrap-angle (- a b)))) s qs))
                          1e-6))
                     (ik/solutions puma target))
               "the arm cannot reach its own pose")))))
@@ -178,7 +179,7 @@
     (let [target (k/pose puma [0.3 -0.6 0.9 0.4 0.7 0.2])
           from (k/home puma)
           chosen (ik/nearest puma target from)
-          travel (fn [s] (reduce + (map (fn [a b] (abs (k/wrap-angle (- a b)))) s from)))]
+          travel (fn [s] (reduce + (map (fn [a b] (abs (am/wrap-angle (- a b)))) s from)))]
       (is (some? chosen))
       (is (= (travel chosen) (reduce min (map travel (ik/solutions puma target)))))
       (is (< (pose-error (k/pose puma chosen) target) 1e-9))))
@@ -194,15 +195,15 @@
       (is (not (k/within-limits? c [3.0 0.5 0.0])))))
 
   (testing "angles wrap to the half turn either side of zero"
-    (is (< (abs (- 0.5 (k/wrap-angle (+ 0.5 (* 4 math/PI))))) 1e-12))
-    (is (< (abs (- -0.5 (k/wrap-angle (- -0.5 (* 4 math/PI))))) 1e-12))
-    (is (<= (- math/PI) (k/wrap-angle 100.0) math/PI))
+    (is (< (abs (- 0.5 (am/wrap-angle (+ 0.5 (* 4 math/PI))))) 1e-12))
+    (is (< (abs (- -0.5 (am/wrap-angle (- -0.5 (* 4 math/PI))))) 1e-12))
+    (is (<= (- math/PI) (am/wrap-angle 100.0) math/PI))
     (testing "and a wrapped angle is the same rotation it started as"
       (let [r (java.util.Random. 37)]
         (dotimes [_ 200]
           (let [a (* 40 (- (.nextDouble r) 0.5))]
             (is (< (q/angle (q/between (q/from-axis-angle [0 0 1] a)
-                                       (q/from-axis-angle [0 0 1] (k/wrap-angle a))))
+                                       (q/from-axis-angle [0 0 1] (am/wrap-angle a))))
                    1e-9))))))))
 
 (def redundant
@@ -390,7 +391,7 @@
               target {:pos w :rot (random-rot r)}]
           (doseq [psi [-2.5 -1.0 0.0 0.7 2.9]]
             (when-let [c (arm/solve human target psi)]
-              (is (< (abs (k/wrap-angle (- psi (arm/swivel-of human c)))) 1e-9)))))))))
+              (is (< (abs (am/wrap-angle (- psi (arm/swivel-of human c)))) 1e-9)))))))))
 
 (deftest arm-forward-test
   (testing "a straight arm reaches its whole length"

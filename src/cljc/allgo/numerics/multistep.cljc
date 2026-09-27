@@ -14,8 +14,10 @@
   definition of the method, and deriving them means any order is available
   instead of only those someone printed."
   (:require [allgo.numerics.core :as core]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.rk :as rk]
-            [allgo.numerics.rkn :as rkn]))
+            [allgo.numerics.rkn :as rkn]
+            [clojure.math :as math]))
 
 ;; ------------------------------------------------- polynomials, coefficient
 ;; A polynomial is a vector of coefficients, lowest power first.
@@ -33,7 +35,7 @@
   [p a b]
   (reduce + (map-indexed (fn [i c]
                            (let [n (inc i)]
-                             (/ (* c (- (Math/pow b n) (Math/pow a n))) n)))
+                             (/ (* c (- (math/pow b n) (math/pow a n))) n)))
                          p)))
 
 (defn- lagrange-basis
@@ -126,17 +128,17 @@
         (assoc integ :t t' :y y' :history (push history (f t' y') k)
                :accepted true :starting? true))
       (let [{:keys [predictor corrector]} method
-            p (core/v+ y (core/v* (core/combine predictor history) h))]
+            p (lin/add y (lin/scale (core/combine predictor history) h))]
         (if-not corrector
           (assoc integ :t t' :y p :history (push history (f t' p) k)
                  :accepted true :starting? false :error nil)
           ;; PECE: predict, evaluate, correct, evaluate. The gap between
           ;; prediction and correction is Milne's estimate of the local error.
           (let [fp (f t' p)
-                y' (core/v+ y (core/v* (core/combine corrector (push history fp k)) h))]
+                y' (lin/add y (lin/scale (core/combine corrector (push history fp k)) h))]
             (assoc integ :t t' :y y' :history (push history (f t' y') k)
                    :accepted true :starting? false
-                   :error (core/norm (core/v- y' p) y'
+                   :error (core/norm (lin/sub y' p) y'
                                      (:tol-abs control) (:tol-rel control)))))))))
 
 (defn adams-bashforth
@@ -192,18 +194,18 @@
             ;; Position advances on the second difference; velocity rides an
             ;; Adams sum over the same history, so both carry the same order
             ;; without a central difference capping it at two.
-            step-y  (fn [w hist] (core/v+ (core/v- (core/v* y 2.0) y-prev)
-                                          (core/v* (core/combine w hist) (* h h))))
+            step-y  (fn [w hist] (lin/add (lin/sub (lin/scale y 2.0) y-prev)
+                                          (lin/scale (core/combine w hist) (* h h))))
             p       (step-y predictor history)
             [y' err] (if-not corrector
                        [p nil]
                        (let [fp (f t' p)
                              c  (step-y corrector (push history fp k))]
-                         [c (core/norm (core/v- c p) c
+                         [c (core/norm (lin/sub c p) c
                                        (:tol-abs control) (:tol-rel control))]))
             fv      (f t' y')]
         (assoc integ :t t' :y y' :y-prev y
-               :dy (core/v+ dy (core/v* (core/combine velocity history) h))
+               :dy (lin/add dy (lin/scale (core/combine velocity history) h))
                :history (push history fv k)
                :accepted true :starting? false :error err)))))
 
@@ -279,10 +281,10 @@
             predictor (variable-coefficients offsets)
             corrector (variable-coefficients (vec (cons 1.0 (butlast offsets))))
             t'        (+ t h)
-            p         (core/v+ y (core/v* (core/combine predictor history) h))
+            p         (lin/add y (lin/scale (core/combine predictor history) h))
             fp        (f t' p)
-            y'        (core/v+ y (core/v* (core/combine corrector (push history fp k)) h))
-            err       (core/norm (core/v- y' p) y' (:tol-abs control) (:tol-rel control))]
+            y'        (lin/add y (lin/scale (core/combine corrector (push history fp k)) h))
+            err       (core/norm (lin/sub y' p) y' (:tol-abs control) (:tol-rel control))]
         ;; Rejected, the history stands and only the step shrinks, which is
         ;; what makes a variable-coefficient method able to retry at once.
         (core/settle integ err (:order method)

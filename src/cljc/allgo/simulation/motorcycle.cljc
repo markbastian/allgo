@@ -85,10 +85,12 @@
   so that steering *into* a lean is steering with the same sign."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
+            [allgo.math :as am]
             [allgo.physics.articulated :as ab]
             [allgo.physics.rigid :as rigid]
             [allgo.physics.world :as pw]
-            [allgo.simulation.rider :as rider]))
+            [allgo.simulation.rider :as rider]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; The bike
@@ -98,7 +100,7 @@
   frame's coordinates, whose origin is the sprung mass's center."
   {:wheel-radius 0.32            ; outside of the tire
    :tire-radius 0.06             ; the tube of the torus
-   :rake (/ (* 25.0 Math/PI) 180.0)
+   :rake (/ (* 25.0 math/PI) 180.0)
    :head [0.45 0.25 0.0]         ; where the steering axis meets the frame
    :fork-length 0.65             ; head to axle, along the steering axis
    :fork-offset 0.03             ; axle ahead of the steering axis
@@ -150,7 +152,7 @@
 (defn steering-axis
   "Up the steering axis, raked back from vertical."
   [{:keys [rake]}]
-  [(- (Math/sin rake)) (Math/cos rake) 0.0])
+  [(- (math/sin rake)) (math/cos rake) 0.0])
 
 (defn- fork-axis
   "Down the fork tubes: the way the slider extends."
@@ -161,7 +163,7 @@
   "The front axle in the steering head's own frame."
   [{:keys [rake fork-length fork-offset] :as cfg}]
   (v/add (v/scale (fork-axis cfg) fork-length)
-         (v/scale [(Math/cos rake) (Math/sin rake) 0.0] fork-offset)))
+         (v/scale [(math/cos rake) (math/sin rake) 0.0] fork-offset)))
 
 (def ^:private idq [0.0 0.0 0.0 1.0])
 
@@ -246,10 +248,10 @@
         forward (q/rotate rot [1.0 0.0 0.0])
         [wx] vel]
     {:speed (double (nth vel 3))
-     :lean (Math/asin (max -1.0 (min 1.0 (double (nth lateral 1)))))
+     :lean (math/asin (am/clamp (double (nth lateral 1)) -1.0 1.0))
      :lean-rate (- (double wx))
-     :heading (Math/atan2 (- (double (nth forward 2))) (double (nth forward 0)))
-     :pitch (Math/asin (max -1.0 (min 1.0 (double (nth forward 1)))))
+     :heading (math/atan2 (- (double (nth forward 2))) (double (nth forward 0)))
+     :pitch (math/asin (am/clamp (double (nth forward 1)) -1.0 1.0))
      :steer (double (nth q steering))
      :steer-rate (double (nth qd steering))
      :rear-travel (double (nth q swingarm))
@@ -288,7 +290,7 @@
         sprung (* (+ (double frame-mass) (double (:carried-mass cfg 0.0))
                      (double steering-mass) (* 0.5 (double fork-mass)))
                   9.81 share)]
-    (* sprung (Math/cos (double rake)))))
+    (* sprung (math/cos (double rake)))))
 
 (defn- spring
   "A preloaded spring and damper at `x`, with bump stops past `[lo hi]`.
@@ -302,7 +304,7 @@
                    :else 0.0)
         ;; Past a stop the damping goes up with the stiffness, or the
         ;; stop is a trampoline.
-        damp (if (or (< x lo) (> x hi)) (* damping (Math/sqrt stop)) damping)]
+        damp (if (or (< x lo) (> x hi)) (* damping (math/sqrt stop)) damping)]
     (+ preload (- (* rate x)) bump (- (* damp xd)))))
 
 (defn- drive
@@ -317,7 +319,7 @@
   "Torque against a wheel's spin, faded in over the last few radians a
   second so that a stopped wheel is held rather than chattered."
   ^double [^double strength ^double lever ^double omega]
-  (- (* strength lever (Math/tanh (/ omega 2.0)))))
+  (- (* strength lever (math/tanh (/ omega 2.0)))))
 
 (defn rider-steer
   "The steering angle a rider wants: into the fall, measured from the lean
@@ -339,7 +341,7 @@
          wheelbase 1.5
          v (max 2.5 (abs (double speed)))
          scale (/ (* 9.81 wheelbase) (* v v))
-         feed-forward (* scale (Math/tan target))
+         feed-forward (* scale (math/tan target))
          k-lean (* 5.0 scale)
          k-rate (* 1.3 scale)
          k-held (* 2.0 scale)
@@ -347,7 +349,7 @@
                  (* k-lean (- (double lean) target))
                  (* k-rate (double lean-rate))
                  (* k-held held))]
-     (max (- (double max-steer)) (min (double max-steer) want)))))
+     (am/clamp want (- (double max-steer)) (double max-steer)))))
 
 (defn forces
   "The generalized forces on every joint, given where the bike is and
@@ -528,7 +530,7 @@
          at (aim (aim target))
          r (double radius)
          ball (-> (rigid/ball {:pos start :radius r
-                               :density (/ (double mass) (* (/ 4.0 3.0) Math/PI r r r))
+                               :density (/ (double mass) (* (/ 4.0 3.0) math/PI r r r))
                                :vel (v/scale (v/normalize (v/sub at start)) speed)})
                   (assoc :kind :cannonball))]
      (update scene :bodies conj ball))))
@@ -557,7 +559,7 @@
   these a steady throttle accelerates for ever."
   ^double [{:keys [drag-area rolling-resistance] :as cfg} ^double speed]
   (+ (* 0.5 1.2 (double drag-area) speed speed)
-     (* (double rolling-resistance) (total-mass cfg) 9.81 (Math/tanh (/ speed 0.5)))))
+     (* (double rolling-resistance) (total-mass cfg) 9.81 (math/tanh (/ speed 0.5)))))
 
 (defn- slow
   "`pose` after one substep of resistance, as an impulse through the
@@ -612,7 +614,7 @@
         err (- (double (:lean (telemetry cfg pose))) (double (:lean controls 0.0)))
         held (let [h (+ (* (double (:lean-held scene 0.0)) (- 1.0 (* 0.05 (double dt))))
                         (* err (double dt)))]
-               (max -0.3 (min 0.3 h)))
+               (am/clamp h -0.3 0.3))
         controls (assoc controls :lean-held held)
         rider (second (:models scene))
         scene (cond-> (-> scene

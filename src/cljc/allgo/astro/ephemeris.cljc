@@ -26,6 +26,7 @@
   propagated orbit without further rotation."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.time :as t]
+            [allgo.geometry.vec3 :as v3]
             [clojure.math :as math]))
 
 (defn- frac [x] (- x (math/floor x)))
@@ -126,9 +127,9 @@
   Omitting the indirect term does not introduce a small error, it reports
   something else entirely."
   [GM r s]
-  (let [d   (mapv - r s)
-        dm  (math/sqrt (reduce + (map * d d)))
-        sm  (math/sqrt (reduce + (map * s s)))
+  (let [d   (v3/sub r s)
+        dm  (v3/length d)
+        sm  (v3/length s)
         kd  (/ GM (* dm dm dm))
         ks  (/ GM (* sm sm sm))]
     (mapv (fn [di si] (- (- (* kd di)) (* ks si))) d s)))

@@ -29,6 +29,7 @@
   requested speed is clamped to the CFL limit for the step actually being
   taken."
   (:require [allgo.array :as a]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
@@ -91,8 +92,8 @@
         fz (+ (double cz) (/ (double z) sp))
         i0 (min (max 0 (long (math/floor fx))) (- (long nx) 2))
         j0 (min (max 0 (long (math/floor fz))) (- (long nz) 2))
-        tx (min 1.0 (max 0.0 (- fx i0)))
-        tz (min 1.0 (max 0.0 (- fz j0)))]
+        tx (am/clamp (- fx i0) 0.0 1.0)
+        tz (am/clamp (- fz j0) 0.0 1.0)]
     (+ (* (- 1.0 tx) (- 1.0 tz) (height s i0 j0))
        (* tx (- 1.0 tz) (height s (inc i0) j0))
        (* (- 1.0 tx) tz (height s i0 (inc j0)))
