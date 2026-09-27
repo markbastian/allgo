@@ -25,7 +25,7 @@ discipline:
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
 | `allgo.simulation` | Reynolds' boids, and a motorcycle with a rider and courses to ride                                                                                                           |
 | `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, extrapolation, FFT, tridiagonal and small dense linear solves                                                             |
-| `allgo.astro`      | Force models, frames, time scales, geodesy, Kepler elements, ephemerides, orbit determination                                                                                |
+| `allgo.astro`      | Force models, frames, time scales, geodesy, Kepler elements, ephemerides, orbit determination, the three-body problem                                                        |
 | `allgo.demo`       | ClojureScript demo viewers (browser)                                                                                                                                         |
 | `allgo.desktop`    | JVM-only renderers (Quil, Swing, Lanterna)                                                                                                                                   |
 
@@ -82,7 +82,7 @@ groups:
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |
 | Fluids                | Eulerian fluid, FLIP fluid, fire and smoke, height-field water                                 |
 | Flocking              | 2D, through a dungeon, with its Voronoi diagram, 3D, 3D Voronoi                                |
-| Orbits & Numerics     | Lorenz, Kepler, satellite perturbations, orbit determination, the solar system                 |
+| Orbits & Numerics     | Lorenz, Kepler, three bodies, satellite perturbations, orbit determination, the solar system   |
 
 The motorcycle is ridden with the keys, on a loop, an Excitebike lane or
 a trials section. With no key down, the course's autopilot rides it. It

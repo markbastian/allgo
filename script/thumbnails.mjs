@@ -42,7 +42,7 @@ const DEFAULT_SETTLE = 6000;
 // page drew them in. 2 keeps the middle half, and so on.
 const ZOOM = { "soft-body": 2.2, skinning: 2.2, cloth: 1.7, joints: 1.8,
                rigid: 1.6, "human-arm": 1.4, kepler: 1.8, hex: 1.4,
-               bricks: 1.9, ragdoll: 1.7 };
+               bricks: 1.9, ragdoll: 1.7, "three-body": 1.5 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

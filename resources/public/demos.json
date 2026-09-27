@@ -348,6 +348,17 @@
    "href": "play/?demo=kepler"
   },
   {
+   "id": "three-body",
+   "group": "Orbits & Numerics",
+   "label": "Three-Body Problem",
+   "blurb": "Figure eights, Lagrange's triangle, and chaos",
+   "badges": [
+    "New",
+    "3D"
+   ],
+   "href": "play/?demo=three-body"
+  },
+  {
    "id": "satellite",
    "group": "Orbits & Numerics",
    "label": "Satellite — Orbit Perturbations",

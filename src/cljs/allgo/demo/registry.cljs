@@ -41,6 +41,7 @@
             [allgo.demo.spatial-hash :as spatial-hash]
             [allgo.demo.sphere-fluid :as sphere-fluid]
             [allgo.demo.terrain-webgl :as terrain]
+            [allgo.demo.three-body :as three-body]
             [allgo.demo.water :as water]))
 
 (def lifecycles
@@ -79,6 +80,7 @@
    "boids-3d" {:start boids-3d/start! :stop boids-3d/stop!}
    "lorenz"   {:start lorenz/start! :stop lorenz/stop!}
    "kepler"   {:start kepler/start! :stop kepler/stop!}
+   "three-body" {:start three-body/start! :stop three-body/stop!}
    "satellite" {:start satellite/start! :stop satellite/stop!}
    "orbit-determination" {:start od/start! :stop od/stop!}
    "solar-system" {:start solar/start! :stop solar/stop!}})

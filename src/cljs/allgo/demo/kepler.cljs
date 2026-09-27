@@ -8,7 +8,8 @@
   starts far behind RKN4, but its error oscillates within a bound while
   RKN4's walks steadily upward. Run either for a few hundred orbits and the
   more accurate method is the one that has drifted further."
-  (:require [allgo.demo.fps :as fps]
+  (:require [allgo.demo.error-chart :as chart]
+            [allgo.demo.fps :as fps]
             [allgo.numerics :as num]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
@@ -38,35 +39,6 @@
      :steps  0
      :chart  []}))
 
-;; ------------------------------------------------------------- strip chart
-
-(def ^:private chart-w 210)
-(def ^:private chart-h 74)
-(def ^:private chart-lo -14.0)
-(def ^:private chart-hi -1.0)
-
-(defn- draw-chart! [^js ctx samples]
-  (.clearRect ctx 0 0 chart-w chart-h)
-  (set! (.-fillStyle ctx) "rgba(5,7,13,0.72)")
-  (.fillRect ctx 0 0 chart-w chart-h)
-  (set! (.-strokeStyle ctx) "rgba(255,255,255,0.10)")
-  (set! (.-lineWidth ctx) 1)
-  (doseq [decade (range (Math/ceil chart-lo) chart-hi 3)]
-    (let [y (* chart-h (- 1.0 (/ (- decade chart-lo) (- chart-hi chart-lo))))]
-      (.beginPath ctx) (.moveTo ctx 0 y) (.lineTo ctx chart-w y) (.stroke ctx)))
-  (when (> (count samples) 1)
-    (set! (.-strokeStyle ctx) "#6c8cff")
-    (set! (.-lineWidth ctx) 1.5)
-    (.beginPath ctx)
-    (doseq [[i v] (map-indexed vector samples)]
-      (let [x (* chart-w (/ i (max 1 (dec (count samples)))))
-            y (* chart-h (- 1.0 (/ (- v chart-lo) (- chart-hi chart-lo))))]
-        (if (zero? i) (.moveTo ctx x y) (.lineTo ctx x y))))
-    (.stroke ctx))
-  (set! (.-fillStyle ctx) "rgba(148,148,171,0.9)")
-  (set! (.-font ctx) "9px ui-monospace, Menlo, monospace")
-  (.fillText ctx "log |dE/E|" 6 11))
-
 (defn- trail-geometry []
   (doto (THREE/BufferGeometry.)
     (.setAttribute "position" (THREE/BufferAttribute. (js/Float32Array. (* max-points 3)) 3))))
@@ -82,17 +54,12 @@
         primary   (THREE/Mesh. (THREE/SphereGeometry. 3.4 28 20)
                                (THREE/MeshBasicMaterial. #js {:color 0xffb03a}))
         readout   (js/document.createElement "div")
-        chart     (js/document.createElement "canvas")
-        ctx       (.getContext chart "2d")
         running?  (atom false)
         tick-fps! (fps/meter! container)
+        ctx       (chart/mount! container)
         state     (atom (fresh))]
     (set! (.-className readout) "numeric-readout")
-    (set! (.-className chart) "numeric-chart")
-    (set! (.-width chart) chart-w)
-    (set! (.-height chart) chart-h)
     (.appendChild container readout)
-    (.appendChild container chart)
     (set! (.-background scene) (THREE/Color. 0x05070d))
     (set! (.-frustumCulled trail) false)
     (.setPixelRatio renderer (or js/window.devicePixelRatio 1))
@@ -125,10 +92,7 @@
                   (aset arr (+ (* i 3) 1) (* view-scale z))
                   (aset arr (+ (* i 3) 2) (* view-scale y))
                   (assoc st :n (inc i) :steps (inc (:steps st 0))
-                         :chart (let [v (Math/log10 (max 1e-16 rel))]
-                                  (if (>= (count chart) chart-w)
-                                    (conj (subvec chart 1) v)
-                                    (conj chart v)))
+                         :chart (chart/push chart rel)
                          :rel rel)))
               (integrate! []
                 (swap! state
@@ -143,7 +107,7 @@
                   (.setDrawRange geo 0 n)
                   (set! (.-needsUpdate (.getAttribute geo "position")) true)
                   (.set (.-position body) (* view-scale x) (* view-scale z) (* view-scale y))
-                  (draw-chart! ctx chart)
+                  (chart/draw! ctx chart)
                   (set! (.-textContent readout)
                         ;; Evaluations, not steps: GBS8-2 holds its energy far
                         ;; better than Verlet but spends ten times the force
