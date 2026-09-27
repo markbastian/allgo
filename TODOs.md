@@ -92,8 +92,8 @@ of expected return:
   3. ~~Initial orbit determination (ch. 7)~~ -- `allgo.astro.iod`. The
      second Lambert solver is Lagrange's equation's; Battin's awaits the
      book's pages for its continued fractions.
-  4. Coordinates and frames (ch. 3-4): done -- `allgo.astro.reduction` and
-     `allgo.astro.states` -- except the IAU 2006/2000 CIO-based reduction.
+  4. ~~Coordinates and frames (ch. 3-4)~~ -- `allgo.astro.reduction`,
+     `allgo.astro.states` and `allgo.astro.cio`.
   5. ~~SGP4/SDP4 and TLEs~~ -- `allgo.astro.sgp4`.
   6. ~~Celestial (ch. 5)~~ -- `allgo.astro.visibility` for sight, shadow,
      eclipses and naked-eye visibility, and twilight in `allgo.astro.rise`;
@@ -117,7 +117,7 @@ of expected return:
       naked-eye visibility from `allgo.astro.visibility`.
   13. ~~The circular restricted three-body problem (ch. 2)~~ --
       `allgo.astro.cr3bp`.
-  14. IAU 2006/2000A CIO-based reduction, checked against ERFA.
+  14. ~~IAU 2006/2000A CIO-based reduction~~ -- `allgo.astro.cio`.
   15. Then move what is plain mathematics out of `allgo.astro` (numerical
       differentiation, roots and events, quadrature, special functions,
       rotations, spherical trigonometry and intersections).

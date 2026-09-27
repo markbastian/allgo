@@ -216,8 +216,10 @@ The demos draw on other people's data, used under their terms:
   IAU Working Group on Nutation", *Celestial Mechanics* 27 (1982) 79,
   as the IERS also distributes them (`nut_IAU1980.dat`).
 - **ERFA** ([liberfa/erfa](https://github.com/liberfa/erfa), derived from
-  the IAU's SOFA library): the FK5 reduction's tests compare against
-  values computed with it.
+  the IAU's SOFA library, BSD-3 license): the IAU 2006/2000A series in
+  `allgo.astro.cio-data` are taken from it, with its copyright notice,
+  conditions and disclaimer at the head of that file; and the FK5 and CIO
+  reductions' tests compare against values computed with it.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
