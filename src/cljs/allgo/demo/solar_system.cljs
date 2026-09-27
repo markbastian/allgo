@@ -16,6 +16,17 @@
   it is not drawn, and its orbit is drawn only along the arc the fit
   covers.
 
+  Close in on Jupiter or Saturn and their moons appear at true scale
+  against the planet, from Meeus's chapters 44 and 46, casting shadows
+  that are traced in the shader. The Events folder jumps to the next or
+  previous of any phenomenon `allgo.astro.almanac` knows -- phases,
+  eclipses, seasons, oppositions -- and looks at the body it concerns; a
+  Moon in the Earth's shadow goes copper. The readout says what an almanac
+  would of the body in focus: a planet's distance, phase, magnitude, size
+  and elongation, the Sun's axis and Carrington rotation, the Moon's phase
+  and libration, the equation of time; and, in the overview, the date in
+  the Julian, Jewish and Islamic calendars.
+
   Scale is the real difficulty. Neptune is 30 AU out and the Moon is 0.0026
   AU from Earth -- a ratio of twelve thousand to one, so any single linear
   scale showing both puts one of them under a pixel. Two honest answers are
@@ -55,16 +66,21 @@
   IAU's rotation models (`allgo.astro.rotation`). Escape, or the button,
   goes back out. The maps, five megabytes in all, are fetched when the
   page opens."
-  (:require [allgo.astro.constants :as c]
+  (:require [allgo.astro.almanac :as almanac]
+            [allgo.astro.calendar :as cal]
+            [allgo.astro.constants :as c]
             [allgo.astro.ephemeris :as eph]
             [allgo.astro.frames :as frames]
+            [allgo.astro.illumination :as illum]
             [allgo.astro.jupiter-moons :as jmoons]
             [allgo.astro.kepler :as kep]
             [allgo.astro.moon :as lunar]
+            [allgo.astro.physical :as physical]
             [allgo.astro.planet-orbits :as orbits]
             [allgo.astro.planets :as pl]
             [allgo.astro.rotation :as rot]
             [allgo.astro.saturn-moons :as smoons]
+            [allgo.astro.solar :as solar]
             [allgo.astro.stars :as stars]
             [allgo.astro.time :as atime]
             [allgo.astro.vsop87 :as vsop87]
@@ -117,6 +133,7 @@
 (def ^:private ^js controls
   #js {:focus         "Overview"
        :date          ""
+       :event         "Full Moon"
        :ephemeris     "VSOP87 + ELP"
        :scale         "logarithmic"
        :daysPerSecond 12.0
@@ -495,6 +512,96 @@
                     (.multiplyScalar (.clone v) (* r (math/sin a))))]
         [(.-x p) (.-y p) (.-z p)]))))
 
+(defn- event-focus
+  "Which body to look at for an event: the Moon for its phases and
+  eclipses, the Earth for a solar eclipse and the seasons, the planet for
+  its own."
+  [event]
+  (cond
+    (#{:new-moon :first-quarter :full-moon :last-quarter :lunar-eclipse :perigee :apogee} event) :moon
+    (#{:solar-eclipse :march-equinox :june-solstice :september-equinox :december-solstice
+       :perihelion :aphelion} event) :earth
+    :else (keyword (first (.split (name event) "-")))))
+
+(defn- norm [v] (math/sqrt (reduce + (map * v v))))
+
+(defn- angle-between [u v]
+  (math/acos (max -1.0 (min 1.0 (/ (reduce + (map * u v)) (* (norm u) (norm v)))))))
+
+(defn- deg-str [rad digits] (str (.toFixed (/ rad c/degrees) digits) "\u00b0"))
+
+(defn- earth-shadow
+  "How deep the Moon is in the Earth's shadow: `[umbral penumbral]`, the
+  fraction of its diameter inside each, from the true geocentric Moon and
+  Sun (km). The shadow's radii at the Moon are Danjon's: the parallaxes
+  and the Sun's semidiameter, enlarged by 2 percent for the atmosphere."
+  [moon sun]
+  (let [dm (norm moon) ds (norm sun)
+        pm (math/asin (/ 6378.14 dm)) ps (math/asin (/ 6378.14 ds))
+        ss (math/asin (/ 695700.0 ds)) sm (math/asin (/ 1737.4 dm))
+        d  (angle-between moon (mapv - sun))
+        cover (fn [r] (max 0.0 (min 1.0 (/ (- (+ r sm) d) (* 2.0 sm)))))]
+    [(cover (* 1.02 (- (+ pm ps) ss))) (cover (* 1.02 (+ pm ps ss)))]))
+
+(defn- calendars
+  "The date in the other calendars Meeus reckons: Julian, the Jewish year,
+  the Islamic date, and this year's Easter."
+  [mjd]
+  (let [[y m d] (atime/mjd->calendar mjd)
+        day (long d)
+        [jy jm jd] (cal/mjd->julian-date mjd)
+        hebrew (let [{:keys [year new-year]} (cal/jewish-year y)]
+                 (if (neg? (compare [m day] new-year)) (dec year) year))
+        [iy im id] (cal/gregorian->moslem y m day)
+        [em ed] (cal/easter y)
+        pad (fn [n] (.padStart (str n) 2 "0"))]
+    (str "Julian " jy "-" (pad jm) "-" (pad (long jd))
+         " \u00b7 Jewish year " hebrew
+         " \u00b7 Islamic " iy "-" (pad im) "-" (pad id)
+         " \u00b7 Easter " y "-" (pad em) "-" (pad ed))))
+
+(defn- body-details
+  "What an almanac would say of the body in focus at `mjd`, from the
+  precise sources: for a planet its distance, phase, brightness, size and
+  elongation; for the Sun its disk's orientation; for the Moon its phase
+  and libration; for the Earth the equation of time."
+  [k mjd]
+  (let [{:keys [planet]} (ephemeris mjd true)
+        earth (planet :earth)]
+    (case k
+      :sun (let [[P B0 L0] (solar/disk mjd)
+                 n (loop [n (long (+ 1 (/ (- mjd (solar/carrington-rotation 1)) 27.2753)))]
+                     (cond (> (solar/carrington-rotation n) mjd) (recur (dec n))
+                           (<= (solar/carrington-rotation (inc n)) mjd) (recur (inc n))
+                           :else n))]
+             (str "axis at P " (deg-str P 2) ", center at B0 " (deg-str B0 2) " L0 " (deg-str L0 2)
+                  "\nCarrington rotation " n))
+      :earth (let [minutes (* 1440.0 (/ (solar/equation-of-time mjd) c/two-pi))
+                   secs (long (math/round (* 60.0 (abs minutes))))]
+               (str "equation of time " (if (neg? minutes) "-" "+")
+                    (quot secs 60) "m" (.padStart (str (mod secs 60)) 2 "0") "s"
+                    " (a sundial is " (if (neg? minutes) "slow" "fast") ")"))
+      :moon (let [{:keys [k chi]} (lunar/phase mjd)
+                  {:keys [l b]} (lunar/libration mjd)
+                  age (- mjd (almanac/previous-event :new-moon mjd))]
+              (str (.toFixed (* 100 k) 0) "% lit, " (.toFixed age 1) " days after new, "
+                   "bright limb at " (deg-str chi 0)
+                   "\nlibration " (deg-str l 1) " in longitude, " (deg-str b 1) " in latitude"))
+      (when-let [p (if (= k :pluto) (pluto-position mjd) (planet k))]
+        (let [g (mapv - p earth)
+              r (/ (norm p) c/AU) delta (/ (norm g) c/AU) R (/ (norm earth) c/AU)
+              i (illum/phase-angle r delta R)
+            ;; the Astronomical Almanac's formulas rather than Mueller's:
+            ;; his put Venus half a magnitude faint near quadrature
+              opts (cond-> {:almanac true}
+                     (= k :saturn) (merge (select-keys (physical/saturn-ring mjd) [:b :du])))
+              mag (illum/magnitude k r delta i opts)
+              dia (* 2.0 (illum/semidiameter k delta))
+              elong (angle-between g (mapv - earth))]
+          (str (.toFixed delta 3) " AU away, " (.toFixed (* 100 (illum/illuminated-fraction r delta R)) 0) "% lit, "
+               "magnitude " (.toFixed mag 1) ", " (.toFixed (/ dia c/arcsec) 1) "\u2033 across, "
+               (deg-str elong 0) " from the Sun"))))))
+
 (def ^:private named-brighter-than
   "The faintest star given its name: the IAU has named 333 of the
   catalogue's stars, and all of them at once would bury the sky in
@@ -548,6 +655,7 @@
         loaded   (atom #{})
         flight   (atom nil)
         moon-path (atom nil)
+        details-cache (atom nil)
         focus-ctl (atom nil)
         back     (doto (js/document.createElement "button")
                    (-> .-className (set! "focus-back"))
@@ -795,6 +903,16 @@
                         k (* (.-moonZoom controls) (/ view-radius outer-au) (/ 1.0 c/AU))
                         precise (precise?)]
                     (.set (.-position (meshes :moon)) (+ ex (* k mx)) (+ ey (* k my)) (+ ez (* k mz)))
+                    ;; A Moon in the Earth's shadow dims in the penumbra and
+                    ;; goes copper in the umbra, lit only by sunsets. Not
+                    ;; traced like Jupiter's -- the Moon is drawn far from
+                    ;; true scale -- but worked out from the true geometry.
+                    (let [[umbra penumbra] (earth-shadow (moon) (mapv - earth))
+                          ^js mat (.-material (meshes :moon))
+                          base (if (.-map mat) 1.0 0.81)
+                          dim (* base (- 1.0 (* 0.45 penumbra)))
+                          mix (fn [a b] (+ (* a (- 1.0 umbra)) (* b umbra)))]
+                      (.setRGB (.-color mat) (mix dim (* base 0.42)) (mix dim (* base 0.17)) (mix dim (* base 0.10))))
                     ;; and its orbit, drawn at the same magnification: a
                     ;; month ahead, sampled afresh only when the Moon has
                     ;; moved on by a sample or the source has changed --
@@ -813,6 +931,18 @@
                         (aset arr (+ (* i 3) 2) (+ ez (* k oz))))
                       (.setDrawRange (.-geometry moon-line) 0 130)
                       (set! (.-needsUpdate (.getAttribute (.-geometry moon-line) "position")) true)))))
+              (details
+                ;; The almanac lines, worked out four times a second at
+                ;; most rather than every frame: Saturn's alone needs its
+                ;; ring's tilt, and the Moon's its libration.
+                [k mjd]
+                (let [now (js/performance.now)
+                      {:keys [at key text]} @details-cache]
+                  (if (and (= key k) (< (- now at) 250))
+                    text
+                    (let [text (if (= k :calendars) (calendars mjd) (body-details k mjd))]
+                      (reset! details-cache {:at now :key k :text text})
+                      text))))
               (sources-apart
                 ;; How far apart the two ephemerides put `k` as seen from
                 ;; the Earth -- the Sun and the Earth itself as seen from
@@ -918,10 +1048,12 @@
                                       (when (neg? h) " (backward)")
                                       (if (= k :pluto)
                                         (when-not (pluto-position mjd) "\nnot shown: its theory covers 1885-2099 only")
-                                        (sources-apart k mjd))))
+                                        (sources-apart k mjd))
+                                      (some->> (details k mjd) (str "\n"))))
                                (str "\n" (.-scale controls) " radial scale"
                                     "   Moon at " (.toFixed moon-km 0) " km, drawn "
-                                    (.toFixed (.-moonZoom controls) 0) "x"))))))
+                                    (.toFixed (.-moonZoom controls) 0) "x"
+                                    "\n" (details :calendars mjd)))))))
               (animate []
                 (when @running?
                   (js/requestAnimationFrame animate)
@@ -993,7 +1125,25 @@
           (-> (.add gui controls "showLines") (.name "constellation lines"))
           (-> (.add gui controls "showConNames") (.name "constellation names"))
           (-> (.add gui controls "showStarNames") (.name "star names"))
-          (.add gui controls "running")
+          (-> (.add gui controls "running") (.listen))
+          (let [folder (.addFolder gui "Events")
+                names (into {} (map (fn [[k {:keys [name]}]] [name k]) almanac/events))
+                jump! (fn [finder]
+                        (let [k (names (.-event controls))]
+                          (when-let [t (finder k (:mjd @state))]
+                            (swap! state assoc :mjd t)
+                            (reset! details-cache nil)
+                            (set! (.-running controls) false)
+                            (rebuild-orbits!)
+                            (let [b (event-focus k)]
+                              (if (= (body-names b) (.-focus controls))
+                                (refocus!)
+                                (set-focus! (body-names b)))))))]
+            (.add folder controls "event" (clj->js (map :name (vals almanac/events))))
+            (-> (.add folder #js {:previous (fn [] (jump! almanac/previous-event))} "previous")
+                (.name "\u2190 previous"))
+            (-> (.add folder #js {:next (fn [] (jump! almanac/next-event))} "next")
+                (.name "next \u2192")))
           (.add gui #js {:toJ2000 (fn [] (swap! state assoc :mjd c/mjd-J2000) (rebuild-orbits!))} "toJ2000")
           ;; On a phone the panel would cover half the sky; it starts
           ;; closed, a tap on its title away.
