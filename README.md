@@ -193,6 +193,28 @@ the accesses so the name survives. Every `controls` object carries one:
 
     (def ^:private ^js controls #js {:boids 30 ...})
 
+## Data and credits
+
+The demos draw on other people's data, used under their terms:
+
+- **Planet, Sun and Moon textures** (`resources/public/textures/`): the 2K
+  maps from [Solar System Scope](https://www.solarsystemscope.com/textures/),
+  used unmodified under the
+  [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/)
+  license.
+- **Rotation models** (`allgo.astro.rotation`): the IAU Working Group on
+  Cartographic Coordinates and Rotational Elements' 2015 report (Archinal
+  et al. 2018), as distributed by NASA's NAIF in the planetary constants
+  kernel `pck00011.tpc`.
+- **Stars** (`resources/public/data/bsc5.tsv`): the Bright Star Catalogue,
+  5th revised edition (Hoffleit & Warren 1991), VizieR catalog V/50.
+- **Star names** (`resources/public/data/star-names.tsv`): the IAU Working
+  Group on Star Names' catalogue.
+- **Constellation figures and names**
+  (`resources/public/data/constellations.tsv`): derived from
+  [d3-celestial](https://github.com/ofrohn/d3-celestial), Copyright (c)
+  2015 Olaf Frohn, under its BSD 3-Clause license.
+
 ## License
 
 Copyright © 2015 Mark Bastian

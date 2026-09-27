@@ -36,12 +36,22 @@
   stars is two independent sources agreeing about where the stars are --
   and a figure the right way round, Orion with Betelgeuse at his upper
   left, is the check that the sky is not drawn in a mirror. North is up,
-  as a star chart has it, until the view is turned."
+  as a star chart has it, until the view is turned.
+
+  Click a body, or pick it from the menu, and the view flies to it and
+  centers on it: the same model, the orbits and the rest of the planets
+  still in it, but turning about that body instead of the Sun. Up close
+  each wears Solar System Scope's map of it, is flattened at the poles as
+  it really is, and is turned the way it faces at that moment by the
+  IAU's rotation models (`allgo.astro.rotation`). Escape, or the button,
+  goes back out. The maps, five megabytes in all, are fetched when the
+  page opens."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.ephemeris :as eph]
             [allgo.astro.frames :as frames]
             [allgo.astro.kepler :as kep]
             [allgo.astro.planets :as pl]
+            [allgo.astro.rotation :as rot]
             [allgo.astro.stars :as stars]
             [allgo.astro.time :as atime]
             [allgo.demo.fps :as fps]
@@ -60,11 +70,37 @@
 (def ^:private dot-size
   ;; Not to scale -- at true scale every planet is far under a pixel. Ordered
   ;; by actual radius so the giants still read as giants.
-  {:mercury 0.16 :venus 0.24 :earth 0.26 :mars 0.19
+  {:sun 0.85 :moon 0.12
+   :mercury 0.16 :venus 0.24 :earth 0.26 :mars 0.19
    :jupiter 0.62 :saturn 0.54 :uranus 0.38 :neptune 0.37})
 
+(def ^:private all-bodies (into [:sun] (concat pl/order [:moon])))
+
+(def ^:private body-names
+  {:sun "Sun" :mercury "Mercury" :venus "Venus" :earth "Earth" :moon "Moon" :mars "Mars"
+   :jupiter "Jupiter" :saturn "Saturn" :uranus "Uranus" :neptune "Neptune"})
+
+(def ^:private focus-order
+  [:sun :mercury :venus :earth :moon :mars :jupiter :saturn :uranus :neptune])
+
+(def ^:private texture-file
+  ;; Solar System Scope's 2K maps (CC BY 4.0; see the README). Venus wears
+  ;; its clouds, which are what anyone has ever seen of it.
+  {:sun "2k_sun.jpg" :mercury "2k_mercury.jpg" :venus "2k_venus_atmosphere.jpg"
+   :earth "2k_earth_daymap.jpg" :moon "2k_moon.jpg" :mars "2k_mars.jpg"
+   :jupiter "2k_jupiter.jpg" :saturn "2k_saturn.jpg" :uranus "2k_uranus.jpg"
+   :neptune "2k_neptune.jpg"})
+
+(def ^:private saturn-rings
+  "The main rings' extent, km from Saturn's center: the C ring's inner edge
+  to the A ring's outer one."
+  [74658.0 136775.0])
+
+(def ^:private flight-ms 1400.0)
+
 (def ^:private ^js controls
-  #js {:scale         "logarithmic"
+  #js {:focus         "Overview"
+       :scale         "logarithmic"
        :daysPerSecond 12.0
        :moonZoom      400.0
        :showOrbits    true
@@ -247,6 +283,50 @@
     (.set (.-position o) (* sky-radius x) (* sky-radius y) (* sky-radius z))
     o))
 
+(defn- orient!
+  "Turns `mesh` to face the way `body` does at `mjd`. The mesh is built
+  with its pole along y and its prime meridian along x -- the body-fixed
+  frame carried into three.js's axes by the same `y-up` as everything
+  else -- so the rotation it needs is the model's, conjugated by `y-up`."
+  [^js mesh body mjd]
+  (let [r (rot/body->icrf body mjd)
+        cols (mapv (fn [j] (to-view (mapv #(nth % j) r))) (range 3))
+        ;; body x, y, z axes in view coordinates; local x = X, y = Z, z = -Y
+        [bx by bz] cols
+        lx bx ly bz lz (mapv - by)
+        m (THREE/Matrix4.)]
+    (.set m (lx 0) (ly 0) (lz 0) 0
+          (lx 1) (ly 1) (lz 1) 0
+          (lx 2) (ly 2) (lz 2) 0
+          0 0 0 1)
+    (.setFromRotationMatrix (.-quaternion mesh) m)))
+
+(defn- shape!
+  "Sizes `mesh` to an equatorial radius of `r` view units, flattened at the
+  poles as `body` is."
+  [^js mesh body r]
+  (let [[a _ c] (:radii (rot/models body))]
+    (.set (.-scale mesh) r (* r (/ c a)) r)))
+
+(defn- ring
+  "Saturn's rings, as a flat annulus in its equatorial plane, in units of
+  Saturn's equatorial radius. The texture is a strip running outward, so
+  each vertex's u is its fraction of the way across."
+  []
+  (let [a (rot/radius :saturn)
+        [r0 r1] (map #(/ % a) saturn-rings)
+        geo (THREE/RingGeometry. r0 r1 160 1)
+        pos (.getAttribute geo "position")
+        uv  (.getAttribute geo "uv")]
+    (dotimes [i (.-count pos)]
+      (let [x (.getX pos i) y (.getY pos i)]
+        (.setXY uv i (/ (- (js/Math.sqrt (+ (* x x) (* y y))) r0) (- r1 r0)) 0.5)))
+    (.rotateX geo (- (/ js/Math.PI 2.0)))
+    (THREE/Mesh. geo (THREE/MeshStandardMaterial.
+                      #js {:color 0xd8c8a0 :transparent true :opacity 0.5
+                           :side THREE/DoubleSide :depthWrite false
+                           :roughness 1.0 :metalness 0.0}))))
+
 (def ^:private named-brighter-than
   "The faintest star given its name: the IAU has named 333 of the
   catalogue's stars, and all of them at once would bury the sky in
@@ -257,13 +337,33 @@
   (let [scene    (THREE/Scene.)
         camera   (THREE/PerspectiveCamera. 50 (/ (.-clientWidth container) (.-clientHeight container)) 0.05 5000)
         renderer (THREE/WebGLRenderer. #js {:antialias true})
-        sun      (THREE/Mesh. (THREE/SphereGeometry. 0.85 24 16)
-                              (THREE/MeshBasicMaterial. #js {:color 0xffcf5c}))
-        bodies   (into {} (for [k pl/order]
-                            [k (THREE/Mesh. (THREE/SphereGeometry. (dot-size k) 16 12)
-                                            (THREE/MeshBasicMaterial. #js {:color (palette k)}))]))
-        moon     (THREE/Mesh. (THREE/SphereGeometry. 0.12 12 10)
-                              (THREE/MeshBasicMaterial. #js {:color 0xcfd6e0}))
+        sphere   (THREE/SphereGeometry. 1.0 64 40)
+        ;; Every body a unit sphere, sized and turned each frame. The Sun
+        ;; makes its own light; the rest are lit by it.
+        meshes   (into {} (for [k all-bodies]
+                            [k (THREE/Mesh. sphere
+                                            (if (= k :sun)
+                                              (THREE/MeshBasicMaterial. #js {:color 0xffcf5c})
+                                              (THREE/MeshStandardMaterial.
+                                               #js {:color (get palette k 0xcfd6e0)
+                                                    :roughness 1.0 :metalness 0.0})))]))
+        bodies   (select-keys meshes pl/order)
+        moon     (meshes :moon)
+        rings    (ring)
+        ;; The Sun is a point of light at the center, and since the radial
+        ;; scale keeps every direction from the Sun true, it lights each
+        ;; planet from the side it really does. (The Moon, pushed out from
+        ;; the Earth by its magnification, is lit a few degrees wrong.)
+        sunlight (THREE/PointLight. 0xffffff 1.3 0 0)
+        ambient  (THREE/AmbientLight. 0xffffff 0.07)
+        loaded   (atom #{})
+        flight   (atom nil)
+        focus-ctl (atom nil)
+        back     (doto (js/document.createElement "button")
+                   (-> .-className (set! "focus-back"))
+                   (-> .-type (set! "button"))
+                   (-> .-textContent (set! "\u2190 Solar system"))
+                   (-> .-hidden (set! true)))
         moon-line (THREE/Line. (doto (THREE/BufferGeometry.)
                                  (.setAttribute "position" (THREE/BufferAttribute. (js/Float32Array. (* 130 3)) 3)))
                                (THREE/LineBasicMaterial. #js {:color 0x8fa0b8 :transparent true :opacity 0.6}))
@@ -319,9 +419,11 @@
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
     (set! (.-borderRadius (.-style (.-domElement renderer))) "8px")
     (.appendChild container (.-domElement renderer))
-    (.add scene sun)
-    (doseq [[_ m] bodies] (.add scene m))
-    (.add scene moon)
+    (.appendChild container back)
+    (doseq [[_ m] meshes] (.add scene m))
+    (.add (bodies :saturn) rings)
+    (.add scene sunlight)
+    (.add scene ambient)
     (.add scene moon-line)
     (.add scene orbits)
     (.add scene ecliptic)
@@ -346,6 +448,123 @@
                                          y (* r (js/Math.sin a))]
                                      (to-view [x (* ce y) (* se y)])))
                                  0x445070 0.5))))
+              (focused []
+                (some (fn [[k n]] (when (= n (.-focus controls)) k)) body-names))
+              (load-textures! [k]
+                (let [pair (if (#{:earth :moon} k) [:earth :moon] [k])]
+                  (doseq [b pair :when (not (@loaded b))]
+                    (swap! loaded conj b)
+                    (.load (THREE/TextureLoader.) (asset (str "textures/" (texture-file b)))
+                           (fn [^js tex]
+                             (set! (.-anisotropy tex) (.. renderer -capabilities (getMaxAnisotropy)))
+                             (let [^js mat (.-material (meshes b))]
+                               (set! (.-map mat) tex)
+                               (.setHex (.-color mat) 0xffffff)
+                               (set! (.-needsUpdate mat) true)))
+                           nil
+                           (fn [e] (js/console.warn "No texture for" (name b) e))))
+                  (when (and (= k :saturn) (not (@loaded :rings)))
+                    (swap! loaded conj :rings)
+                    (.load (THREE/TextureLoader.) (asset "textures/2k_saturn_ring_alpha.png")
+                           (fn [^js tex]
+                             (let [^js mat (.-material rings)]
+                               (set! (.-map mat) tex)
+                               (.setHex (.-color mat) 0xffffff)
+                               (set! (.-opacity mat) 1.0)
+                               (set! (.-needsUpdate mat) true)))))))
+              (view-direction
+                ;; Which side to look at a body from: the side the Earth
+                ;; sees, so the Moon shows its near side at tonight's phase
+                ;; and Saturn its rings at the tilt a telescope would. The
+                ;; Earth itself is seen from sunward and a little north,
+                ;; and the overview from wherever the view already is.
+                [k]
+                (let [mjd (:mjd @state)
+                      v (fn [[x y z]] (.normalize (THREE/Vector3. x y z)))
+                      earth (to-view (pl/heliocentric :earth mjd))]
+                  (case k
+                    nil nil
+                    :sun (v earth)
+                    :earth (.normalize (.add (.negate (v earth)) (THREE/Vector3. 0 0.6 0)))
+                    :moon (.negate (v (to-view (eph/moon mjd))))
+                    (v (mapv - earth (to-view (pl/heliocentric k mjd)))))))
+              (set-focus!
+                ;; Through the panel's own control, so the menu shows it
+                ;; and its change handler does the flying.
+                [label]
+                (when-let [^js ctl @focus-ctl] (.setValue ctl label)))
+              (pick
+                ;; The body under a point on the screen, if any: the nearest
+                ;; whose disc -- or a fingertip around its center, for the
+                ;; ones a few pixels across -- contains it.
+                [cx cy]
+                (let [^js el (.-domElement renderer)
+                      rect (.getBoundingClientRect el)
+                      w (.-width rect) h (.-height rect)
+                      x (- cx (.-left rect)) y (- cy (.-top rect))
+                      per-unit (/ (* 0.5 h) (js/Math.tan (* 0.5 (/ (* js/Math.PI (.-fov camera)) 180.0))))]
+                  (->> meshes
+                       (keep (fn [[k ^js m]]
+                               (when (.-visible m)
+                                 (let [p (.clone (.-position m))
+                                       dist (.distanceTo p (.-position camera))
+                                       v (.project p camera)]
+                                   (when (< (.-z v) 1.0)
+                                     (let [sx (* 0.5 (+ 1.0 (.-x v)) w)
+                                           sy (* 0.5 (- 1.0 (.-y v)) h)
+                                           r (max 18.0 (/ (* (.. m -scale -x) per-unit) dist))
+                                           d (js/Math.hypot (- sx x) (- sy y))]
+                                       (when (<= d r) [k d])))))))
+                       (sort-by second)
+                       ffirst)))
+              (refocus! []
+                (set! (.-hidden back) (nil? (focused)))
+                (when-let [k (focused)] (load-textures! k))
+                (let [target (.clone (.-target orbit))
+                      offset (.sub (.clone (.-position camera)) target)]
+                  (reset! flight {:t0 (js/performance.now) :from target :offset offset
+                                  :toward (view-direction (focused))})))
+              (focus-point
+                ;; Where the view should be centered: the focused body, or
+                ;; the Sun for the overview.
+                []
+                (if-let [k (focused)]
+                  (.clone (.-position (meshes k)))
+                  (THREE/Vector3. 0 0 0)))
+              (follow! []
+                (let [p (focus-point)]
+                  (if-let [{:keys [t0 ^js from ^js offset ^js toward]} @flight]
+                    ;; Flying: the target slides to the body and the camera
+                    ;; closes to viewing distance along the line it looked
+                    ;; down, eased at both ends.
+                    (let [u (min 1.0 (/ (- (js/performance.now) t0) flight-ms))
+                          e (- (* 3.0 u u) (* 2.0 u u u))
+                          dist (if-let [k (focused)] (* 4.0 (dot-size k)) 48.0)
+                          len (+ (.length offset) (* e (- dist (.length offset))))
+                          target (.lerp (.clone from) p e)
+                          dir0 (.normalize (.clone offset))
+                          dir (if toward
+                                (let [d (.lerp (.clone dir0) toward e)]
+                                  (if (< (.length d) 1e-6) toward (.normalize d)))
+                                dir0)]
+                      (.copy (.-target orbit) target)
+                      (.copy (.-position camera) (.add (.multiplyScalar dir len) target))
+                      (when (>= u 1.0) (reset! flight nil)))
+                    ;; Following: carried along with the body, however the
+                    ;; view has been turned since.
+                    (let [delta (.sub (.clone p) (.-target orbit))]
+                      (.add (.-position camera) delta)
+                      (.copy (.-target orbit) p))))
+                (set! (.-minDistance orbit) (if-let [k (focused)] (* 1.2 (dot-size k)) 0.0)))
+              (layout!
+                ;; Every body turned to face the way it does now, and sized.
+                []
+                (let [mjd (:mjd @state)]
+                  (doseq [[b ^js m] meshes]
+                    (orient! m b mjd)
+                    (shape! m b (dot-size b)))
+                  (set! (.-visible orbits) (.-showOrbits controls))
+                  (set! (.-visible ecliptic) (.-showEcliptic controls))))
               (on-resize []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (when (and (pos? w) (pos? h))
@@ -381,8 +600,6 @@
                       [yr mo dy hr] (atime/mjd->calendar mjd)
                       moon-km (let [[a b cc] (eph/moon mjd)]
                                 (js/Math.sqrt (+ (* a a) (* b b) (* cc cc))))]
-                  (set! (.-visible orbits) (.-showOrbits controls))
-                  (set! (.-visible ecliptic) (.-showEcliptic controls))
                   (when-let [^js s @stars-at]
                     (set! (.-visible s) (.-showStars controls)))
                   (when-let [^js l @lines-at]
@@ -394,9 +611,14 @@
                   (set! (.-textContent readout)
                         (str (.toFixed yr 0) "-" (.padStart (str mo) 2 "0") "-" (.padStart (str dy) 2 "0")
                              "  " (.toFixed hr 0) "h   MJD " (.toFixed mjd 1)
-                             "\\n" (.-scale controls) " radial scale"
-                             "   Moon at " (.toFixed moon-km 0) " km, drawn "
-                             (.toFixed (.-moonZoom controls) 0) "x"))))
+                             (if-let [k (focused)]
+                               (let [h (rot/sidereal-day k)]
+                                 (str "\n" (body-names k) ": radius " (.toLocaleString (js/Math.round (rot/radius k))) " km,"
+                                      " turns in " (if (< (abs h) 48) (str (.toFixed (abs h) 2) " h") (str (.toFixed (/ (abs h) 24) 2) " d"))
+                                      (when (neg? h) " (backward)")))
+                               (str "\n" (.-scale controls) " radial scale"
+                                    "   Moon at " (.toFixed moon-km 0) " km, drawn "
+                                    (.toFixed (.-moonZoom controls) 0) "x"))))))
               (animate []
                 (when @running?
                   (js/requestAnimationFrame animate)
@@ -406,6 +628,8 @@
                       (swap! state update :mjd + (* (.-daysPerSecond controls) (/ (- t0 last) 1000.0))))
                     (swap! state assoc :last t0)
                     (update-bodies!)
+                    (layout!)
+                    (follow!)
                     (publish!)
                     (.update orbit)
                     ;; The sky goes where the camera goes: infinitely far.
@@ -414,8 +638,39 @@
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
+        ;; A click or tap on a body focuses it; a press that moves is the
+        ;; view being turned, and is left to the orbit controls.
+        (let [^js el (.-domElement renderer)
+              down (atom nil)]
+          (.addEventListener el "pointerdown"
+                             (fn [^js e] (reset! down [(.-clientX e) (.-clientY e) (js/performance.now)])))
+          (.addEventListener el "pointerup"
+                             (fn [^js e]
+                               (when-let [[x0 y0 t0] @down]
+                                 (reset! down nil)
+                                 (when (and (< (js/Math.hypot (- (.-clientX e) x0) (- (.-clientY e) y0)) 6)
+                                            (< (- (js/performance.now) t0) 500))
+                                   (when-let [k (pick (.-clientX e) (.-clientY e))]
+                                     (when (not= k (focused)) (set-focus! (body-names k))))))))
+          (.addEventListener el "pointermove"
+                             (fn [^js e]
+                               (when (and (= "mouse" (.-pointerType e)) (zero? (.-buttons e)))
+                                 (set! (.. el -style -cursor)
+                                       (if (pick (.-clientX e) (.-clientY e)) "pointer" ""))))))
+        (.addEventListener back "click" (fn [] (set-focus! "Overview")))
+        (.addEventListener js/window "keydown"
+                           (fn [^js e]
+                             (when (and (= "Escape" (.-key e)) (focused) @running?
+                                        (not (#{"INPUT" "SELECT" "TEXTAREA"} (.. e -target -tagName))))
+                               (set-focus! "Overview"))))
         (rebuild-orbits!)
+        ;; Every map up front, so a body is dressed however it is reached --
+        ;; by the focus menu or by zooming in on it by hand.
+        (doseq [k focus-order] (load-textures! k))
         (let [gui (GUI. #js {:container container})]
+          (reset! focus-ctl
+                  (-> (.add gui controls "focus" (clj->js (into ["Overview"] (map body-names focus-order))))
+                      (.onChange refocus!)))
           (-> (.add gui controls "scale" #js ["logarithmic" "linear"]) (.onChange rebuild-orbits!))
           (.add gui controls "daysPerSecond" 0 200 1)
           (.add gui controls "moonZoom" 1 2000 1)
