@@ -382,7 +382,7 @@
    "id": "solar-system",
    "group": "Orbits & Numerics",
    "label": "Solar System",
-   "blurb": "Planets, Moon, satellite and 9,000 stars in one J2000 frame",
+   "blurb": "Planets, moons, eclipses and 9,000 stars, from space or from any place on Earth",
    "badges": [
     "3D",
     "New"

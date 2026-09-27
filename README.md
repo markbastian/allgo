@@ -211,6 +211,13 @@ The demos draw on other people's data, used under their terms:
   Cartographic Coordinates and Rotational Elements' 2015 report (Archinal
   et al. 2018), as distributed by NASA's NAIF in the planetary constants
   kernel `pck00011.tpc`.
+- **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
+  planetary theory, version D, from CDS catalog VI/81, truncated as
+  NOTES describes.
+- **Meeus's tables** (the nutation, lunar, satellite, Pluto and
+  phenomena series under `allgo.astro`): converted by script from Sonia
+  Keys's Go port of *Astronomical Algorithms*,
+  [soniakeys/meeus](https://github.com/soniakeys/meeus), MIT license.
 - **Stars** (`resources/public/data/bsc5.tsv`): the Bright Star Catalogue,
   5th revised edition (Hoffleit & Warren 1991), VizieR catalog V/50.
 - **Star names** (`resources/public/data/star-names.tsv`): the IAU Working

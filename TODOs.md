@@ -59,6 +59,22 @@ of expected return:
   together through `allgo.physics.world` is the workaround the motorcycle
   rider uses.
 
+## Solar system demo
+
+- **The Earth and Moon's shadows.** A lunar eclipse tints the Moon from
+  the true geometry, but nothing shows a solar eclipse's shadow on the
+  Earth, and Saturn's rings neither cast a shadow on the planet nor fall
+  into its shadow. The traced shadows that Jupiter's moons use would do
+  for the rings; the Earth and Moon would need drawing to one scale near
+  an eclipse.
+- **The sky view** shows the planets as points; their phases and disks
+  (Venus's crescent, Saturn's rings) could be drawn when zoomed in, as
+  the Moon is.
+- **More events.** The Events menu lacks Venus's elongations and
+  stations, Mercury's and Mars's other stations, and the conjunctions of
+  Mars, Jupiter, Uranus and Neptune: the rows of Meeus's table 36.B that
+  could not be checked against a second source (NOTES).
+
 ## Astronomical and Astrodynamic Calculations
 
 - Everything in Fundamentals of Astrodynamics and Applications by David Vallado
@@ -66,5 +82,4 @@ of expected return:
 ## Time
 
 - All calculations from Calendrical Calculations by Edward M. Reingold and Nachum Dershowitz
-  - See also https://www.cs.tau.ac.il/~nachum/calendar-book/third-edition/CIIT.html
-  - Apparently the book examples and the calendrica library are written in Lisp, which should be easy to port to Clojure.
+  - Book examples are in Lisp, which should port well to Clojure.

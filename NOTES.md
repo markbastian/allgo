@@ -1058,3 +1058,48 @@ referred to J2000, is derived from 31.A by precessing the orbit
 - One transcription error in the source was corrected: Venus's 1984
   Almanac magnitude has +0.000239 i² − 0.00000065 i³, not the reverse,
   which would have Venus brightening as it thinned.
+
+## The solar system demo on Meeus
+
+The demo moved onto the Meeus work in five steps; what was decided and
+measured along the way:
+
+- **Sources.** Planets from VSOP87 and the Moon from ELP, carried into
+  EME2000 (`vsop87/equatorial-J2000`, `moon/geocentric-J2000`). The panel
+  switches back to Standish's elements and Montenbruck & Gill's lunar
+  series, and the readout gives the angle between the two for the body in
+  focus -- 3 to 6 arcminutes for the giants, about 1 for the Moon.
+  Timed in an unoptimized ClojureScript build under Node, one frame's
+  worth costs: all eight VSOP87 planets 0.58 ms, the Moon 0.09 ms,
+  Jupiter's moons 0.24 ms, Saturn's 0.19 ms, Pluto 0.02 ms. The Moon's
+  month-long orbit line is 130 ELP evaluations, so it is resampled only
+  when the Moon has moved a fifth of a day.
+- **Pluto** is drawn only over 1885-2099, the span of Meeus's fit, and
+  its orbit only along that arc. Its rotation model came from
+  `pck00011.tpc`, like the others.
+- **Moons in three dimensions.** Meeus's satellite theories end in a
+  projection onto the sky as seen from the Earth; `positions-3d` stops
+  before it. Tested by the moons lying in their planets' equators as the
+  IAU poles have them (Galileans within 0.6 degrees, Saturn's inner seven
+  within 2) -- two independent sources agreeing. The moons are drawn at
+  true scale against their planet, which is itself drawn hugely
+  oversized, so they appear only for the planet in focus.
+- **Shadows** are traced, not mapped: a shadow map covering the solar
+  system would put Io's shadow across one texel. Each fragment of a
+  giant or its moons tests its line to the Sun against the others'
+  spheres, with a penumbra as wide as the Sun's disk seen from there. Io's
+  shadow on 2024 December 2 at 02:40 TT falls beside the Red Spot. The
+  Earth and Moon are not drawn to scale with each other, so a lunar
+  eclipse is shown by tinting the Moon from the true geometry (Danjon's
+  shadow radii) rather than by tracing.
+- **Magnitudes.** The readout uses the 1984 Astronomical Almanac formulas.
+  Mueller's, which Meeus prints first, gave Venus -3.7 on 2024 December
+  2 against the -4.2 observed; the Almanac's give -4.2.
+- **The sky from the Earth** turns the star cloud by one matrix per frame
+  -- J2000 to true of date to the horizon -- and refracts in the vertex
+  shader by the formula `coordinates/refraction` uses for the bodies.
+  Checked against London on 2024 December 2: sunrise 07:45 and sunset
+  15:54 UT, Jupiter rising 16:08 five days before opposition; Orion
+  upright on the meridian at sidereal time 5h18m; and the first quarter
+  of December 8 lit toward the setting Sun with Mare Crisium on the
+  eastern limb.
