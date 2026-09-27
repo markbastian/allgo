@@ -11,6 +11,11 @@
   focus, how far apart the two put it: arcminutes, which is what the
   coarse ones are worth.
 
+  Pluto is there too, from Meeus's chapter 37 -- a fit to a numerical
+  ephemeris over 1885 to 2099 and to nothing else, so outside those years
+  it is not drawn, and its orbit is drawn only along the arc the fit
+  covers.
+
   Scale is the real difficulty. Neptune is 30 AU out and the Moon is 0.0026
   AU from Earth -- a ratio of twelve thousand to one, so any single linear
   scale showing both puts one of them under a pixel. Two honest answers are
@@ -73,23 +78,24 @@
 
 (def ^:private palette
   {:mercury 0xb0a08c :venus 0xe8c47a :earth 0x5b9bd5 :mars 0xc1553a
-   :jupiter 0xd8a06a :saturn 0xe3d08a :uranus 0x8fd0d8 :neptune 0x5570d0})
+   :jupiter 0xd8a06a :saturn 0xe3d08a :uranus 0x8fd0d8 :neptune 0x5570d0
+   :pluto 0xc9b8a4})
 
 (def ^:private dot-size
   ;; Not to scale -- at true scale every planet is far under a pixel. Ordered
   ;; by actual radius so the giants still read as giants.
   {:sun 0.85 :moon 0.12
    :mercury 0.16 :venus 0.24 :earth 0.26 :mars 0.19
-   :jupiter 0.62 :saturn 0.54 :uranus 0.38 :neptune 0.37})
+   :jupiter 0.62 :saturn 0.54 :uranus 0.38 :neptune 0.37 :pluto 0.1})
 
-(def ^:private all-bodies (into [:sun] (concat pl/order [:moon])))
+(def ^:private all-bodies (into [:sun] (concat pl/order [:moon :pluto])))
 
 (def ^:private body-names
   {:sun "Sun" :mercury "Mercury" :venus "Venus" :earth "Earth" :moon "Moon" :mars "Mars"
-   :jupiter "Jupiter" :saturn "Saturn" :uranus "Uranus" :neptune "Neptune"})
+   :jupiter "Jupiter" :saturn "Saturn" :uranus "Uranus" :neptune "Neptune" :pluto "Pluto"})
 
 (def ^:private focus-order
-  [:sun :mercury :venus :earth :moon :mars :jupiter :saturn :uranus :neptune])
+  [:sun :mercury :venus :earth :moon :mars :jupiter :saturn :uranus :neptune :pluto])
 
 (def ^:private texture-file
   ;; Solar System Scope's 2K maps (CC BY 4.0; see the README). Venus wears
@@ -144,6 +150,22 @@
         :moon   (fn [] (lunar/geocentric-J2000 mjd m))})
      {:planet (fn [k] (pl/heliocentric k mjd))
       :moon   (fn [] (eph/moon mjd))})))
+
+(defn- pluto-position
+  "Pluto's heliocentric position, km, in EME2000, or nil outside 1885-2099:
+  Meeus's Pluto is a fit to a numerical ephemeris over those years and
+  means nothing beyond them. Both sources share it; neither has another."
+  [mjd]
+  (when-let [[l b r] (orbits/pluto mjd)]
+    (let [ce (math/cos eph/obliquity-J2000) se (math/sin eph/obliquity-J2000)
+          x (* r c/AU (math/cos b) (math/cos l))
+          y (* r c/AU (math/cos b) (math/sin l))
+          z (* r c/AU (math/sin b))]
+      [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))])))
+
+(def ^:private pluto-span
+  "The years Meeus's Pluto covers, as MJD."
+  [(atime/calendar->mjd 1885 1 1) (atime/calendar->mjd 2099 12 31)])
 
 (defn- radial
   "Map a distance in AU onto the view. Logarithmic keeps all eight orbits on
@@ -467,6 +489,12 @@
                 (doseq [^js child (vec (.-children orbits))] (.remove orbits child))
                 (doseq [k pl/order]
                   (.add orbits (line-of (orbit-points k (:mjd @state) 128) (palette k) 0.45)))
+                ;; Pluto's is the arc its theory covers -- 214 of its 248
+                ;; years -- and no more: the gap is honest.
+                (let [[t0 t1] pluto-span]
+                  (.add orbits (line-of (keep #(some-> (pluto-position %) place)
+                                              (range t0 t1 60.0))
+                                        (palette :pluto) 0.35)))
                 (doseq [^js child (vec (.-children ecliptic))] (.remove ecliptic child))
                 ;; A ring in the ecliptic plane, tilted into the equatorial
                 ;; frame -- the visible reminder of which frame this is.
@@ -484,7 +512,7 @@
                 (some (fn [[k n]] (when (= n (.-focus controls)) k)) body-names))
               (load-textures! [k]
                 (let [pair (if (#{:earth :moon} k) [:earth :moon] [k])]
-                  (doseq [b pair :when (not (@loaded b))]
+                  (doseq [b pair :when (and (texture-file b) (not (@loaded b)))]
                     (swap! loaded conj b)
                     (.load (THREE/TextureLoader.) (asset (str "textures/" (texture-file b)))
                            (fn [^js tex]
@@ -516,6 +544,7 @@
                       earth (to-view (planet :earth))]
                   (case k
                     nil nil
+                    :pluto (v (mapv - earth (to-view (or (pluto-position (:mjd @state)) [1.0 0.0 0.0]))))
                     :sun (v earth)
                     :earth (.normalize (.add (.negate (v earth)) (THREE/Vector3. 0 0.6 0)))
                     :moon (.negate (v (to-view (moon))))
@@ -612,6 +641,12 @@
                     (let [[x y z] (place (if (= k :earth) earth (planet k)))
                           ^js m (bodies k)]
                       (.set (.-position m) x y z)))
+                  (let [^js m (meshes :pluto)]
+                    (if-let [p (pluto-position mjd)]
+                      (let [[x y z] (place p)]
+                        (set! (.-visible m) true)
+                        (.set (.-position m) x y z))
+                      (set! (.-visible m) false)))
                   ;; The Moon is geocentric already; adding it to the Earth's
                   ;; heliocentric place is legitimate only because both are in
                   ;; the same frame, which is the whole point.
@@ -677,7 +712,9 @@
                                  (str "\n" (body-names k) ": radius " (.toLocaleString (math/round (rot/radius k))) " km,"
                                       " turns in " (if (< (abs h) 48) (str (.toFixed (abs h) 2) " h") (str (.toFixed (/ (abs h) 24) 2) " d"))
                                       (when (neg? h) " (backward)")
-                                      (sources-apart k mjd)))
+                                      (if (= k :pluto)
+                                        (when-not (pluto-position mjd) "\nnot shown: its theory covers 1885-2099 only")
+                                        (sources-apart k mjd))))
                                (str "\n" (.-scale controls) " radial scale"
                                     "   Moon at " (.toFixed moon-km 0) " km, drawn "
                                     (.toFixed (.-moonZoom controls) 0) "x"))))))
