@@ -27,6 +27,11 @@
   and libration, the equation of time; and, in the overview, the date in
   the Julian, Jewish and Islamic calendars.
 
+  The view can also be the sky from a place on the Earth
+  (`allgo.demo.solar-sky`): the stars, the Sun, the Moon and the planets
+  over a horizon at the chosen latitude and longitude, refracted, with
+  the times each rises, transits and sets.
+
   Scale is the real difficulty. Neptune is 30 AU out and the Moon is 0.0026
   AU from Earth -- a ratio of twelve thousand to one, so any single linear
   scale showing both puts one of them under a pixel. Two honest answers are
@@ -85,6 +90,7 @@
             [allgo.astro.time :as atime]
             [allgo.astro.vsop87 :as vsop87]
             [allgo.demo.fps :as fps]
+            [allgo.demo.solar-sky :as solar-sky]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]
@@ -134,6 +140,10 @@
   #js {:focus         "Overview"
        :date          ""
        :event         "Full Moon"
+       :view          "solar system"
+       :latitude      51.48
+       :longitude     0.0
+       :lookAt        "south"
        :ephemeris     "VSOP87 + ELP"
        :scale         "logarithmic"
        :daysPerSecond 12.0
@@ -656,6 +666,9 @@
         flight   (atom nil)
         moon-path (atom nil)
         details-cache (atom nil)
+        sky-view (atom nil)
+        gui-ref  (atom nil)
+        saved-speed (atom nil)
         focus-ctl (atom nil)
         back     (doto (js/document.createElement "button")
                    (-> .-className (set! "focus-back"))
@@ -700,6 +713,7 @@
                      (reset! lines-at figs)
                      (.add sky-group points)
                      (.add sky-group figs)
+                     ((:set-stars! @sky-view) points figs)
                      (reset! con-labels
                              (vec (for [{nm :name at :label} constellations]
                                     (label nm "sky-label sky-label--constellation" at))))
@@ -717,6 +731,7 @@
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
     (set! (.-borderRadius (.-style (.-domElement renderer))) "8px")
     (.appendChild container (.-domElement renderer))
+    (reset! sky-view (solar-sky/create container renderer faintest))
     (.appendChild container back)
     (doseq [[_ m] meshes] (.add scene m))
     (.add (bodies :saturn) rings)
@@ -753,6 +768,32 @@
                                          y (* r (math/sin a))]
                                      (to-view [x (* ce y) (* se y)])))
                                  0x445070 0.5))))
+              (from-earth? [] (= "sky from Earth" (.-view controls)))
+              (switch-view! []
+                ;; one canvas, two scenes: the label layers, the orbit
+                ;; controls and the back button follow whichever is shown
+                (let [sky? (from-earth?)]
+                  ((:show! @sky-view) sky?)
+                  (set! (.. labels -domElement -style -display) (if sky? "none" ""))
+                  (set! (.-enabled orbit) (not sky?))
+                  (set! (.-hidden back) (or sky? (nil? (focused))))
+                  ;; and the panel shows only what the view uses
+                  (when-let [^js gui @gui-ref]
+                    (doseq [^js ctl (.controllersRecursive gui)]
+                      (let [p (.-property ctl)]
+                        (cond
+                          (#{"latitude" "longitude" "lookAt"} p) (.show ctl sky?)
+                          (#{"focus" "ephemeris" "scale" "moonZoom" "showOrbits" "showMoons" "showEcliptic"
+                             "showStars" "showConNames" "showStarNames"} p) (.show ctl (not sky?))))))
+                  ;; the sky turns once a day, so a day a second is a blur:
+                  ;; slow the clock for it, and give the speed back after
+                  (if sky?
+                    (when (> (.-daysPerSecond controls) 0.05)
+                      (reset! saved-speed (.-daysPerSecond controls))
+                      (set! (.-daysPerSecond controls) 0.02))
+                    (when-let [v @saved-speed]
+                      (set! (.-daysPerSecond controls) v)
+                      (reset! saved-speed nil)))))
               (focused []
                 (some (fn [[k n]] (when (= n (.-focus controls)) k)) body-names))
               (load-textures! [k]
@@ -880,7 +921,8 @@
                     (set! (.-aspect camera) (/ w h))
                     (.updateProjectionMatrix camera)
                     (.setSize renderer w h)
-                    (.setSize labels w h))))
+                    (.setSize labels w h)
+                    ((:resize! @sky-view) w h))))
               (update-bodies! []
                 (let [mjd (:mjd @state)
                       {:keys [planet moon]} (ephemeris mjd)
@@ -1062,16 +1104,27 @@
                     (when (and (.-running controls) last)
                       (swap! state update :mjd + (* (.-daysPerSecond controls) (/ (- t0 last) 1000.0))))
                     (swap! state assoc :last t0)
-                    (update-bodies!)
-                    (layout!)
-                    (update-moons!)
-                    (follow!)
-                    (publish!)
-                    (.update orbit)
-                    ;; The sky goes where the camera goes: infinitely far.
-                    (.copy (.-position sky-group) (.-position camera))
-                    (.render labels scene camera)
-                    (.render renderer scene camera)
+                    (if (from-earth?)
+                      ;; the sky from a place on the Earth: its own scene
+                      (let [text ((:frame! @sky-view) (:mjd @state)
+                                                      [(* c/degrees (.-latitude controls)) (* c/degrees (.-longitude controls))]
+                                                      {:lines? (.-showLines controls)
+                                                       :moon-map (.. (meshes :moon) -material -map)})]
+                        (when-not (some-> ^js (.-activeElement js/document) (.closest ".lil-gui"))
+                          (set! (.-date controls) (format-date (:mjd @state))))
+                        (set! (.-textContent readout)
+                              (str (format-date (:mjd @state)) " TT\n" text)))
+                      (do
+                        (update-bodies!)
+                        (layout!)
+                        (update-moons!)
+                        (follow!)
+                        (publish!)
+                        (.update orbit)
+                        ;; The sky goes where the camera goes: infinitely far.
+                        (.copy (.-position sky-group) (.-position camera))
+                        (.render labels scene camera)
+                        (.render renderer scene camera)))
                     (tick-fps! (- (js/performance.now) t0)))))]
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         ;; A click or tap on a body focuses it; a press that moves is the
@@ -1086,7 +1139,7 @@
                                  (reset! down nil)
                                  (when (and (< (math/hypot (- (.-clientX e) x0) (- (.-clientY e) y0)) 6)
                                             (< (- (js/performance.now) t0) 500))
-                                   (when-let [k (pick (.-clientX e) (.-clientY e))]
+                                   (when-let [k (and (not (from-earth?)) (pick (.-clientX e) (.-clientY e)))]
                                      (when (not= k (focused)) (set-focus! (body-names k))))))))
           (.addEventListener el "pointermove"
                              (fn [^js e]
@@ -1104,9 +1157,17 @@
         ;; by the focus menu or by zooming in on it by hand.
         (doseq [k focus-order] (load-textures! k))
         (let [gui (GUI. #js {:container container})]
+          (reset! gui-ref gui)
           (reset! focus-ctl
                   (-> (.add gui controls "focus" (clj->js (into ["Overview"] (map body-names focus-order))))
                       (.onChange refocus!)))
+          (-> (.add gui controls "view" #js ["solar system" "sky from Earth"]) (.onChange switch-view!))
+          (-> (.add gui controls "latitude" -90 90 0.01) (.name "latitude (\u00b0N)"))
+          (-> (.add gui controls "longitude" -180 180 0.01) (.name "longitude (\u00b0E)"))
+          (-> (.add gui controls "lookAt" (clj->js (into ["south"] (map body-names (:bodies @sky-view)))))
+              (.name "look toward")
+              (.onChange (fn [v] ((:look-at! @sky-view)
+                                  (or (some (fn [[k n]] (when (= n v) k)) body-names) :south)))))
           (-> (.add gui controls "ephemeris" #js [precise-source "Keplerian elements"])
               (.onChange (fn [_] (reset! moon-path nil) (rebuild-orbits!))))
           (-> (.add gui controls "scale" #js ["logarithmic" "linear"]) (.onChange rebuild-orbits!))
@@ -1114,7 +1175,7 @@
               (.onFinishChange (fn [v] (when-let [mjd (parse-date v)]
                                          (swap! state assoc :mjd mjd)
                                          (rebuild-orbits!)))))
-          (.add gui controls "daysPerSecond" 0 200 0.01)
+          (-> (.add gui controls "daysPerSecond" 0 200 0.01) (.listen))
           (.add gui controls "moonZoom" 1 2000 1)
           (.add gui controls "showOrbits")
           (-> (.add gui controls "showMoons") (.name "moons of Jupiter, Saturn"))
@@ -1145,6 +1206,7 @@
             (-> (.add folder #js {:next (fn [] (jump! almanac/next-event))} "next")
                 (.name "next \u2192")))
           (.add gui #js {:toJ2000 (fn [] (swap! state assoc :mjd c/mjd-J2000) (rebuild-orbits!))} "toJ2000")
+          (switch-view!)
           ;; On a phone the panel would cover half the sky; it starts
           ;; closed, a tap on its title away.
           (when (.-matches (js/window.matchMedia "(max-width: 640px)"))
