@@ -18,6 +18,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.geopotential :as geo]
             [allgo.astro.kepler :as kepler]
+            [allgo.astro.perturbations :as perturbations]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [clojure.math :as math]))
@@ -226,10 +227,9 @@
   ([mu r v dt ndot nddot]
    (let [{:keys [a e i raan argp M]} (kepler/state->elements mu r v)
          n (kepler/mean-motion mu a)
-         p (* a (- 1.0 (* e e)))
-         k (/ (* 1.5 n geo/J2 c/R-earth c/R-earth) (* p p))
-         raan' (am/wrap-2pi (+ raan (* (- k) (math/cos i) dt)))
-         argp' (am/wrap-2pi (+ argp (* k (- 2.0 (* 2.5 (math/sin i) (math/sin i))) dt)))
+         rates (perturbations/j2-secular mu c/R-earth geo/J2 a e i)
+         raan' (am/wrap-2pi (+ raan (* (:raan rates) dt)))
+         argp' (am/wrap-2pi (+ argp (* (:argp rates) dt)))
          M' (am/wrap-2pi (+ M (* n dt) (* 0.5 ndot dt dt) (/ (* nddot dt dt dt) 6.0)))
          a' (- a (* (/ (* 2.0 a) (* 3.0 n)) ndot dt))
          e' (- e (* (/ (* 2.0 (- 1.0 e)) (* 3.0 n)) ndot dt))]
