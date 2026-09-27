@@ -17,6 +17,7 @@
             [allgo.astro.geopotential :as geo]
             [allgo.astro.kepler :as kepler]
             [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
@@ -113,3 +114,50 @@
    (let [{node :raan} (j2-secular a e 0.0)
          ci (/ rate node)]
      (when (<= -1.0 ci 1.0) (math/acos ci)))))
+
+;; ------------------------------------------------------------------ drag
+
+(defn drag-secular
+  "The secular decay drag gives an orbit of semi-major axis `a` and
+  eccentricity `e` in an atmosphere whose density falls exponentially from
+  `rho-p` kg/m^3 at perigee with scale height `H` km, for a ballistic
+  coefficient `B` = C_D A / m, m^2/kg, and no rotation of the air:
+  King-Hele's first-order results,
+
+    da per revolution = -2 pi B rho_p a^2 exp(-c) (I0 + 2e I1)
+    de per revolution = -2 pi B rho_p a exp(-c) (I1 + e/2 (I0 + I2))
+
+  with c = ae/H and I_k the modified Bessel functions of c -- the
+  density's rise at each perigee pass, integrated round the orbit.
+  Returns `{:da :de}` per revolution and `:a-rate` `:e-rate` per second.
+  Good while e is small; the terms dropped are e^2 against those kept."
+  ([a e B rho-p H] (drag-secular mu a e B rho-p H))
+  ([mu a e B rho-p H]
+   (let [c (/ (* a e) H)
+         k (* 2.0 math/PI B rho-p 1e3 (math/exp (- c)))
+         i0 (am/bessel-i 0 c) i1 (am/bessel-i 1 c) i2 (am/bessel-i 2 c)
+         da (- (* k a a (+ i0 (* 2.0 e i1))))
+         de (- (* k a (+ i1 (* 0.5 e (+ i0 i2)))))
+         period (kepler/period mu a)]
+     {:da da :de de :a-rate (/ da period) :e-rate (/ de period)})))
+
+(defn circular-decay-rate
+  "da/dt, km/s, of a circular orbit of radius `a` in air of density `rho`
+  kg/m^3, for a ballistic coefficient `B`: -B rho sqrt(mu a), the along-
+  track drag put through Gauss's equation for a."
+  ([a B rho] (circular-decay-rate mu a B rho))
+  ([mu a B rho] (- (* B rho 1e3 (math/sqrt (* mu a))))))
+
+(defn circular-lifetime
+  "Seconds for a circular orbit to decay from radius `a0` to `a1`, the
+  density at each height (km above the Earth's radius) `(density h)`
+  kg/m^3: the decay rate integrated, by Simpson's rule in the radius."
+  ([a0 a1 B density] (circular-lifetime mu a0 a1 B density 2000))
+  ([mu a0 a1 B density n]
+   (let [n (if (odd? n) (inc n) n)
+         h (/ (- a0 a1) n)
+         f (fn [a] (/ -1.0 (circular-decay-rate mu a B (density (- a c/R-earth)))))]
+     (* (/ h 3.0)
+        (reduce + (for [k (range (inc n))
+                        :let [w (cond (or (zero? k) (= k n)) 1.0 (odd? k) 4.0 :else 2.0)]]
+                    (* w (f (+ a1 (* k h))))))))))

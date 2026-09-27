@@ -69,3 +69,51 @@
       (is (> i (/ math/PI 2)) "retrograde")
       (is (close? (:raan (pt/j2-secular 7078.0 0.0 i)) (/ (* 2 math/PI) (* 365.2421897 86400.0)) 1e-12)))
     (is (nil? (pt/sun-synchronous-inclination 30000.0 0.0)) "too high for J2 to turn it that fast")))
+
+(deftest bessel
+  (testing "I_n against its integral, (1/pi) int_0^pi exp(x cos t) cos(n t) dt"
+    (doseq [n [0 1 2 3] x [0.0 0.5 3.0 12.0]]
+      (let [k 2000 h (/ math/PI k)
+            integral (* (/ h math/PI)
+                        (reduce + (for [j (range (inc k))
+                                        :let [t (* j h) w (if (or (zero? j) (= j k)) 0.5 1.0)]]
+                                    (* w (math/exp (* x (math/cos t))) (math/cos (* n t))))))]
+        (is (< (abs (- (am/bessel-i n x) integral)) (* 1e-10 (max 1.0 integral))) (str [n x]))))))
+
+(defn- exponential-drag
+  "Drag in still air falling off exponentially from rho-p at radius rp."
+  [B rho-p rp H]
+  (fn [r v]
+    (let [rho (* rho-p (math/exp (- (/ (- (v3/length r) rp) H))))]
+      (v3/scale v (* -0.5 B rho 1e3 (v3/length v))))))
+
+(deftest drag
+  (testing "King-Hele's decay per revolution is drag averaged round the orbit"
+    (let [B 0.01 rho-p 3e-11 H 60.0 rp (+ c/R-earth 300.0)]
+      (doseq [e [0.002 0.01 0.03]]
+        (let [a (/ rp (- 1.0 e))
+              el {:a a :e e :i 0.9 :raan 0.1 :argp 0.3 :M 0.0}
+              {:keys [a-rate e-rate]} (pt/drag-secular a e B rho-p H)
+              averaged (pt/averaged-rates mu el (exponential-drag B rho-p rp H) 3600)]
+          ;; first order in e: they part by e^2
+          (is (close? (:a averaged) a-rate (* 3 e e)) (str "a, e = " e))
+          (is (close? (:e averaged) e-rate (+ 1e-3 (* 3 e))) (str "e, e = " e))))))
+  (testing "a circular orbit's decay rate is Gauss's equation with along-track drag"
+    (let [a 6778.0 B 0.01 rho 3e-12
+          el {:a a :e 1e-9 :i 0.9 :raan 0.1 :argp 0.3 :M 0.0}
+          averaged (pt/averaged-rates mu el (exponential-drag B rho a 1e9) 72)]
+      (is (close? (:a averaged) (pt/circular-decay-rate a B rho) 1e-9))))
+  (testing "the lifetime is the decay rate integrated in time"
+    (let [B 0.01 density (fn [h] (* 3e-11 (math/exp (- (/ (- h 300.0) 55.0)))))
+          a0 (+ c/R-earth 350.0) a1 (+ c/R-earth 250.0)
+          t (pt/circular-lifetime a0 a1 B density)
+          ;; step the orbit down with RK4 in time until it reaches a1
+          rate (fn [a] (pt/circular-decay-rate a B (density (- a c/R-earth))))
+          dt 600.0
+          t' (loop [a a0 t 0.0]
+               (let [k1 (rate a) k2 (rate (+ a (* 0.5 dt k1))) k3 (rate (+ a (* 0.5 dt k2))) k4 (rate (+ a (* dt k3)))
+                     a' (+ a (* (/ dt 6) (+ k1 (* 2 k2) (* 2 k3) k4)))]
+                 (if (<= a' a1)
+                   (+ t (* dt (/ (- a a1) (- a a'))))
+                   (recur a' (+ t dt)))))]
+      (is (close? t t' 1e-4)))))
