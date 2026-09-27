@@ -82,17 +82,20 @@ of expected return:
   Montenbruck & Gill and Meeus, implemented from the book's equations and
   algorithms. The tests check each result independently: by flying it
   with the two-body propagator, by the identities it must satisfy, and
-  against ERFA and published standards where those cover it.
+  against ERFA and published standards where those cover it. SGP4 is
+  transcribed from the code that accompanies *Revisiting Spacetrack Report
+  #3* and checked against that package's own verification output.
+  - Add the book's inline worked examples as unit tests, with their
+    printed values, alongside the independent checks.
   1. ~~Two-body core (ch. 2)~~ -- `allgo.astro.universal`.
   2. ~~Maneuvers (ch. 6)~~ -- `allgo.astro.maneuvers`.
   3. Initial orbit determination (ch. 7): done except Laplace's method,
      the double-r iteration that refines Gauss, and Battin's Lambert
      solver (a second, independent one to check the universal solver
      against).
-  4. Coordinates and frames (ch. 3-4): range-azimuth-elevation, topocentric
-     SEZ, RSW/NTW/PQW, flight and equinoctial elements, TEME, FK5 chain
-     with EOP, IAU 2006/2000 CIO.
-  5. SGP4/SDP4 and TLEs.
+  4. Coordinates and frames (ch. 3-4): done -- `allgo.astro.reduction` and
+     `allgo.astro.states` -- except the IAU 2006/2000 CIO-based reduction.
+  5. ~~SGP4/SDP4 and TLEs~~ -- `allgo.astro.sgp4`.
   6. Celestial (ch. 5): Sun and Moon positions, rise and set, satellite
      eclipses (shadow), sight and light.
   7. Perturbations (ch. 8-9): J2 secular and periodic rates, gravity

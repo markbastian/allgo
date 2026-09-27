@@ -1,0 +1,2 @@
+# published SGP4 verification data, kept byte for byte as distributed
+test/data/sgp4/** -text

@@ -1103,3 +1103,51 @@ measured along the way:
   upright on the meridian at sidereal time 5h18m; and the first quarter
   of December 8 lit toward the setting Sun with Mare Crisium on the
   eastern limb.
+
+## SGP4, from *Revisiting Spacetrack Report #3*
+
+`allgo.astro.sgp4` is transcribed from the C++ in the code package for
+AIAA 2006-6753 (SGP4.cpp, 12 March 2020), not from the paper's equations
+or any other port: where anything disagrees, the reports and their code
+are authoritative. Each expression keeps the C++'s names and order of
+operations, because the aim is the C++'s numbers, not just its theory.
+Against the package's published output -- the C++ `.e` files and the
+MATLAB file in opsmode a, the shipped Java conversion in opsmode i -- every
+printed digit is reproduced, on the JVM and in ClojureScript alike.
+Against a build of the package's C++ at full precision, 758 of 1338 states
+agree to the last bit and the rest to 3e-8 km, the platform's sin, cos
+and pow accounting for what is left.
+
+What it took to get there, none of it visible in the theory:
+
+- **`rem` is not `fmod`.** Clojure's `rem` on doubles computes
+  x - trunc(x/y) y, which rounds; ClojureScript's does the same. C's
+  `fmod` is exact. It matters most for the sidereal time, a large multiple
+  of 2 pi reduced, which came out 1e-12 off. The namespace has its own
+  exact `fmod`: `IEEE-remainder` shifted by y where its sign disagrees
+  with x on the JVM, `js-mod` in JavaScript. C's `fmod` also keeps the
+  sign of x, which Clojure's `mod` does not; several of SGP4's angles go
+  negative.
+- **Kepler's equation's sine and cosine lag a step.** The C++ loop takes
+  sin and cos of `eo1` at the top of each pass, so after the loop they
+  belong to `eo1` before its last correction. A tidier loop that returns
+  sin and cos of the final `eo1` does not match.
+- **`gsto` is `gstime` in both opsmodes.** The C++ still computes AFSPC's
+  1970-based sidereal time in `initl`, then discards it. Ports of older
+  versions of the code use it in opsmode a.
+- **The epoch is split, and years divisible by four are leap years.**
+  `days2mdhms` and `jday` give a Julian day and fraction, and `sgp4init`
+  gets their sum less 2433281.5.
+- **Grouping matters to the last bit.** `0.375*j2*tsi/psisq*con41` is not
+  `0.375*j2*(tsi/psisq)*con41`, and `pow(x, 4.0)` is not `x*x*x*x`;
+  dspace's `nm = no + (nm - no)` round trip is kept too.
+- **The integrator's memory is a cache.** The C++ keeps the resonance
+  integrator's last step in the element record and resumes from it. The
+  steps fall on the same 720-minute grid from the epoch either way, so
+  `sgp4` here integrates from the epoch each call and stays pure.
+
+The published files need two allowances. For a case that fails at the
+epoch (33334), the drivers still print a row of whatever vectors the
+previous case left. The MATLAB file ends with a stray copy of 08195's
+120-minute row. The tests drop both and say so. The package's FAQ
+recommends opsmode a to match the US Air Force, and it is the default.

@@ -225,6 +225,13 @@ The demos draw on other people's data, used under their terms:
   phenomena series under `allgo.astro`): converted by script from Sonia
   Keys's Go port of *Astronomical Algorithms*,
   [soniakeys/meeus](https://github.com/soniakeys/meeus), MIT license.
+- **SGP4** (`allgo.astro.sgp4`): transcribed from the C++ that
+  accompanies Vallado, Crawford, Hujsak and Kelso, *Revisiting Spacetrack
+  Report #3* (AIAA 2006-6753), after Hoots and Roehrich's *Spacetrack
+  Report No. 3*; the package's verification cases and outputs are in
+  `test/data/sgp4/`. The code carries no license; its authors ask for a
+  citation and a link to
+  [celestrak.org/publications/AIAA/2006-6753](https://celestrak.org/publications/AIAA/2006-6753/).
 - **Stars** (`resources/public/data/bsc5.tsv`): the Bright Star Catalogue,
   5th revised edition (Hoffleit & Warren 1991), VizieR catalog V/50.
 - **Star names** (`resources/public/data/star-names.tsv`): the IAU Working
