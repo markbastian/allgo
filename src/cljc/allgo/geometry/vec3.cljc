@@ -64,3 +64,10 @@
   "Every component a real number. Worth asserting after a solve."
   [[x y z]]
   (and (am/finite? x) (am/finite? y) (am/finite? z)))
+
+(defn angle
+  "The angle between `a` and `b`, radians, 0 to pi: atan2 of |a x b| and
+  a . b, which holds its digits at every angle -- acos of the cosine
+  loses half of them near 0 and pi."
+  ^double [a b]
+  (math/atan2 (length (cross a b)) (dot a b)))

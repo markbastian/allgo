@@ -15,6 +15,7 @@
   whatever unit the caller's position functions take."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.srp :as srp]
+            [allgo.geometry.sphere :as sphere]
             [allgo.geometry.vec3 :as v3]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
@@ -34,15 +35,8 @@
   ([r1 r2] (sight? r1 r2 {}))
   ([r1 r2 {:keys [oblate?]}]
    (let [k (if oblate? (/ 1.0 (- 1.0 polar-flattening)) 1.0)
-         stretch (fn [[x y z]] [x y (* k z)])
-         a (stretch r1) b (stretch r2)
-         d (v3/sub b a)
-         ;; the point of the segment nearest the center
-         t (let [dd (v3/dot d d)] (if (zero? dd) 0.0 (- (/ (v3/dot a d) dd))))
-         nearest (if (<= 0.0 t 1.0) (v3/add-scaled a d t) (if (< t 0.0) a b))
-         R c/R-earth]
-     (and (>= (v3/length a) R) (>= (v3/length b) R)
-          (>= (v3/length nearest) R)))))
+         stretch (fn [[x y z]] [x y (* k z)])]
+     (sphere/segment-clears? (stretch r1) (stretch r2) c/R-earth))))
 
 ;; ----------------------------------------------------------- shadow
 

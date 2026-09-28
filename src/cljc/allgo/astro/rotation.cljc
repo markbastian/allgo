@@ -23,7 +23,9 @@
   North is the IAU's: the pole on the north side of the solar system's
   invariable plane, so Venus and Uranus, which turn backward, have `W`
   decreasing."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.rotation :as rot]
+            [allgo.numerics.linear :as lin]
+            [clojure.math :as math]))
 
 (def ^:private angles
   "The barycenters' nutation-precession angles, degrees, each as
@@ -202,19 +204,13 @@
      :dec (math/to-radians (+ (poly dec T) (periodic dec-terms math/cos)))
      :w   (math/to-radians (mod (+ (poly pm d) (periodic pm-terms math/sin)) 360.0))}))
 
-(defn- rz [a] (let [c (math/cos a) s (math/sin a)] [[c (- s) 0.0] [s c 0.0] [0.0 0.0 1.0]]))
-(defn- rx [a] (let [c (math/cos a) s (math/sin a)] [[1.0 0.0 0.0] [0.0 c (- s)] [0.0 s c]]))
-
-(defn- mat-mul [a b]
-  (mapv (fn [row] (mapv (fn [j] (reduce + (map * row (map #(nth % j) b)))) (range 3))) a))
-
 (defn body->icrf
   "The rotation taking body-fixed coordinates -- x through the prime
   meridian, z through the north pole -- into the ICRF, as rows of a 3x3
   matrix: Rz(ra + 90 deg) Rx(90 deg - dec) Rz(W)."
   [body mjd]
   (let [{:keys [ra dec w]} (angles-at body mjd)]
-    (mat-mul (mat-mul (rz (+ ra (/ math/PI 2.0))) (rx (- (/ math/PI 2.0) dec))) (rz w))))
+    (lin/mat-mul (lin/mat-mul (rot/rotate-z (+ ra (/ math/PI 2.0))) (rot/rotate-x (- (/ math/PI 2.0) dec))) (rot/rotate-z w))))
 
 (defn pole
   "The north pole's direction in the ICRF, a unit vector."

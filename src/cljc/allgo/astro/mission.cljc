@@ -12,6 +12,7 @@
             [allgo.astro.geopotential :as geo]
             [allgo.astro.perturbations :as perturbations]
             [allgo.astro.reduction :as reduction]
+            [allgo.geometry.sphere :as sphere]
             [allgo.math :as am]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
@@ -21,30 +22,17 @@
 (defn range-azimuth
   "`{:range :angle :azimuth}` from `[lat1 lon1]` to `[lat2 lon2]` on a
   sphere of radius `R` (default the Earth's): the great-circle distance,
-  the angle it subtends at the center, and the initial azimuth, by the
-  haversine for the angle and the four-part formula for the azimuth."
+  the angle it subtends at the center, and the initial azimuth."
   ([p1 p2] (range-azimuth p1 p2 c/R-earth))
-  ([[lat1 lon1] [lat2 lon2] R]
-   (let [dlon (- lon2 lon1)
-         hav (+ (am/sq (math/sin (* 0.5 (- lat2 lat1))))
-                (* (math/cos lat1) (math/cos lat2) (am/sq (math/sin (* 0.5 dlon)))))
-         angle (* 2.0 (math/asin (math/sqrt (min 1.0 hav))))
-         az (math/atan2 (* (math/sin dlon) (math/cos lat2))
-                        (- (* (math/cos lat1) (math/sin lat2))
-                           (* (math/sin lat1) (math/cos lat2) (math/cos dlon))))]
-     {:range (* R angle) :angle angle :azimuth (am/wrap-2pi az)})))
+  ([p1 p2 R]
+   (let [{:keys [angle azimuth]} (sphere/great-circle p1 p2)]
+     {:range (* R angle) :angle angle :azimuth azimuth})))
 
 (defn destination
   "`[lat lon]` reached from `[lat lon]` by going `range` along a great
   circle that sets out at `azimuth`, on a sphere of radius `R`."
   ([p range azimuth] (destination p range azimuth c/R-earth))
-  ([[lat lon] range azimuth R]
-   (let [d (/ range R)
-         lat2 (math/asin (+ (* (math/sin lat) (math/cos d))
-                            (* (math/cos lat) (math/sin d) (math/cos azimuth))))
-         lon2 (+ lon (math/atan2 (* (math/sin azimuth) (math/sin d) (math/cos lat))
-                                 (- (math/cos d) (* (math/sin lat) (math/sin lat2)))))]
-     [lat2 (am/wrap-angle lon2)])))
+  ([p range azimuth R] (sphere/destination p (/ range R) azimuth)))
 
 ;; ---------------------------------------------------------- ground track
 

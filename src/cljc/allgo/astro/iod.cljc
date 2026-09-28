@@ -16,6 +16,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.kepler :as kepler]
             [allgo.astro.universal :as universal]
+            [allgo.geometry.sphere :as sphere]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [allgo.numerics.interpolation :as interp]
@@ -24,9 +25,6 @@
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
-
-(defn- angle [a b]
-  (math/acos (am/clamp (/ (v3/dot a b) (* (v3/length a) (v3/length b))) -1.0 1.0)))
 
 ;; ---------------------------------------------------- three positions
 
@@ -48,7 +46,7 @@
          b (v3/cross d r2)
          lg (math/sqrt (/ mu (* (v3/length n) (v3/length d))))]
      {:v2 (v3/add (v3/scale b (/ lg m2)) (v3/scale s lg))
-      :theta12 (angle r1 r2) :theta23 (angle r2 r3)
+      :theta12 (v3/angle r1 r2) :theta23 (v3/angle r2 r3)
       :copa (math/asin (/ (v3/dot z23 r1) (* (v3/length z23) m1)))})))
 
 (defn herrick-gibbs
@@ -63,7 +61,7 @@
      {:v2 (v3/add (v3/add (v3/scale r1 (* (- t32) (+ (/ 1.0 (* t21 t31)) (k r1))))
                           (v3/scale r2 (* (- t32 t21) (+ (/ 1.0 (* t21 t32)) (k r2)))))
                   (v3/scale r3 (* t21 (+ (/ 1.0 (* t32 t31)) (k r3)))))
-      :theta12 (angle r1 r2) :theta23 (angle r2 r3)
+      :theta12 (v3/angle r1 r2) :theta23 (v3/angle r2 r3)
       :copa (let [z23 (v3/cross r2 r3)]
               (math/asin (/ (v3/dot z23 r1) (* (v3/length z23) (v3/length r1)))))})))
 
@@ -176,23 +174,14 @@
 
 ;; ------------------------------------------------------- double-r
 
-(defn- range-at
-  "The range along unit `L` from site `R` at which the distance from the
-  center is `r`: the far root of |R + rho L| = r, nil where the line never
-  gets that far out."
-  [L R r]
-  (let [c (* 2.0 (v3/dot L R))
-        disc (- (* c c) (* 4.0 (- (v3/dot R R) (* r r))))]
-    (when (>= disc 0.0) (* 0.5 (+ (- c) (math/sqrt disc))))))
-
 (defn- double-r-step
   "For radii `r1m` `r2m` at the first two sightings: the three positions,
   the conic through them, and how far its timing misses the observation
   times -- `{:F [F1 F2] :r [r1 r2 r3] :conic ...}`, nil where the guess
   puts no conic through them."
   [mu [L1 L2 L3] [tau1 tau3] [R1 R2 R3] r1m r2m]
-  (when-let [rho1 (range-at L1 R1 r1m)]
-    (when-let [rho2 (range-at L2 R2 r2m)]
+  (when-let [rho1 (sphere/far-intersection R1 L1 r1m)]
+    (when-let [rho2 (sphere/far-intersection R2 L2 r2m)]
       (let [r1 (v3/add R1 (v3/scale L1 rho1))
             r2 (v3/add R2 (v3/scale L2 rho2))
             W (v3/normalize (v3/cross r1 r2))

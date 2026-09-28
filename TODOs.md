@@ -118,9 +118,10 @@ of expected return:
   13. ~~The circular restricted three-body problem (ch. 2)~~ --
       `allgo.astro.cr3bp`.
   14. ~~IAU 2006/2000A CIO-based reduction~~ -- `allgo.astro.cio`.
-  15. Then move what is plain mathematics out of `allgo.astro` (numerical
-      differentiation, roots and events, quadrature, special functions,
-      rotations, spherical trigonometry and intersections).
+  15. ~~Move what is plain mathematics out of `allgo.astro`~~ --
+      `allgo.numerics` differentiation, roots, quadrature, special and
+      linear's small solves; `allgo.math` fmod and frac; `allgo.geometry`
+      rotation, sphere and disk, and `vec3/angle`.
 
 ## Time
 

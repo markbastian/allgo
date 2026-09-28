@@ -14,25 +14,9 @@
   offset that no amount of careful integration will recover."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.time :as time]
+            [allgo.geometry.rotation :as rot]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
-
-;; ------------------------------------------------------------------ matrices
-;; Frame rotations, in the astrodynamical sense: R(theta) * v gives the
-;; components of v in a frame turned by theta, not v turned by theta.
-
-(defn rx [t] (let [s (math/sin t) k (math/cos t)]
-               [[1.0 0.0 0.0] [0.0 k s] [0.0 (- s) k]]))
-(defn ry [t] (let [s (math/sin t) k (math/cos t)]
-               [[k 0.0 (- s)] [0.0 1.0 0.0] [s 0.0 k]]))
-(defn rz [t] (let [s (math/sin t) k (math/cos t)]
-               [[k s 0.0] [(- s) k 0.0] [0.0 0.0 1.0]]))
-
-(defn chain
-  "Compose rotations left to right, so `(chain a b c)` applied to a vector
-  does c first."
-  [& ms]
-  (reduce lin/mat-mul ms))
 
 ;; ---------------------------------------------------------------- precession
 
@@ -50,7 +34,7 @@
         zeta (* c/arcsec (+ (* 2306.2181 T) (* 0.30188 T2) (* 0.017998 T3)))
         z    (* c/arcsec (+ (* 2306.2181 T) (* 1.09468 T2) (* 0.018203 T3)))
         th   (* c/arcsec (- (* 2004.3109 T) (* 0.42665 T2) (* 0.041833 T3)))]
-    (chain (rz (- z)) (ry th) (rz (- zeta)))))
+    (rot/chain (rot/rz (- z)) (rot/ry th) (rot/rz (- zeta)))))
 
 (defn mean-obliquity
   "Obliquity of the ecliptic referred to the mean equator, radians
@@ -255,7 +239,7 @@
   [mjd-tt]
   (let [eps (mean-obliquity mjd-tt)
         [dpsi deps] (nutation-angles mjd-tt)]
-    (chain (rx (- (+ eps deps))) (rz (- dpsi)) (rx eps))))
+    (rot/chain (rot/rx (- (+ eps deps))) (rot/rz (- dpsi)) (rot/rx eps))))
 
 (defn equation-of-equinoxes
   "The gap between apparent and mean sidereal time, radians. It is the
@@ -287,7 +271,7 @@
   "Rotation from the true equator and equinox of date to the Earth-fixed
   frame: the daily spin, and by far the largest of the four."
   [mjd-ut1 mjd-tt]
-  (rz (gast mjd-ut1 mjd-tt)))
+  (rot/rz (gast mjd-ut1 mjd-tt)))
 
 ;; ------------------------------------------------------------- polar motion
 
@@ -300,7 +284,7 @@
   against an annual term. Like dUT1 this can only be measured and published,
   never predicted, and zero is the honest default when it is unknown."
   [xp yp]
-  (lin/mat-mul (ry (- xp)) (rx (- yp))))
+  (lin/mat-mul (rot/ry (- xp)) (rot/rx (- yp))))
 
 ;; --------------------------------------------------- the complete transform
 
@@ -317,10 +301,10 @@
   circle a day."
   ([mjd-tt mjd-ut1] (celestial->terrestrial mjd-tt mjd-ut1 0.0 0.0))
   ([mjd-tt mjd-ut1 xp yp]
-   (chain (polar-motion xp yp)
-          (earth-rotation mjd-ut1 mjd-tt)
-          (nutation mjd-tt)
-          (precession mjd-tt))))
+   (rot/chain (polar-motion xp yp)
+              (earth-rotation mjd-ut1 mjd-tt)
+              (nutation mjd-tt)
+              (precession mjd-tt))))
 
 (defn terrestrial->celestial
   "The inverse, which for a rotation is simply the transpose."
@@ -371,9 +355,9 @@
   ([mjd-tt mjd-ut1] (celestial->terrestrial-cached mjd-tt mjd-ut1 0.0 0.0))
   ([mjd-tt mjd-ut1 xp yp]
    (let [[pn eqeq] (slow-parts mjd-tt)]
-     (chain (polar-motion xp yp)
-            (rz (+ (time/gmst mjd-ut1) eqeq))
-            pn))))
+     (rot/chain (polar-motion xp yp)
+                (rot/rz (+ (time/gmst mjd-ut1) eqeq))
+                pn))))
 
 ;; ------------------------------------------------------------------- drawing
 

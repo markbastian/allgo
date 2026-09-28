@@ -15,7 +15,7 @@
   the pole from the model, radians; `:lod`, seconds. Times are MJD, the
   rotation UT1 and everything else TT. States are `[r v]`, km and km/s."
   (:require [allgo.astro.cio-data :as data]
-            [allgo.astro.frames :as frames]
+            [allgo.geometry.rotation :as rot]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [allgo.numerics.linear :as lin]
@@ -111,19 +111,19 @@
          r2 (+ (* x x) (* y y))
          e (if (pos? r2) (math/atan2 y x) 0.0)
          d (math/atan (math/sqrt (/ r2 (- 1.0 r2))))]
-     (frames/chain (frames/rz (- (+ e sv))) (frames/ry d) (frames/rz e)))))
+     (rot/chain (rot/rz (- (+ e sv))) (rot/ry d) (rot/rz e)))))
 
 (defn polar-matrix
   "TIRS to ITRS: Rx(-yp) Ry(-xp) Rz(s')."
   [mjd-tt {:keys [xp yp] :or {xp 0.0 yp 0.0}}]
-  (frames/chain (frames/rx (- yp)) (frames/ry (- xp)) (frames/rz (s-prime mjd-tt))))
+  (rot/chain (rot/rx (- yp)) (rot/ry (- xp)) (rot/rz (s-prime mjd-tt))))
 
 (defn c2t-matrix
   "GCRS to ITRS: polar motion, the Earth rotation angle and the CIP."
   ([mjd-tt mjd-ut1] (c2t-matrix mjd-tt mjd-ut1 {}))
   ([mjd-tt mjd-ut1 eop]
    (lin/mat-mul (polar-matrix mjd-tt eop)
-                (lin/mat-mul (frames/rz (earth-rotation-angle mjd-ut1)) (c2i-matrix mjd-tt eop)))))
+                (lin/mat-mul (rot/rz (earth-rotation-angle mjd-ut1)) (c2i-matrix mjd-tt eop)))))
 
 (def ^:private omega-nominal 7.292115146706979e-5)
 
@@ -133,7 +133,7 @@
   ([st mjd-tt mjd-ut1] (gcrs->itrs st mjd-tt mjd-ut1 {}))
   ([[r v] mjd-tt mjd-ut1 {:keys [lod] :or {lod 0.0} :as eop}]
    (let [Q (c2i-matrix mjd-tt eop)
-         R (frames/rz (earth-rotation-angle mjd-ut1))
+         R (rot/rz (earth-rotation-angle mjd-ut1))
          W (polar-matrix mjd-tt eop)
          w [0.0 0.0 (* omega-nominal (- 1.0 (/ lod 86400.0)))]
          rt (lin/mat-vec R (lin/mat-vec Q r))
@@ -145,7 +145,7 @@
   ([st mjd-tt mjd-ut1] (itrs->gcrs st mjd-tt mjd-ut1 {}))
   ([[r v] mjd-tt mjd-ut1 {:keys [lod] :or {lod 0.0} :as eop}]
    (let [Qt (lin/transpose (c2i-matrix mjd-tt eop))
-         Rt (lin/transpose (frames/rz (earth-rotation-angle mjd-ut1)))
+         Rt (lin/transpose (rot/rz (earth-rotation-angle mjd-ut1)))
          Wt (lin/transpose (polar-matrix mjd-tt eop))
          w [0.0 0.0 (* omega-nominal (- 1.0 (/ lod 86400.0)))]
          rt (lin/mat-vec Wt r)

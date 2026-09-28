@@ -29,6 +29,7 @@
             [allgo.astro.rotation :as rot]
             [allgo.astro.solar :as solar]
             [allgo.astro.time :as atime]
+            [allgo.geometry.rotation :as geo-rot]
             [allgo.numerics.linear :as lin]
             ["three" :as THREE]
             ["three/examples/jsm/renderers/CSS2DRenderer.js" :refer [CSS2DObject CSS2DRenderer]]
@@ -52,7 +53,7 @@
   [lat lst]
   (let [sp (math/sin lat) cp (math/cos lat)
         ;; into the frame of the local meridian, then east-north-up
-        enu (lin/mat-mul [[0.0 1.0 0.0] [(- sp) 0.0 cp] [cp 0.0 sp]] (frames/rz lst))
+        enu (lin/mat-mul [[0.0 1.0 0.0] [(- sp) 0.0 cp] [cp 0.0 sp]] (geo-rot/rz lst))
         [e n u] enu]
     [e u (mapv - n)]))
 

@@ -21,6 +21,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.frames :as frames]
             [allgo.astro.time :as time]
+            [allgo.geometry.rotation :as rot]
             [allgo.geometry.vec3 :as v3]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
@@ -59,7 +60,7 @@
 (defn- nutation-matrix [mjd-tt eop]
   (let [[dpsi _ eps] (nutation-angles mjd-tt eop)
         eps0 (frames/mean-obliquity mjd-tt)]
-    (frames/chain (frames/rx (- eps)) (frames/rz (- dpsi)) (frames/rx eps0))))
+    (rot/chain (rot/rx (- eps)) (rot/rz (- dpsi)) (rot/rx eps0))))
 
 (defn- polar-matrix
   "PEF to ITRF, Vallado's full rotation rather than its small-angle form."
@@ -93,7 +94,7 @@
   ([s mjd-tt] (eci->teme s mjd-tt {}))
   ([s mjd-tt eop]
    (let [[r v] (eci->tod s mjd-tt eop)
-         R (frames/rz (eqe-1982 mjd-tt eop))]
+         R (rot/rz (eqe-1982 mjd-tt eop))]
      [(mv R r) (mv R v)])))
 
 (defn eci->pef
@@ -103,7 +104,7 @@
   ([s mjd-tt mjd-ut1] (eci->pef s mjd-tt mjd-ut1 {}))
   ([s mjd-tt mjd-ut1 eop]
    (let [[r v] (eci->tod s mjd-tt eop)
-         R (frames/rz (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt eop)))
+         R (rot/rz (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt eop)))
          rp (mv R r)]
      [rp (lin/sub (mv R v) (v3/cross (omega eop) rp))])))
 
@@ -129,13 +130,13 @@
   "TEME to GCRF: how an SGP4 state is brought into the inertial frame."
   ([s mjd-tt] (teme->eci s mjd-tt {}))
   ([[r v] mjd-tt eop]
-   (let [R (frames/rz (- (eqe-1982 mjd-tt eop)))]
+   (let [R (rot/rz (- (eqe-1982 mjd-tt eop)))]
      (tod->eci [(mv R r) (mv R v)] mjd-tt eop))))
 
 (defn pef->eci
   ([s mjd-tt mjd-ut1] (pef->eci s mjd-tt mjd-ut1 {}))
   ([[r v] mjd-tt mjd-ut1 eop]
-   (let [R (tr (frames/rz (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt eop))))
+   (let [R (tr (rot/rz (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt eop))))
          v' (lin/add v (v3/cross (omega eop) r))]
      (tod->eci [(mv R r) (mv R v')] mjd-tt eop))))
 
@@ -151,7 +152,7 @@
   mean sidereal time, the frame being on the mean equinox."
   ([s mjd-ut1] (teme->ecef s mjd-ut1 {}))
   ([[r v] mjd-ut1 eop]
-   (let [R (frames/rz (time/gmst mjd-ut1))
+   (let [R (rot/rz (time/gmst mjd-ut1))
          rp (mv R r)
          vp (lin/sub (mv R v) (v3/cross (omega eop) rp))
          W (polar-matrix eop)]

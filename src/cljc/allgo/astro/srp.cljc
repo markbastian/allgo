@@ -13,26 +13,10 @@
   there is a penumbra where it is partly occulted, and a satellite crossing
   it sees the force ramp rather than switch."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.disk :as disk]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [clojure.math :as math]))
-
-(defn- circle-overlap
-  "Fraction of a disk of apparent radius `a` hidden behind one of apparent
-  radius `b`, their centers `sep` apart. All angles, in radians."
-  [a b sep]
-  (cond
-    (>= sep (+ a b))  0.0                        ; clear of each other
-    (<= sep (- b a))  1.0                        ; the occulter covers it entirely
-    (<= sep (- a b))  (/ (* b b) (* a a))        ; the occulter sits wholly inside
-    :else
-    ;; Two overlapping disks: the shared area is a pair of circular segments.
-    (let [x    (/ (+ (* sep sep) (* a a) (- (* b b))) (* 2.0 sep))
-          y    (math/sqrt (max 0.0 (- (* a a) (* x x))))
-          area (- (+ (* a a (math/acos (/ x a)))
-                     (* b b (math/acos (/ (- sep x) b))))
-                  (* sep y))]
-      (/ area (* math/PI a a)))))
 
 (defn shadow
   "Fraction of the Sun visible from `r`, given the Sun at `r-sun`: 1 in full
@@ -51,7 +35,7 @@
          b        (math/asin (min 1.0 (/ r-occulter d-earth)))
          cos-sep  (/ (v3/dot (v3/negate r) to-sun) (* d-earth d-sun))
          sep      (math/acos (am/clamp cos-sep -1.0 1.0))]
-     (- 1.0 (circle-overlap a b sep)))))
+     (- 1.0 (disk/overlap-fraction a b sep)))))
 
 (defn acceleration
   "Radiation-pressure acceleration on a satellite at `r` with the Sun at
