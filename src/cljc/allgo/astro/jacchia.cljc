@@ -26,7 +26,8 @@
 
   Heights are geometric, km; densities g/cm^3 and number densities cm^-3,
   as the report tabulates them, except where `atmosphere` says otherwise."
-  (:require [allgo.numerics.quadrature :as quadrature]
+  (:require [allgo.astro.solar :as solar]
+            [allgo.numerics.quadrature :as quadrature]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------------------ constants
@@ -153,20 +154,138 @@
   [tinf z]
   (let [tz (temperature tinf z)
         g-over-t #(/ (gravity %) (temperature tinf %))
-        diffuse (fn [n-base t-base z-base k]
+        ;; the integral of g/T from a base to z, common to every constituent
+        path (fn [z-base] (if (>= z z-base) (integral g-over-t z-base z) (- (integral g-over-t z z-base))))
+        diffuse (fn [n-base t-base path k]
                   (let [{:keys [m alpha]} (species k)]
                     (* n-base (math/pow (/ t-base tz) (+ 1.0 alpha))
-                       (math/exp (/ (* -1e5 m (if (>= z z-base)
-                                                (integral g-over-t z-base z)
-                                                (- (integral g-over-t z z-base))))
-                                    rgas)))))
+                       (math/exp (/ (* -1e5 m path) rgas)))))
         t500 (temperature tinf 500.0)
-        nh (diffuse (hydrogen-500 t500) t500 500.0 :H)
+        nh (when (> z 100.0) (diffuse (hydrogen-500 t500) t500 (path 500.0) :H))
         n (if (<= z 100.0)
             (mixed-number-densities (mixed-density tinf z) (mean-molecular-mass z))
             (let [t100 (temperature tinf 100.0)
-                  base (mixed-number-densities (mixed-density tinf 100.0) (mean-molecular-mass 100.0))]
-              (into {} (map (fn [k] [k (diffuse (base k) t100 100.0 k)]) (keys base)))))
-        n (if (> z 100.0) (assoc n :H nh) n)
+                  base (mixed-number-densities (mixed-density tinf 100.0) (mean-molecular-mass 100.0))
+                  p100 (path 100.0)]
+              (into {} (map (fn [k] [k (diffuse (base k) t100 p100 k)]) (keys base)))))
+        n (if nh (assoc n :H nh) n)
         rho (mass-density n)]
     {:t tz :rho rho :n n :m (/ (* rho avogadro) (reduce + (vals n)))}))
+
+;; ------------------------------------------------------------ variations
+
+(defn night-minimum
+  "Tc, the global nighttime minimum exospheric temperature, K, at Kp = 0:
+  equation (14), from the previous day's 10.7 cm flux `f107` (the
+  temperature lags the flux by a day) and its average over three solar
+  rotations `f107a`, in 1e-22 W m^-2 Hz^-1."
+  [f107 f107a]
+  (+ 379.0 (* 3.24 f107a) (* 1.3 (- f107 f107a))))
+
+(defn local-temperature
+  "Tl, the uncorrected exospheric temperature at latitude `lat`, the Sun's
+  declination `dec` (radians) and local solar time `lst` (hours), for
+  nighttime minimum `tc`: equations (15) to (17), the maximum lagging the
+  subsolar point by the terms in beta, p and gamma."
+  [tc lat dec lst]
+  (let [m 2.2 n 3.0 r 0.3
+        beta (math/to-radians -37.0) p (math/to-radians 6.0) gamma (math/to-radians 43.0)
+        h (math/to-radians (* 15.0 (- lst 12.0)))
+        tau (let [t (+ h beta (* p (math/sin (+ h gamma))))]
+              ;; into -pi to pi
+              (- t (* 2.0 math/PI (math/floor (/ (+ t math/PI) (* 2.0 math/PI))))))
+        theta (* 0.5 (abs (+ lat dec)))
+        eta (* 0.5 (abs (- lat dec)))
+        s (math/pow (math/sin theta) m)
+        c (math/pow (math/cos eta) m)]
+    (* tc (+ 1.0 (* r s)) (+ 1.0 (* (/ (* r (- c s)) (+ 1.0 (* r s))) (math/pow (math/cos (* 0.5 tau)) n))))))
+
+(defn geomagnetic-temperature
+  "The geomagnetic rise in exospheric temperature, K, for the planetary
+  index `kp` (lagged 6.7 hours): equation (18) at and above 200 km, the
+  temperature part (20b) of the hybrid form below."
+  [kp z]
+  (if (< z 200.0)
+    (+ (* 14.0 kp) (* 0.02 (math/exp kp)))
+    (+ (* 28.0 kp) (* 0.03 (math/exp kp)))))
+
+(defn geomagnetic-density
+  "The density part of the hybrid geomagnetic effect below 200 km,
+  Delta log10 rho: equation (20a); nothing above."
+  [kp z]
+  (if (< z 200.0) (+ (* 0.012 kp) (* 1.2e-5 (math/exp kp))) 0.0))
+
+(defn- semiannual-phase
+  "Phi of equation (23), from MJD `t`."
+  [t]
+  (/ (- t 36204.0) 365.2422))
+
+(defn semiannual-height
+  "f(z) of equation (22), the semiannual variation's amplitude at height
+  `z` km."
+  [z]
+  (* (+ (* 5.876e-7 (math/pow z 2.331)) 0.06328) (math/exp (* -2.868e-3 z))))
+
+(defn semiannual-time
+  "g(t) of equation (22) at MJD `t`, normalized to unit amplitude."
+  [t]
+  (let [phi (semiannual-phase t)
+        tau (+ phi (* 0.09544 (- (math/pow (+ 0.5 (* 0.5 (math/sin (+ (* 2.0 math/PI phi) 6.035)))) 1.65) 0.5)))]
+    (+ 0.02835 (* 0.3817 (+ 1.0 (* 0.4671 (math/sin (+ (* 2.0 math/PI tau) 4.137))))
+                  (math/sin (+ (* 4.0 math/PI tau) 4.259))))))
+
+(defn semiannual
+  "The semiannual variation, Delta log10 rho = f(z) g(t): equation (21)."
+  [z t]
+  (* (semiannual-height z) (semiannual-time t)))
+
+(defn seasonal-latitudinal
+  "The seasonal-latitudinal variation of the lower thermosphere, Delta
+  log10 rho, at height `z` km, latitude `lat` (radians) and MJD `t`:
+  equation (24)."
+  [z lat t]
+  (let [x (- z 90.0)]
+    (* 0.014 x (math/exp (* -0.0013 x x)) (math/signum lat)
+       (math/sin (+ (* 2.0 math/PI (semiannual-phase t)) 1.72))
+       (math/pow (math/sin lat) 2))))
+
+(defn helium
+  "The seasonal-latitudinal variation of helium, Delta log10 n(He), at
+  latitude `lat` and solar declination `dec` (radians): equation (25),
+  the obliquity 23.44 degrees."
+  [lat dec]
+  (let [eps (math/to-radians 23.44)
+        q (/ math/PI 4.0)]
+    (* 0.65 (abs (/ dec eps))
+       (- (math/pow (math/sin (- q (* 0.5 lat (math/signum dec)))) 3)
+          (math/pow (math/sin q) 3)))))
+
+(defn atmosphere
+  "J71 at `inputs`, a map of
+
+    :mjd    the time, MJD (UT)
+    :alt    height, km, 90 and above
+    :lat    geodetic latitude, degrees
+    :lst    local solar time, hours
+    :f107   the previous day's 10.7 cm flux
+    :f107a  its average over three solar rotations
+    :kp     the planetary geomagnetic index, 6.7 hours before
+    :dec    the Sun's declination, degrees (by default from the Sun's
+            low-accuracy position)
+
+  returning number densities, m^-3, `:N2 :O2 :O :Ar :He :H`; the mass
+  density, kg/m^3, `:rho`; the temperature `:t` and exospheric
+  temperature `:t-exo`, K. The exospheric temperature carries the solar,
+  diurnal and geomagnetic variations; the densities the semiannual,
+  seasonal-latitudinal and (below 200 km) geomagnetic corrections, which
+  scale every constituent alike, and helium its own."
+  [{:keys [mjd alt lat lst f107 f107a kp dec]}]
+  (let [lat (math/to-radians lat)
+        dec (if dec (math/to-radians dec) (second (solar/equatorial-low mjd)))
+        tinf (+ (local-temperature (night-minimum f107 f107a) lat dec lst)
+                (geomagnetic-temperature kp alt))
+        {:keys [t n]} (static tinf alt)
+        n (update n :He * (math/pow 10.0 (helium lat dec)))
+        f (math/pow 10.0 (+ (semiannual alt mjd) (seasonal-latitudinal alt lat mjd) (geomagnetic-density kp alt)))
+        n (update-vals n #(* % f 1e6))]
+    (assoc n :rho (* 1e3 (/ (mass-density n) 1e6)) :t t :t-exo tinf)))
