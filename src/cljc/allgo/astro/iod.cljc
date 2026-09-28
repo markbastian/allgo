@@ -18,6 +18,7 @@
             [allgo.astro.universal :as universal]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
@@ -195,16 +196,6 @@
         disc (- (* c c) (* 4.0 (- (v3/dot R R) (* r r))))]
     (when (>= disc 0.0) (* 0.5 (+ (- c) (math/sqrt disc))))))
 
-(defn- solve3
-  "x of the 3x3 linear system m x = b, by Cramer's rule."
-  [m b]
-  (let [det (fn [[[a b c] [d e f] [g h i]]]
-              (- (+ (* a (- (* e i) (* f h))) (* c (- (* d h) (* e g))))
-                 (* b (- (* d i) (* f g)))))
-        d (det m)
-        col (fn [k] (mapv (fn [row bi] (assoc row k bi)) m b))]
-    (mapv #(/ (det (col %)) d) (range 3))))
-
 (defn- double-r-step
   "For radii `r1m` `r2m` at the first two sightings: the three positions,
   the conic through them, and how far its timing misses the observation
@@ -224,10 +215,10 @@
             sweep (fn [a b] (math/atan2 (v3/dot (v3/cross a b) W) (v3/dot a b)))
             dnu21 (sweep r1 r2) dnu32 (sweep r2 r3)
             ;; p, e cos nu2, e sin nu2 from p/r - 1 = e cos nu at each point
-            [p X Y] (solve3 [[(/ 1.0 r1m) (- (math/cos dnu21)) (- (math/sin dnu21))]
-                             [(/ 1.0 r2m) -1.0 0.0]
-                             [(/ 1.0 r3m) (- (math/cos dnu32)) (math/sin dnu32)]]
-                            [1.0 1.0 1.0])
+            [p X Y] (lin/solve-3 [[(/ 1.0 r1m) (- (math/cos dnu21)) (- (math/sin dnu21))]
+                                  [(/ 1.0 r2m) -1.0 0.0]
+                                  [(/ 1.0 r3m) (- (math/cos dnu32)) (math/sin dnu32)]]
+                                 [1.0 1.0 1.0])
             e (math/hypot X Y)
             a (/ p (- 1.0 (* e e)))
             nu2 (math/atan2 Y X)

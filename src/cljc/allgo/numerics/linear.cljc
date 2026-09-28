@@ -102,3 +102,22 @@
     (when (cholesky A)
       (transpose (mapv (fn [i] (cholesky-solve A (mapv #(if (= i %) 1.0 0.0) (range n))))
                        (range n))))))
+
+(defn det-3 [[[a b cc] [d e f] [g h i]]]
+  (- (+ (* a e i) (* b f g) (* cc d h)) (+ (* cc e g) (* b d i) (* a f h))))
+
+(defn solve-3
+  "x of the 3x3 linear system m x = b, by Cramer's rule."
+  [m b]
+  (let [det (fn [[[a b c] [d e f] [g h i]]]
+              (- (+ (* a (- (* e i) (* f h))) (* c (- (* d h) (* e g))))
+                 (* b (- (* d i) (* f g)))))
+        d (det m)
+        col (fn [k] (mapv (fn [row bi] (assoc row k bi)) m b))]
+    (mapv #(/ (det (col %)) d) (range 3))))
+
+(defn congruence
+  "A B A^T: a matrix `B` carried through the linear map `A`, as a
+  covariance is."
+  [A B]
+  (mat-mul (mat-mul A B) (transpose A)))

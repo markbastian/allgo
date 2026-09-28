@@ -16,6 +16,7 @@
   rotation UT1 and everything else TT. States are `[r v]`, km and km/s."
   (:require [allgo.astro.cio-data :as data]
             [allgo.astro.frames :as frames]
+            [allgo.geometry.vec3 :as v3]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
@@ -127,8 +128,6 @@
 
 (def ^:private omega-nominal 7.292115146706979e-5)
 
-(defn- cross [[a b c] [d e f]] [(- (* b f) (* c e)) (- (* c d) (* a f)) (- (* a e) (* b d))])
-
 (defn gcrs->itrs
   "A GCRS state in the ITRS; the velocity loses the Earth's spin, at the
   rate the length of day sets."
@@ -139,7 +138,7 @@
          W (polar-matrix mjd-tt eop)
          w [0.0 0.0 (* omega-nominal (- 1.0 (/ lod 86400.0)))]
          rt (lin/mat-vec R (lin/mat-vec Q r))
-         vt (lin/sub (lin/mat-vec R (lin/mat-vec Q v)) (cross w rt))]
+         vt (lin/sub (lin/mat-vec R (lin/mat-vec Q v)) (v3/cross w rt))]
      [(lin/mat-vec W rt) (lin/mat-vec W vt)])))
 
 (defn itrs->gcrs
@@ -151,5 +150,5 @@
          Wt (lin/transpose (polar-matrix mjd-tt eop))
          w [0.0 0.0 (* omega-nominal (- 1.0 (/ lod 86400.0)))]
          rt (lin/mat-vec Wt r)
-         vt (lin/add (lin/mat-vec Wt v) (cross w rt))]
+         vt (lin/add (lin/mat-vec Wt v) (v3/cross w rt))]
      [(lin/mat-vec Qt (lin/mat-vec Rt rt)) (lin/mat-vec Qt (lin/mat-vec Rt vt))])))

@@ -19,11 +19,6 @@
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
-;; ------------------------------------------------------------ small matrices
-
-(defn det-3 [[[a b cc] [d e f] [g h i]]]
-  (- (+ (* a e i) (* b f g) (* cc d h)) (+ (* cc e g) (* b d i) (* a f h))))
-
 ;; --------------------------------------------------------------- gradients
 
 (defn two-body-gradient

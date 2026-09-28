@@ -17,6 +17,7 @@
             [allgo.astro.precession :as precession]
             [allgo.astro.time :as time]
             [allgo.astro.vsop87 :as vsop87]
+            [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [allgo.numerics.interpolation :as interp :refer [horner]]
             [clojure.math :as math]))
@@ -107,10 +108,6 @@
 
 (defn- ->vector [[l b]] [(* (math/cos b) (math/cos l)) (* (math/cos b) (math/sin l)) (math/sin b)])
 
-(defn- cross [[a b c] [d e f]] [(- (* b f) (* c e)) (- (* c d) (* a f)) (- (* a e) (* b d))])
-
-(defn- dot [u v] (reduce + (map * u v)))
-
 (defn mean-elements-J2000
   "`mean-elements` referred to the ecliptic and equinox of J2000 -- Meeus's
   table 31.B, here derived from 31.A by precessing the orbit: two points
@@ -124,10 +121,10 @@
         p1 (move (orbit-point raan i 0.0))
         p2 (move (orbit-point raan i (/ math/PI 2)))
         pp (move (orbit-point raan i argp))
-        [nx ny nz :as n] (cross p1 p2)
+        [nx ny nz :as n] (v3/cross p1 p2)
         raan' (am/wrap-2pi (math/atan2 nx (- ny)))
         node  [(math/cos raan') (math/sin raan') 0.0]
-        argp' (am/wrap-2pi (math/atan2 (dot (cross n node) pp) (dot node pp)))
+        argp' (am/wrap-2pi (math/atan2 (v3/dot (v3/cross n node) pp) (v3/dot node pp)))
         peri' (+ raan' argp')]
     (assoc el
            :i (math/acos nz) :raan raan' :argp argp'

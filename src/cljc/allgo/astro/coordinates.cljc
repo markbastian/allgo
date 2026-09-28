@@ -21,6 +21,7 @@
   θ0 - L - α appears here as θ0 + L - α and his azimuths are 180 degrees
   from these."
   (:require [allgo.astro.constants :as c]
+            [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [allgo.numerics.interpolation :as interp]
             [clojure.math :as math]))
@@ -313,9 +314,6 @@
 (defn- unit-vector [[a d]]
   [(* (math/cos d) (math/cos a)) (* (math/cos d) (math/sin a)) (math/sin d)])
 
-(defn- cross [[a1 b1 c1] [a2 b2 c2]]
-  [(- (* b1 c2) (* b2 c1)) (- (* c1 a2) (* c2 a1)) (- (* a1 b2) (* a2 b1))])
-
 (defn- norm [v] (math/sqrt (reduce + (map * v v))))
 
 (defn- dot [a b] (reduce + (map * a b)))
@@ -323,7 +321,7 @@
 (defn great-circle-distance
   "Distance of point `p0` from the great circle through `p1` and `p2`."
   [p1 p2 p0]
-  (let [n (cross (unit-vector p1) (unit-vector p2))]
+  (let [n (v3/cross (unit-vector p1) (unit-vector p2))]
     (math/asin (/ (dot n (unit-vector p0)) (norm n)))))
 
 (defn collinearity
@@ -333,7 +331,7 @@
   of how nearly three bodies are aligned."
   [p1 p2 p3]
   (let [[u1 u2 u3] (map unit-vector [p1 p2 p3])
-        n12 (cross u1 u2) n23 (cross u2 u3) n13 (cross u1 u3)]
+        n12 (v3/cross u1 u2) n23 (v3/cross u2 u3) n13 (v3/cross u1 u3)]
     [(math/acos (/ (dot n12 n23) (* (norm n12) (norm n23))))
      (math/asin (/ (dot u2 n13) (* (norm u2) (norm n13))))]))
 

@@ -23,11 +23,6 @@
 
 ;; ------------------------------------------------------------ machinery
 
-(defn transform
-  "J P J^T: the covariance `P` carried through the Jacobian `J`."
-  [J P]
-  (lin/mat-mul (lin/mat-mul J P) (lin/transpose J)))
-
 (defn- flat [[r v]] (vec (concat r v)))
 (defn- state [x] [(subvec x 0 3) (subvec x 3 6)])
 
@@ -47,13 +42,13 @@
   elements [a e i raan argp M]. Singular where the elements are: circular
   or equatorial orbits."
   ([P s] (cartesian->classical mu P s))
-  ([mu P s] (transform (diff/jacobian #(classical-vector mu %) (flat s) {:angles #{2 3 4 5}}) P)))
+  ([mu P s] (lin/congruence (diff/jacobian #(classical-vector mu %) (flat s) {:angles #{2 3 4 5}}) P)))
 
 (defn classical->cartesian
   "Carry the covariance `P` of classical elements [a e i raan argp M]
   `el` into Cartesian."
   ([P el] (classical->cartesian mu P el))
-  ([mu P el] (transform (diff/jacobian #(from-classical mu %) (vec el) {:steps (mapv #(* 1e-6 (max 1e-3 (abs %))) el)}) P)))
+  ([mu P el] (lin/congruence (diff/jacobian #(from-classical mu %) (vec el) {:steps (mapv #(* 1e-6 (max 1e-3 (abs %))) el)}) P)))
 
 (defn equinoctial-vector
   "[a af ag chi psi meanlon] of a flat state -- `allgo.astro.states`'s
@@ -67,7 +62,7 @@
   elements [a af ag chi psi meanlon], retrograde orbits in their own
   set as `states/state->equinoctial` chooses."
   ([P s] (cartesian->equinoctial mu P s))
-  ([mu P s] (transform (diff/jacobian #(equinoctial-vector mu %) (flat s) {:angles #{5}}) P)))
+  ([mu P s] (lin/congruence (diff/jacobian #(equinoctial-vector mu %) (flat s) {:angles #{5}}) P)))
 
 (defn equinoctial->cartesian
   "Carry the covariance `P` of equinoctial elements `eq`, a map as
@@ -77,15 +72,15 @@
    (let [x (mapv eq [:a :af :ag :chi :psi :meanlon])
          f (fn [[a af ag chi psi meanlon]]
              (flat (states/equinoctial->state mu {:a a :af af :ag ag :chi chi :psi psi :meanlon meanlon :fr fr})))]
-     (transform (diff/jacobian f x {:steps (mapv #(* 1e-6 (max 1e-3 (abs %))) x)}) P))))
+     (lin/congruence (diff/jacobian f x {:steps (mapv #(* 1e-6 (max 1e-3 (abs %))) x)}) P))))
 
 (defn cartesian->flight
   "Carry the Cartesian (inertial) covariance `P` of state `s` into flight
   elements [rm vm latgc lon fpa az] at TT `mjd-tt` and UT1 `mjd-ut1`."
   [P s mjd-tt mjd-ut1 eop]
-  (transform (diff/jacobian #(vec (take 6 (states/state->flight (state %) mjd-tt mjd-ut1 eop))) (flat s)
-                            {:angles #{2 3 4 5}})
-             P))
+  (lin/congruence (diff/jacobian #(vec (take 6 (states/state->flight (state %) mjd-tt mjd-ut1 eop))) (flat s)
+                                 {:angles #{2 3 4 5}})
+                  P))
 
 ;; ------------------------------------------------------- local frames
 
@@ -98,13 +93,13 @@
   velocity alike (the frame's own turning left out, as is usual for
   comparing uncertainties)."
   [P s]
-  (transform (block (states/rsw s)) P))
+  (lin/congruence (block (states/rsw s)) P))
 
-(defn rsw->cartesian [P s] (transform (lin/transpose (block (states/rsw s))) P))
+(defn rsw->cartesian [P s] (lin/congruence (lin/transpose (block (states/rsw s))) P))
 
 (defn cartesian->ntw
   "The same into the velocity-aligned N, T, W axes."
   [P s]
-  (transform (block (states/ntw s)) P))
+  (lin/congruence (block (states/ntw s)) P))
 
-(defn ntw->cartesian [P s] (transform (lin/transpose (block (states/ntw s))) P))
+(defn ntw->cartesian [P s] (lin/congruence (lin/transpose (block (states/ntw s))) P))

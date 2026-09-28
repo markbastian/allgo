@@ -21,6 +21,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.frames :as frames]
             [allgo.astro.time :as time]
+            [allgo.geometry.vec3 :as v3]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
@@ -71,8 +72,6 @@
 (defn- omega [{:keys [lod] :or {lod 0.0}}]
   [0.0 0.0 (* omega-nominal (- 1.0 (/ lod 86400.0)))])
 
-(defn- cross [[a b cc] [d e f]] [(- (* b f) (* cc e)) (- (* cc d) (* a f)) (- (* a e) (* b d))])
-
 ;; ------------------------------------------------ inertial to rotating
 
 (defn eci->mod
@@ -106,7 +105,7 @@
    (let [[r v] (eci->tod s mjd-tt eop)
          R (frames/rz (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt eop)))
          rp (mv R r)]
-     [rp (lin/sub (mv R v) (cross (omega eop) rp))])))
+     [rp (lin/sub (mv R v) (v3/cross (omega eop) rp))])))
 
 (defn eci->ecef
   "GCRF to the Earth-fixed ITRF."
@@ -137,7 +136,7 @@
   ([s mjd-tt mjd-ut1] (pef->eci s mjd-tt mjd-ut1 {}))
   ([[r v] mjd-tt mjd-ut1 eop]
    (let [R (tr (frames/rz (+ (time/gmst mjd-ut1) (equation-of-equinoxes mjd-tt eop))))
-         v' (lin/add v (cross (omega eop) r))]
+         v' (lin/add v (v3/cross (omega eop) r))]
      (tod->eci [(mv R r) (mv R v')] mjd-tt eop))))
 
 (defn ecef->eci
@@ -154,6 +153,6 @@
   ([[r v] mjd-ut1 eop]
    (let [R (frames/rz (time/gmst mjd-ut1))
          rp (mv R r)
-         vp (lin/sub (mv R v) (cross (omega eop) rp))
+         vp (lin/sub (mv R v) (v3/cross (omega eop) rp))
          W (polar-matrix eop)]
      [(mv W rp) (mv W vp)])))
