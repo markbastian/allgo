@@ -7,10 +7,11 @@
 
   To first order a covariance P in one set becomes J P J^T in another, J
   the Jacobian of the conversion. For the local frames J is a rotation and
-  exact; for the classical elements it is derived analytically
-  (`classical-partials`); for the equinoctial and flight elements it is
-  taken numerically (`allgo.numerics.differentiation`), to ten digits, the
-  angles among the outputs wrapped.
+  exact; for the classical and equinoctial elements it is derived
+  analytically (`classical-partials`, `equinoctial-partials`); for the
+  flight elements it is taken numerically
+  (`allgo.numerics.differentiation`), to ten digits, the angles among the
+  outputs wrapped.
 
   States are `[r v]`, km and km/s; element vectors are ordered as their
   functions below say, radians for the angles."
@@ -106,22 +107,104 @@
   ([mu x] (let [{:keys [a af ag chi psi meanlon]} (states/state->equinoctial mu (state x))]
             [a af ag chi psi meanlon])))
 
+(defn equinoctial-partials
+  "The Jacobian of the state [x y z vx vy vz] with respect to the
+  equinoctial elements [a af ag chi psi meanlon] of `eq`, a map as
+  `states/state->equinoctial` gives, analytically and directly (after
+  Broucke and Cefola, \"On the equinoctial orbit elements\", Celestial
+  Mechanics 5, 1972), one column per element. With k = af, h = ag,
+  p = chi, q = psi, I = fr and F the eccentric longitude,
+
+    lambda = F - k sin F + h cos F
+    r = X f + Y g,  v = X' f + Y' g
+    X = a ((1 - h^2 b) cos F + h k b sin F - k)
+    Y = a ((1 - k^2 b) sin F + h k b cos F - h),   b = 1/(1 + sqrt(1 - h^2 - k^2))
+    f = (1 - p^2 + q^2, 2pq, -2Ip)/(1 + p^2 + q^2)
+    g = (2Ipq, (1 + p^2 - q^2) I, 2q)/(1 + p^2 + q^2)
+
+  and so
+
+    a       r/a and -v/2a, as for the classical elements
+    k, h    the in-plane coordinates' partials at fixed lambda, F moving
+            with them: dF/dk = (a/r) sin F, dF/dh = -(a/r) cos F
+    p, q    the frame's own partials
+    lambda  v/n and -mu r/(n r^3), the motion itself
+
+  none singular for circular or equatorial orbits."
+  ([eq] (equinoctial-partials mu eq))
+  ([mu {:keys [a af ag chi psi meanlon fr] :or {fr 1.0}}]
+   (let [k af h ag p chi q psi I fr
+         n (math/sqrt (/ mu (* a a a)))
+         F (loop [F meanlon j 0]
+             (let [dF (/ (- (+ (- F (* k (math/sin F))) (* h (math/cos F))) meanlon)
+                         (- 1.0 (* k (math/cos F)) (* h (math/sin F))))]
+               (if (or (< (abs dF) 1e-15) (> j 50)) (- F dF) (recur (- F dF) (inc j)))))
+         c (math/cos F) s (math/sin F)
+         eta (math/sqrt (- 1.0 (* h h) (* k k)))
+         b (/ 1.0 (+ 1.0 eta))
+         bh (/ (* b b h) eta) bk (/ (* b b k) eta)
+         D (- 1.0 (* k c) (* h s))                      ; r/a
+         ;; X/a, Y/a and their partials in F, h and k at fixed F
+         x (+ (* (- 1.0 (* h h b)) c) (* h k b s) (- k))
+         y (+ (* (- 1.0 (* k k b)) s) (* h k b c) (- h))
+         Px (- (* h k b c) (* (- 1.0 (* h h b)) s))       ; dx/dF
+         Py (- (* (- 1.0 (* k k b)) c) (* h k b s))       ; dy/dF
+         PxF (- (+ (* (- 1.0 (* h h b)) c) (* h k b s)))
+         PyF (- (+ (* (- 1.0 (* k k b)) s) (* h k b c)))
+         xh (+ (* -1.0 (+ (* 2.0 h b) (* h h bh)) c) (* (+ (* k b) (* h k bh)) s))
+         xk (+ (* -1.0 h h bk c) (* (+ (* h b) (* h k bk)) s) -1.0)
+         yh (+ (* -1.0 k k bh s) (* (+ (* k b) (* h k bh)) c) -1.0)
+         yk (+ (* -1.0 (+ (* 2.0 k b) (* k k bk)) s) (* (+ (* h b) (* h k bk)) c))
+         Pxh (+ (* (+ (* 2.0 h b) (* h h bh)) s) (* (+ (* k b) (* h k bh)) c))
+         Pxk (+ (* h h bk s) (* (+ (* h b) (* h k bk)) c))
+         Pyh (- (* -1.0 k k bh c) (* (+ (* k b) (* h k bh)) s))
+         Pyk (- (* -1.0 (+ (* 2.0 k b) (* k k bk)) c) (* (+ (* h b) (* h k bk)) s))
+         DF (- (* k s) (* h c)) Dh (- s) Dk (- c)
+         Fh (/ (- c) D) Fk (/ s D)
+         ;; X, Y, X', Y' in an element e at fixed lambda
+         in-plane (fn [xe ye Pxe Pye De Fe]
+                    (let [Dt (+ De (* DF Fe))]
+                      [(* a (+ xe (* Px Fe))) (* a (+ ye (* Py Fe)))
+                       (* n a (- (/ (+ Pxe (* PxF Fe)) D) (/ (* Px Dt) (* D D))))
+                       (* n a (- (/ (+ Pye (* PyF Fe)) D) (/ (* Py Dt) (* D D))))]))
+         s2 (+ 1.0 (* p p) (* q q))
+         fhat (v3/scale [(+ (- 1.0 (* p p)) (* q q)) (* 2.0 p q) (* -2.0 I p)] (/ 1.0 s2))
+         ghat (v3/scale [(* 2.0 I p q) (* I (- (+ 1.0 (* p p)) (* q q))) (* 2.0 q)] (/ 1.0 s2))
+         d-frame (fn [dN w frame] (v3/scale (v3/sub dN (v3/scale frame (* 2.0 w))) (/ 1.0 s2)))
+         fp (d-frame [(* -2.0 p) (* 2.0 q) (* -2.0 I)] p fhat)
+         fq (d-frame [(* 2.0 q) (* 2.0 p) 0.0] q fhat)
+         gp (d-frame [(* 2.0 I q) (* 2.0 I p) 0.0] p ghat)
+         gq (d-frame [(* 2.0 I p) (* -2.0 I q) 2.0] q ghat)
+         X (* a x) Y (* a y) Xd (/ (* n a Px) D) Yd (/ (* n a Py) D)
+         in (fn [u w] (v3/add (v3/scale fhat u) (v3/scale ghat w)))
+         r (in X Y) v (in Xd Yd)
+         rm (v3/length r)
+         col (fn [dr dv] (vec (concat dr dv)))
+         plane-col (fn [[dX dY dXd dYd]] (col (in dX dY) (in dXd dYd)))
+         frame-col (fn [df dg] (col (v3/add (v3/scale df X) (v3/scale dg Y))
+                                    (v3/add (v3/scale df Xd) (v3/scale dg Yd))))]
+     (lin/transpose
+      [(col (v3/scale r (/ 1.0 a)) (v3/scale v (/ -0.5 a)))
+       (plane-col (in-plane xk yk Pxk Pyk Dk Fk))
+       (plane-col (in-plane xh yh Pxh Pyh Dh Fh))
+       (frame-col fp gp)
+       (frame-col fq gq)
+       (col (v3/scale v (/ 1.0 n)) (v3/scale r (/ (- mu) (* n rm rm rm))))]))))
+
 (defn cartesian->equinoctial
   "Carry the Cartesian covariance `P` of state `s` into equinoctial
   elements [a af ag chi psi meanlon], retrograde orbits in their own
-  set as `states/state->equinoctial` chooses."
+  set as `states/state->equinoctial` chooses, through the inverse of
+  `equinoctial-partials`."
   ([P s] (cartesian->equinoctial mu P s))
-  ([mu P s] (lin/congruence (diff/jacobian #(equinoctial-vector mu %) (flat s) {:angles #{5}}) P)))
+  ([mu P s] (lin/congruence (lin/inverse-general (equinoctial-partials mu (states/state->equinoctial mu s))) P)))
 
 (defn equinoctial->cartesian
   "Carry the covariance `P` of equinoctial elements `eq`, a map as
-  `states/state->equinoctial` gives, into Cartesian."
+  `states/state->equinoctial` gives, into Cartesian, through
+  `equinoctial-partials`."
   ([P eq] (equinoctial->cartesian mu P eq))
-  ([mu P {:keys [fr] :as eq}]
-   (let [x (mapv eq [:a :af :ag :chi :psi :meanlon])
-         f (fn [[a af ag chi psi meanlon]]
-             (flat (states/equinoctial->state mu {:a a :af af :ag ag :chi chi :psi psi :meanlon meanlon :fr fr})))]
-     (lin/congruence (diff/jacobian f x {:steps (mapv #(* 1e-6 (max 1e-3 (abs %))) x)}) P))))
+  ([mu P eq] (lin/congruence (equinoctial-partials mu eq) P)))
 
 (defn cartesian->flight
   "Carry the Cartesian (inertial) covariance `P` of state `s` into flight

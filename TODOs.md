@@ -109,9 +109,8 @@ of expected return:
   8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
      sun-synchronous inclination in `allgo.astro.perturbations`.
   9. ~~Covariance transformations~~ -- `allgo.astro.covariance`: the
-     classical elements' Jacobian analytic, the equinoctial and flight
-     elements' numerical (an analytic equinoctial one, direct rather than
-     through the classical, would be the next step).
+     classical and equinoctial elements' Jacobians analytic, the flight
+     elements' numerical.
   10. ~~Interplanetary (ch. 12)~~ -- `allgo.astro.interplanetary`: spheres
       of influence, departure, capture and flyby hyperbolas, Hohmann and
       Lambert transfers between planets.

@@ -101,4 +101,26 @@
                              (* 1e-7 (max 1e-6 (abs (get-in N [i j]))))))))))
   (testing "so the covariance carried either way round comes back"
     (let [el (cov/classical-vector (vec (concat (first s) (second s))))]
-      (is (< (max-rel (cov/classical->cartesian (cov/cartesian->classical P s) el) P) 1e-9)))))
+      (is (< (max-rel (cov/classical->cartesian (cov/cartesian->classical P s) el) P) 1e-9))))
+  (testing "the analytic partials of the state in the equinoctial elements are the numerical ones, column by column"
+    (doseq [el [{:a 8000.0 :e 0.12 :i 0.9 :raan 0.6 :argp 1.4 :M 2.2}
+                {:a 7000.0 :e 1e-4 :i 1e-4 :raan 0.3 :argp 1.0 :M 2.2}
+                {:a 26000.0 :e 0.7 :i 1.1 :raan 4.0 :argp 5.0 :M 3.0}
+                {:a 7200.0 :e 0.05 :i 2.8 :raan 0.3 :argp 1.0 :M 5.2}]]
+      (let [eq (st/state->equinoctial (kep/elements->state c/GM-earth el))
+            x (mapv eq [:a :af :ag :chi :psi :meanlon])
+            f (fn [[a af ag chi psi meanlon]]
+                (let [[r v] (st/equinoctial->state {:a a :af af :ag ag :chi chi :psi psi :meanlon meanlon :fr (:fr eq)})]
+                  (vec (concat r v))))
+            A (cov/equinoctial-partials eq)
+            ;; the numerical side goes by way of the classical elements,
+            ;; whose round-off near e = i = 0 wants steps no smaller than 1e-8
+            N (diff/jacobian f x {:steps (mapv #(* 1e-6 (max 0.01 (abs %))) x)})
+            column (fn [M j] (mapv #(nth % j) M))]
+        (doseq [j (range 6)]
+          (let [a (column A j) n (column N j)]
+            (is (< (lin/distance a n) (* 1e-7 (lin/length n))) (str el " column " j)))))))
+  (testing "and where the classical elements fail -- circular and equatorial -- the covariance still comes back"
+    (let [s0 (kep/elements->state c/GM-earth {:a 7000.0 :e 0.0 :i 0.0 :raan 0.0 :argp 0.0 :M 1.0})]
+      (is (< (max-rel (cov/equinoctial->cartesian (cov/cartesian->equinoctial P s0) (st/state->equinoctial s0)) P)
+             1e-9)))))
