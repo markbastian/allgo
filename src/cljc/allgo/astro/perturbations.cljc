@@ -19,6 +19,7 @@
             [allgo.astro.srp :as srp]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
+            [allgo.numerics.differentiation :as diff]
             [allgo.numerics.quadrature :as quadrature]
             [allgo.numerics.special :as special]
             [clojure.math :as math]))
@@ -83,6 +84,48 @@
                  (gauss-rates mu el' (rsw s (accel r v))))]
      (into {} (for [k [:a :e :i :raan :argp :M]]
                 [k (/ (reduce + (map k rates)) samples)])))))
+
+;; ------------------------------------------ Lagrange's planetary equations
+
+(defn lagrange-rates
+  "The rates of the classical elements `el` under a conservative
+  perturbation, from the partial derivatives `dR` -- `{:a :e :i :raan
+  :argp :M}` -- of its disturbing function R: Lagrange's planetary
+  equations (Lagrange 1782; in every celestial mechanics text since),
+
+    da/dt     = 2/(n a) dR/dM
+    de/dt     = (1-e^2)/(n a^2 e) dR/dM - sqrt(1-e^2)/(n a^2 e) dR/domega
+    di/dt     = cos i/(n a^2 sqrt(1-e^2) sin i) dR/domega - 1/(n a^2 sqrt(1-e^2) sin i) dR/dOmega
+    dOmega/dt = 1/(n a^2 sqrt(1-e^2) sin i) dR/di
+    domega/dt = sqrt(1-e^2)/(n a^2 e) dR/de - cos i/(n a^2 sqrt(1-e^2) sin i) dR/di
+    dM/dt     = n - (1-e^2)/(n a^2 e) dR/de - 2/(n a) dR/da
+
+  `:M` is the whole rate, the mean motion with it. Singular at e = 0 and
+  i = 0, as the elements are."
+  ([el dR] (lagrange-rates mu el dR))
+  ([mu {:keys [a e i]} dR]
+   (let [n (kepler/mean-motion mu a)
+         eta (math/sqrt (- 1.0 (* e e)))
+         na2 (* n a a)
+         si (math/sin i) ci (math/cos i)
+         {Ra :a Re :e Ri :i RO :raan Rw :argp RM :M} dR]
+     {:a (* (/ 2.0 (* n a)) RM)
+      :e (- (* (/ (* eta eta) (* na2 e)) RM) (* (/ eta (* na2 e)) Rw))
+      :i (- (/ (* ci Rw) (* na2 eta si)) (/ RO (* na2 eta si)))
+      :raan (/ Ri (* na2 eta si))
+      :argp (- (* (/ eta (* na2 e)) Re) (/ (* ci Ri) (* na2 eta si)))
+      :M (- n (* (/ (* eta eta) (* na2 e)) Re) (* (/ 2.0 (* n a)) Ra))})))
+
+(defn lagrange-rates-of
+  "`lagrange-rates` with the partials of the disturbing function `(R el)`
+  taken numerically (`allgo.numerics.differentiation`)."
+  ([el R] (lagrange-rates-of mu el R))
+  ([mu el R]
+   (let [ks [:a :e :i :raan :argp :M]
+         x (mapv el ks)
+         steps (mapv #(* 1e-5 (max 0.1 (abs %))) x)
+         [grad] (diff/jacobian (fn [v] [(R (zipmap ks v))]) x {:steps steps})]
+     (lagrange-rates mu el (zipmap ks grad)))))
 
 ;; ------------------------------------------------------------------- J2
 

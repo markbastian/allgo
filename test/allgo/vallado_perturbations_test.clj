@@ -163,3 +163,29 @@
         (is (< (abs (- (m k) (mean k))) (* 1e-9 (max 1.0 (mean k)))) (str k)))
       ;; the perigee and anomaly, each ill-set by a small eccentricity, together
       (is (< (abs (- (+ (:argp m) (:M m)) (+ (:argp mean) (:M mean)))) 1e-9)))))
+
+(deftest lagranges-equations
+  (testing "the averaged J2 disturbing function gives J2's secular rates exactly"
+    (doseq [[a e i] [[8000.0 0.1 0.9] [7078.0 0.001 1.71] [26000.0 0.7 1.1]]]
+      (let [R-bar (fn [{:keys [a e i]}]
+                    (* (/ (* mu geo/J2 c/R-earth c/R-earth) (* 4.0 a a a (math/pow (- 1.0 (* e e)) 1.5)))
+                       (- 2.0 (* 3.0 (math/pow (math/sin i) 2)))))
+            rates (pt/lagrange-rates-of {:a a :e e :i i :raan 0.4 :argp 1.2 :M 0.5} R-bar)
+            closed (pt/j2-secular a e i)]
+        (doseq [k [:raan :argp :M]]
+          (is (close? (rates k) (closed k) 1e-8) (str k " " [a e i])))
+        (doseq [k [:a :e :i]]
+          (is (< (abs (rates k)) 1e-15) (str k))))))
+  (testing "J2's instantaneous disturbing function gives what Gauss's equations give from its acceleration"
+    (let [el {:a 8000.0 :e 0.1 :i 0.9 :raan 0.4 :argp 1.2 :M 0.5}
+          R-j2 (fn [el'] (let [[[_ _ z :as r]] (kep/elements->state mu el')
+                               rm (v3/length r)]
+                           (* (/ (* -0.5 mu geo/J2 c/R-earth c/R-earth) (* rm rm rm))
+                              (- (* 3.0 (/ (* z z) (* rm rm))) 1.0))))
+          lag (pt/lagrange-rates-of el R-j2)
+          s (kep/elements->state mu el)
+          gauss (pt/gauss-rates el (pt/rsw s ((minus-central j2-accel) (first s) (second s))))
+          n (kep/mean-motion mu 8000.0)]
+      (doseq [k [:a :e :i :raan :argp]]
+        (is (close? (lag k) (gauss k) 1e-6) (str k)))
+      (is (close? (- (:M lag) n) (:M gauss) 1e-6) "M"))))
