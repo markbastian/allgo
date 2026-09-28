@@ -108,9 +108,10 @@ of expected return:
      J2 e terms the report drops.
   8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
      sun-synchronous inclination in `allgo.astro.perturbations`.
-  9. ~~Covariance transformations~~ -- `allgo.astro.covariance`, the
-     element sets' Jacobians taken numerically; the book's analytic ones
-     await its pages.
+  9. ~~Covariance transformations~~ -- `allgo.astro.covariance`: the
+     classical elements' Jacobian analytic, the equinoctial and flight
+     elements' numerical (an analytic equinoctial one, direct rather than
+     through the classical, would be the next step).
   10. ~~Interplanetary (ch. 12)~~ -- `allgo.astro.interplanetary`: spheres
       of influence, departure, capture and flyby hyperbolas, Hohmann and
       Lambert transfers between planets.

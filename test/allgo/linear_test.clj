@@ -24,3 +24,10 @@
           tr (fn [M] (+ (get-in M [0 0]) (get-in M [1 1]) (get-in M [2 2])))]
       (is (< (abs (- (tr (lin/congruence R B)) (tr B))) 1e-12))
       (is (< (abs (- (tr (lin/congruence (lin/mat-scale (lin/eye 3) 2.0) B)) (* 4.0 (tr B)))) 1e-12)))))
+
+(deftest general-inverse
+  (testing "an unsymmetric matrix, and a zero on the diagonal that pivoting must step round"
+    (let [A [[0.0 2.0 1.0] [1.0 -1.0 4.0] [3.0 0.5 -2.0]]]
+      (is (every? #(< (abs %) 1e-12) (flatten (lin/mat-sub (lin/mat-mul A (lin/inverse-general A)) (lin/eye 3)))))))
+  (testing "and nil for a singular one"
+    (is (nil? (lin/inverse-general [[1.0 2.0] [2.0 4.0]])))))

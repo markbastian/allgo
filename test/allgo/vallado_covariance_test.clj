@@ -9,6 +9,7 @@
             [allgo.astro.kepler :as kep]
             [allgo.astro.states :as st]
             [allgo.math :as am]
+            [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
@@ -79,3 +80,25 @@
           R (lin/normalize (first s))
           Pr (mapv #(subvec % 0 3) (subvec P 0 3))]
       (is (< (abs (- (get-in Pf [0 0]) (lin/dot R (lin/mat-vec Pr R)))) (* 1e-8 (get-in Pf [0 0])))))))
+
+(deftest analytic-jacobians
+  (testing "the analytic partials of the state in the classical elements are the numerical ones"
+    (doseq [el [[8000.0 0.12 0.9 0.6 1.4 2.2] [7000.0 0.001 1.7 5.9 0.2 4.0] [26000.0 0.7 0.3 2.0 4.5 0.1]]]
+      (let [A (cov/classical-partials el)
+            ;; steps no smaller than 1e-7, below which the differences are noise
+            N (diff/jacobian #(cov/classical->flat c/GM-earth %) el
+                             {:steps (mapv #(* 1e-6 (max 0.1 (abs %))) el)})]
+        (is (every? true? (for [i (range 6) j (range 6)]
+                            (< (abs (- (get-in A [i j]) (get-in N [i j])))
+                               (* 1e-7 (max 1e-3 (abs (get-in N [i j])))))))
+            (str el)))))
+  (testing "and their inverse is the numerical Jacobian of the elements in the state"
+    (let [x (vec (concat (first s) (second s)))
+          J (lin/inverse-general (cov/classical-partials (cov/classical-vector x)))
+          N (diff/jacobian cov/classical-vector x {:angles #{2 3 4 5}})]
+      (is (every? true? (for [i (range 6) j (range 6)]
+                          (< (abs (- (get-in J [i j]) (get-in N [i j])))
+                             (* 1e-7 (max 1e-6 (abs (get-in N [i j]))))))))))
+  (testing "so the covariance carried either way round comes back"
+    (let [el (cov/classical-vector (vec (concat (first s) (second s))))]
+      (is (< (max-rel (cov/classical->cartesian (cov/cartesian->classical P s) el) P) 1e-9)))))
