@@ -127,6 +127,11 @@ of expected return:
       rotation, sphere and disk, and `vec3/angle`.
   16. ~~Gauss-Jackson integration (ch. 8)~~ -- `allgo.numerics.gauss-jackson`.
   17. ~~Element sets by differential correction~~ -- `allgo.astro.sgp4-fit`.
+  18. ~~Atmosphere models (ch. 8)~~ -- NRLMSISE-00 (`allgo.astro.msis`),
+      Jacchia 1971 and 1970 (`allgo.astro.jacchia`) and Jacchia-Roberts
+      (`allgo.astro.jacchia-roberts`), with the 1976 standard atmosphere
+      and exponential model (`allgo.astro.us76`) and Harris-Priester
+      (`allgo.astro.drag`).
 
 ## Time
 

@@ -232,6 +232,11 @@ The demos draw on other people's data, used under their terms:
   Laboratory), a work of the US government, as NASA's CCMC ModelWeb
   archive distributes it; the coefficients generated from its BLOCK DATA,
   and its test driver's output in `test/data/msis/`.
+- **Jacchia's models** (`allgo.astro.jacchia`, `allgo.astro.jacchia-roberts`):
+  implemented from Jacchia's SAO Special Reports 313 (1970) and 332
+  (1971) and Roberts's analytic form (Celestial Mechanics 4, 1971), read
+  through the NASA Astrophysics Data System; the tests check them against
+  those reports' tables.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
