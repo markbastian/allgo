@@ -132,6 +132,15 @@ of expected return:
       (`allgo.astro.jacchia-roberts`), with the 1976 standard atmosphere
       and exponential model (`allgo.astro.us76`) and Harris-Priester
       (`allgo.astro.drag`).
+  19. ~~The rest of what the book names, from primary sources~~ --
+      polynomial roots (`allgo.numerics.polynomial`), Gooding's angles-only
+      IOD (`iod/gooding`), the B-plane (`allgo.astro.bplane`), fixed-delta-v
+      maneuvers, the sequential batch and extended and unscented Kalman
+      filters (`allgo.astro.od`), Kaula's functions (`allgo.astro.kaula`),
+      Earth radiation pressure (`allgo.astro.earth-radiation`), Walker
+      constellations and coverage (`allgo.astro.constellation`), and a
+      DSST-style semi-analytic theory (`allgo.astro.semianalytic`).
+      JB2008 is left out: its license forbids translating its code.
 
 ## Time
 
