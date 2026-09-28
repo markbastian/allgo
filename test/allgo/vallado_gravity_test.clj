@@ -12,14 +12,17 @@
 
 (def ^:private degree 20)
 
-(def ^:private field
+(defn- random-field
   "Normalized coefficients of the size a real field's have -- 1e-5/n^2 --
   but drawn at random (from a fixed seed), so every term is exercised."
+  [degree]
   (let [rng (java.util.Random. 20260927)
         draw (fn [n] (* (/ 1e-5 (* n n)) (.nextGaussian rng)))]
     {:GM c/GM-earth :R c/R-earth :normalized? true
      :C (into {[0 0] 1.0} (for [n (range 2 (inc degree)) m (range (inc n))] [[n m] (draw n)]))
      :S (into {} (for [n (range 2 (inc degree)) m (range 1 (inc n))] [[n m] (draw n)]))}))
+
+(def ^:private field (random-field degree))
 
 (def ^:private points
   [[6778.0 0.0 0.0] [-4000.0 5200.0 3100.0] [1200.0 -900.0 7100.0] [7000.0 7000.0 -2000.0]])
@@ -36,7 +39,9 @@
                 small (* 1e-10 (v3/length (perturbing mg r)))]]
     (testing (str "at " r)
       (is (< (v3/distance (grav/pines-acceleration field r degree) mg) small) "Pines")
-      (is (< (v3/distance (grav/spherical-acceleration field r degree) mg) small) "spherical partials"))))
+      (is (< (v3/distance (grav/spherical-acceleration field r degree) mg) small) "spherical partials")
+      (is (< (v3/distance (grav/lear-acceleration field r degree) mg) small) "Lear, normalized")
+      (is (< (v3/distance (grav/gottlieb-acceleration field r degree) mg) small) "Gottlieb, normalized"))))
 
 (deftest gradient-of-the-potential
   (testing "Pines's acceleration is the gradient of the potential, numerically"
@@ -51,9 +56,18 @@
         (is (< (v3/distance grad a) (* 1e-6 (v3/length a))))))))
 
 (deftest the-poles
-  (testing "Pines's is finite on the polar axis, and agrees with the recursion there"
-    (let [r [0.0 0.0 7000.0]
-          a (grav/pines-acceleration field r degree)
-          mg (geo/acceleration field r degree)]
-      (is (every? #(not (NaN? %)) a))
-      (is (< (v3/distance a mg) (* 1e-10 (v3/length (perturbing mg r))))))))
+  (testing "Pines's, Lear's and Gottlieb's are finite on the polar axis, and agree with the recursion there"
+    (doseq [r [[0.0 0.0 7000.0] [0.0 0.0 -7000.0]]
+            f [grav/pines-acceleration grav/lear-acceleration grav/gottlieb-acceleration]]
+      (let [a (f field r degree)
+            mg (geo/acceleration field r degree)]
+        (is (every? #(not (NaN? %)) a))
+        (is (< (v3/distance a mg) (* 1e-10 (v3/length (perturbing mg r)))))))))
+
+(deftest high-degree
+  (testing "normalized, Lear's and Gottlieb's agree with each other to degree 60"
+    (let [f60 (random-field 60)]
+      (doseq [r points]
+        (let [l (grav/lear-acceleration f60 r 60)
+              g (grav/gottlieb-acceleration f60 r 60)]
+          (is (< (v3/distance l g) (* 1e-10 (v3/length (perturbing g r))))))))))

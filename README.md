@@ -220,6 +220,10 @@ The demos draw on other people's data, used under their terms:
   `allgo.astro.cio-data` are taken from it, with its copyright notice,
   conditions and disclaimer at the head of that file; and the FK5 and CIO
   reductions' tests compare against values computed with it.
+- **Lear's and Gottlieb's gravity algorithms** (`allgo.astro.gravity`):
+  transcribed from the normalized MATLAB listings in Eckman, Brown and
+  Adamo, *Normalization and Implementation of Three Gravitational
+  Acceleration Models*, NASA/TP-2016-218604, a work of the US government.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
