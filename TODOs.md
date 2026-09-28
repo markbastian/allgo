@@ -125,6 +125,8 @@ of expected return:
       `allgo.numerics` differentiation, roots, quadrature, special and
       linear's small solves; `allgo.math` fmod and frac; `allgo.geometry`
       rotation, sphere and disk, and `vec3/angle`.
+  16. ~~Gauss-Jackson integration (ch. 8)~~ -- `allgo.numerics.gauss-jackson`.
+  17. ~~Element sets by differential correction~~ -- `allgo.astro.sgp4-fit`.
 
 ## Time
 
