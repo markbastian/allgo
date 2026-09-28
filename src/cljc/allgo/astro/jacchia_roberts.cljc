@@ -13,7 +13,7 @@
   fractions into logarithms and an arctangent (Roberts's 11-13 and
   19-20). The coefficients are found here from the residues at the four
   roots -- the same partial fractions Roberts writes out, without his
-  pre-multiplied constants. Above 125 km Roberts replaces Jacchia's
+  pre-multiplied constants, the roots by `allgo.numerics.polynomial`. Above 125 km Roberts replaces Jacchia's
   arctangent profile by one the diffusion equation integrates exactly,
 
     T = T-inf - (T-inf - Tx) exp[-((Tx - T0)/(T-inf - Tx))((Z - Zx)/(Zx - Z0))(l/(Ra + Z))],
@@ -27,6 +27,7 @@
   O2's (his 16 and 17); they are taken here the way round Jacchia's
   mixing gives them. Heights km, densities g/cm^3 and cm^-3."
   (:require [allgo.astro.jacchia :as j]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (def ^:private z0 90.0)
@@ -45,25 +46,6 @@
 (defn- c- [[a b] [c d]] [(- a c) (- b d)])
 (defn- c* [[a b] [c d]] [(- (* a c) (* b d)) (+ (* a d) (* b c))])
 (defn- c-div [[a b] [c d]] (let [m (+ (* c c) (* d d))] [(/ (+ (* a c) (* b d)) m) (/ (- (* b c) (* a d)) m)]))
-(defn- c-abs [[a b]] (math/hypot a b))
-
-(defn- quartic-roots
-  "The four roots of the monic quartic with coefficients `[a0 a1 a2 a3]`
-  (x^4 + a3 x^3 + a2 x^2 + a1 x + a0), by Durand and Kerner's
-  simultaneous iteration."
-  [[a0 a1 a2 a3]]
-  (let [p (fn [z] (reduce (fn [acc c] (c+ (c* acc z) [c 0.0])) [1.0 0.0] [a3 a2 a1 a0]))
-        scale (+ 1.0 (apply max (map abs [a0 a1 a2 a3])))]
-    (loop [zs (mapv #(c* [scale 0.0] [(math/cos (+ 0.4 (* % 1.5))) (math/sin (+ 0.4 (* % 1.5)))]) (range 4))
-           k 0]
-      (let [zs' (vec (for [i (range 4)]
-                       (let [zi (zs i)
-                             den (reduce c* [1.0 0.0] (for [j (range 4) :when (not= i j)] (c- zi (zs j))))]
-                         (c- zi (c-div (p zi) den)))))
-            moved (apply max (map #(c-abs (c- %1 %2)) zs zs'))]
-        (if (or (< moved (* 1e-15 scale)) (> k 500))
-          zs'
-          (recur zs' (inc k)))))))
 
 ;; ---------------------------------------------------- the quartic profile
 
@@ -76,9 +58,9 @@
         d (- tx t0)
         ;; T = Tx + c1 u + c3 u^3 + c4 u^4, u = Z - 125: equation (5)
         c1 (/ (* 1.9 d) 35.0) c3 (/ (* -1.7 d) (math/pow 35.0 3)) c4 (/ (* -0.8 d) (math/pow 35.0 4))
-        us (quartic-roots [(/ tx c4) (/ c1 c4) 0.0 (/ c3 c4)])
-        real (sort > (map first (filter #(< (abs (second %)) 1e-6) us)))
-        [cx cy] (first (filter #(> (second %) 1e-6) us))]
+        us (poly/quartic c4 c3 0.0 c1 tx)
+        real (sort > (map first (filter #(zero? (second %)) us)))
+        [cx cy] (first (filter #(pos? (second %)) us))]
     {:tx tx :c4 c4 :r1 (+ zx (first real)) :r2 (+ zx (second real)) :x (+ zx cx) :y cy}))
 
 (defn- quartic-temperature [{:keys [tx c4 r1 r2 x y]} z]
