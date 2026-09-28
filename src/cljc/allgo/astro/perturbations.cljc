@@ -324,3 +324,63 @@
          (if (or (> k 50) (< (abs (:a step)) 1e-9))
            guess'
            (recur guess' (inc k))))))))
+
+;; ------------------------------------------------ a third body, averaged
+
+(defn orbit-moment
+  "<r r^T>, the second moment of position averaged over an orbit of
+  elements `el`: (a^2/2) [(1 - e^2)(I - h h^T) + 5 e e^T], h the unit
+  normal and e the eccentricity vector -- all the orbit a tidal force
+  sees."
+  ([el] (orbit-moment mu el))
+  ([mu {:keys [a e] :as el}]
+   (let [[r v :as s] (kepler/elements->state mu (assoc el :M 0.0 :nu nil))
+         h (v3/normalize (v3/cross r v))
+         ev (eccentricity-vector mu s)
+         outer (fn [u w] (mapv (fn [x] (mapv #(* x %) w)) u))
+         I [[1.0 0.0 0.0] [0.0 1.0 0.0] [0.0 0.0 1.0]]
+         k (* 0.5 a a)]
+     (mapv (fn [row-a row-b] (mapv (fn [x y] (* k (+ (* (- 1.0 (* e e)) x) (* 5.0 y)))) row-a row-b))
+           (mapv (fn [ri hi] (mapv - ri hi)) I (outer h h))
+           (outer ev ev)))))
+
+(defn third-body-averaged-potential
+  "The disturbing function of a third body of parameter `mu3` at distance
+  `r3` in direction `n3` (a unit vector), quadrupole order, averaged over
+  the satellite's orbit `el`: (mu3/r3^3) [(3/2) n3.<r r^T>.n3 - (1/2)<r^2>]."
+  [el mu3 r3 n3]
+  (let [M (orbit-moment el)
+        tr (+ (get-in M [0 0]) (get-in M [1 1]) (get-in M [2 2]))
+        mn (mapv #(v3/dot % n3) M)]
+    (* (/ mu3 (* r3 r3 r3)) (- (* 1.5 (v3/dot n3 mn)) (* 0.5 tr)))))
+
+(defn third-body-secular
+  "The secular rates of the elements `el` under a third body of parameter
+  `mu3` on a circular orbit of radius `r3` whose unit normal is `h3`: the
+  quadrupole disturbing function averaged over both orbits -- the third
+  body's direction averaged to <n n^T> = (I - h3 h3^T)/2 -- through
+  Lagrange's equations. The Sun and the Moon, for Earth satellites."
+  [el mu3 r3 h3]
+  (lagrange-rates-of el (fn [el']
+                          (let [M (orbit-moment el')
+                                tr (+ (get-in M [0 0]) (get-in M [1 1]) (get-in M [2 2]))
+                                Mh (mapv #(v3/dot % h3) M)]
+                            ;; tr(M (I - h3 h3^T)/2) = (tr M - h3.M.h3)/2
+                            (* (/ mu3 (* r3 r3 r3))
+                               (- (* 1.5 0.5 (- tr (v3/dot h3 Mh))) (* 0.5 tr)))))))
+
+(defn third-body-node-perigee
+  "The classical closed forms for a near-circular orbit of mean motion `n`
+  and inclination `i` under a third body of parameter `mu3` on a circular
+  orbit of radius `r3` inclined `eps` to the equator, its node averaged
+  out: `{:raan :argp}`, rad/s --
+
+    dOmega/dt = -3/4 (n3^2/n) cos i (1 - 3/2 sin^2 eps)
+    domega/dt =  3/4 (n3^2/n) (2 - 5/2 sin^2 i) (1 - 3/2 sin^2 eps)
+
+  with n3^2 = mu3/r3^3. For the Moon and Sun they are the familiar
+  0.00338 and 0.00154 cos i/n degrees a day, n in revolutions a day."
+  [n i mu3 r3 eps]
+  (let [k (* 0.75 (/ mu3 (* r3 r3 r3 n)) (- 1.0 (* 1.5 (math/pow (math/sin eps) 2))))]
+    {:raan (* (- k) (math/cos i))
+     :argp (* k (- 2.0 (* 2.5 (math/pow (math/sin i) 2))))}))

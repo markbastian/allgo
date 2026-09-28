@@ -189,3 +189,35 @@
       (doseq [k [:a :e :i :raan :argp]]
         (is (close? (lag k) (gauss k) 1e-6) (str k)))
       (is (close? (- (:M lag) n) (:M gauss) 1e-6) "M"))))
+
+(deftest third-bodies
+  (let [el {:a 8000.0 :e 0.2 :i 0.9 :raan 0.4 :argp 1.2 :M 0.0}]
+    (testing "the orbit's second moment, averaged numerically"
+      (let [n 720
+            M (reduce (fn [acc k] (let [[r] (kep/elements->state mu (assoc el :M (* 2 math/PI (/ k n))))]
+                                    (mapv (fn [row x] (mapv #(+ %1 (/ (* x %2) n)) row r)) acc r)))
+                      [[0.0 0.0 0.0] [0.0 0.0 0.0] [0.0 0.0 0.0]] (range n))]
+        (is (every? #(< (abs %) 1e-6) (flatten (mapv (fn [a b] (mapv - a b)) M (pt/orbit-moment el)))))))
+    (testing "the doubly averaged rates are the tidal acceleration itself averaged over both orbits"
+      (let [mu3 c/GM-moon r3 384400.0
+            h3 (v3/normalize [0.0 (- (math/sin 0.4)) (math/cos 0.4)])
+            u3 [1.0 0.0 0.0] w3 (v3/cross h3 u3)
+            secular (pt/third-body-secular el mu3 r3 h3)
+            ;; the third body at 24 places round its orbit, each averaged over the satellite's
+            k 24
+            tidal (fn [n3] (fn [r _] (v3/scale (v3/sub (v3/scale n3 (* 3.0 (v3/dot r n3))) r) (/ mu3 (* r3 r3 r3)))))
+            brute (let [rs (for [j (range k) :let [th (* 2 math/PI (/ j k))
+                                                   n3 (v3/add (v3/scale u3 (math/cos th)) (v3/scale w3 (math/sin th)))]]
+                             (pt/averaged-rates mu el (tidal n3) 360))]
+                    (into {} (for [key [:e :i :raan :argp]] [key (/ (reduce + (map key rs)) k)])))]
+        (doseq [key [:e :i :raan :argp]]
+          (is (< (abs (- (secular key) (brute key))) (* 1e-4 (apply max (map #(abs (brute %)) [:raan :argp])))) (str key))))))
+  (testing "for a circular orbit, the classical closed forms and the familiar coefficients"
+    (let [a 7000.0 i 0.9 n (kep/mean-motion mu a)
+          eps (math/to-radians 23.44)
+          ;; the Moon's pull, as the Earth-Moon system feels it
+          {:keys [raan argp]} (pt/third-body-node-perigee n i c/GM-moon 384400.0 eps)
+          rev-per-day (/ (* n 86400.0) (* 2 math/PI))
+          deg-per-day #(math/to-degrees (* % 86400.0))]
+      (is (< (abs (- (deg-per-day raan) (/ (* -0.00338 (math/cos i)) rev-per-day))) 1e-5))
+      (is (< (abs (- (deg-per-day argp) (/ (* 0.00169 (- 4.0 (* 5.0 (math/pow (math/sin i) 2)))) rev-per-day))) 1e-5)))))
