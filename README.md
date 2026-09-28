@@ -224,6 +224,9 @@ The demos draw on other people's data, used under their terms:
   transcribed from the normalized MATLAB listings in Eckman, Brown and
   Adamo, *Normalization and Implementation of Three Gravitational
   Acceleration Models*, NASA/TP-2016-218604, a work of the US government.
+- **U.S. Standard Atmosphere, 1976** (`allgo.astro.us76`): its defining
+  equations below 86 km and its Table I densities above, from the NOAA,
+  NASA and USAF publication (NASA-TM-X-74335), a work of the US government.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
