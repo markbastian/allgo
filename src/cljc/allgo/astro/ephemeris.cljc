@@ -27,9 +27,8 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.time :as t]
             [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [clojure.math :as math]))
-
-(defn- frac [x] (- x (math/floor x)))
 
 (def obliquity-J2000
   "Obliquity of the ecliptic at J2000, radians."
@@ -56,11 +55,11 @@
   "Geocentric position of the Sun, km."
   [mjd-tt]
   (let [T (t/centuries-J2000 mjd-tt)
-        M (* c/two-pi (frac (+ 0.9931267 (* 99.9973583 T))))
-        L (* c/two-pi (frac (+ 0.7859444 (/ M c/two-pi)
-                               (/ (+ (* 6892.0 (math/sin M))
-                                     (* 72.0 (math/sin (* 2.0 M))))
-                                  1296.0e3))))
+        M (* c/two-pi (am/frac (+ 0.9931267 (* 99.9973583 T))))
+        L (* c/two-pi (am/frac (+ 0.7859444 (/ M c/two-pi)
+                                  (/ (+ (* 6892.0 (math/sin M))
+                                        (* 72.0 (math/sin (* 2.0 M))))
+                                     1296.0e3))))
         r (- 149.619e6 (* 2.499e6 (math/cos M)) (* 0.021e6 (math/cos (* 2.0 M))))]
     ;; The mean longitude advances 35999 degrees a century, not 36001, which
     ;; identifies the series as referred to the fixed J2000 equinox rather
@@ -78,11 +77,11 @@
   most of the series is the Sun pulling the Moon about."
   [mjd-tt]
   (let [T   (t/centuries-J2000 mjd-tt)
-        L0  (frac (+ 0.606433 (* 1336.851344 T)))
-        l   (* c/two-pi (frac (+ 0.374897 (* 1325.552410 T))))
-        lp  (* c/two-pi (frac (+ 0.993133 (* 99.997361 T))))
-        D   (* c/two-pi (frac (+ 0.827361 (* 1236.853086 T))))
-        F   (* c/two-pi (frac (+ 0.259086 (* 1342.227825 T))))
+        L0  (am/frac (+ 0.606433 (* 1336.851344 T)))
+        l   (* c/two-pi (am/frac (+ 0.374897 (* 1325.552410 T))))
+        lp  (* c/two-pi (am/frac (+ 0.993133 (* 99.997361 T))))
+        D   (* c/two-pi (am/frac (+ 0.827361 (* 1236.853086 T))))
+        F   (* c/two-pi (am/frac (+ 0.259086 (* 1342.227825 T))))
         sin math/sin
         cos math/cos
         dL  (+ (* 22640 (sin l))       (* -4586 (sin (- l (* 2 D))))
@@ -94,7 +93,7 @@
                (* -165 (sin (- lp (* 2 D))))
                (* -125 (sin D))        (* -110 (sin (+ l lp)))
                (* 148 (sin (- l lp)))  (* -55 (sin (- (* 2 F) (* 2 D)))))
-        L   (* c/two-pi (frac (+ L0 (/ dL 1296.0e3))))
+        L   (* c/two-pi (am/frac (+ L0 (/ dL 1296.0e3))))
         S   (+ F (/ (+ dL (* 412 (sin (* 2 F))) (* 541 (sin lp))) (/ 1.0 c/arcsec)))
         h   (- F (* 2 D))
         N   (+ (* -526 (sin h))          (* 44 (sin (+ l h)))

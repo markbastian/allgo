@@ -70,16 +70,6 @@
       (is (close? (:raan (pt/j2-secular 7078.0 0.0 i)) (/ (* 2 math/PI) (* 365.2421897 86400.0)) 1e-12)))
     (is (nil? (pt/sun-synchronous-inclination 30000.0 0.0)) "too high for J2 to turn it that fast")))
 
-(deftest bessel
-  (testing "I_n against its integral, (1/pi) int_0^pi exp(x cos t) cos(n t) dt"
-    (doseq [n [0 1 2 3] x [0.0 0.5 3.0 12.0]]
-      (let [k 2000 h (/ math/PI k)
-            integral (* (/ h math/PI)
-                        (reduce + (for [j (range (inc k))
-                                        :let [t (* j h) w (if (or (zero? j) (= j k)) 0.5 1.0)]]
-                                    (* w (math/exp (* x (math/cos t))) (math/cos (* n t))))))]
-        (is (< (abs (- (am/bessel-i n x) integral)) (* 1e-10 (max 1.0 integral))) (str [n x]))))))
-
 (defn- exponential-drag
   "Drag in still air falling off exponentially from rho-p at radius rp."
   [B rho-p rp H]

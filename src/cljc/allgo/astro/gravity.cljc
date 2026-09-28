@@ -17,27 +17,12 @@
   unnormalized, which keeps these to moderate degree. Positions and
   accelerations are Earth-fixed, km and km/s^2."
   (:require [allgo.astro.geopotential :as geo]
+            [allgo.numerics.special :as special]
             [clojure.math :as math]))
 
 (defn- coefficient [C n m] (get C [n m] (if (and (zero? n) (zero? m)) 1.0 0.0)))
 
 ;; ------------------------------------------------------- spherical partials
-
-(defn- legendre
-  "Unnormalized associated Legendre functions P_nm(sin lat), no
-  Condon-Shortley phase, to degree `deg`, as a map keyed by [n m]."
-  [sl cl deg]
-  (reduce (fn [P [n m]]
-            (assoc P [n m]
-                   (cond
-                     (and (zero? n) (zero? m)) 1.0
-                     (= n m) (* (- (* 2.0 m) 1.0) cl (P [(dec m) (dec m)]))
-                     (= n (inc m)) (* (+ (* 2.0 m) 1.0) sl (P [m m]))
-                     :else (/ (- (* (- (* 2.0 n) 1.0) sl (P [(dec n) m]))
-                                 (* (+ n m -1.0) (P [(- n 2) m])))
-                              (- n m)))))
-          {}
-          (for [m (range (+ deg 2)) n (range m (+ deg 2))] [n m])))
 
 (defn spherical-acceleration
   "The acceleration from the field `model` to degree `degree` at `r`,
@@ -56,7 +41,7 @@
         r2 (+ rho2 (* z z)) r (math/sqrt r2)
         sl (/ z r) cl (/ rho r) tl (/ z rho)
         lon (math/atan2 y x)
-        P (legendre sl cl degree)
+        P (special/associated-legendre sl cl (inc degree))
         [dr dlat dlon]
         (reduce (fn [[dr dlat dlon] [n m]]
                   (let [cnm (coefficient C n m) snm (get S [n m] 0.0)
@@ -75,23 +60,6 @@
 
 ;; ------------------------------------------------------------------ Pines
 
-(defn- derived-legendre
-  "A_nm(u), the m-th derivatives of the Legendre polynomials, to degree
-  `deg`: A_nn = (2n-1) A_n-1,n-1, A_n,n-1 = u A_nn, and
-  (n - m) A_nm = (2n - 1) u A_n-1,m - (n + m - 1) A_n-2,m."
-  [u deg]
-  (reduce (fn [A [n m]]
-            (assoc A [n m]
-                   (cond
-                     (and (zero? n) (zero? m)) 1.0
-                     (= n m) (* (- (* 2.0 n) 1.0) (A [(dec n) (dec n)]))
-                     (= m (dec n)) (* u (A [n n]))
-                     :else (/ (- (* (- (* 2.0 n) 1.0) u (A [(dec n) m]))
-                                 (* (+ n m -1.0) (A [(- n 2) m])))
-                              (- n m)))))
-          {}
-          (for [n (range (inc deg)) m (range n -1 -1)] [n m])))
-
 (defn pines-acceleration
   "The acceleration from the field `model` to degree `degree` at `r`, by
   Pines's formulation. With s, t, u the direction cosines, r_m + i i_m =
@@ -109,7 +77,7 @@
   (let [{:keys [GM R C S]} (geo/denormalize model)
         r (math/sqrt (+ (* x x) (* y y) (* z z)))
         s (/ x r) t (/ y r) u (/ z r)
-        A (derived-legendre u (+ degree 2))
+        A (special/derived-legendre u (+ degree 2))
         a (fn [n m] (get A [n m] 0.0))
         ;; r_m and i_m, the real and imaginary parts of (s + i t)^m
         [rm im] (loop [m 1 rs [1.0] is [0.0]]

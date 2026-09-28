@@ -15,8 +15,8 @@
   STK), function for function and expression for expression: the names
   are the C++ names and each expression keeps the C++ order of
   operations, so results agree with it to the last few bits rather than
-  merely to the theory. C's `fmod` is an exact
-  `fmod` here, Clojure's `rem` on doubles being inexact. The one structural change is
+  merely to the theory. C's `fmod` is
+  `allgo.math/fmod`, which is exact, as Clojure's `rem` on doubles is not. The one structural change is
   that `sgp4` is a pure function: where the C++ keeps the resonance
   integrator's last step in the element record to resume from, this
   integrates from the epoch each call, which lands on the same half-day
@@ -31,24 +31,14 @@
   `opsmode` is :a, AFSPC's operation, or :i, the paper's improved mode.
   :a is the default, as the paper's FAQ recommends to match the US Air
   Force, and is the mode the published C++ verification output is in."
-  (:require [clojure.math :as math]
+  (:require [allgo.math :as am]
+            [clojure.math :as math]
             [clojure.string :as str]))
 
 (def ^:private pi math/PI)
 (def ^:private twopi (* 2.0 pi))
 (def ^:private x2o3 (/ 2.0 3.0))
 (def ^:private temp4 1.5e-12)
-
-(defn- fmod
-  "C's fmod, which is exact: the remainder of x/y with the sign of x.
-  Clojure's `rem` on doubles is x - trunc(x/y) y, which rounds."
-  [x y]
-  #?(:clj (let [r (math/IEEE-remainder x y)]
-            (cond (zero? r) (if (neg? x) -0.0 0.0)
-                  (= (neg? r) (neg? x)) r
-                  (neg? x) (- r (abs y))
-                  :else (+ r (abs y))))
-     :cljs (js-mod x y)))
 
 ;; ------------------------------------------------------------ dpper
 
@@ -110,7 +100,7 @@
                 dbet (+ (* (- ph) sinop) (* pinc cosip cosop))
                 alfdp (+ alfdp dalf)
                 betdp (+ betdp dbet)
-                nodep (fmod nodep twopi)
+                nodep (am/fmod nodep twopi)
                 nodep (if (and (< nodep 0.0) (= opsmode \a)) (+ nodep twopi) nodep)
                 xls (+ mp argpp (* cosip nodep))
                 dls (- (+ pl pgh) (* pinc nodep sinip))
@@ -150,7 +140,7 @@
         betasq (- 1.0 emsq)
         rtemsq (math/sqrt betasq)
         day (+ epoch 18261.5 (/ tc 1440.0))
-        xnodce (fmod (- 4.5236020 (* 9.2422029e-4 day)) twopi)
+        xnodce (am/fmod (- 4.5236020 (* 9.2422029e-4 day)) twopi)
         stem (math/sin xnodce)
         ctem (math/cos xnodce)
         zcosil (- 0.91375164 (* 0.03568096 ctem))
@@ -232,8 +222,8 @@
      :sz21 sz21 :sz22 sz22 :sz23 sz23 :sz31 sz31 :sz32 sz32 :sz33 sz33
      :z1 z1 :z2 z2 :z3 z3 :z11 z11 :z12 z12 :z13 z13
      :z21 z21 :z22 z22 :z23 z23 :z31 z31 :z32 z32 :z33 z33
-     :zmol (fmod (- (+ 4.7199672 (* 0.22997150 day)) gam) twopi)
-     :zmos (fmod (+ 6.2565837 (* 0.017201977 day)) twopi)
+     :zmol (am/fmod (- (+ 4.7199672 (* 0.22997150 day)) gam) twopi)
+     :zmos (am/fmod (+ 6.2565837 (* 0.017201977 day)) twopi)
      :se2 (* 2.0 ss1 ss6)
      :se3 (* 2.0 ss1 ss7)
      :si2 (* 2.0 ss2 sz12)
@@ -305,7 +295,7 @@
         [domdt dnodt] (if (not= sinim 0.0)
                         [(- domdt (* (/ cosim sinim) shll)) (+ dnodt (/ shll sinim))]
                         [domdt dnodt])
-        theta (fmod (+ gsto (* tc rptim)) twopi)
+        theta (am/fmod (+ gsto (* tc rptim)) twopi)
         rates {:irez irez :dedt dedt :didt didt :dmdt dmdt :dnodt dnodt :domdt domdt}]
     (if (zero? irez)
       rates
@@ -386,7 +376,7 @@
              {:d2201 d2201 :d2211 d2211 :d3210 d3210 :d3222 d3222
               :d4410 d4410 :d4422 d4422 :d5220 d5220 :d5232 d5232
               :d5421 d5421 :d5433 d5433
-              :xlamo (fmod (- (+ mo nodeo nodeo) theta theta) twopi)
+              :xlamo (am/fmod (- (+ mo nodeo nodeo) theta theta) twopi)
               :xfact (- (+ mdot dmdt (* 2.0 (- (+ nodedot dnodt) rptim))) no)})
            ;; synchronous resonance terms
            (let [g200 (+ 1.0 (* emsq (+ -2.5 (* 0.8125 emsq))))
@@ -401,7 +391,7 @@
                  del3 (* 3.0 del1 f330 g300 q33 aonv)
                  del1 (* del1 f311 g310 q31 aonv)]
              {:del1 del1 :del2 del2 :del3 del3
-              :xlamo (fmod (- (+ mo nodeo argpo) theta) twopi)
+              :xlamo (am/fmod (- (+ mo nodeo argpo) theta) twopi)
               :xfact (- (+ (- (+ mdot xpidot) rptim) dmdt domdt dnodt) no)})))))))
 
 ;; ------------------------------------------------------------ dspace
@@ -428,7 +418,7 @@
         stepn -720.0
         step2 259200.0
         ;; calculate deep space resonance effects
-        theta (fmod (+ gsto (* tc rptim)) twopi)
+        theta (am/fmod (+ gsto (* tc rptim)) twopi)
         em (+ em (* dedt t))
         inclm (+ inclm (* didt t))
         argpm (+ argpm (* domdt t))
@@ -507,7 +497,7 @@
         tut1 (/ (- jdut1 2451545.0) 36525.0)
         temp (+ (* -6.2e-6 tut1 tut1 tut1) (* 0.093104 tut1 tut1)
                 (* (+ (* 876600.0 3600) 8640184.812866) tut1) 67310.54841)
-        temp (fmod (/ (* temp deg2rad) 240.0) twopi)]
+        temp (am/fmod (/ (* temp deg2rad) 240.0) twopi)]
     (if (< temp 0.0) (+ temp twopi) temp)))
 
 (defn- initl [xke j2 ecco epoch inclo no-kozai]
@@ -729,10 +719,10 @@
           (let [em (if (< em 1.0e-6) 1.0e-6 em)
                 mm (+ mm (* no-unkozai templ))
                 xlm (+ mm argpm nodem)
-                nodem (fmod nodem twopi)
-                argpm (fmod argpm twopi)
-                xlm (fmod xlm twopi)
-                mm (fmod (- xlm argpm nodem) twopi)
+                nodem (am/fmod nodem twopi)
+                argpm (am/fmod argpm twopi)
+                xlm (am/fmod xlm twopi)
+                mm (am/fmod (- xlm argpm nodem) twopi)
                 mean {:am am :em em :im inclm :Om nodem :om argpm :mm mm :nm nm}
                 sinim (math/sin inclm)
                 cosim (math/cos inclm)
@@ -762,7 +752,7 @@
                     xl (+ mp argpp nodep (* temp xlcof axnl))
                     ;; solve Kepler's equation. As in the C++, sineo1 and
                     ;; coseo1 are those of eo1 before its last correction.
-                    u (fmod (- xl nodep) twopi)
+                    u (am/fmod (- xl nodep) twopi)
                     [sineo1 coseo1]
                     (loop [eo1 u tem5 9999.9 ktr 1 sc nil]
                       (if (and (>= (abs tem5) 1.0e-12) (<= ktr 10))

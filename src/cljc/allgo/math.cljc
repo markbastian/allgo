@@ -76,15 +76,18 @@
   ^double [^double x]
   (math/log (+ x (math/sqrt (+ (* x x) 1.0)))))
 
-(defn bessel-i
-  "The modified Bessel function of the first kind, I_n(x), for integer n >=
-  0, by its power series sum (x/2)^(2k+n) / (k! (k+n)!), which converges
-  for every x."
-  ^double [n ^double x]
-  (let [h (* 0.5 x)
-        first-term (loop [t 1.0 k 1] (if (> k n) t (recur (/ (* t h) k) (inc k))))
-        hh (* h h)]
-    (loop [t first-term sum first-term k 1]
-      (let [t (/ (* t hh) (* k (+ k n)))
-            sum' (+ sum t)]
-        (if (or (= sum' sum) (> k 500)) sum' (recur t sum' (inc k)))))))
+(defn fmod
+  "C's fmod, which is exact: the remainder of x/y with the sign of x.
+  Clojure's `rem` on doubles is x - trunc(x/y) y, which rounds."
+  [x y]
+  #?(:clj (let [r (math/IEEE-remainder x y)]
+            (cond (zero? r) (if (neg? x) -0.0 0.0)
+                  (= (neg? r) (neg? x)) r
+                  (neg? x) (- r (abs y))
+                  :else (+ r (abs y))))
+     :cljs (js-mod x y)))
+
+(defn frac
+  "The fractional part of x, x - floor(x): in [0, 1) whatever x's sign."
+  ^double [^double x]
+  (- x (math/floor x)))

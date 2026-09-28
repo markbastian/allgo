@@ -17,6 +17,7 @@
   (:require [allgo.astro.cio-data :as data]
             [allgo.astro.frames :as frames]
             [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
@@ -25,8 +26,6 @@
 
 (defn- centuries [mjd-tt] (/ (- mjd-tt 51544.5) 36525.0))
 
-(defn- fmod [x y] (let [r (math/IEEE-remainder x y)] (if (and (not (zero? r)) (not= (neg? r) (neg? x))) (+ r (if (neg? x) (- y) y)) r)))
-
 (defn fundamental-arguments
   "The fourteen arguments of the IERS Conventions (2003 and 2010), radians,
   at `t` Julian centuries of TT from J2000: the Moon's and Sun's mean
@@ -34,8 +33,8 @@
   the mean longitudes of Mercury through Neptune; and the general
   precession in longitude p_A."
   [t]
-  (let [arcsec (fn [& cs] (* as->rad (fmod (reduce (fn [acc k] (+ (* acc t) k)) 0.0 (reverse cs)) 1296000.0)))
-        lin (fn [a b] (fmod (+ a (* b t)) twopi))]
+  (let [arcsec (fn [& cs] (* as->rad (am/fmod (reduce (fn [acc k] (+ (* acc t) k)) 0.0 (reverse cs)) 1296000.0)))
+        lin (fn [a b] (am/fmod (+ a (* b t)) twopi))]
     [(arcsec 485868.249036 1717915923.2178 31.8792 0.051635 -0.00024470)
      (arcsec 1287104.793048 129596581.0481 -0.5532 0.000136 -0.00001149)
      (arcsec 335779.526232 1739527262.8478 -12.7512 -0.001037 0.00000417)
@@ -93,7 +92,7 @@
   (let [whole (math/floor mjd-ut1)
         f (- mjd-ut1 whole)
         du (- mjd-ut1 51544.5)]
-    (fmod (* twopi (+ f 0.5 0.7790572732640 (* 0.00273781191135448 du))) twopi)))
+    (am/fmod (* twopi (+ f 0.5 0.7790572732640 (* 0.00273781191135448 du))) twopi)))
 
 (defn s-prime
   "The TIO locator s', radians: -47 microarcseconds a century."

@@ -18,8 +18,8 @@
             [allgo.astro.kepler :as kepler]
             [allgo.astro.srp :as srp]
             [allgo.geometry.vec3 :as v3]
-            [allgo.math :as am]
             [allgo.numerics.quadrature :as quadrature]
+            [allgo.numerics.special :as special]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
@@ -137,7 +137,7 @@
   ([mu a e B rho-p H]
    (let [c (/ (* a e) H)
          k (* 2.0 math/PI B rho-p 1e3 (math/exp (- c)))
-         i0 (am/bessel-i 0 c) i1 (am/bessel-i 1 c) i2 (am/bessel-i 2 c)
+         i0 (special/bessel-i 0 c) i1 (special/bessel-i 1 c) i2 (special/bessel-i 2 c)
          da (- (* k a a (+ i0 (* 2.0 e i1))))
          de (- (* k a (+ i1 (* 0.5 e (+ i0 i2)))))
          period (kepler/period mu a)]

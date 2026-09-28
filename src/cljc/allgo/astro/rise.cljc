@@ -37,8 +37,6 @@
   [parallax]
   (- (* 0.7275 parallax) (* (/ 34.0 60.0) c/degrees)))
 
-(defn- frac [x] (- x (math/floor x)))
-
 (defn approximate
   "`{:rise :transit :set}` as fractions of the UT day, for a body fixed at
   `[ra dec]`, seen from `[lat lon]`, when the apparent sidereal time at
@@ -50,7 +48,7 @@
     (when (<= -1.0 cH0 1.0)
       (let [H0 (/ (math/acos cH0) c/two-pi)
             m0 (/ (- ra lon theta0) c/two-pi)]
-        {:rise (frac (- m0 H0)) :transit (frac m0) :set (frac (+ m0 H0))}))))
+        {:rise (am/frac (- m0 H0)) :transit (am/frac m0) :set (am/frac (+ m0 H0))}))))
 
 (defn times
   "`{:rise :transit :set}` corrected for the body's motion: `positions`
