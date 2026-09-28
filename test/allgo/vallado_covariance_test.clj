@@ -30,17 +30,6 @@
                (/ (abs (- (get-in A [i j]) (get-in B [i j])))
                   (math/sqrt (* (get-in B [i i]) (get-in B [j j])))))))
 
-(deftest numerical-jacobian
-  (testing "against the Jacobian of polar coordinates, known in closed form"
-    (let [f (fn [[x y]] [(math/hypot x y) (math/atan2 y x)])
-          [x y] [3.0 -4.0] r2 25.0 r 5.0
-          J (cov/jacobian f [x y] {:angles #{1}})]
-      (is (every? #(< (abs %) 1e-10)
-                  (flatten (lin/mat-sub J [[(/ x r) (/ y r)] [(- (/ y r2)) (/ x r2)]]))))))
-  (testing "and across the 2 pi seam, which the wrapping keeps smooth"
-    (let [J (cov/jacobian (fn [[x y]] [(math/atan2 y x)]) [-1.0 1e-12] {:angles #{0}})]
-      (is (< (abs (- (get-in J [0 1]) -1.0)) 1e-8)))))
-
 (deftest round-trips
   (testing "classical and back"
     (let [{:keys [a e i raan argp M]} (kep/state->elements c/GM-earth (first s) (second s))

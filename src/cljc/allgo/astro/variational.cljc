@@ -15,6 +15,7 @@
   alongside the trajectory, 36 extra states for the six real ones, because
   A depends on where the satellite actually is."
   (:require [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
@@ -45,8 +46,6 @@
                   (range 3)))
           (range 3))))
 
-(defn- perturb [v i h] (update (vec v) i + h))
-
 (defn acceleration-gradients
   "Numerical Jacobians of an acceleration with respect to position and
   velocity, by central differences.
@@ -58,15 +57,10 @@
   to the magnitude of what is being perturbed, so it works as well at
   geostationary radius as in low orbit."
   [accel t r v]
-  (let [step (fn [x] (max 1e-4 (* 1e-7 (abs x))))
-        col  (fn [f x i] (let [h (step (nth x i))]
-                           (v3/scale (v3/sub (f (perturb x i h)) (f (perturb x i (- h))))
-                                     (/ 1.0 (* 2.0 h)))))
-        dr   (mapv (fn [i] (col (fn [r'] (accel t r' v)) r i)) (range 3))
-        dv   (mapv (fn [i] (col (fn [v'] (accel t r v')) v i)) (range 3))]
-    ;; the columns above are gradients; transpose into Jacobians
-    {:d-dr (lin/transpose dr)
-     :d-dv (lin/transpose dv)}))
+  (let [steps (fn [x] (mapv #(max 1e-4 (* 1e-7 (abs %))) x))
+        opts (fn [x] {:steps (steps x) :richardson? false})]
+    {:d-dr (diff/jacobian (fn [r'] (accel t r' v)) r (opts r))
+     :d-dv (diff/jacobian (fn [v'] (accel t r v')) v (opts v))}))
 
 (defn jacobian
   "The 6x6 matrix A = d(state-rate)/d(state).
