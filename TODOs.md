@@ -89,9 +89,9 @@ of expected return:
     printed values, alongside the independent checks.
   1. ~~Two-body core (ch. 2)~~ -- `allgo.astro.universal`.
   2. ~~Maneuvers (ch. 6)~~ -- `allgo.astro.maneuvers`.
-  3. ~~Initial orbit determination (ch. 7)~~ -- `allgo.astro.iod`. The
-     second Lambert solver is Lagrange's equation's; Battin's awaits the
-     book's pages for its continued fractions.
+  3. ~~Initial orbit determination (ch. 7)~~ -- `allgo.astro.iod`, with
+     three independent Lambert solvers: universal variables, Lagrange's
+     equation and Battin's.
   4. ~~Coordinates and frames (ch. 3-4)~~ -- `allgo.astro.reduction`,
      `allgo.astro.states` and `allgo.astro.cio`.
   5. ~~SGP4/SDP4 and TLEs~~ -- `allgo.astro.sgp4`.

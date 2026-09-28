@@ -379,6 +379,19 @@
     (concat [[:ellipse (ellipse false)] [:ellipse (ellipse true)]]
             (when (zero? revs) [[:hyperbola hyperbola]]))))
 
+(defn- fg-velocities
+  "The velocities at `r1` and `r2` on the transfer of semilatus rectum
+  `p` between them, the short way or the long, through f and g."
+  [mu r1 r2 long? p]
+  (let [m1 (v3/length r1) m2 (v3/length r2)
+        cdn (/ (v3/dot r1 r2) (* m1 m2))
+        sdn (* (if long? -1.0 1.0) (math/sqrt (max 0.0 (- 1.0 (* cdn cdn)))))
+        f (- 1.0 (* (/ m2 p) (- 1.0 cdn)))
+        g (/ (* m1 m2 sdn) (math/sqrt (* mu p)))
+        gd (- 1.0 (* (/ m1 p) (- 1.0 cdn)))]
+    [(v3/scale (v3/sub r2 (v3/scale r1 f)) (/ 1.0 g))
+     (v3/scale (v3/sub (v3/scale r2 gd) r1) (/ 1.0 g))]))
+
 (defn lambert-lagrange
   "Every transfer from `r1` to `r2` in `dt` seconds, the short way or
   with `:long?` the long, with `:revs` complete revolutions: `[[v1 v2]
@@ -399,14 +412,7 @@
    (let [m1 (v3/length r1) m2 (v3/length r2)
          c (v3/distance r1 r2)
          s (* 0.5 (+ m1 m2 c))
-         cdn (/ (v3/dot r1 r2) (* m1 m2))
-         sdn (* (if long? -1.0 1.0) (math/sqrt (max 0.0 (- 1.0 (* cdn cdn)))))
-         velocities (fn [p]
-                      (let [f (- 1.0 (* (/ m2 p) (- 1.0 cdn)))
-                            g (/ (* m1 m2 sdn) (math/sqrt (* mu p)))
-                            gd (- 1.0 (* (/ m1 p) (- 1.0 cdn)))]
-                        [(v3/scale (v3/sub r2 (v3/scale r1 f)) (/ 1.0 g))
-                         (v3/scale (v3/sub (v3/scale r2 gd) r1) (/ 1.0 g))]))
+         velocities #(fg-velocities mu r1 r2 long? %)
          ;; a on a log scale: ellipses from s/2 out; hyperbolas over every
          ;; size, their time falling to nothing as a does
          grid (fn [kind] (let [base (* 0.5 s)]
@@ -420,3 +426,94 @@
             :when (not= (neg? (f lo)) (neg? (f hi)))
             :let [a (roots/bisect f lo hi)]]
         (velocities (pf a)))))))
+
+;; ---------------------------------------------------- Lambert by Battin
+
+(defn battin-xi
+  "Battin's xi(x), by its continued fraction in eta = x/(sqrt(1+x) + 1)^2:
+
+    8 (sqrt(1+x) + 1) / (3 + 1/(5 + eta + 9/7 eta/(1 + 16/63 eta/(1 + 25/99 eta/(1 + ...)))))
+
+  the coefficients after the first running k^2 / ((2k-1)(2k+1)) for
+  k = 4, 5, 6 ..."
+  [x]
+  (let [s (math/sqrt (+ 1.0 x))
+        eta (/ x (math/pow (+ s 1.0) 2))
+        tail (reduce (fn [acc k] (+ 1.0 (/ (* (/ (* k k) (* (- (* 2 k) 1.0) (+ (* 2 k) 1.0))) eta) acc)))
+                     1.0 (range 40 3 -1))]
+    (/ (* 8.0 (+ s 1.0))
+       (+ 3.0 (/ 1.0 (+ 5.0 eta (/ (* (/ 9.0 7.0) eta) tail)))))))
+
+(defn battin-k
+  "Battin's K(u), by its continued fraction
+
+    1/3 / (1 + 4/27 u/(1 + 8/27 u/(1 + 2/9 u/(1 + 22/81 u/(1 + ...)))))
+
+  whose coefficients run 2(3n+2)(6n+1)/(9(4n+1)(4n+3)) and
+  2(3n+4)(6n+5)/(9(4n+3)(4n+5)) in turn, n = 0, 1, 2 ..."
+  [u]
+  (let [gammas (mapcat (fn [n] [(/ (* 2.0 (+ (* 3 n) 2) (+ (* 6 n) 1)) (* 9.0 (+ (* 4 n) 1) (+ (* 4 n) 3)))
+                                (/ (* 2.0 (+ (* 3 n) 4) (+ (* 6 n) 5)) (* 9.0 (+ (* 4 n) 3) (+ (* 4 n) 5)))])
+                       (range 20))
+        cf (reduce (fn [acc g] (+ 1.0 (/ (* g u) acc))) 1.0 (reverse gammas))]
+    (/ (/ 1.0 3.0) cf)))
+
+(defn battin-y
+  "One step of Battin's iteration: y for x, given l and m -- the
+  continued-fraction root of the cubic y^3 - (1 + h1) y^2 - h2 = 0. Returns
+  `{:y :h1 :h2}`."
+  [x l m]
+  (let [xi (battin-xi x)
+        den (* (+ 1.0 (* 2.0 x) l) (+ (* 4.0 x) (* xi (+ 3.0 x))))
+        h1 (/ (* (math/pow (+ l x) 2) (+ 1.0 (* 3.0 x) xi)) den)
+        h2 (/ (* m (+ (- x l) xi)) den)
+        B (/ (* 27.0 h2) (* 4.0 (math/pow (+ 1.0 h1) 3)))
+        U (/ B (* 2.0 (+ (math/sqrt (+ 1.0 B)) 1.0)))
+        K (battin-k U)]
+    {:y (* (/ (+ 1.0 h1) 3.0) (+ 2.0 (/ (math/sqrt (+ 1.0 B)) (+ 1.0 (* 2.0 U K K)))))
+     :h1 h1 :h2 h2}))
+
+(defn lambert-battin
+  "The velocities `[v1 v2]` from `r1` to `r2` in `dt` seconds, the short
+  way or with `:long?` the long, with no complete revolutions, by Battin's
+  method (Battin and Vaughan, \"An Elegant Lambert Algorithm\", J.
+  Guidance, Control, and Dynamics 7, 1984): the geometry turned into l and
+  m, the iteration x -> y -> x through the continued fractions xi and K
+  until it settles, and then a = mu t^2 / (16 r0p^2 x y^2). Uniform over
+  ellipses, the parabola and hyperbolas, and free of the singularity other
+  methods have at a transfer of 180 degrees. The velocities follow from a
+  through Lagrange's semilatus rectum and f and g; nil if it does not
+  converge."
+  ([r1 r2 dt] (lambert-battin mu r1 r2 dt {}))
+  ([r1 r2 dt opts] (lambert-battin mu r1 r2 dt opts))
+  ([mu r1 r2 dt {:keys [long?]}]
+   (let [m1 (v3/length r1) m2 (v3/length r2)
+         c (v3/distance r1 r2)
+         s (* 0.5 (+ m1 m2 c))
+         cdn (am/clamp (/ (v3/dot r1 r2) (* m1 m2)) -1.0 1.0)
+         dnu (let [d (math/acos cdn)] (if long? (- (* 2.0 math/PI) d) d))
+         ratio (/ m2 m1)
+         eps (- ratio 1.0)
+         tan2w (/ (* 0.25 eps eps) (+ (math/sqrt ratio) (* ratio (+ 2.0 (math/sqrt ratio)))))
+         s4 (am/sq (math/sin (* 0.25 dnu)))
+         c4 (am/sq (math/cos (* 0.25 dnu)))
+         c2 (math/cos (* 0.5 dnu))
+         r0p (* (math/sqrt (* m1 m2)) (+ c4 tan2w))
+         l (if (< dnu math/PI)
+             (/ (+ s4 tan2w) (+ s4 tan2w c2))
+             (/ (- (+ c4 tan2w) c2) (+ c4 tan2w)))
+         m (/ (* mu dt dt) (* 8.0 r0p r0p r0p))
+         [x y] (loop [x l k 0]
+                 (let [{:keys [y]} (battin-y x l m)
+                       x' (- (math/sqrt (+ (am/sq (* 0.5 (- 1.0 l))) (/ m (* y y)))) (* 0.5 (+ 1.0 l)))]
+                   (if (or (< (abs (- x' x)) 1e-15) (> k 100))
+                     [x' (:y (battin-y x' l m))]
+                     (recur x' (inc k)))))
+         a (/ (* mu dt dt) (* 16.0 r0p r0p x y y))
+         ;; Lagrange's branch whose time at this a is dt gives p
+         candidates (for [[kind [tf pf]] (lagrange-branches mu s c m1 m2 long? 0)
+                          :when (if (pos? a) (= kind :ellipse) (= kind :hyperbola))]
+                      [(abs (- (tf a) dt)) (pf a)])
+         [miss p] (first (sort-by first candidates))]
+     (when (and p (< miss (* 1e-6 dt)))
+       (fg-velocities mu r1 r2 long? p)))))

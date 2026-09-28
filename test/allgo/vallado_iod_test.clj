@@ -186,3 +186,34 @@
             (doseq [[a] sols] (is (arrives? r1 a r2 dt)))))))
     (testing "too little time for a revolution: none"
       (is (empty? (iod/lambert-lagrange r1 (first (at 3000.0)) 4560.0 {:revs 1}))))))
+
+(deftest lambert-by-battin
+  (let [[r1 v1] (at 0.0)
+        period (kep/period mu 12000.0)
+        same? (fn [[a b] [a' b']] (and (< (rel-err a a') 1e-9) (< (rel-err b b') 1e-9)))]
+    (testing "the same transfers as the universal and Lagrange solvers, and each arrives"
+      (doseq [[r2 dt opts] [[(first (at 2400.0)) 2400.0 {}]
+                            [(first (at (* 0.7 period))) (* 0.7 period) {:long? true}]
+                            [(first (at 2400.0)) 600.0 {}]
+                            [(first (at 2400.0)) 30000.0 {}]]]
+        (let [b (iod/lambert-battin r1 r2 dt opts)]
+          (is (some? b) (str opts dt))
+          (is (same? b (iod/lambert r1 r2 dt opts)) (str opts dt))
+          (is (same? b (first (iod/lambert-lagrange r1 r2 dt opts))) (str opts dt))
+          (is (arrives? r1 (first b) r2 dt)))))
+    (testing "the true orbit, recovered"
+      (let [dt 2400.0 [r2 v2] (at dt)]
+        (is (same? (iod/lambert-battin r1 r2 dt) [v1 v2]))))
+    (testing "through very nearly 180 degrees, where Battin's method has no singularity"
+      (let [r2 (v3/scale (v3/normalize [(- (first r1)) (- (second r1)) (+ (- (nth r1 2)) 1.0)]) 9000.0)
+            dt 3000.0
+            b (iod/lambert-battin r1 r2 dt)]
+        (is (arrives? r1 (first b) r2 dt))))))
+
+(deftest battins-continued-fractions
+  (testing "K(0) is a third"
+    (is (< (abs (- (iod/battin-k 0.0) (/ 1.0 3.0))) 1e-16)))
+  (testing "each y is the root of Battin's cubic y^3 - (1 + h1) y^2 - h2 = 0"
+    (doseq [x [0.01 0.3 1.5 4.0] l [0.05 0.4] m [0.2 3.0 40.0]]
+      (let [{:keys [y h1 h2]} (iod/battin-y x l m)]
+        (is (< (abs (- (* y y y) (* (+ 1.0 h1) y y) h2)) (* 1e-12 (* y y y))) (str [x l m]))))))
