@@ -517,3 +517,45 @@
          [miss p] (first (sort-by first candidates))]
      (when (and p (< miss (* 1e-6 dt)))
        (fg-velocities mu r1 r2 long? p)))))
+
+;; ----------------------------------------------------- Lambert by Gauss
+
+(defn gauss-x-series
+  "Gauss's X(x) = (4/3)(1 + 6/5 x + (6 8)/(5 7) x^2 + (6 8 10)/(5 7 9) x^3 + ...),
+  summed until it settles: the series whose closed form is
+  (E - sin E)/sin^3(E/2) at x = sin^2(E/4). Converges for x < 1."
+  [x]
+  (loop [k 1 term 1.0 sum 1.0]
+    (let [term (* term x (/ (+ (* 2.0 k) 4.0) (+ (* 2.0 k) 3.0)))
+          sum' (+ sum term)]
+      (if (or (= sum' sum) (> k 2000)) (* (/ 4.0 3.0) sum') (recur (inc k) term sum')))))
+
+(defn lambert-gauss
+  "The velocities `[v1 v2]` from `r1` to `r2` in `dt` seconds by Gauss's
+  own method (Theoria Motus, 1809; as Bate, Mueller and White give it):
+  with l = (r1 + r2)/(4 sqrt(r1 r2) cos(dnu/2)) - 1/2 and
+  m = mu t^2/(2 sqrt(r1 r2) cos(dnu/2))^3, iterate y -> x1 = m/y^2 - l ->
+  y = 1 + X(x1) (l + x1) until it settles; then cos(dE/2) = 1 - 2 x1 gives
+  the semilatus rectum, and f and g the velocities. Short way only, and
+  for transfers of well under 90 degrees, where Gauss meant it for
+  observations close together; nil where it does not converge."
+  ([r1 r2 dt] (lambert-gauss mu r1 r2 dt))
+  ([mu r1 r2 dt]
+   (let [m1 (v3/length r1) m2 (v3/length r2)
+         cdn (am/clamp (/ (v3/dot r1 r2) (* m1 m2)) -1.0 1.0)
+         c2 (math/cos (* 0.5 (math/acos cdn)))
+         k (* 2.0 (math/sqrt (* m1 m2)) c2)
+         l (- (/ (+ m1 m2) (* 2.0 k)) 0.5)
+         m (/ (* mu dt dt) (* k k k))
+         x1-of (fn [y] (- (/ m (* y y)) l))]
+     (loop [y 1.0 i 0]
+       (let [x1 (x1-of y)]
+         (when (and (< x1 1.0) (< i 500))
+           (let [y' (+ 1.0 (* (gauss-x-series x1) (+ l x1)))]
+             (if (< (abs (- y' y)) 1e-15)
+               (let [x1 (x1-of y')
+                     cdE2 (- 1.0 (* 2.0 x1))
+                     p (/ (* m1 m2 (- 1.0 cdn))
+                          (- (+ m1 m2) (* 2.0 (math/sqrt (* m1 m2)) c2 cdE2)))]
+                 (fg-velocities mu r1 r2 false p))
+               (recur y' (inc i))))))))))

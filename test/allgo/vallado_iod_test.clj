@@ -217,3 +217,17 @@
     (doseq [x [0.01 0.3 1.5 4.0] l [0.05 0.4] m [0.2 3.0 40.0]]
       (let [{:keys [y h1 h2]} (iod/battin-y x l m)]
         (is (< (abs (- (* y y y) (* (+ 1.0 h1) y y) h2)) (* 1e-12 (* y y y))) (str [x l m]))))))
+
+(deftest lambert-by-gauss
+  (testing "X(x)'s series is its closed form (E - sin E)/sin^3(E/2), x = sin^2(E/4)"
+    (doseq [E [0.1 0.8 1.6 2.4]]
+      (let [x (math/pow (math/sin (* 0.25 E)) 2)]
+        (is (< (abs (- (iod/gauss-x-series x) (/ (- E (math/sin E)) (math/pow (math/sin (* 0.5 E)) 3)))) 1e-12) (str E)))))
+  (testing "over short arcs, the same transfer as the other solvers, and it arrives"
+    (let [[r1] (at 0.0)]
+      (doseq [dt [300.0 900.0 1800.0]]
+        (let [r2 (first (at dt))
+              g (iod/lambert-gauss r1 r2 dt)]
+          (is (< (rel-err (first g) (first (iod/lambert r1 r2 dt {}))) 1e-9) (str dt))
+          (is (< (rel-err (first g) (first (iod/lambert-battin r1 r2 dt))) 1e-9) (str dt))
+          (is (arrives? r1 (first g) r2 dt)))))))
