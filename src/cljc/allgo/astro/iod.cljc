@@ -18,6 +18,7 @@
             [allgo.astro.universal :as universal]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
+            [allgo.numerics.interpolation :as interp]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
@@ -135,18 +136,6 @@
 
 ;; -------------------------------------------------------- Laplace
 
-(defn- derivatives-at-middle
-  "The first and second derivatives at the middle time of the quadratic
-  through three vectors at times `tau1` 0 `tau3` (relative to the middle)."
-  [[x1 x2 x3] tau1 tau3]
-  (let [comb (fn [k1 k2 k3] (v3/add (v3/add (v3/scale x1 k1) (v3/scale x2 k2)) (v3/scale x3 k3)))]
-    [(comb (- (/ tau3 (* tau1 (- tau1 tau3))))
-           (- (/ (+ tau1 tau3) (* tau1 tau3)))
-           (- (/ tau1 (* tau3 (- tau3 tau1)))))
-     (comb (/ 2.0 (* tau1 (- tau1 tau3)))
-           (/ 2.0 (* tau1 tau3))
-           (/ 2.0 (* tau3 (- tau3 tau1))))]))
-
 (defn laplace
   "An orbit from three sightings of direction alone, as `gauss` takes
   them, by Laplace's method: the line of sight L and the site R are
@@ -167,8 +156,8 @@
    (let [Ls (mapv (fn [[ra dec]] (line-of-sight ra dec)) observations)
          tau1 (- t1 t2) tau3 (- t3 t2)
          L (second Ls)
-         [L' L''] (derivatives-at-middle Ls tau1 tau3)
-         [R' R''] (derivatives-at-middle sites tau1 tau3)
+         [L' L''] (interp/derivatives-at-middle Ls tau1 tau3)
+         [R' R''] (interp/derivatives-at-middle sites tau1 tau3)
          n1 (v3/cross L L') n2 (v3/cross L L'')
          D (v3/dot L'' n1)
          ;; rho = A + B / r^3

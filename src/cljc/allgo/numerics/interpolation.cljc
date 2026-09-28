@@ -16,7 +16,8 @@
   for values, an extremum and a zero without recomputing them. The
   interpolating factor n runs from -1 to 1 across a 3-point table (0 at
   the middle value) and from -2 to 2 across a 5-point one."
-  (:require [clojure.math :as math]))
+  (:require [allgo.numerics.linear :as lin]
+            [clojure.math :as math]))
 
 (defn horner
   "c0 + c1 x + c2 x^2 + ..., evaluated from the highest power down."
@@ -192,3 +193,16 @@
                 (mapv + acc (map #(/ (* yi %) den) basis))))
             (vec (repeat n 0.0))
             points)))
+
+(defn derivatives-at-middle
+  "`[first second]`: the derivatives at the middle point of the quadratic
+  through three vectors (or numbers' vectors) given at times `tau1`, 0 and
+  `tau3` relative to it -- what Laplace's method needs of a line of sight."
+  [[x1 x2 x3] tau1 tau3]
+  (let [comb (fn [k1 k2 k3] (lin/add (lin/add (lin/scale x1 k1) (lin/scale x2 k2)) (lin/scale x3 k3)))]
+    [(comb (- (/ tau3 (* tau1 (- tau1 tau3))))
+           (- (/ (+ tau1 tau3) (* tau1 tau3)))
+           (- (/ tau1 (* tau3 (- tau3 tau1)))))
+     (comb (/ 2.0 (* tau1 (- tau1 tau3)))
+           (/ 2.0 (* tau1 tau3))
+           (/ 2.0 (* tau3 (- tau3 tau1))))]))
