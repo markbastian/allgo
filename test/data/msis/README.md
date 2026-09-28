@@ -1,6 +1,6 @@
 # NRLMSISE-00 test output
 
-`nrlmsise00_output.txt` is copied unchanged from the NRLMSISE-00 Fortran
+`nrlmsise00_output.txt` is copied, unchanged but for a final newline, from the NRLMSISE-00 Fortran
 distribution in NASA's CCMC ModelWeb archive,
 https://git.smce.nasa.gov/ccmc-share/modelwebarchive (`MSIS/NRLMSIS00/`).
 The model is by Picone, Hedin and Drob of the Naval Research Laboratory,
