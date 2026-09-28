@@ -262,7 +262,7 @@
   as the report has them for SGP4, without the terms of order J2 e: against
   J2's motion integrated numerically, a circular low orbit drifts along
   track by J2^2, some 45 m an orbit, and one of eccentricity 0.01 by J2 e,
-  some 450 m."
+  some 450 m. The terms in full are `allgo.astro.brouwer`'s."
   ([el] (j2-osculating mu c/R-earth geo/J2 el))
   ([mu R J2 {:keys [a e i raan argp M]}]
    (let [n (math/sqrt (/ mu (* a a a)))

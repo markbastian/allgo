@@ -104,8 +104,8 @@ of expected return:
      `allgo.astro.gravity` (Pines and the spherical partials) and J2's
      short-period terms as Spacetrack Report No. 3 gives them, and Lear's
      and Gottlieb's normalized gravity algorithms from NASA/TP-2016-218604
-     -- except Brouwer's (or Kozai's) short-period terms in full, with the
-     J2 e terms the report drops.
+     -- and Brouwer's short-period terms in full, with the J2 e terms the
+     report drops, in `allgo.astro.brouwer`.
   8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
      sun-synchronous inclination in `allgo.astro.perturbations`.
   9. ~~Covariance transformations~~ -- `allgo.astro.covariance`: the
