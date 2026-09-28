@@ -134,3 +134,32 @@
       ;; the push is along -x, so the rates are those of a push along -x, scaled
       (is (< (v3/length (v3/cross e (:e F))) (* 1e-12 (v3/length e) (v3/length (:e F)))))
       (is (pos? (v3/dot e (:e F)))))))
+
+(deftest j2-short-period
+  (let [per (kep/period mu 7000.0)
+        t (* 3 per)
+        error (fn [e with?]
+                (let [mean {:a 7000.0 :e e :i 0.9 :raan 0.3 :argp 1.0 :M 0.2}
+                      s0 (pt/j2-osculating mean)
+                      num (rk4 (minus-central j2-accel) s0 t 2400)
+                      rates (pt/j2-secular 7000.0 e 0.9)
+                      mean-t (assoc mean :raan (+ 0.3 (* (:raan rates) t)) :argp (+ 1.0 (* (:argp rates) t))
+                                    :M (+ 0.2 (* (:M rates) t)))
+                      model (if with? (pt/j2-propagate mean t) (kep/elements->state mu mean-t))]
+                  (v3/distance (first num) (first model))))]
+    (testing "three orbits of J2's motion, integrated, against the mean elements with the short-period terms"
+      ;; J2^2's along-track drift, some 45 m an orbit, is what first order leaves
+      (is (< (error 0.0 true) 0.2))
+      (is (< (error 0.001 true) 0.2)))
+    (testing "and without them, the orbit is kilometers out"
+      (is (> (error 0.0 false) (* 10 (error 0.0 true))))
+      (is (> (error 0.001 false) 2.0)))
+    (testing "the report drops the terms of order J2 e: at 0.01 they show"
+      (is (< (error 0.01 true) 2.0))))
+  (testing "osculating to mean and back"
+    (let [mean {:a 7000.0 :e 0.01 :i 0.9 :raan 0.3 :argp 1.0 :M 0.2}
+          m (pt/osculating->mean (pt/j2-osculating mean))]
+      (doseq [k [:a :e :i :raan]]
+        (is (< (abs (- (m k) (mean k))) (* 1e-9 (max 1.0 (mean k)))) (str k)))
+      ;; the perigee and anomaly, each ill-set by a small eccentricity, together
+      (is (< (abs (- (+ (:argp m) (:M m)) (+ (:argp mean) (:M mean)))) 1e-9)))))

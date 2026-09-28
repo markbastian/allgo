@@ -18,6 +18,7 @@
             [allgo.astro.kepler :as kepler]
             [allgo.astro.srp :as srp]
             [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [allgo.numerics.quadrature :as quadrature]
             [allgo.numerics.special :as special]
             [clojure.math :as math]))
@@ -197,3 +198,86 @@
   ([s r-sun area-to-mass cr] (srp-secular mu s r-sun area-to-mass cr))
   ([mu s r-sun area-to-mass cr]
    (steady-push-secular mu s (srp/acceleration [0.0 0.0 0.0] r-sun area-to-mass cr 1.0))))
+
+;; ------------------------------------------------ J2's short-period terms
+
+(defn j2-osculating
+  "The osculating state `[r v]` of an orbit with mean elements `el` --
+  Brouwer's, as two-line elements carry them -- under J2: Brouwer's
+  first-order short-period terms in Lyddane's form, as Spacetrack Report
+  No. 3 (Hoots and Roehrich, 1980) gives them for SGP4, with k2 = J2 R^2/2
+  and theta = cos i:
+
+    r     = r_L (1 - 3/2 (k2/p^2) sqrt(1-e^2) (3 theta^2 - 1)) + 1/2 (k2/p) (1 - theta^2) cos 2u
+    u     = u_L - 1/4 (k2/p^2) (7 theta^2 - 1) sin 2u
+    Omega = Omega + 3/2 (k2/p^2) theta sin 2u
+    i     = i + 3/2 (k2/p^2) theta sin i cos 2u
+    r'    = r'_L - (k2/p) n (1 - theta^2) sin 2u
+    r nu' = r nu'_L + (k2/p) n ((1 - theta^2) cos 2u + 3/2 (3 theta^2 - 1))
+
+  L marking the two-body values of the mean orbit. First order in J2 and,
+  as the report has them for SGP4, without the terms of order J2 e: against
+  J2's motion integrated numerically, a circular low orbit drifts along
+  track by J2^2, some 45 m an orbit, and one of eccentricity 0.01 by J2 e,
+  some 450 m."
+  ([el] (j2-osculating mu c/R-earth geo/J2 el))
+  ([mu R J2 {:keys [a e i raan argp M]}]
+   (let [n (math/sqrt (/ mu (* a a a)))
+         p (* a (- 1.0 (* e e)))
+         E (kepler/kepler-equation M e)
+         rl (* a (- 1.0 (* e (math/cos E))))
+         rdotl (/ (* (math/sqrt (* mu a)) e (math/sin E)) rl)
+         rvdotl (/ (math/sqrt (* mu p)) rl)
+         nu (kepler/eccentric->true E e)
+         u (+ argp nu)
+         k2 (* 0.5 J2 R R)
+         kp (/ k2 p) kp2 (/ k2 (* p p))
+         th (math/cos i) th2 (* th th)
+         s2u (math/sin (* 2.0 u)) c2u (math/cos (* 2.0 u))
+         r (+ (* rl (- 1.0 (* 1.5 kp2 (math/sqrt (- 1.0 (* e e))) (- (* 3.0 th2) 1.0))))
+              (* 0.5 kp (- 1.0 th2) c2u))
+         uk (- u (* 0.25 kp2 (- (* 7.0 th2) 1.0) s2u))
+         node (+ raan (* 1.5 kp2 th s2u))
+         inc (+ i (* 1.5 kp2 th (math/sin i) c2u))
+         rdot (- rdotl (* kp n (- 1.0 th2) s2u))
+         rvdot (+ rvdotl (* kp n (+ (* (- 1.0 th2) c2u) (* 1.5 (- (* 3.0 th2) 1.0)))))
+         ;; the orientation vectors
+         sn (math/sin node) cn (math/cos node) si (math/sin inc) ci (math/cos inc)
+         su (math/sin uk) cu (math/cos uk)
+         mhat [(* (- sn) ci) (* cn ci) si]
+         nhat [cn sn 0.0]
+         U (v3/add (v3/scale mhat su) (v3/scale nhat cu))
+         V (v3/sub (v3/scale mhat cu) (v3/scale nhat su))]
+     [(v3/scale U r) (v3/add (v3/scale U rdot) (v3/scale V rvdot))])))
+
+(defn j2-propagate
+  "The osculating state `dt` seconds after an epoch where the mean elements
+  are `el`: the mean elements carried forward by J2's secular rates, then
+  the short-period terms of `j2-osculating` put back."
+  ([el dt] (j2-propagate mu c/R-earth geo/J2 el dt))
+  ([mu R J2 {:keys [a e i raan argp M] :as el} dt]
+   (let [rates (j2-secular mu R J2 a e i)]
+     (j2-osculating mu R J2 (assoc el
+                                   :raan (+ raan (* (:raan rates) dt))
+                                   :argp (+ argp (* (:argp rates) dt))
+                                   :M (+ M (* (:M rates) dt)))))))
+
+(defn osculating->mean
+  "The mean elements whose `j2-osculating` state is `s`, by fixed-point
+  iteration on the elements: the osculating elements are the first guess,
+  and each step moves the guess by how far its own osculating elements
+  miss the target's. J2 is small, so a few steps settle it."
+  ([s] (osculating->mean mu c/R-earth geo/J2 s))
+  ([mu R J2 [r v]]
+   (let [target (kepler/state->elements mu r v)
+         ks [:a :e :i :raan :argp :M]
+         angle? #{:i :raan :argp :M}
+         d (fn [x y k] (let [dx (- x y)] (if (angle? k) (am/wrap-angle dx) dx)))]
+     (loop [guess (select-keys target ks) k 0]
+       (let [[r' v'] (j2-osculating mu R J2 guess)
+             got (kepler/state->elements mu r' v')
+             step (into {} (for [key ks] [key (d (target key) (got key) key)]))
+             guess' (merge-with + guess step)]
+         (if (or (> k 50) (< (abs (:a step)) 1e-9))
+           guess'
+           (recur guess' (inc k))))))))

@@ -101,9 +101,10 @@ of expected return:
   7. Perturbations (ch. 8-9): done -- `allgo.astro.perturbations` (Gauss's
      variational equations, orbit-averaged rates, J2's secular rates,
      King-Hele's drag decay, radiation pressure's secular rates) and
-     `allgo.astro.gravity` (Pines and the spherical partials) -- except
-     J2's short-period terms and Gottlieb's and Lear's formulations, which
-     await the book's pages.
+     `allgo.astro.gravity` (Pines and the spherical partials) and J2's
+     short-period terms as Spacetrack Report No. 3 gives them -- except
+     Gottlieb's and Lear's formulations, and Brouwer's (or Kozai's)
+     short-period terms in full, with the J2 e terms the report drops.
   8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
      sun-synchronous inclination in `allgo.astro.perturbations`.
   9. ~~Covariance transformations~~ -- `allgo.astro.covariance`, the
