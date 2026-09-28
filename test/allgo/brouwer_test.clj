@@ -1,11 +1,10 @@
 (ns allgo.brouwer-test
   "Brouwer's theory against J2's motion integrated numerically, and his
   second-order secular rates against the mean Hamiltonian averaged from
-  first principles. With the rates and the mean L both second order, what
-  thirty orbits leave near-circular orbits is third order in J2 -- a
-  tenth of J2, a thousandth of the error -- and a few meters; eccentric
-  orbits keep a drift of order J2^2 e from the long-period terms left
-  out. Spacetrack Report No. 3's shortened terms are kilometers out."
+  first principles. With the rates and the mean L second order and the
+  long-period terms in, what thirty orbits leave is third order in J2 --
+  a tenth of J2, a thousandth of the error -- and a few meters.
+  Spacetrack Report No. 3's shortened terms are kilometers out."
   (:require [allgo.astro.brouwer :as br]
             [allgo.astro.constants :as c]
             [allgo.astro.geopotential :as geo]
@@ -116,14 +115,23 @@
 ;; ------------------------------------------------------------ propagation
 
 (deftest against-numerical-j2
-  (testing "thirty orbits: meters near-circular, tens of meters eccentric"
-    (doseq [[el bound] (map vector orbits [0.005 0.005 0.04 0.05 0.05 0.04])]
-      (is (< (error-after geo/J2 el 30) bound) (str el))))
-  (testing "near-circular, what is left is third order: a tenth of J2 leaves a thousandth of the error, or near it"
-    (doseq [el [(orbits 0) (orbits 4)]]
+  (testing "what is left after thirty orbits is third order: a tenth of J2 leaves a thousandth of the error, or near it"
+    (doseq [[el bound] (map vector orbits [0.005 0.005 0.005 0.01 0.05 0.02])]
       (let [full (error-after geo/J2 el 30)
             tenth (error-after (* 0.1 geo/J2) el 30)]
+        ;; meters; tens near the equator, where J2^3 is largest
+        (is (< full bound) (str el " " full))
         (is (> (/ full tenth) 400.0) (str el " " full " " tenth)))))
+  (testing "the long-period terms: without them an eccentric orbit is a hundred meters out"
+    (let [{:keys [a e i raan argp M] :as el} (orbits 2)
+          [t r] (integrated geo/J2 a e (br/osculating-state el) 100)
+          rates (br/secular-rates a e i)
+          without (br/short-period-elements (assoc el :raan (+ raan (* (:raan rates) t))
+                                                   :argp (+ argp (* (:argp rates) t))
+                                                   :M (+ M (* (:M rates) t))))
+          with (v3/distance r (first (br/propagate el t)))]
+      (is (< with 0.01) (str with))
+      (is (> (v3/distance r (first (kep/elements->state mu without))) (* 10.0 with)))))
   (testing "the second-order rates are what does it: J2's first-order rates alone leave kilometers"
     (let [{:keys [a e i raan argp M] :as el} (orbits 1)
           [t r] (integrated geo/J2 a e (br/osculating-state el) 30)
@@ -142,7 +150,8 @@
     (doseq [{:keys [a e i raan argp M] :as el} orbits]
       (let [m (br/mean-elements (br/osculating-state el))]
         (is (< (abs (- (:a m) a)) 1e-8) (str el))
-        (is (< (abs (- (:e m) e)) 1e-10) (str el))
+        ;; a millimeter: the long-period terms' differences at e = 0.001
+        (is (< (abs (- (:e m) e)) 5e-10) (str el))
         (is (< (abs (- (:i m) i)) 1e-11) (str el))
         (is (< (abs (am/wrap-angle (- (:raan m) raan))) 1e-11) (str el))
         (is (< (abs (am/wrap-angle (- (+ (:argp m) (:M m)) argp M))) 1e-11) (str el))))))

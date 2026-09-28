@@ -105,9 +105,8 @@ of expected return:
      short-period terms as Spacetrack Report No. 3 gives them, and Lear's
      and Gottlieb's normalized gravity algorithms from NASA/TP-2016-218604
      -- and Brouwer's short-period terms in full, with the J2 e terms the
-     report drops, and his second-order secular rates, in
-     `allgo.astro.brouwer`. Still to do there: Brouwer's long-period
-     terms, which leave eccentric orbits a drift of order J2^2 e.
+     report drops, his second-order secular rates and his long-period
+     terms, in `allgo.astro.brouwer`.
   8. ~~Mission geometry (ch. 11)~~ -- `allgo.astro.mission`, with the
      sun-synchronous inclination in `allgo.astro.perturbations`.
   9. ~~Covariance transformations~~ -- `allgo.astro.covariance`: the
