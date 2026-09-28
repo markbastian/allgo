@@ -19,6 +19,7 @@
             [allgo.astro.srp :as srp]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
+            [allgo.numerics.quadrature :as quadrature]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
@@ -155,13 +156,7 @@
   kg/m^3: the decay rate integrated, by Simpson's rule in the radius."
   ([a0 a1 B density] (circular-lifetime mu a0 a1 B density 2000))
   ([mu a0 a1 B density n]
-   (let [n (if (odd? n) (inc n) n)
-         h (/ (- a0 a1) n)
-         f (fn [a] (/ -1.0 (circular-decay-rate mu a B (density (- a c/R-earth)))))]
-     (* (/ h 3.0)
-        (reduce + (for [k (range (inc n))
-                        :let [w (cond (or (zero? k) (= k n)) 1.0 (odd? k) 4.0 :else 2.0)]]
-                    (* w (f (+ a1 (* k h))))))))))
+   (quadrature/simpson (fn [a] (/ -1.0 (circular-decay-rate mu a B (density (- a c/R-earth))))) a1 a0 n)))
 
 ;; ------------------------------------------------- a steady push: SRP
 
