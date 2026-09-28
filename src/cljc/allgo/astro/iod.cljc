@@ -8,7 +8,9 @@
   (Gibbs's geometric construction, or Herrick-Gibbs's Taylor series when
   the three are too close together for geometry), from three sightings of
   direction alone (Gauss's method, which finds the ranges by solving an
-  eighth-degree polynomial), or from two positions and the time between
+  eighth-degree polynomial, refined by Escobal's double-r iteration, or
+  by Gooding's method, which holds over long arcs and whole revolutions),
+  or from two positions and the time between
   them -- Lambert's problem, which is also the targeting problem: what
   velocity takes me from here to there in this long.
 
@@ -559,3 +561,71 @@
                           (- (+ m1 m2) (* 2.0 (math/sqrt (* m1 m2)) c2 cdE2)))]
                  (fg-velocities mu r1 r2 false p))
                (recur y' (inc i))))))))))
+
+;; ------------------------------------------------------------- Gooding
+
+(defn gooding
+  "An orbit from three sightings of direction alone, as `gauss` takes
+  them, by Gooding's method (\"A new procedure for the solution of the
+  classical problem of minimal orbit determination from three lines of
+  sight\", Celestial Mechanics and Dynamical Astronomy 66, 1997): guess
+  the ranges at the first and third sightings, which fixes two positions;
+  Lambert's problem between them over the time between gives an orbit,
+  and flying it to the middle time a computed position; its two
+  coordinates across the middle sight line are the residuals, driven to
+  zero by Newton's method in the two ranges, the partials by central
+  differences as Gooding takes them, each step halved until it lowers
+  the residual -- which widens the guesses it converges from. No series is truncated and no
+  configuration of sight lines is singular save the truly indeterminate
+  -- all three in one plane through the center -- and the arc may span
+  whole revolutions: `:revs` the complete ones between the first and
+  third sightings, `:high?` which of the two orbits each count of them
+  has, `:long?` for more than half a revolution beyond them. The ranges
+  default to `gauss`'s, or 1.5 Earth radii from each site. Returns `{:r2
+  :v2 :ranges}` at the middle sighting, nil if the iteration does not
+  converge."
+  ([observations ts sites] (gooding mu observations ts sites {}))
+  ([mu observations [t1 t2 t3 :as ts] [R1 R2 R3 :as sites] {:keys [guesses revs long? high?] :or {revs 0}}]
+   (let [[L1 L2 L3] (map (fn [[ra dec]] (line-of-sight ra dec)) observations)
+         lambert-opts {:revs revs :long? long? :high? high?}
+         ;; axes across the middle sight line
+         ax1 (v3/normalize (v3/cross L2 (if (< (abs (nth L2 2)) 0.9) [0.0 0.0 1.0] [1.0 0.0 0.0])))
+         ax2 (v3/cross L2 ax1)
+         orbit (fn [rho1 rho3]
+                 (let [r1 (v3/add R1 (v3/scale L1 rho1))
+                       r3 (v3/add R3 (v3/scale L3 rho3))]
+                   (when-let [[v1] (lambert mu r1 r3 (- t3 t1) lambert-opts)]
+                     (when-let [[r2 v2] (universal/propagate mu r1 v1 (- t2 t1))]
+                       (let [c (v3/sub r2 R2)]
+                         {:r2 r2 :v2 v2 :F [(v3/dot c ax1) (v3/dot c ax2)]})))))
+         [g1 g3] (or guesses
+                     (when-let [{rs :ranges} (gauss mu observations ts sites)]
+                       (when (and (every? pos? rs) (zero? revs)) [(first rs) (nth rs 2)]))
+                     [(* 1.5 c/R-earth) (* 1.5 c/R-earth)])
+         scale (+ (v3/length R2) (* 0.5 (+ g1 g3)))]
+     (loop [rho1 g1 rho3 g3 i 0]
+       (when-let [{[F1 F2] :F :keys [r2 v2]} (orbit rho1 rho3)]
+         (if (< (math/hypot F1 F2) (* 1e-13 scale))
+           {:r2 r2 :v2 v2 :ranges [rho1 (v3/length (v3/sub r2 R2)) rho3]}
+           (when (< i 100)
+             (let [h1 (* 1e-7 rho1) h3 (* 1e-7 rho3)
+                   p1 (orbit (+ rho1 h1) rho3) m1 (orbit (- rho1 h1) rho3)
+                   p3 (orbit rho1 (+ rho3 h3)) m3 (orbit rho1 (- rho3 h3))]
+               (when (and p1 m1 p3 m3)
+                 (let [d (fn [p m h] (map #(/ (- %1 %2) (* 2.0 h)) (:F p) (:F m)))
+                       [a11 a21] (d p1 m1 h1)
+                       [a13 a23] (d p3 m3 h3)
+                       det (- (* a11 a23) (* a13 a21))
+                       d1 (/ (- (* a23 F1) (* a13 F2)) det)
+                       d3 (/ (- (* a11 F2) (* a21 F1)) det)
+                       norm (math/hypot F1 F2)
+                       ;; halve a step that leaves a range negative, has no
+                       ;; Lambert solution or does not lower the residual
+                       step (loop [s 1.0]
+                              (let [n1 (- rho1 (* s d1)) n3 (- rho3 (* s d3))
+                                    ok (and (pos? n1) (pos? n3)
+                                            (when-let [{[G1 G2] :F} (orbit n1 n3)] (< (math/hypot G1 G2) norm)))]
+                                (cond ok [n1 n3]
+                                      (< s 1e-4) nil
+                                      :else (recur (* 0.5 s)))))]
+                   (when step (recur (first step) (second step) (inc i)))))))))))))

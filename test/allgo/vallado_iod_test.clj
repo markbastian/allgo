@@ -231,3 +231,27 @@
           (is (< (rel-err (first g) (first (iod/lambert r1 r2 dt {}))) 1e-9) (str dt))
           (is (< (rel-err (first g) (first (iod/lambert-battin r1 r2 dt))) 1e-9) (str dt))
           (is (arrives? r1 (first g) r2 dt)))))))
+
+(deftest gooding
+  (testing "Gooding's method recovers the orbit from a short arc, as double-r does"
+    (doseq [ts [[-480.0 0.0 480.0] [-900.0 0.0 1200.0]]]
+      (let [[obs sites] (sightings ts)
+            {:keys [r2 v2]} (iod/gooding obs ts sites)
+            [r-true v-true] (at 0.0)]
+        (is (< (rel-err r2 r-true) 1e-9) (str ts))
+        (is (< (rel-err v2 v-true) 1e-9) (str ts)))))
+  (testing "and from a long arc, more than half the 3.6-hour orbit, from rough guesses"
+    (let [ts [-3000.0 0.0 4500.0]
+          [obs sites] (sightings ts)
+          {:keys [r2 v2]} (iod/gooding c/GM-earth obs ts sites {:guesses [8000.0 8000.0] :long? true})
+          [r-true v-true] (at 0.0)]
+      (is (< (rel-err r2 r-true) 1e-9))
+      (is (< (rel-err v2 v-true) 1e-9))))
+  (testing "and across a whole revolution, told how many"
+    (let [period (kep/period mu 12000.0)
+          ts [0.0 1500.0 (+ period 2400.0)]
+          [obs sites] (sightings ts)
+          [r-true v-true] (at 1500.0)
+          found (keep #(iod/gooding c/GM-earth obs ts sites {:guesses [6000.0 6000.0] :revs 1 :high? %})
+                      [false true])]
+      (is (some #(and (< (rel-err (:r2 %) r-true) 1e-9) (< (rel-err (:v2 %) v-true) 1e-9)) found)))))
