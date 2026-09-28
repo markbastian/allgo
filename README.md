@@ -227,6 +227,11 @@ The demos draw on other people's data, used under their terms:
 - **U.S. Standard Atmosphere, 1976** (`allgo.astro.us76`): its defining
   equations below 86 km and its Table I densities above, from the NOAA,
   NASA and USAF publication (NASA-TM-X-74335), a work of the US government.
+- **NRLMSISE-00** (`allgo.astro.msis`, `allgo.astro.msis-data`):
+  transcribed from the Fortran of Picone, Hedin and Drob (Naval Research
+  Laboratory), a work of the US government, as NASA's CCMC ModelWeb
+  archive distributes it; the coefficients generated from its BLOCK DATA,
+  and its test driver's output in `test/data/msis/`.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
