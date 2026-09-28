@@ -283,3 +283,63 @@
         dx0 (/ (* n (+ (* x0 (- 4.0 (* 3.0 cs))) (* 2.0 (- 1.0 cs) (/ dy0 n)))) (- s))
         dz0 (/ (* (- n) z0 cs) s)]
     [dx0 dy0 dz0]))
+
+;; ------------------------------------------------------ fixed-delta-v
+
+(defn fixed-dv-orbit
+  "What a burn of fixed size `dv` does at radius `r` where the speed is
+  `v` and the flight-path angle `fpa`, aimed at angle `alpha` in the
+  orbit's plane from the velocity (positive away from the center):
+  `{:v :fpa :a :e :rp :ra}` of the orbit after it."
+  ([r v fpa dv alpha] (fixed-dv-orbit mu r v fpa dv alpha))
+  ([mu r v fpa dv alpha]
+   (let [;; radial and transverse components, before and after
+         vr (+ (* v (math/sin fpa)) (* dv (math/sin (+ fpa alpha))))
+         vt (+ (* v (math/cos fpa)) (* dv (math/cos (+ fpa alpha))))
+         v2 (+ (* vr vr) (* vt vt))
+         energy (- (* 0.5 v2) (/ mu r))
+         h (* r vt)
+         a (/ (- mu) (* 2.0 energy))
+         e (math/sqrt (max 0.0 (+ 1.0 (/ (* 2.0 energy h h) (* mu mu)))))
+         p (/ (* h h) mu)]
+     {:v (math/sqrt v2) :fpa (math/atan2 vr vt) :a a :e e
+      :rp (/ p (+ 1.0 e)) :ra (if (< e 1.0) (/ p (- 1.0 e)) ##Inf)})))
+
+(defn fixed-dv-to-radius
+  "The directions -- angles from the velocity in the orbit's plane,
+  positive away from the center -- in which a burn of fixed size `dv` at
+  radius `r`, speed `v` and flight-path angle `fpa` puts an apsis of the
+  new orbit at `r-target`. The new orbit reaches a radius R when h^2/R^2
+  <= 2(E + mu/R), its speed there at least the transverse part the
+  angular momentum requires; an apsis at R is the equality, found here
+  wherever it changes sign round the circle of directions. Empty if no
+  direction of this burn reaches -- and at the very farthest radius it
+  can reach, where the two directions merge into one, the tangent burn's.
+  (Vallado's fixed-delta-v maneuvers, set up here from the vis-viva and
+  angular momentum of the burned orbit.)"
+  ([r v fpa dv r-target] (fixed-dv-to-radius mu r v fpa dv r-target))
+  ([mu r v fpa dv r-target]
+   (let [margin (fn [alpha]
+                  (let [vr (+ (* v (math/sin fpa)) (* dv (math/sin (+ fpa alpha))))
+                        vt (+ (* v (math/cos fpa)) (* dv (math/cos (+ fpa alpha))))
+                        energy (- (* 0.5 (+ (* vr vr) (* vt vt))) (/ mu r))
+                        h (* r vt)]
+                    (- (* 2.0 (+ energy (/ mu r-target))) (/ (* h h) (* r-target r-target)))))
+         n 720
+         step (/ (* 2.0 math/PI) n)
+         alphas (map #(- (* % step) math/PI) (range (inc n)))]
+     (->> (partition 2 1 alphas)
+          (keep (fn [[a b]] (when (neg? (* (margin a) (margin b))) (roots/bisect margin a b))))
+          vec))))
+
+(defn max-turn
+  "The largest angle through which a burn of fixed size `dv` can turn a
+  velocity of speed `v`, and the speed after: when dv < v, arcsin(dv/v),
+  the burn perpendicular to the new velocity, the speed falling to
+  sqrt(v^2 - dv^2); otherwise any turn at all. `{:turn :v :alpha}`,
+  alpha the burn's angle from the old velocity."
+  [v dv]
+  (if (< dv v)
+    {:turn (math/asin (/ dv v)) :v (math/sqrt (- (* v v) (* dv dv)))
+     :alpha (+ (/ math/PI 2) (math/asin (/ dv v)))}
+    {:turn math/PI :v (- dv v) :alpha math/PI}))

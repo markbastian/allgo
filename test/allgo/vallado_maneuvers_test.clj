@@ -247,3 +247,53 @@
             v0 (mv/hill-intercept a r0 t)
             [r _] (mv/hill a r0 v0 t)]
         (is (every? #(< (abs %) 1e-9) r))))))
+
+(defn- burn-apsides
+  "The apsides, found from the state vector, after a burn of `dv` at
+  angle `alpha` from the velocity at radius `r`, speed `v` and flight-path
+  angle `fpa`, all in the x-y plane."
+  [r v fpa dv alpha]
+  (let [pos [r 0.0 0.0]
+        vel [(* v (math/sin fpa)) (* v (math/cos fpa)) 0.0]
+        dvv [(* dv (math/sin (+ fpa alpha))) (* dv (math/cos (+ fpa alpha))) 0.0]
+        {:keys [a e]} (kep/state->elements c/GM-earth pos (v3/add vel dvv))]
+    {:rp (* a (- 1.0 e)) :ra (* a (+ 1.0 e))}))
+
+(deftest fixed-dv
+  (let [mu c/GM-earth
+        r 7000.0 v (math/sqrt (/ mu r))]
+    (testing "fixed-dv-orbit is the orbit the burned state vector has"
+      (doseq [[fpa dv alpha] [[0.0 0.5 0.0] [0.1 0.3 1.2] [-0.05 0.8 -2.0]]]
+        (let [{:keys [ra rp]} (mv/fixed-dv-orbit r v fpa dv alpha)
+              flown (burn-apsides r v fpa dv alpha)]
+          (is (< (abs (- ra (:ra flown))) 1e-6) (str alpha))
+          (is (< (abs (- rp (:rp flown))) 1e-6) (str alpha)))))
+    (testing "a burn along the velocity is the tangent burn, its apoapsis where vis-viva puts it"
+      (let [dv 0.5
+            {:keys [ra rp]} (mv/fixed-dv-orbit r v 0.0 dv 0.0)
+            a (/ 1.0 (- (/ 2.0 r) (/ (math/pow (+ v dv) 2) mu)))]
+        (is (< (abs (- rp r)) 1e-8))
+        (is (< (abs (- ra (- (* 2.0 a) r))) 1e-8))))
+    (testing "the tangent burn reaches farthest: just short of its apoapsis two directions, either side of it; just beyond, none"
+      (let [farthest (:ra (mv/fixed-dv-orbit r v 0.0 0.5 0.0))
+            alphas (mv/fixed-dv-to-radius r v 0.0 0.5 (* 0.999 farthest))]
+        (is (= 2 (count alphas)))
+        (is (< (abs (+ (first alphas) (second alphas))) 1e-9) "symmetric about the velocity")
+        (doseq [alpha alphas]
+          (is (< (abs (- (:ra (burn-apsides r v 0.0 0.5 alpha)) (* 0.999 farthest))) 1e-6) (str alpha)))
+        (is (empty? (mv/fixed-dv-to-radius r v 0.0 0.5 (* 1.001 farthest))))))
+    (testing "a lower target, reachable two ways, each checked from the state vector"
+      (let [alphas (mv/fixed-dv-to-radius r v 0.1 0.3 7500.0)]
+        (is (= 2 (count alphas)))
+        (doseq [alpha alphas]
+          (is (< (abs (- (:ra (burn-apsides r v 0.1 0.3 alpha)) 7500.0)) 1e-6) (str alpha)))))
+    (testing "out of reach"
+      (is (empty? (mv/fixed-dv-to-radius r v 0.0 0.1 20000.0))))
+    (testing "the largest turn: the new velocity perpendicular to the burn, and no direction turns further"
+      (let [{:keys [turn alpha] v' :v} (mv/max-turn 7.5 1.0)
+            new [(+ 7.5 (math/cos alpha)) (math/sin alpha)]]
+        (is (< (abs (- (math/atan2 (second new) (first new)) turn)) 1e-12))
+        (is (< (abs (- (math/hypot (first new) (second new)) v')) 1e-12))
+        (is (< (abs (+ (* (math/cos alpha) (first new)) (* (math/sin alpha) (second new)))) 1e-12))
+        (is (every? (fn [b] (<= (math/atan2 (math/sin b) (+ 7.5 (math/cos b))) (+ turn 1e-12)))
+                    (map #(* % 0.01) (range 315))))))))
