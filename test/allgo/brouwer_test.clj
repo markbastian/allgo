@@ -145,6 +145,24 @@
           [t r] (integrated geo/J2 a e (pt/j2-osculating el) 30)]
       (is (> (v3/distance r (first (pt/j2-propagate el t))) 50.0)))))
 
+(deftest critical-inclination
+  (let [critical (math/acos (math/sqrt 0.2))
+        near? (fn [el] (try (br/osculating-state el) false
+                            (catch clojure.lang.ExceptionInfo x
+                              (= ::br/critical-inclination (:type (ex-data x))))))
+        el (fn [e degrees] {:a 8000.0 :e e :i (+ critical (math/to-radians degrees)) :raan 0.3 :argp 1.0 :M 0.2})]
+    (testing "too near it the long-period terms are refused, the sooner the more eccentric the orbit"
+      (is (near? (el 0.3 1.0)))
+      (is (near? (el 0.1 0.2)))
+      (is (near? (el 0.1 -0.2)))
+      (is (near? (assoc (el 0.1 0.2) :i (- math/PI (+ critical (math/to-radians 0.2))))) "and at its retrograde twin"))
+    (testing "where they are accepted they still hold: thirty orbits to meters"
+      (doseq [[e degrees] [[0.3 2.0] [0.1 0.5] [0.01 0.05]]]
+        (is (not (near? (el e degrees))))
+        (is (< (error-after geo/J2 (el e degrees) 30) 0.005) (str e " " degrees))))
+    (testing "and a long propagation, its angles run past 2 pi, is not mistaken for one"
+      (is (vector? (br/propagate (orbits 2) (* 1e6 (kep/period mu 8000.0))))))))
+
 (deftest osculating-to-mean
   (testing "mean to osculating and back"
     (doseq [{:keys [a e i raan argp M] :as el} orbits]

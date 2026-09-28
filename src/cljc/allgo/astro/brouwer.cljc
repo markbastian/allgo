@@ -49,7 +49,8 @@
   Brouwer's mean elements are doubly averaged, the long-period terms
   applied first and the short-period after. The perigee rate vanishes at
   the critical inclination, 63.4 degrees, and there the long-period terms
-  fail, as Brouwer's do.
+  fail, as Brouwer's do: where they grow too large to trust, the
+  conversions and the propagator throw (`long-period-limit`).
 
   With all of it, what is left against J2's motion integrated
   numerically is third order in J2. Elements are `{:a :e :i :raan :argp
@@ -281,14 +282,39 @@
       (- (+ (* We (/ (- eta) (* L e))) (* Wth (/ (- th) G))))
       (- (/ Wth G))])))
 
+(def long-period-limit
+  "The largest long-period correction, in any of the nonsingular elements
+  e cos(g + h), e sin(g + h), tan(i/2) sin h, tan(i/2) cos h and the mean
+  longitude, the theory accepts. The terms are first order in it, so what
+  they leave out goes as its square: at 1e-3 thirty orbits are still
+  within a few meters of J2's motion integrated numerically, at 2e-3 they
+  are some twenty out and at 4e-3 a hundred. Ordinary orbits keep below
+  2e-4; near the critical inclination the correction grows without bound,
+  the sooner the more eccentric the orbit -- within a degree of it at e =
+  0.3, a twentieth of one at e = 0.01."
+  1e-3)
+
 (defn long-period-elements
   "The singly averaged elements of the doubly averaged `el`: the
-  long-period corrections, first order in J2."
+  long-period corrections, first order in J2. Throws, with `:type`
+  `::critical-inclination` in its data, where the correction passes
+  `long-period-limit` -- near the critical inclination, 63.4 degrees or
+  116.6, where the first-order perigee rate the terms divide by vanishes."
   ([el] (long-period-elements mu c/R-earth geo/J2 el))
   ([mu R J2 el]
    (let [[L] (delaunay mu el)
-         [_ dG _ dl dg dh] (long-period mu R J2 el)]
-     (corrected mu el L 0.0 dG dl dg dh))))
+         [_ dG _ dl dg dh] (long-period mu R J2 el)
+         el' (corrected mu el L 0.0 dG dl dg dh)
+         ;; the mean longitude's change wrapped: `el`'s angles may run on
+         ;; past 2 pi, as `propagate` carries them, and `el'`'s are reduced
+         change (update (mapv - (->equinoctial el') (->equinoctial el)) 5 am/wrap-angle)
+         size (apply max (map abs (rest change)))]
+     (when-not (<= size long-period-limit)
+       (throw (ex-info (str "Too near the critical inclination for Brouwer's long-period terms: a correction of "
+                            size " passes the limit of " long-period-limit)
+                       {:type ::critical-inclination :i (:i el) :e (:e el) :correction size
+                        :limit long-period-limit})))
+     el')))
 
 (defn osculating-elements
   "The osculating elements of Brouwer's mean elements `el` -- doubly
