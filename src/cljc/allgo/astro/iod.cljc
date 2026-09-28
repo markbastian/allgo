@@ -18,6 +18,7 @@
             [allgo.astro.universal :as universal]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
@@ -311,13 +312,7 @@
 (defn- min-psi
   "The psi of least time of flight in the band of `revs` revolutions."
   [f lo hi]
-  (let [g (/ (- (math/sqrt 5.0) 1.0) 2.0)
-        t #(or (:t (f %)) ##Inf)]
-    (loop [lo lo hi hi i 0]
-      (if (> i 200)
-        (* 0.5 (+ lo hi))
-        (let [x1 (- hi (* g (- hi lo))) x2 (+ lo (* g (- hi lo)))]
-          (if (< (t x1) (t x2)) (recur lo x2 (inc i)) (recur x1 hi (inc i))))))))
+  (roots/minimize #(or (:t (f %)) ##Inf) lo hi {:tol 0.0 :max-iter 200}))
 
 (defn lambert
   "The velocities `[v1 v2]` that carry a body from `r1` to `r2` in `dt`
@@ -448,17 +443,11 @@
          grid (fn [kind] (let [base (* 0.5 s)]
                            (if (= kind :ellipse)
                              (map #(* base (math/pow 10.0 (/ % 100.0))) (range 0 601))
-                             (map #(- (* base (math/pow 10.0 (/ % 100.0)))) (range 600 -601 -1)))))
-         root (fn [f lo hi]
-                (loop [lo lo hi hi i 0]
-                  (let [mid (* 0.5 (+ lo hi))]
-                    (if (or (> i 200) (<= (abs (- hi lo)) (* 1e-15 (abs mid))))
-                      mid
-                      (if (= (neg? (f lo)) (neg? (f mid))) (recur mid hi (inc i)) (recur lo mid (inc i)))))))]
+                             (map #(- (* base (math/pow 10.0 (/ % 100.0)))) (range 600 -601 -1)))))]
      (vec
       (for [[kind [tf pf]] (lagrange-branches mu s c m1 m2 long? revs)
             :let [f #(- (tf %) dt) as (grid kind)]
             [lo hi] (map vector as (rest as))
             :when (not= (neg? (f lo)) (neg? (f hi)))
-            :let [a (root f lo hi)]]
+            :let [a (roots/bisect f lo hi)]]
         (velocities (pf a)))))))

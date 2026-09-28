@@ -16,6 +16,7 @@
   Radii in km, speeds in km/s, times in seconds, angles in radians. `mu`
   defaults to the Earth's."
   (:require [allgo.astro.constants :as c]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
@@ -165,12 +166,7 @@
          total (fn [d1] (+ (delta-v vi vta d1) (delta-v vtb vf (- di d1))))
          di1 (if optimal
                ;; golden-section search over the first burn's share
-               (let [g (/ (- (math/sqrt 5.0) 1.0) 2.0)]
-                 (loop [lo 0.0 hi di i 0]
-                   (if (> i 100)
-                     (* 0.5 (+ lo hi))
-                     (let [x1 (- hi (* g (- hi lo))) x2 (+ lo (* g (- hi lo)))]
-                       (if (< (total x1) (total x2)) (recur lo x2 (inc i)) (recur x1 hi (inc i)))))))
+               (roots/minimize total 0.0 di {:tol 0.0 :max-iter 100})
                (let [R (/ rfinal rinit)]
                  (math/atan (/ (math/sin di) (+ (math/pow R 1.5) (math/cos di))))))]
      {:di1 di1 :di2 (- di di1)

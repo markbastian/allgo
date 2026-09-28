@@ -11,19 +11,8 @@
   (:require [allgo.astro.geodesy :as geodesy]
             [allgo.astro.reduction :as reduction]
             [allgo.astro.sgp4 :as sgp4]
-            [allgo.astro.visibility :as visibility]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
-
-(defn- culmination
-  "The time of the greatest `f` between `a` and `b`, which holds a single
-  maximum, by golden-section search."
-  [f a b tol]
-  (let [g (/ (- (math/sqrt 5.0) 1.0) 2.0)]
-    (loop [a a b b]
-      (if (< (- b a) tol)
-        (* 0.5 (+ a b))
-        (let [x1 (- b (* g (- b a))) x2 (+ a (* g (- b a)))]
-          (if (< (f x1) (f x2)) (recur x1 b) (recur a x2)))))))
 
 (defn passes
   "The passes between `t0` and `t1` of a satellite whose elevation at time
@@ -36,7 +25,7 @@
   ([elevation t0 t1] (passes elevation t0 t1 {}))
   ([elevation t0 t1 {:keys [mask step tol] :or {mask 0.0 step 30.0 tol 1e-3}}]
    (let [up? #(> (elevation %) mask)
-         edges (visibility/transitions up? t0 t1 step tol)
+         edges (roots/transitions up? t0 t1 step tol)
          bounds (loop [edges edges current (when (up? t0) {:rise nil}) out []]
                   (if-let [[[t was-up?] & more] (seq edges)]
                     (if was-up?
@@ -44,7 +33,7 @@
                       (recur more {:rise t} out))
                     (if current (conj out (assoc current :set nil)) out)))]
      (mapv (fn [{:keys [rise set] :as p}]
-             (let [c (culmination elevation (or rise t0) (or set t1) tol)]
+             (let [c (roots/maximize elevation (or rise t0) (or set t1) {:tol tol})]
                (assoc p :culmination c :max-elevation (elevation c))))
            bounds))))
 

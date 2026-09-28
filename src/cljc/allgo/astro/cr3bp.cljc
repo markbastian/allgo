@@ -17,6 +17,7 @@
   U has five stationary points, the Lagrange points: three on the axis
   and two at the tips of equilateral triangles."
   (:require [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 (defn mass-ratio
@@ -63,12 +64,7 @@
   bisection: one sign change in each of the three intervals the primaries
   cut the axis into."
   [mu lo hi]
-  (let [f #(first (gradient mu [% 0.0 0.0]))]
-    (loop [lo lo hi hi k 0]
-      (let [mid (* 0.5 (+ lo hi))]
-        (if (or (> k 200) (<= (- hi lo) 1e-15))
-          mid
-          (if (= (neg? (f lo)) (neg? (f mid))) (recur mid hi (inc k)) (recur lo mid (inc k))))))))
+  (roots/bisect #(first (gradient mu [% 0.0 0.0])) lo hi))
 
 (defn lagrange-points
   "The five Lagrange points: `{:L1 :L2 :L3 :L4 :L5}`. L1 between the

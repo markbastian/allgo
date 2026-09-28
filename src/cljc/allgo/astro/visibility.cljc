@@ -16,6 +16,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.srp :as srp]
             [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------------------ sight
@@ -68,27 +69,6 @@
   [r r-sun]
   (pos? (:fraction (shadow r r-sun))))
 
-(defn- crossing
-  "The instant, to within `tol`, between `a` (where `(pred a)`) and `b`
-  (where not) that `pred` changes."
-  [pred a b tol]
-  (loop [a a b b]
-    (if (<= (abs (- b a)) tol)
-      (* 0.5 (+ a b))
-      (let [m (* 0.5 (+ a b))]
-        (if (pred m) (recur m b) (recur a m))))))
-
-(defn transitions
-  "Where `pred` changes between `t0` and `t1`, sampling every `step` and
-  refining each change to `tol`: `[[t from-value] ...]`."
-  [pred t0 t1 step tol]
-  (let [ts (concat (range t0 t1 step) [t1])]
-    (->> (map vector ts (rest ts))
-         (keep (fn [[a b]]
-                 (let [pa (pred a) pb (pred b)]
-                   (when (not= pa pb)
-                     [(crossing #(= pa (pred %)) a b tol) pa])))))))
-
 (defn eclipses
   "The satellite's passages through the Earth's shadow between `t0` and
   `t1`: `(position t)` gives its position and `(sun t)` the Sun's, in one
@@ -101,9 +81,9 @@
   (let [dark? (fn [t] (< (:fraction (shadow (position t) (sun t))) 1.0))
         umbra? (fn [t] (<= (:fraction (shadow (position t) (sun t))) 0.0))
         edges (sort-by first
-                       (concat (for [[t was] (transitions dark? t0 t1 step tol)]
+                       (concat (for [[t was] (roots/transitions dark? t0 t1 step tol)]
                                  [t (if was :penumbra-out :penumbra-in)])
-                               (for [[t was] (transitions umbra? t0 t1 step tol)]
+                               (for [[t was] (roots/transitions umbra? t0 t1 step tol)]
                                  [t (if was :umbra-out :umbra-in)])))
         start (when (dark? t0) {})]
     (loop [edges edges current start out []]

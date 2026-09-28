@@ -1,7 +1,6 @@
 (ns allgo.numerics.fit
-  "Least-squares curve fitting and the iterations that solve an equation
-  by repeated improvement (Meeus, *Astronomical Algorithms*, chapters 4
-  and 5).
+  "Least-squares curve fitting (Meeus, *Astronomical Algorithms*, chapter
+  4). The iterations of his chapter 5 are in `allgo.numerics.roots`.
 
   The fits are the closed forms: the normal equations for a line, a
   parabola, or any combination of up to three given functions, written out
@@ -77,41 +76,3 @@
                             (let [fx (f x)] [(+ syf (* y fx)) (+ sff (* fx fx))]))
                           [0.0 0.0] points)]
     (/ syf sff)))
-
-;; ---------------------------------------------------------------- chapter 5
-
-(defn fixed-point
-  "Iterate x <- (better x) from `start` until successive values differ by
-  less than `tol`, returning the last. nil after `max-iterations` without
-  settling.
-
-  This is how most of astronomy's transcendental equations are solved:
-  Kepler's equation, the time of a rising, the light time to a planet --
-  each rearranged so the unknown appears once on the left, and fed back
-  into itself. It converges whenever the rearranged right side changes
-  more slowly than its argument."
-  ([better start] (fixed-point better start 1e-15 100))
-  ([better start tol max-iterations]
-   (loop [x start i 0]
-     (when (< i max-iterations)
-       (let [n (better x)]
-         (if (<= (abs (- n x)) (* tol (max 1.0 (abs n))))
-           n
-           (recur n (inc i))))))))
-
-(defn bisect
-  "A root of `f` between `lo` and `hi`, where it changes sign, by halving
-  the interval to the last bit.
-
-  Slow -- one bit per evaluation -- but it cannot fail where a sign change
-  is known, which is why Meeus recommends it for Kepler's equation at
-  eccentricities near one, where Newton's method may not converge."
-  [f lo hi]
-  (let [flo (f lo)]
-    (loop [lo lo hi hi flo flo i 0]
-      (let [mid (* 0.5 (+ lo hi))
-            fm  (f mid)]
-        (cond
-          (or (zero? fm) (>= i 64) (= mid lo) (= mid hi)) mid
-          (= (neg? fm) (neg? flo)) (recur mid hi fm (inc i))
-          :else (recur lo mid flo (inc i)))))))

@@ -13,6 +13,7 @@
             [allgo.astro.perturbations :as perturbations]
             [allgo.astro.reduction :as reduction]
             [allgo.math :as am]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 ;; ----------------------------------------------------- between two places
@@ -84,11 +85,7 @@
   [revs days e i]
   (let [miss (fn [a] (- (:days (repeat-period a e i revs)) days))
         a-guess (orbit-for-period (/ (* days 86164.0905) revs))]
-    (loop [lo (* 0.8 a-guess) hi (* 1.2 a-guess) k 0]
-      (let [mid (* 0.5 (+ lo hi))]
-        (if (or (> k 200) (< (- hi lo) 1e-9))
-          mid
-          (if (neg? (miss mid)) (recur mid hi (inc k)) (recur lo mid (inc k))))))))
+    (roots/bisect miss (* 0.8 a-guess) (* 1.2 a-guess))))
 
 ;; --------------------------------------------------------------- frozen
 

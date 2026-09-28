@@ -9,6 +9,7 @@
             [allgo.meeus-support :refer [->deg ->hours close? deg dms jd->mjd mjd->jd]]
             [allgo.numerics.fit :as fit]
             [allgo.numerics.interpolation :as interp]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -96,9 +97,9 @@
 ;; ---------------------------------------------------------------- chapter 5
 
 (deftest fixed-point-and-bisection
-  (is (close? (math/sqrt 2.0) (fit/bisect #(- (* % %) 2.0) 0.0 2.0) 1e-15))
-  (is (close? 0.7390851332151607 (fit/fixed-point math/cos 1.0) 1e-14))
-  (is (nil? (fit/fixed-point #(* 2.0 %) 1.0 1e-15 20)) "diverging gives nil"))
+  (is (close? (math/sqrt 2.0) (roots/bisect #(- (* % %) 2.0) 0.0 2.0) 1e-15))
+  (is (close? 0.7390851332151607 (roots/fixed-point math/cos 1.0) 1e-14))
+  (is (nil? (roots/fixed-point #(* 2.0 %) 1.0 1e-15 20)) "diverging gives nil"))
 
 ;; ---------------------------------------------------------------- chapter 7
 
