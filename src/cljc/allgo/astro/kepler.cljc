@@ -278,15 +278,18 @@
         e    (v3/length evec)
         en   (specific-energy mu r v)
         a    (if (< (abs en) 1e-15) ##Inf (/ (- mu) (* 2.0 en)))
-        i    (math/acos (am/clamp (/ (nth h 2) hm) -1.0 1.0))
+        ;; every angle by atan2 of a sine and a cosine part, which holds
+        ;; its digits near 0 and pi where acos of a cosine loses half
+        hhat (v3/scale h (/ 1.0 hm))
+        angle-about-h (fn [from to] (math/atan2 (v3/dot (v3/cross from to) hhat) (v3/dot from to)))
+        i    (math/atan2 (math/hypot (nth h 0) (nth h 1)) (nth h 2))
         circular?   (< e circular-tol)
         equatorial? (< nm (* equatorial-tol hm))
         raan (if equatorial? 0.0 (am/wrap-2pi (math/atan2 (nth node 1) (nth node 0))))
         argp (cond
                circular?   0.0
                equatorial? (am/wrap-2pi (math/atan2 (nth evec 1) (nth evec 0)))
-               :else       (let [ang (math/acos (am/clamp (/ (v3/dot node evec) (* nm e)) -1.0 1.0))]
-                             (am/wrap-2pi (if (neg? (nth evec 2)) (- c/two-pi ang) ang))))
+               :else       (am/wrap-2pi (angle-about-h node evec)))
         nu   (cond
                ;; circular and equatorial: measure from x, the only reference left
                (and circular? equatorial?)
@@ -294,11 +297,9 @@
                               (if (neg? (nth h 2)) (- ang) ang)))
                ;; circular: measure from the node -- argument of latitude
                circular?
-               (let [ang (math/acos (am/clamp (/ (v3/dot node r) (* nm rm)) -1.0 1.0))]
-                 (am/wrap-2pi (if (neg? (nth r 2)) (- c/two-pi ang) ang)))
+               (am/wrap-2pi (angle-about-h node r))
                :else
-               (let [ang (math/acos (am/clamp (/ (v3/dot evec r) (* e rm)) -1.0 1.0))]
-                 (am/wrap-2pi (if (neg? (v3/dot r v)) (- c/two-pi ang) ang))))]
+               (am/wrap-2pi (angle-about-h evec r)))]
     {:a a :e e :i i :raan raan :argp argp :nu nu
      :M (if (< e 1.0) (true->mean nu e) ##NaN)}))
 
