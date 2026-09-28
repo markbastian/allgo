@@ -8,7 +8,9 @@
   succeeds."
   (:require [allgo.astro.cio :as cio]
             [allgo.astro.reduction :as rd]
+            [allgo.geometry.rotation :as rot]
             [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -71,3 +73,23 @@
     (is (< (v3/distance (first (cio/gcrs->itrs gcrs tt ut polar))
                         (first (rd/eci->ecef gcrs tt ut polar)))
            5e-3))))
+
+(deftest the-equinox-based-route
+  ;; ERFA: eraPfw06, eraEo06a, eraGst06a and eraPnm06a. ERFA takes X and Y
+  ;; from its nutation series rather than the X, Y series, which agree to
+  ;; a few 1e-12 rad
+  (testing "the Fukushima-Williams angles"
+    (is (near? (cio/fukushima-williams tt)
+               [1.0075211742570022e-05 0.40904725249029683 0.0048857498487654034 0.40904718456493888] 1e-16)))
+  (testing "the equation of the origins, GST and the equinox-based matrix"
+    (is (< (abs (- (cio/equation-of-origins tt) -0.004399070165188583)) 1e-11))
+    (is (< (abs (- (cio/gst ut tt) 0.49946189849354639)) 1e-11))
+    (is (near? (cio/npb-matrix tt)
+               [[0.99998849750898389 -0.0043990448197225038 -0.0019113488428034776]
+                [0.0043990604496966209 0.99999032407887412 3.9734408237568353e-06]
+                [0.0019113128693985584 -1.2381534219230161e-05 0.99999817336323815]]
+               1e-11)))
+  (testing "and the two routes agree: GST and the equinox-based matrix give the CIO route's ITRS"
+    (let [npb (cio/npb-matrix tt)
+          via-equinox (lin/mat-mul (cio/polar-matrix tt polar) (lin/mat-mul (rot/rz (cio/gst ut tt)) npb))]
+      (is (near? via-equinox (cio/c2t-matrix tt ut polar) 1e-15)))))

@@ -151,3 +151,54 @@
          rt (lin/mat-vec Wt r)
          vt (lin/add (lin/mat-vec Wt v) (v3/cross w rt))]
      [(lin/mat-vec Qt (lin/mat-vec Rt rt)) (lin/mat-vec Qt (lin/mat-vec Rt vt))])))
+
+;; ------------------------------------------------ the equinox-based route
+
+(defn- arcsec-poly [t & cs]
+  (* as->rad (reduce (fn [acc k] (+ (* acc t) k)) 0.0 (reverse cs))))
+
+(defn fukushima-williams
+  "`[gamma-bar phi-bar psi-bar eps-A]`, radians: the IAU 2006 precession's
+  Fukushima-Williams angles at TT `mjd-tt` (Hilton et al., Celestial
+  Mechanics 94, 2006; the IERS Conventions 2010, eq. 5.40) -- the first
+  two placing the ecliptic of date, the last the mean obliquity."
+  [mjd-tt]
+  (let [t (centuries mjd-tt)]
+    [(arcsec-poly t -0.052928 10.556378 0.4932044 -0.00031238 -0.000002788 0.0000000260)
+     (arcsec-poly t 84381.412819 -46.811016 0.0511268 0.00053289 -0.000000440 -0.0000000176)
+     (arcsec-poly t -0.041775 5038.481484 1.5584175 -0.00018522 -0.000026452 -0.0000000148)
+     (arcsec-poly t 84381.406 -46.836769 -0.0001831 0.00200340 -0.000000576 -0.0000000434)]))
+
+(defn ecliptic-pole
+  "The pole of the ecliptic of date, a unit vector in the GCRS: the z axis
+  of the frame R1(phi-bar) R3(gamma-bar) turns the GCRS into."
+  [mjd-tt]
+  (let [[g p] (fukushima-williams mjd-tt)]
+    (nth (lin/mat-mul (rot/rx p) (rot/rz g)) 2)))
+
+(defn equation-of-origins
+  "The equation of the origins, radians: the true equinox's angle from the
+  CIO along the true equator, the equinox being where that equator
+  (normal to the CIP) crosses the ecliptic of date. So GST = ERA - EO."
+  ([mjd-tt] (equation-of-origins mjd-tt {}))
+  ([mjd-tt eop]
+   (let [Q (c2i-matrix mjd-tt eop)
+         cip (nth Q 2)
+         equinox (v3/normalize (v3/cross cip (ecliptic-pole mjd-tt)))
+         [x y] (lin/mat-vec Q equinox)]
+     (math/atan2 y x))))
+
+(defn npb-matrix
+  "GCRS to the true equator and equinox of date, IAU 2006/2000A: the CIO
+  matrix turned about the CIP by the equation of the origins."
+  ([mjd-tt] (npb-matrix mjd-tt {}))
+  ([mjd-tt eop]
+   (lin/mat-mul (rot/rz (equation-of-origins mjd-tt eop)) (c2i-matrix mjd-tt eop))))
+
+(defn gst
+  "Greenwich apparent sidereal time, IAU 2006/2000A: the Earth rotation
+  angle less the equation of the origins, at UT1 `mjd-ut1` and TT
+  `mjd-tt`."
+  ([mjd-ut1 mjd-tt] (gst mjd-ut1 mjd-tt {}))
+  ([mjd-ut1 mjd-tt eop]
+   (am/fmod (- (earth-rotation-angle mjd-ut1) (equation-of-origins mjd-tt eop)) (* 2.0 math/PI))))
