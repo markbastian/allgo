@@ -3,8 +3,9 @@
   ground site: the transition matrix against differences of the flown
   trajectory; the sequential batch against the batch taken whole; the
   batch iterated to the orbit itself from exact data and within its
-  covariance from noisy; and the extended Kalman filter converging from
-  a start kilometers out, its error within its covariance."
+  covariance from noisy; and the extended and unscented Kalman filters
+  converging from a start kilometers out, their errors within their
+  covariances."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.kepler :as kep]
             [allgo.astro.od :as od]
@@ -113,3 +114,17 @@
         (let [late (map :residuals (drop (quot (count run) 2) run))
               rms (math/sqrt (/ (reduce + (map #(* (first %) (first %)) late)) (count late)))]
           (is (< rms (* 2.0 (first sigma)))))))))
+
+(deftest unscented-kalman-filter
+  (testing "the same start and observations as the extended filter: within its covariance, and as close as it"
+    (let [start [(v3/add (first truth) [5.0 -3.0 2.0]) (v3/add (second truth) [0.005 -0.003 0.002])]
+          P0 (vec (for [i (range 6)] (vec (for [j (range 6)] (if (= i j) (if (< i 3) 100.0 1e-4) 0.0)))))
+          obs (observations 1.0)
+          u (peek (od/ukf two-body start P0 0.0 obs {:q 1e-15}))
+          e (peek (od/ekf two-body start P0 0.0 obs {:q 1e-15}))
+          [rt vt] (kep/propagate mu (first truth) (second truth) (:t u))
+          err (vec (concat (v3/sub (:r u) rt) (v3/sub (:v u) vt)))]
+      (is (< (v3/length (subvec err 0 3)) 0.05) "tens of meters")
+      (doseq [i (range 6)]
+        (is (< (abs (err i)) (* 3.0 (math/sqrt (get-in (:P u) [i i])))) (str i)))
+      (is (< (v3/distance (:r u) (:r e)) 0.02) "the two filters agree to meters"))))

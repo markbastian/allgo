@@ -1,7 +1,8 @@
 (ns allgo.astro.od
   "Orbit determination from a stream of observations (Vallado, chapter
   10; Tapley, Schutz and Born, *Statistical Orbit Determination*, 2004):
-  the sequential-batch least squares, and the extended Kalman filter.
+  the sequential-batch least squares, and the extended and unscented
+  Kalman filters.
 
   Both linearize about a reference trajectory and carry the state
   transition matrix along it (`allgo.astro.variational`). The sequential
@@ -164,3 +165,68 @@
         {:t t :r r :v v :P P})
        rest
        vec))
+
+;; ----------------------------------------------------------- unscented
+
+(defn- propagate-state
+  "The state `dt` from `[r v]` under `accel`, without the transition
+  matrix."
+  [accel t0 x t1]
+  (if (== t0 t1)
+    x
+    (let [first-order (fn [t y] (into (subvec y 3 6) (accel t (subvec y 0 3) (subvec y 3 6))))
+          integ (rk/integrator rk/dopri54 first-order t0 x (* 0.01 (- t1 t0)) {:tol-abs 1e-11 :tol-rel 1e-11})]
+      (:y (core/step-until integ t1)))))
+
+(defn ukf
+  "The unscented Kalman filter (Julier and Uhlmann, \"A new extension of
+  the Kalman filter to nonlinear systems\", 1997, in the scaled form of
+  Wan and van der Merwe, 2000), taking the arguments and returning what
+  `ekf` does. No transition matrix and no partials: the covariance is
+  represented by 2n + 1 sigma points, x and x +/- the columns of
+  sqrt((n + lambda) P), each flown through the dynamics and the
+  measurement model in full, and the mean and covariance rebuilt from
+  them with the weights W0m = lambda/(n + lambda), W0c = W0m + 1 -
+  alpha^2 + beta, the rest 1/(2(n + lambda)); lambda = alpha^2 (n +
+  kappa) - n. Options `:q` as for `ekf`, and `:alpha` (default 1e-3),
+  `:beta` (2, right for Gaussian errors) and `:kappa` (0)."
+  [accel [r v] P t observations {:keys [q alpha beta kappa] :or {q 0.0 alpha 1e-3 beta 2.0 kappa 0.0}}]
+  (let [n 6
+        lambda (- (* alpha alpha (+ n kappa)) n)
+        wm (into [(/ lambda (+ n lambda))] (repeat (* 2 n) (/ 1.0 (* 2.0 (+ n lambda)))))
+        wc (assoc wm 0 (+ (wm 0) (- 1.0 (* alpha alpha)) beta))
+        mean (fn [xs] (reduce lin/add (map lin/scale xs wm)))
+        cov (fn [xs mx ys my] (reduce lin/mat-add (map (fn [x y w] (let [dx (lin/sub x mx) dy (lin/sub y my)]
+                                                                     (mapv (fn [a] (mapv #(* w a %) dy)) dx)))
+                                                       xs ys wc)))]
+    (->> observations
+         (reductions
+          (fn [{:keys [r v P t]} {tk :t :keys [z model sigma]}]
+            (let [x (flat r v)
+                  L (lin/cholesky (lin/mat-scale P (+ n lambda)))
+                  cols (lin/transpose L)
+                  points (into [x] (concat (map #(lin/add x %) cols) (map #(lin/sub x %) cols)))
+                  ;; the time update: each point flown to tk
+                  flown (mapv #(propagate-state accel t % tk) points)
+                  x1 (mean flown)
+                  P1 (lin/mat-add (cov flown x1 flown x1) (process-noise q (abs (- tk t))))
+                  ;; the measurement update, from points redrawn about x1
+                  L1 (lin/cholesky (lin/mat-scale P1 (+ n lambda)))
+                  cols1 (lin/transpose L1)
+                  pts (into [x1] (concat (map #(lin/add x1 %) cols1) (map #(lin/sub x1 %) cols1)))
+                  zs (mapv #(vec (model tk (subvec % 0 3) (subvec % 3 6))) pts)
+                  zbar (mean zs)
+                  noise (vec (for [i (range (count z))]
+                               (vec (for [j (range (count z))] (if (= i j) (* (sigma i) (sigma i)) 0.0)))))
+                  Pzz (lin/mat-add (cov zs zbar zs zbar) noise)
+                  Pxz (cov pts x1 zs zbar)
+                  K (lin/mat-mul Pxz (lin/inverse-general Pzz))
+                  residuals (mapv - z zbar)
+                  xk (lin/add x1 (lin/mat-vec K residuals))
+                  Pk (lin/mat-sub P1 (lin/mat-mul (lin/mat-mul K Pzz) (lin/transpose K)))
+                  ;; kept symmetric against rounding
+                  Pk (lin/mat-scale (lin/mat-add Pk (lin/transpose Pk)) 0.5)]
+              {:t tk :r (subvec xk 0 3) :v (subvec xk 3 6) :P Pk :residuals residuals}))
+          {:t t :r r :v v :P P})
+         rest
+         vec)))
