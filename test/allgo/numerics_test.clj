@@ -47,8 +47,16 @@
             (str (:name method) " claims order " (:order method) ", observed " p))))))
 
 (deftest higher-order-is-more-accurate-at-equal-step
-  (let [errs (mapv #(global-error % 0.01) rk/catalog)]
-    (is (apply > errs) "error falls monotonically as order rises")))
+  ;; by order: methods of one order may tie (every two-stage second-order
+  ;; method gives the same answer on this linear problem), and the
+  ;; fifth-order ones all reach round-off
+  (let [worst (->> rk/catalog
+                   (group-by :order)
+                   (sort-by key)
+                   (map (fn [[_ ms]] (apply max (map #(global-error % 0.01) ms))))
+                   (map #(max % 1e-12)))]
+    (is (apply >= worst) "error falls as order rises, to round-off")
+    (is (apply > (butlast worst)) "strictly, until round-off")))
 
 (deftest step-until-lands-exactly-on-the-end-time
   ;; Overshooting by up to a step makes any error comparison meaningless.

@@ -83,9 +83,49 @@
         :b-hat [(/ 5179.0 57600.0) 0.0 (/ 7571.0 16695.0) (/ 393.0 640.0)
                 (/ -92097.0 339200.0) (/ 187.0 2100.0) (/ 1.0 40.0)]}))
 
+(def midpoint
+  "The midpoint or improved polygon method: Euler's step taken with the
+  slope at the half-step Euler predicts (Chapra and Canale 25.2.2)."
+  (tab {:name "Midpoint" :order 2 :stages 2
+        :c [0.0 0.5] :a [[] [0.5]] :b [0.0 1.0]}))
+
+(def ralston
+  "Ralston's second-order method, the second-order Runge-Kutta of least
+  truncation-error bound: a2 = 2/3 (Chapra and Canale 25.3.1)."
+  (tab {:name "Ralston" :order 2 :stages 2
+        :c [0.0 0.75] :a [[] [0.75]] :b [(/ 1.0 3.0) (/ 2.0 3.0)]}))
+
+(def rk5-butcher
+  "Butcher's fifth-order method (Butcher 1964; Chapra and Canale eq.
+  25.45), six stages."
+  (tab {:name "RK5 (Butcher)" :order 5 :stages 6
+        :c [0.0 0.25 0.25 0.5 0.75 1.0]
+        :a [[]
+            [0.25]
+            [0.125 0.125]
+            [0.0 -0.5 1.0]
+            [(/ 3.0 16.0) 0.0 0.0 (/ 9.0 16.0)]
+            [(/ -3.0 7.0) (/ 2.0 7.0) (/ 12.0 7.0) (/ -12.0 7.0) (/ 8.0 7.0)]]
+        :b [(/ 7.0 90.0) 0.0 (/ 32.0 90.0) (/ 12.0 90.0) (/ 32.0 90.0) (/ 7.0 90.0)]}))
+
+(def cash-karp
+  "The Cash-Karp embedded 5(4) pair (Cash and Karp, ACM Trans. Math.
+  Software 16, 1990) -- Chapra and Canale's 'Runge-Kutta Fehlberg' --
+  the fifth-order solution propagated."
+  (tab {:name "Cash-Karp 5(4)" :order 5 :error-order 4 :stages 6 :adaptive? true
+        :c [0.0 0.2 0.3 0.6 1.0 0.875]
+        :a [[]
+            [0.2]
+            [(/ 3.0 40.0) (/ 9.0 40.0)]
+            [0.3 -0.9 1.2]
+            [(/ -11.0 54.0) 2.5 (/ -70.0 27.0) (/ 35.0 27.0)]
+            [(/ 1631.0 55296.0) (/ 175.0 512.0) (/ 575.0 13824.0) (/ 44275.0 110592.0) (/ 253.0 4096.0)]]
+        :b [(/ 37.0 378.0) 0.0 (/ 250.0 621.0) (/ 125.0 594.0) 0.0 (/ 512.0 1771.0)]
+        :b-hat [(/ 2825.0 27648.0) 0.0 (/ 18575.0 48384.0) (/ 13525.0 55296.0) (/ 277.0 14336.0) 0.25]}))
+
 (def catalog
   "Every tableau here, lowest order first."
-  [euler heun rk3 rk4 rkf45 dopri54])
+  [euler heun midpoint ralston rk3 rk4 rkf45 rk5-butcher cash-karp dopri54])
 
 ;; ----------------------------------------------------------- the integrator
 
