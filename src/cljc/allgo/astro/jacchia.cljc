@@ -215,19 +215,22 @@
   "Tl, the uncorrected exospheric temperature at latitude `lat`, the Sun's
   declination `dec` (radians) and local solar time `lst` (hours), for
   nighttime minimum `tc`: equations (15) to (17), the maximum lagging the
-  subsolar point by the terms in beta, p and gamma."
-  [tc lat dec lst]
-  (let [m 2.2 n 3.0 r 0.3
-        beta (math/to-radians -37.0) p (math/to-radians 6.0) gamma (math/to-radians 43.0)
-        h (math/to-radians (* 15.0 (- lst 12.0)))
-        tau (let [t (+ h beta (* p (math/sin (+ h gamma))))]
+  subsolar point by the terms in beta, p and gamma. J71's constants m =
+  2.2 and R = 0.3 by default; `constants` `{:m :r}` for others -- J70's
+  are m = 2.5 and, on average, R = 0.31."
+  ([tc lat dec lst] (local-temperature tc lat dec lst {}))
+  ([tc lat dec lst {:keys [m r] :or {m 2.2 r 0.3}}]
+   (let [n 3.0
+         beta (math/to-radians -37.0) p (math/to-radians 6.0) gamma (math/to-radians 43.0)
+         h (math/to-radians (* 15.0 (- lst 12.0)))
+         tau (let [t (+ h beta (* p (math/sin (+ h gamma))))]
               ;; into -pi to pi
-              (- t (* 2.0 math/PI (math/floor (/ (+ t math/PI) (* 2.0 math/PI))))))
-        theta (* 0.5 (abs (+ lat dec)))
-        eta (* 0.5 (abs (- lat dec)))
-        s (math/pow (math/sin theta) m)
-        c (math/pow (math/cos eta) m)]
-    (* tc (+ 1.0 (* r s)) (+ 1.0 (* (/ (* r (- c s)) (+ 1.0 (* r s))) (math/pow (math/cos (* 0.5 tau)) n))))))
+               (- t (* 2.0 math/PI (math/floor (/ (+ t math/PI) (* 2.0 math/PI))))))
+         theta (* 0.5 (abs (+ lat dec)))
+         eta (* 0.5 (abs (- lat dec)))
+         s (math/pow (math/sin theta) m)
+         c (math/pow (math/cos eta) m)]
+     (* tc (+ 1.0 (* r s)) (+ 1.0 (* (/ (* r (- c s)) (+ 1.0 (* r s))) (math/pow (math/cos (* 0.5 tau)) n)))))))
 
 (defn geomagnetic-temperature
   "The geomagnetic rise in exospheric temperature, K, for the planetary

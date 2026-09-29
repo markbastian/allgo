@@ -237,6 +237,12 @@ The demos draw on other people's data, used under their terms:
   (1971) and Roberts's analytic form (Celestial Mechanics 4, 1971), read
   through the NASA Astrophysics Data System; the tests check them against
   those reports' tables.
+- **JB2008** (`allgo.astro.jb2008`): implemented from Bowman et al.,
+  AIAA 2008-6438, a work of the US government, and the JB2006 paper
+  (J. Atmos. Solar-Terr. Phys. 70, 2008) for the equations it keeps; no
+  code of the model's distributors was used. Its tests compare against
+  densities computed with Orekit 12.2 (Apache License 2.0), in
+  `test/data/jb2008/`.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.

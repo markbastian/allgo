@@ -140,7 +140,10 @@ of expected return:
       Earth radiation pressure (`allgo.astro.earth-radiation`), Walker
       constellations and coverage (`allgo.astro.constellation`), and a
       DSST-style semi-analytic theory (`allgo.astro.semianalytic`).
-      JB2008 is left out: its license forbids translating its code.
+      JB2008 (`allgo.astro.jb2008`) from its published papers alone, its
+      distributors' code unused; within 0.5% of Orekit's on average from
+      220 to 400 km, diverging above 500 km at the winter pole in ways
+      the papers do not settle (`jb2008/limits`).
 
 ## Time
 
