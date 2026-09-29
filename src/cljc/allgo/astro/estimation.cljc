@@ -89,6 +89,28 @@
                             (lin/mat-scale (mapv (fn [ki] (mapv #(* ki % R) K)) K) 1.0))]
     {:x x' :P joseph :gain K :innovation-variance S}))
 
+(defn linear-kalman
+  "The Kalman filter for a linear system (Vallado's algorithm 67): from
+  the estimate `x0` with covariance `P0`, through `steps`, each `{:phi :Q
+  :H :z :R}` -- the transition matrix from the last step and the process
+  noise it adds, then the rows of the measurement matrix, the measured
+  values and their variances, taken one at a time. Returns the estimate
+  after each step, `[{:x :P} ...]`."
+  [x0 P0 steps]
+  (->> steps
+       (reductions
+        (fn [{:keys [x P]} {:keys [phi Q H z R]}]
+          (let [n (count x)
+                predicted (kalman-predict x P phi (or Q (lin/mat-scale (lin/eye n) 0.0)))]
+            (reduce (fn [{:keys [x P]} k]
+                      (let [h (H k)]
+                        (select-keys (kalman-update x P h (- (z k) (lin/dot h x)) (R k)) [:x :P])))
+                    predicted
+                    (range (count z)))))
+        {:x x0 :P P0})
+       rest
+       vec))
+
 ;; ------------------------------------------------- orthogonal least squares
 ;;
 ;; The normal equations are convenient and lossy. Forming A^T A squares the

@@ -7,6 +7,7 @@
   converging from a start kilometers out, their errors within their
   covariances."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.estimation :as est]
             [allgo.astro.kepler :as kep]
             [allgo.astro.od :as od]
             [allgo.geometry.vec3 :as v3]
@@ -128,3 +129,40 @@
       (doseq [i (range 6)]
         (is (< (abs (err i)) (* 3.0 (math/sqrt (get-in (:P u) [i i])))) (str i)))
       (is (< (v3/distance (:r u) (:r e)) 0.02) "the two filters agree to meters"))))
+
+(deftest linear-kalman-filter
+  (testing "with no process noise, the filter ends where the batch with the
+            same prior does, carried to the last time -- exactly, for a
+            linear system"
+    (let [phi (fn [dt] [[1.0 dt] [0.0 1.0]])
+          ts (range 1.0 21.0 1.0)
+          zs (map #(+ 3.0 (* -0.5 %) (* 0.1 (math/sin (* 7.0 %)))) ts)
+          x0 [0.0 0.0] P0 [[100.0 0.0] [0.0 10.0]]
+          steps (map (fn [_ z] {:phi (phi 1.0) :H [[1.0 0.0]] :z [z] :R [0.01]}) ts zs)
+          {:keys [x P]} (peek (est/linear-kalman x0 P0 steps))
+          rows (map (fn [t z] {:H (first (lin/mat-mul [[1.0 0.0]] (phi t))) :residual z :weight 100.0}) ts zs)
+          {xb :x Pb :P} (peek (od/sequential-batch {:x x0 :P P0} [rows]))
+          PhiN (phi (last ts))]
+      (is (every? #(< (abs %) 1e-10) (map - x (lin/mat-vec PhiN xb))))
+      (is (every? #(< (abs %) 1e-10) (map - (flatten P) (flatten (lin/mat-mul (lin/mat-mul PhiN Pb) (lin/transpose PhiN)))))))))
+
+(deftest linearized-kalman-filter
+  (let [start [(v3/add (first truth) [0.5 -0.3 0.2]) (v3/add (second truth) [5e-4 -3e-4 2e-4])]
+        P0 (vec (for [i (range 6)] (vec (for [j (range 6)] (if (= i j) (if (< i 3) 1.0 1e-6) 0.0)))))
+        obs (observations 1.0)
+        run (od/lkf two-body start P0 0.0 obs {})
+        {:keys [t dx P]} (peek run)]
+    (testing "without process noise it is the batch's first iteration about the
+              same reference, with the same prior, made sequential"
+      (let [rows (od/batch-rows two-body 0.0 start obs)
+            {xb :x} (peek (od/sequential-batch {:x (vec (repeat 6 0.0)) :P P0} [rows]))
+            {:keys [phi]} (od/propagate-with-stm two-body 0.0 start t)
+            mapped (lin/mat-vec phi xb)]
+        (is (< (v3/length (map - (subvec dx 0 3) (subvec mapped 0 3))) 1e-6))
+        (is (< (v3/length (map - (subvec dx 3 6) (subvec mapped 3 6))) 1e-9))))
+    (testing "and from half a kilometer out it lands within its covariance of the truth"
+      (let [{:keys [r v]} (peek run)
+            [rt vt] (kep/propagate mu (first truth) (second truth) t)
+            err (vec (concat (v3/sub r rt) (v3/sub v vt)))]
+        (doseq [i (range 6)]
+          (is (< (abs (err i)) (* 3.0 (math/sqrt (get-in P [i i])))) (str i)))))))

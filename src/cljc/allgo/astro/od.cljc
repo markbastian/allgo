@@ -17,7 +17,8 @@
 
   States are `[r v]`, km and km/s; `accel` is `(fn [t r v])`, the
   acceleration, two-body included."
-  (:require [allgo.astro.variational :as var]
+  (:require [allgo.astro.estimation :as est]
+            [allgo.astro.variational :as var]
             [allgo.numerics.core :as core]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
@@ -165,6 +166,37 @@
         {:t t :r r :v v :P P})
        rest
        vec))
+
+(defn lkf
+  "The linearized Kalman filter (Vallado's algorithm 68): as `ekf`, but
+  about a reference trajectory flown once from `[r v]` and never
+  corrected, the filter estimating only the deviation from it -- carried
+  by the reference's transition matrix and updated by the residuals from
+  the reference, their partials taken there. Cheaper and, while the
+  deviation stays small, as good; it is the batch least squares' first
+  iteration made sequential. Returns `[{:t :r :v :P :dx :residuals} ...]`,
+  the estimate the reference plus the deviation."
+  [accel [r v] P t observations {:keys [q] :or {q 0.0}}]
+  (->> observations
+       (reductions
+        (fn [{:keys [ref-r ref-v dx P t]} {tk :t :keys [z model sigma]}]
+          (let [{r1 :r v1 :v :keys [phi]} (propagate-with-stm accel t [ref-r ref-v] tk)
+                dx1 (lin/mat-vec phi dx)
+                P1 (lin/mat-add (lin/mat-mul (lin/mat-mul phi P) (lin/transpose phi)) (process-noise q (abs (- tk t))))
+                x1 (flat r1 v1)
+                H (measurement-partials model tk x1)
+                residuals (mapv - z (model tk r1 v1))
+                {dx' :x P' :P} (reduce (fn [{:keys [x P]} k]
+                                         (select-keys (est/kalman-update x P (H k) (- (residuals k) (lin/dot (H k) x))
+                                                                         (* (sigma k) (sigma k)))
+                                                      [:x :P]))
+                                       {:x dx1 :P P1}
+                                       (range (count z)))
+                x (lin/add x1 dx')]
+            {:t tk :ref-r r1 :ref-v v1 :dx dx' :P P' :r (subvec x 0 3) :v (subvec x 3 6) :residuals residuals}))
+        {:t t :ref-r r :ref-v v :dx (vec (repeat 6 0.0)) :P P})
+       rest
+       (mapv #(dissoc % :ref-r :ref-v))))
 
 ;; ----------------------------------------------------------- unscented
 
