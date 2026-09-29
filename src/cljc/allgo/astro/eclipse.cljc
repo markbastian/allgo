@@ -20,21 +20,19 @@
             [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
-(defn- deg [x] (* x c/degrees))
-
 (defn- circumstances
   "Greatest eclipse and gamma, u and M' for syzygy k, or nil if the Moon
   is too far from a node."
   [k c1 c2]
   (let [T (/ k 1236.85)
-        F (deg (poly/horner-ascending [160.7108 (* 390.67050284 1236.85) -0.0016118 -0.00000227 0.000000011] T))]
+        F (c/deg (poly/horner-ascending [160.7108 (* 390.67050284 1236.85) -0.0016118 -0.00000227 0.000000011] T))]
     (when (<= (abs (math/sin F)) 0.36)
       (let [E  (poly/horner-ascending [1.0 -0.002516 -0.0000074] T)
-            M  (deg (poly/horner-ascending [2.5534 (* 29.10535670 1236.85) -0.0000014 -0.00000011] T))
-            M' (deg (poly/horner-ascending [201.5643 (* 385.81693528 1236.85) 0.0107582 0.00001238 -0.000000058] T))
-            om (deg (poly/horner-ascending [124.7746 (* -1.56375588 1236.85) 0.0020672 0.00000215] T))
-            F1 (- F (* (deg 0.02665) (math/sin om)))
-            A1 (deg (poly/horner-ascending [299.77 (* 0.107408 1236.85) -0.009173] T))
+            M  (c/deg (poly/horner-ascending [2.5534 (* 29.10535670 1236.85) -0.0000014 -0.00000011] T))
+            M' (c/deg (poly/horner-ascending [201.5643 (* 385.81693528 1236.85) 0.0107582 0.00001238 -0.000000058] T))
+            om (c/deg (poly/horner-ascending [124.7746 (* -1.56375588 1236.85) 0.0020672 0.00000215] T))
+            F1 (- F (* (c/deg 0.02665) (math/sin om)))
+            A1 (c/deg (poly/horner-ascending [299.77 (* 0.107408 1236.85) -0.009173] T))
             s math/sin cs math/cos
             jd (+ 2451550.09766 (* 29.530588861 k)
                   (* T T (poly/horner-ascending [0.00015437 -0.000000150 0.00000000073] T))

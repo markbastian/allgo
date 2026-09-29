@@ -14,26 +14,10 @@
   Coefficients are given highest power first, `[a b c]` for a x^2 + b x
   + c. Roots are complex, `[re im]`, real ones with im 0; `real-roots`
   keeps the real ones."
-  (:require [clojure.math :as math]))
+  (:require [allgo.numerics.complex :as cx]
+            [clojure.math :as math]))
 
 ;; ------------------------------------------------------ complex numbers
-
-(defn- c+ [[a b] [c d]] [(+ a c) (+ b d)])
-(defn- c- [[a b] [c d]] [(- a c) (- b d)])
-(defn- c* [[a b] [c d]] [(- (* a c) (* b d)) (+ (* a d) (* b c))])
-(defn- c-div [[a b] [c d]] (let [m (+ (* c c) (* d d))] [(/ (+ (* a c) (* b d)) m) (/ (- (* b c) (* a d)) m)]))
-(defn- c-scale [[a b] s] [(* a s) (* b s)])
-
-(defn- c-sqrt
-  "The principal square root."
-  [[a b]]
-  (let [m (math/hypot a b)]
-    (if (zero? m)
-      [0.0 0.0]
-      (let [re (math/sqrt (* 0.5 (+ m (abs a))))]
-        (if (>= a 0.0)
-          [re (/ b (* 2.0 re))]
-          [(/ (abs b) (* 2.0 re)) (if (neg? b) (- re) re)])))))
 
 ;; ------------------------------------------------------------ evaluation
 
@@ -52,7 +36,7 @@
 (defn- c-horner
   "The polynomial and its derivative at complex `z`."
   [coeffs z]
-  (reduce (fn [[p dp] c] [(c+ (c* p z) [c 0.0]) (c+ (c* dp z) p)]) [[0.0 0.0] [0.0 0.0]] coeffs))
+  (reduce (fn [[p dp] c] [(cx/+ (cx/* p z) [c 0.0]) (cx/+ (cx/* dp z) p)]) [[0.0 0.0] [0.0 0.0]] coeffs))
 
 (defn- polish
   "Newton's method on the polynomial `coeffs` from root `z`, a few steps,
@@ -63,7 +47,7 @@
           m (math/hypot (first dp) (second dp))]
       (if (or (> k 4) (zero? m))
         z
-        (let [z' (c- z (c-div p dp))
+        (let [z' (cx/- z (cx// p dp))
               [p'] (c-horner coeffs z')]
           (if (< (math/hypot (first p') (second p')) (math/hypot (first p) (second p)))
             (recur z' (inc k))
@@ -128,20 +112,20 @@
         scale (max 1.0 (abs p) (math/sqrt (abs r)))
         ys (if (<= (abs q) (* 1e-14 scale scale scale))
              ;; y^4 + p y^2 + r = 0: y = +/- sqrt of each root of z^2 + p z + r
-             (let [disc (c-sqrt [(- (* p p) (* 4.0 r)) 0.0])]
-               (mapcat (fn [z] (let [s (c-sqrt z)] [s (c-scale s -1.0)]))
-                       [(c-scale (c+ [(- p) 0.0] disc) 0.5) (c-scale (c- [(- p) 0.0] disc) 0.5)]))
+             (let [disc (cx/sqrt [(- (* p p) (* 4.0 r)) 0.0])]
+               (mapcat (fn [z] (let [s (cx/sqrt z)] [s (cx/scale s -1.0)]))
+                       [(cx/scale (cx/+ [(- p) 0.0] disc) 0.5) (cx/scale (cx/- [(- p) 0.0] disc) 0.5)]))
              (let [m (->> (depressed-cubic-roots p (- (* 0.25 p p) r) (* -0.125 q q))
                           (filter #(zero? (second %)))
                           (map first)
                           (apply max))
                    s (math/sqrt (* 2.0 m))
                    quad (fn [lin const]
-                          (let [disc (c-sqrt [(- (* lin lin) (* 4.0 const)) 0.0])]
-                            [(c-scale (c+ [(- lin) 0.0] disc) 0.5) (c-scale (c- [(- lin) 0.0] disc) 0.5)]))]
+                          (let [disc (cx/sqrt [(- (* lin lin) (* 4.0 const)) 0.0])]
+                            [(cx/scale (cx/+ [(- lin) 0.0] disc) 0.5) (cx/scale (cx/- [(- lin) 0.0] disc) 0.5)]))]
                (concat (quad s (- (+ (* 0.5 p) m) (/ q (* 2.0 s))))
                        (quad (- s) (+ (* 0.5 p) m (/ q (* 2.0 s)))))))]
-    (mapv #(clean (polish coeffs (c- % [shift 0.0]))) ys)))
+    (mapv #(clean (polish coeffs (cx/- % [shift 0.0]))) ys)))
 
 (defn real-roots
   "The real ones among `roots`, ascending."
@@ -201,17 +185,17 @@
          z (fn [x] (if (number? x) [(double x) 0.0] x))]
      (loop [x0 (z x0) x1 (z x1) x2 (z x2) i 0]
        (when (< i max-iter)
-         (let [h0 (c- x1 x0) h1 (c- x2 x1)
+         (let [h0 (cx/- x1 x0) h1 (cx/- x2 x1)
                f0 (f x0) f1 (f x1) f2 (f x2)
-               d0 (c-div (c- f1 f0) h0) d1 (c-div (c- f2 f1) h1)
-               a (c-div (c- d1 d0) (c+ h1 h0))
-               b (c+ (c* a h1) d1)
+               d0 (cx// (cx/- f1 f0) h0) d1 (cx// (cx/- f2 f1) h1)
+               a (cx// (cx/- d1 d0) (cx/+ h1 h0))
+               b (cx/+ (cx/* a h1) d1)
                c f2
-               rad (c-sqrt (c- (c* b b) (c-scale (c* a c) 4.0)))
-               [p m] [(c+ b rad) (c- b rad)]
+               rad (cx/sqrt (cx/- (cx/* b b) (cx/scale (cx/* a c) 4.0)))
+               [p m] [(cx/+ b rad) (cx/- b rad)]
                den (if (> (math/hypot (first p) (second p)) (math/hypot (first m) (second m))) p m)
-               dx (if (and (zero? (first den)) (zero? (second den))) [0.0 0.0] (c-div (c-scale c -2.0) den))
-               x3 (c+ x2 dx)]
+               dx (if (and (zero? (first den)) (zero? (second den))) [0.0 0.0] (cx// (cx/scale c -2.0) den))
+               x3 (cx/+ x2 dx)]
            (if (<= (math/hypot (first dx) (second dx)) (* tol (max 1e-300 (math/hypot (first x3) (second x3)))))
              (clean x3)
              (recur x1 x2 x3 (inc i)))))))))

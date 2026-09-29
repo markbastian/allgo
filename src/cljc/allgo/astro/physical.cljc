@@ -22,8 +22,6 @@
             [allgo.math :as am]
             [clojure.math :as math]))
 
-(defn- deg [x] (* x c/degrees))
-
 (defn- geometry
   "The planet as seen from the Earth, both in FK5, light time included:
   the planet's heliocentric `[l b r]` when its light left, the Earth's
@@ -72,8 +70,8 @@
          crescent -- Mars shows a gibbous phase near quadrature."
   [mjd-tt]
   (let [T (/ (- mjd-tt c/mjd-J2000) 36525.0)
-        l-pole (+ (deg 352.9065) (* (deg 1.1733) T))
-        b-pole (- (deg 63.2818) (* (deg 0.00394) T))
+        l-pole (+ (c/deg 352.9065) (* (c/deg 1.1733) T))
+        b-pole (- (c/deg 63.2818) (* (c/deg 0.00394) T))
         {:keys [l b r l0 R xyz delta tau]} (geometry :mars mjd-tt)
         [x y z] xyz
         lam (math/atan2 y x)
@@ -81,11 +79,11 @@
         sb0 (math/sin b-pole) cb0 (math/cos b-pole)
         DE (math/asin (- (* (- sb0) (math/sin bet))
                          (* cb0 (math/cos bet) (math/cos (- l-pole lam)))))
-        N  (+ (deg 49.5581) (* (deg 0.7721) T))
-        l' (- l (/ (deg 0.00697) r))
-        b' (- b (/ (* (deg 0.000225) (math/cos (- l N))) r))
+        N  (+ (c/deg 49.5581) (* (c/deg 0.7721) T))
+        l' (- l (/ (c/deg 0.00697) r))
+        b' (- b (/ (* (c/deg 0.000225) (math/cos (- l N))) r))
         DS (math/asin (- (* (- sb0) (math/sin b')) (* cb0 (math/cos b') (math/cos (- l-pole l')))))
-        W  (+ (deg 11.504) (* (deg 350.89200025) (- (+ mjd-tt c/jd-mjd-offset) tau 2433282.5)))
+        W  (+ (c/deg 11.504) (* (c/deg 350.89200025) (- (+ mjd-tt c/jd-mjd-offset) tau 2433282.5)))
         eps0 (frames/mean-obliquity mjd-tt)
         [a0 d0] (coord/ecliptic->equatorial [l-pole b-pole] eps0)
         [a d] (equatorial-of xyz eps0)
@@ -94,8 +92,8 @@
                          (* (math/cos d) (math/sin (- a0 a))))
         ;; apparent: aberration and nutation for the pole and the planet
         [dpsi deps] (frames/nutation-angles mjd-tt)
-        lam' (+ lam (/ (* (deg 0.005693) (math/cos (- l0 lam))) (math/cos bet)) dpsi)
-        bet' (+ bet (* (deg 0.005693) (math/sin (- l0 lam)) (math/sin bet)))
+        lam' (+ lam (/ (* (c/deg 0.005693) (math/cos (- l0 lam))) (math/cos bet)) dpsi)
+        bet' (+ bet (* (c/deg 0.005693) (math/sin (- l0 lam)) (math/sin bet)))
         eps  (+ eps0 deps)
         pole (coord/ecliptic->equatorial [(+ l-pole dpsi) b-pole] eps)
         planet (coord/ecliptic->equatorial [lam' bet'] eps)
@@ -122,10 +120,10 @@
   (let [jd (+ mjd-tt c/jd-mjd-offset)
         d  (- jd 2433282.5)
         T1 (/ d 36525.0)
-        a0 (+ (deg 268.0) (* (deg 0.1061) T1))
-        d0 (- (deg 64.5) (* (deg 0.0164) T1))
-        W1 (+ (deg 17.71) (* (deg 877.90003539) d))
-        W2 (+ (deg 16.838) (* (deg 870.27003539) d))
+        a0 (+ (c/deg 268.0) (* (c/deg 0.1061) T1))
+        d0 (- (c/deg 64.5) (* (c/deg 0.0164) T1))
+        W1 (+ (c/deg 17.71) (* (c/deg 877.90003539) d))
+        W2 (+ (c/deg 16.838) (* (c/deg 870.27003539) d))
         {:keys [l b r l0 R xyz delta]} (geometry :jupiter mjd-tt)
         eps0 (frames/mean-obliquity mjd-tt)
         [as ds] (coord/ecliptic->equatorial [l b] eps0)
@@ -139,16 +137,16 @@
         ;; disk's center, displaced from the geometric one
         C  (cond-> (/ (- (+ (* 2.0 r delta) (* R R)) (* r r) (* delta delta)) (* 4.0 r delta))
              (neg? (math/sin (- l l0))) -)
-        w1 (am/wrap-2pi (+ W1 (- zeta) (* (deg -5.07033) delta) C))
-        w2 (am/wrap-2pi (+ W2 (- zeta) (* (deg -5.02626) delta) C))
+        w1 (am/wrap-2pi (+ W1 (- zeta) (* (c/deg -5.07033) delta) C))
+        w2 (am/wrap-2pi (+ W2 (- zeta) (* (c/deg -5.02626) delta) C))
         [dpsi deps] (frames/nutation-angles mjd-tt)
         eps (+ eps0 deps)
         se (math/sin eps) ce (math/cos eps)
         sa (math/sin a) ca (math/cos a)
         sl0 (math/sin l0) cl0 (math/cos l0)
-        a  (+ a (/ (* (deg 0.005693) (+ (* ca cl0 ce) (* sa sl0))) (math/cos d)))
-        d  (+ d (* (deg 0.005693) (+ (* cl0 ce (- (* (/ se ce) (math/cos d)) (* sa (math/sin d))))
-                                     (* ca (math/sin d) sl0))))
+        a  (+ a (/ (* (c/deg 0.005693) (+ (* ca cl0 ce) (* sa sl0))) (math/cos d)))
+        d  (+ d (* (c/deg 0.005693) (+ (* cl0 ce (- (* (/ se ce) (math/cos d)) (* sa (math/sin d))))
+                                       (* ca (math/sin d) sl0))))
         nut (fn [[a d]]
               (let [td (math/tan d)]
                 [(+ a (- (* (+ ce (* se (math/sin a) td)) dpsi) (* (math/cos a) td deps)))
@@ -161,13 +159,13 @@
   second method) -- a tenth of a degree, no ephemeris needed."
   [mjd-tt]
   (let [d  (- mjd-tt c/mjd-J2000)
-        V  (+ (deg 172.74) (* (deg 0.00111588) d))
-        M  (+ (deg 357.529) (* (deg 0.9856003) d))
+        V  (+ (c/deg 172.74) (* (c/deg 0.00111588) d))
+        M  (+ (c/deg 357.529) (* (c/deg 0.9856003) d))
         sV (math/sin V)
-        N  (+ (deg 20.02) (* (deg 0.0830853) d) (* (deg 0.329) sV))
-        J  (- (+ (deg 66.115) (* (deg 0.9025179) d)) (* (deg 0.329) sV))
-        A  (+ (* (deg 1.915) (math/sin M)) (* (deg 0.020) (math/sin (* 2 M))))
-        B  (+ (* (deg 5.555) (math/sin N)) (* (deg 0.168) (math/sin (* 2 N))))
+        N  (+ (c/deg 20.02) (* (c/deg 0.0830853) d) (* (c/deg 0.329) sV))
+        J  (- (+ (c/deg 66.115) (* (c/deg 0.9025179) d)) (* (c/deg 0.329) sV))
+        A  (+ (* (c/deg 1.915) (math/sin M)) (* (c/deg 0.020) (math/sin (* 2 M))))
+        B  (+ (* (c/deg 5.555) (math/sin N)) (* (c/deg 0.168) (math/sin (* 2 N))))
         K  (- (+ J A) B)
         R  (- 1.00014 (* 0.01671 (math/cos M)) (* 0.00014 (math/cos (* 2 M))))
         r  (- 5.20872 (* 0.25208 (math/cos N)) (* 0.00611 (math/cos (* 2 N))))
@@ -175,13 +173,13 @@
         psi (math/asin (* (/ R delta) (math/sin K)))
         dd  (- d (/ delta 173.0))
         C   (let [s (math/sin (* 0.5 psi))] (if (pos? (math/sin K)) (- (* s s)) (* s s)))
-        lam (+ (deg 34.35) (* (deg 0.083091) d) (* (deg 0.329) sV) B)
-        DS  (* (deg 3.12) (math/sin (+ lam (deg 42.8))))]
+        lam (+ (c/deg 34.35) (* (c/deg 0.083091) d) (* (c/deg 0.329) sV) B)
+        DS  (* (c/deg 3.12) (math/sin (+ lam (c/deg 42.8))))]
     {:ds DS
-     :de (- DS (* (deg 2.22) (math/sin psi) (math/cos (+ lam (deg 22))))
-            (* (deg 1.3) (/ (- r delta) delta) (math/sin (- lam (deg 100.5)))))
-     :omega1 (am/wrap-2pi (+ (deg 210.98) (* (deg 877.8169088) dd) psi (- B) C))
-     :omega2 (am/wrap-2pi (+ (deg 187.23) (* (deg 870.1869088) dd) psi (- B) C))}))
+     :de (- DS (* (c/deg 2.22) (math/sin psi) (math/cos (+ lam (c/deg 22))))
+            (* (c/deg 1.3) (/ (- r delta) delta) (math/sin (- lam (c/deg 100.5)))))
+     :omega1 (am/wrap-2pi (+ (c/deg 210.98) (* (c/deg 877.8169088) dd) psi (- B) C))
+     :omega2 (am/wrap-2pi (+ (c/deg 187.23) (* (c/deg 870.1869088) dd) psi (- B) C))}))
 
 ;; ------------------------------------------------------- Saturn's ring (45)
 
@@ -204,17 +202,17 @@
     :a :b-axis  the outer edge of ring A's apparent semi-axes."
   [mjd-tt]
   (let [T (/ (- mjd-tt c/mjd-J2000) 36525.0)
-        i  (deg (+ 28.075216 (* -0.012998 T) (* 0.000004 T T)))
-        om (deg (+ 169.50847 (* 1.394681 T) (* 0.000412 T T)))
+        i  (c/deg (+ 28.075216 (* -0.012998 T) (* 0.000004 T T)))
+        om (c/deg (+ 169.50847 (* 1.394681 T) (* 0.000412 T T)))
         {:keys [l b r l0 xyz delta]} (geometry :saturn mjd-tt)
         [x y z] xyz
         lam (math/atan2 y x)
         bet (math/atan (/ z (math/hypot x y)))
         si (math/sin i) ci (math/cos i)
         sB (- (* si (math/cos bet) (math/sin (- lam om))) (* ci (math/sin bet)))
-        N  (deg (+ 113.6655 (* 0.8771 T)))
-        l' (- l (/ (deg 0.01759) r))
-        b' (- b (/ (* (deg 0.000764) (math/cos (- l N))) r))
+        N  (c/deg (+ 113.6655 (* 0.8771 T)))
+        l' (- l (/ (c/deg 0.01759) r))
+        b' (- b (/ (* (c/deg 0.000764) (math/cos (- l N))) r))
         U1 (math/atan2 (+ (* si (math/sin b')) (* ci (math/cos b') (math/sin (- l' om))))
                        (* (math/cos b') (math/cos (- l' om))))
         U2 (math/atan2 (+ (* si (math/sin bet)) (* ci (math/cos bet) (math/sin (- lam om))))
@@ -222,8 +220,8 @@
         a-edge (/ (* 375.35 c/arcsec) delta)
         [dpsi deps] (frames/nutation-angles mjd-tt)
         eps (+ (frames/mean-obliquity mjd-tt) deps)
-        lam' (+ lam (/ (* (deg 0.005693) (math/cos (- l0 lam))) (math/cos bet)) dpsi)
-        bet' (+ bet (* (deg 0.005693) (math/sin (- l0 lam)) (math/sin bet)))
+        lam' (+ lam (/ (* (c/deg 0.005693) (math/cos (- l0 lam))) (math/cos bet)) dpsi)
+        bet' (+ bet (* (c/deg 0.005693) (math/sin (- l0 lam)) (math/sin bet)))
         pole (coord/ecliptic->equatorial [(+ (- om (/ math/PI 2)) dpsi) (- (/ math/PI 2) i)] eps)
         planet (coord/ecliptic->equatorial [lam' bet'] eps)]
     {:b (math/asin sB)

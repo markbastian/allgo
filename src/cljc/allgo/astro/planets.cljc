@@ -18,11 +18,11 @@
   worth 8000 km at the Sun by 2025."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.ephemeris :as eph]
+            [allgo.astro.frames :as frames]
             [allgo.astro.kepler :as kep]
             [allgo.astro.time :as time]
             [allgo.geometry.vec3 :as v3]
-            [allgo.math :as am]
-            [clojure.math :as math]))
+            [allgo.math :as am]))
 
 (def elements
   "Semi-major axis (AU), eccentricity, inclination, mean longitude,
@@ -86,9 +86,7 @@
         nu (kep/mean->true M e)
         ;; Kepler's own routine, in the ecliptic frame the elements live in
         s (kep/elements->state c/GM-sun {:a a :e e :i i :raan raan :argp argp :nu nu})
-        ce (math/cos eph/obliquity-J2000)
-        se (math/sin eph/obliquity-J2000)
-        eq (fn [[x y z]] [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))])]
+        eq #(frames/ecliptic->equatorial % eph/obliquity-J2000)]
     (mapv eq s)))
 
 (defn heliocentric

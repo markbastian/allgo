@@ -19,13 +19,12 @@
             [allgo.astro.kepler :as kepler]
             [allgo.astro.solar :as solar]
             [allgo.astro.vsop87 :as vsop87]
+            [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [clojure.math :as math]))
 
 (defn- spherical->rect [[l b r]]
   [(* r (math/cos b) (math/cos l)) (* r (math/cos b) (math/sin l)) (* r (math/sin b))])
-
-(defn- norm [[x y z]] (math/sqrt (+ (* x x) (* y y) (* z z))))
 
 (defn light-time
   "Days for light to cross `distance` AU."
@@ -41,7 +40,7 @@
         at    (fn [tau] (mapv - (vsop87/rectangular planet (- mjd-tt tau)) earth))]
     (loop [tau 0.0 i 0]
       (let [[x y z :as d] (at tau)
-            delta (norm d)
+            delta (v3/length d)
             tau'  (light-time delta)]
         (if (or (< (abs (- tau' tau)) 1e-9) (>= i 10))
           [(am/wrap-2pi (math/atan2 y x)) (math/atan2 z (math/hypot x y)) delta tau']
@@ -101,11 +100,11 @@
         at  (fn [tau] (mapv + sun (position (- mjd-tt tau))))]
     (loop [tau 0.0 i 0]
       (let [[x y z :as d] (at tau)
-            delta (norm d)
+            delta (v3/length d)
             tau' (light-time delta)]
         (if (or (< (abs (- tau' tau)) 1e-9) (>= i 10))
           [(am/wrap-2pi (math/atan2 y x)) (math/asin (/ z delta)) delta
-           (math/acos (/ (reduce + (map * d sun)) (* delta (norm sun))))]
+           (math/acos (/ (reduce + (map * d sun)) (* delta (v3/length sun))))]
           (recur tau' (inc i)))))))
 
 (defn heliocentric->geocentric
@@ -114,4 +113,4 @@
   `[lon lat r]`) -- the subtraction, in spherical coordinates."
   [body earth]
   (let [[x y z] (mapv - (spherical->rect body) (spherical->rect earth))]
-    [(am/wrap-2pi (math/atan2 y x)) (math/atan2 z (math/hypot x y)) (norm [x y z])]))
+    [(am/wrap-2pi (math/atan2 y x)) (math/atan2 z (math/hypot x y)) (v3/length [x y z])]))

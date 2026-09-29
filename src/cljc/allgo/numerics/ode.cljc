@@ -12,13 +12,12 @@
   `f` is `(f t y)` with `y` a vector; results are `[[t y] ...]`, the start
   first."
   (:require [allgo.numerics.differentiation :as d]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.rk :as rk]
             [clojure.math :as math]))
 
-(defn- add [a b] (mapv + a b))
-(defn- scale [a s] (mapv #(* s %) a))
-(defn- lin-comb [pairs] (reduce (fn [acc [c v]] (add acc (scale v c))) (vec (repeat (count (second (first pairs))) 0.0)) pairs))
+(defn- lin-comb [pairs] (reduce (fn [acc [c v]] (lin/add acc (lin/scale v c))) (vec (repeat (count (second (first pairs))) 0.0)) pairs))
 (defn- rel-change [a b] (apply max (map (fn [x y] (if (zero? y) (abs (- y x)) (abs (/ (- y x) y)))) a b)))
 
 (defn- iterate-corrector
@@ -41,8 +40,8 @@
    (vec (reductions (fn [[t y] _]
                       (let [s0 (f t y)
                             t1 (+ t h)
-                            y1 (iterate-corrector #(add y (scale (add s0 (f t1 %)) (* 0.5 h)))
-                                                  (add y (scale s0 h)) tol iterations)]
+                            y1 (iterate-corrector #(lin/add y (lin/scale (lin/add s0 (f t1 %)) (* 0.5 h)))
+                                                  (lin/add y (lin/scale s0 h)) tol iterations)]
                         [t1 y1]))
                     [t0 (vec y0)] (range n)))))
 
@@ -52,7 +51,7 @@
   -- f's total derivative, f_t + f_y f, which the user supplies (Chapra
   and Canale 25.1.3)."
   [f ddf t0 y0 h n]
-  (vec (reductions (fn [[t y] _] [(+ t h) (add y (add (scale (f t y) h) (scale (ddf t y) (* 0.5 h h))))])
+  (vec (reductions (fn [[t y] _] [(+ t h) (lin/add y (lin/add (lin/scale (f t y) h) (lin/scale (ddf t y) (* 0.5 h h))))])
                    [t0 (vec y0)] (range n))))
 
 (defn- rk4-step [f t y h]
@@ -78,7 +77,7 @@
              scale (mapv #(max (abs %1) (abs (* h %2)) 1e-30) y (f t y))
              err (/ (apply max (map #(abs (/ %1 %2)) delta scale)) tol)]
          (if (<= err 1.0)
-           (let [y' (add half (mapv #(/ % 15.0) delta))]
+           (let [y' (lin/add half (mapv #(/ % 15.0) delta))]
              (recur (+ t h) y' (* h (min 4.0 (* 0.9 (math/pow (max err 1e-10) -0.2)))) (conj out [(+ t h) y'])))
            (recur t y (* h (max 0.1 (* 0.9 (math/pow err -0.25)))) out)))))))
 
@@ -92,12 +91,12 @@
   [f t0 y0 h n]
   (vec (reductions (fn [[t y] _]
                      (let [t1 (+ t h)
-                           g (fn [z] (mapv - z y (scale (f t1 z) h)))
-                           y1 (loop [z (add y (scale (f t y) h)) k 0]
+                           g (fn [z] (mapv - z y (lin/scale (f t1 z) h)))
+                           y1 (loop [z (lin/add y (lin/scale (f t y) h)) k 0]
                                 (let [dz (ls/gauss (d/jacobian g z {:steps (mapv #(* 1e-7 (max 1.0 (abs %))) z) :richardson? false}) (mapv - (g z)))]
                                   (if (or (nil? dz) (> k 50))
                                     z
-                                    (let [z' (add z dz)]
+                                    (let [z' (lin/add z dz)]
                                       (if (< (rel-change z z') 1e-14) z' (recur z' (inc k)))))))]
                        [t1 y1]))
                    [t0 (vec y0)] (range n))))
@@ -112,16 +111,16 @@
   minus predictor) and the corrector's c (subtracted times this step's)
   (Chapra and Canale 26.2, Box 26.1)."
   {:heun {:history 2
-          :predict (fn [h ys fs] (add (ys 0) (scale (fs 1) (* 2.0 h))))
-          :correct (fn [h ys fs f+] (add (ys 1) (scale (add (fs 1) f+) (* 0.5 h))))
+          :predict (fn [h ys fs] (lin/add (ys 0) (lin/scale (fs 1) (* 2.0 h))))
+          :correct (fn [h ys fs f+] (lin/add (ys 1) (lin/scale (lin/add (fs 1) f+) (* 0.5 h))))
           :modify [0.8 0.2]}
    :milne {:history 4
-           :predict (fn [h ys fs] (add (ys 0) (scale (lin-comb [[2.0 (fs 3)] [-1.0 (fs 2)] [2.0 (fs 1)]]) (/ (* 4.0 h) 3.0))))
-           :correct (fn [h ys fs f+] (add (ys 2) (scale (lin-comb [[1.0 (fs 2)] [4.0 (fs 3)] [1.0 f+]]) (/ h 3.0))))
+           :predict (fn [h ys fs] (lin/add (ys 0) (lin/scale (lin-comb [[2.0 (fs 3)] [-1.0 (fs 2)] [2.0 (fs 1)]]) (/ (* 4.0 h) 3.0))))
+           :correct (fn [h ys fs f+] (lin/add (ys 2) (lin/scale (lin-comb [[1.0 (fs 2)] [4.0 (fs 3)] [1.0 f+]]) (/ h 3.0))))
            :modify [(/ 28.0 29.0) (/ 1.0 29.0)]}
    :adams {:history 4
-           :predict (fn [h ys fs] (add (ys 3) (scale (lin-comb [[55.0 (fs 3)] [-59.0 (fs 2)] [37.0 (fs 1)] [-9.0 (fs 0)]]) (/ h 24.0))))
-           :correct (fn [h ys fs f+] (add (ys 3) (scale (lin-comb [[9.0 f+] [19.0 (fs 3)] [-5.0 (fs 2)] [1.0 (fs 1)]]) (/ h 24.0))))
+           :predict (fn [h ys fs] (lin/add (ys 3) (lin/scale (lin-comb [[55.0 (fs 3)] [-59.0 (fs 2)] [37.0 (fs 1)] [-9.0 (fs 0)]]) (/ h 24.0))))
+           :correct (fn [h ys fs f+] (lin/add (ys 3) (lin/scale (lin-comb [[9.0 f+] [19.0 (fs 3)] [-5.0 (fs 2)] [1.0 (fs 1)]]) (/ h 24.0))))
            :modify [(/ 251.0 270.0) (/ 19.0 270.0)]}})
 
 (defn multistep
@@ -150,7 +149,7 @@
                t1 (+ (peek ts) h)
                p0 (predict h ys fs)
                ;; the predictor modifier uses the last step's corrector-predictor gap
-               p (if (and modify? last-pc) (add p0 (scale last-pc pm)) p0)
+               p (if (and modify? last-pc) (lin/add p0 (lin/scale last-pc pm)) p0)
                c (iterate-corrector #(correct h ys fs (f t1 %)) p tol iterations)
-               y1 (if modify? (mapv - c (scale (mapv - c p0) cm)) c)]
+               y1 (if modify? (mapv - c (lin/scale (mapv - c p0) cm)) c)]
            (recur (conj (subvec pts 1) [t1 y1]) (conj out [t1 y1]) (inc k) (mapv - c p0))))))))

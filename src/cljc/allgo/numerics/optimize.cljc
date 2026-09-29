@@ -23,15 +23,12 @@
 
   Everything here minimizes; to maximize f, minimize -f."
   (:require [allgo.numerics.differentiation :as d]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
             [allgo.random :as random]
             [clojure.math :as math]))
 
 (declare line-minimize)
-
-(defn- add [a b] (mapv + a b))
-(defn- sub [a b] (mapv - a b))
-(defn- scale [a s] (mapv #(* s %) a))
 
 (defn- replace-worst
   "The simplex with its worst point swapped for `p`, sorted best first."
@@ -39,7 +36,7 @@
   (vec (sort-by second (conj (pop simplex) p))))
 
 (defn- centroid [points]
-  (scale (reduce add points) (/ 1.0 (count points))))
+  (lin/scale (reduce lin/add points) (/ 1.0 (count points))))
 
 (defn nelder-mead
   "The `x` near `x0` where `f` is least: `{:x :f :iterations}`. `f`
@@ -69,11 +66,11 @@
              [xw fw] (peek simplex)
              [_ fs] (simplex (dec n))]
          (if (or (>= k max-iter)
-                 (and (every? (fn [[x _]] (every? #(<= (abs %) tol-x) (sub x xb))) simplex)
+                 (and (every? (fn [[x _]] (every? #(<= (abs %) tol-x) (lin/sub x xb))) simplex)
                       (every? (fn [[_ v]] (<= (abs (- v fb)) tol-f)) simplex)))
            {:x xb :f fb :iterations k}
            (let [c (centroid (map first (pop simplex)))
-                 at (fn [t] (let [x (add c (scale (sub c xw) t))] [x (g x)]))
+                 at (fn [t] (let [x (lin/add c (lin/scale (lin/sub c xw) t))] [x (g x)]))
                  replace #(replace-worst simplex %)
                  [_ fr :as r] (at 1.0)]
              (recur
@@ -89,7 +86,7 @@
                     (replace cp)
                     ;; shrink everything toward the best point
                     (sorted (cons [xb fb] (for [[x _] (rest simplex)]
-                                            (let [y (add xb (scale (sub x xb) 0.5))] [y (g y)])))))))
+                                            (let [y (lin/add xb (lin/scale (lin/sub x xb) 0.5))] [y (g y)])))))))
               (inc k)))))))))
 
 ;; ---------------------------------------------------------- one variable
@@ -184,7 +181,7 @@
   bracketed by stepping out from 0 with growing steps, then found by
   Brent's method. `[t x+td f]`."
   [f x d]
-  (let [g (fn [t] (f (add x (scale d t))))
+  (let [g (fn [t] (f (lin/add x (lin/scale d t))))
         f0 (g 0.0)
         h (/ 1e-2 (max 1e-12 (math/sqrt (reduce + (map * d d)))))
         ;; walk downhill from 0, doubling, until f rises
@@ -196,7 +193,7 @@
                     (let [fa (g a)]
                       (if (or (>= fa fb) (> k 60)) [a h] (recur (* 2.0 a) fa (inc k))))))
         {t :x fv :f} (brent-minimize g lo hi {:tol 1e-12})]
-    [t (add x (scale d t)) fv]))
+    [t (lin/add x (lin/scale d t)) fv]))
 
 ;; ---------------------------------------------- several variables: direct
 
@@ -248,7 +245,7 @@
      (loop [x (mapv double x0) fx (f x0)
             dirs (mapv (fn [i] (assoc (vec (repeat n 0.0)) i 1.0)) (range n)) k 1]
        (let [[y fy] (reduce (fn [[y _] d] (let [[_ y' fv] (line-minimize f y d)] [y' fv])) [x fx] dirs)
-             net (sub y x)
+             net (lin/sub y x)
              [x' fx' dirs] (if (every? zero? net)
                              [y fy dirs]
                              (let [[_ z fz] (line-minimize f y net)]
@@ -275,7 +272,7 @@
        (let [g (grad x)]
          (if (every? zero? g)
            {:x x :f fx :iterations k}
-           (let [[_ x' fx'] (line-minimize f x (scale g -1.0))]
+           (let [[_ x' fx'] (line-minimize f x (lin/scale g -1.0))]
              (if (or (settled? x x' fx fx' tol) (>= k max-iter))
                {:x x' :f fx' :iterations k}
                (recur x' fx' (inc k))))))))))
@@ -290,13 +287,13 @@
   ([f grad x0] (conjugate-gradient f grad x0 {}))
   ([f grad x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 5000}}]
    (let [grad (grad-fn f grad) n (count x0)]
-     (loop [x (mapv double x0) fx (f x0) g (grad x0) d (scale (grad x0) -1.0) k 1]
+     (loop [x (mapv double x0) fx (f x0) g (grad x0) d (lin/scale (grad x0) -1.0) k 1]
        (if (every? zero? g)
          {:x x :f fx :iterations k}
          (let [[_ x' fx'] (line-minimize f x d)
                g' (grad x')
                beta (/ (reduce + (map * g' g')) (reduce + (map * g g)))
-               d' (if (zero? (mod k n)) (scale g' -1.0) (add (scale g' -1.0) (scale d beta)))]
+               d' (if (zero? (mod k n)) (lin/scale g' -1.0) (lin/add (lin/scale g' -1.0) (lin/scale d beta)))]
            (if (or (settled? x x' fx fx' tol) (>= k max-iter))
              {:x x' :f fx' :iterations k}
              (recur x' fx' g' d' (inc k)))))))))
@@ -315,7 +312,7 @@
    (let [grad (grad-fn f grad) hess (or hess #(d/hessian f %))]
      (loop [x (mapv double x0) fx (f x0) k 1]
        (if-let [dx (solve-sym (hess x) (grad x))]
-         (let [x' (sub x dx) fx' (f x')]
+         (let [x' (lin/sub x dx) fx' (f x')]
            (if (or (settled? x x' fx fx' tol) (>= k max-iter))
              {:x x' :f fx' :iterations k}
              (recur x' fx' (inc k))))
@@ -337,7 +334,7 @@
              dx (solve-sym damped g)]
          (if (nil? dx)
            (recur x fx (* 10.0 alpha) (inc k))
-           (let [x' (sub x dx) fx' (f x')]
+           (let [x' (lin/sub x dx) fx' (f x')]
              (cond
                (>= k max-iter) {:x x :f fx :iterations k}
                (< fx' fx) (if (settled? x x' fx fx' tol)
@@ -365,9 +362,9 @@
             B (mapv (fn [i] (assoc (vec (repeat n 0.0)) i 1.0)) (range n)) k 1]
        (if (every? zero? g)
          {:x x :f fx :iterations k}
-         (let [[_ x' fx'] (line-minimize f x (scale (mv B g) -1.0))
+         (let [[_ x' fx'] (line-minimize f x (lin/scale (mv B g) -1.0))
                g' (grad x')
-               s (sub x' x) y (sub g' g)
+               s (lin/sub x' x) y (lin/sub g' g)
                sy (reduce + (map * s y))
                By (mv B y)
                B' (cond

@@ -25,6 +25,7 @@
   package shares that frame, so positions from here can be drawn alongside a
   propagated orbit without further rotation."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.frames :as frames]
             [allgo.astro.time :as t]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
@@ -45,12 +46,6 @@
   [mjd-tt]
   (* (- 23.43929111 (* 0.0130042 (t/centuries-J2000 mjd-tt))) c/degrees))
 
-(defn- ecliptic->equatorial [[x y z] eps]
-  (let [ce (math/cos eps) se (math/sin eps)]
-    [x
-     (- (* ce y) (* se z))
-     (+ (* se y) (* ce z))]))
-
 (defn sun
   "Geocentric position of the Sun, km."
   [mjd-tt]
@@ -65,8 +60,8 @@
     ;; identifies the series as referred to the fixed J2000 equinox rather
     ;; than the moving equinox of date. The obliquity must match: using the
     ;; one of date puts the Sun 8000 km out by 2025 and 33,000 by 2100.
-    (ecliptic->equatorial [(* r (math/cos L)) (* r (math/sin L)) 0.0]
-                          obliquity-J2000)))
+    (frames/ecliptic->equatorial [(* r (math/cos L)) (* r (math/sin L)) 0.0]
+                                 obliquity-J2000)))
 
 (defn moon
   "Geocentric position of the Moon, km.
@@ -110,8 +105,8 @@
                (* 171.0 (cos (+ l (* 2 D))))
                (* 152.0 (cos (- (+ l lp) (* 2 D)))))]
     ;; L0 is likewise measured from the J2000 equinox.
-    (ecliptic->equatorial [(* R (cos L) (cos B)) (* R (sin L) (cos B)) (* R (sin B))]
-                          obliquity-J2000)))
+    (frames/ecliptic->equatorial [(* R (cos L) (cos B)) (* R (sin L) (cos B)) (* R (sin B))]
+                                 obliquity-J2000)))
 
 ;; ------------------------------------------------------------- the force
 

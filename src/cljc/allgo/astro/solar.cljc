@@ -27,12 +27,10 @@
             [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
-(defn- deg [x] (* x c/degrees))
-
 ;; --------------------------------------------------- low accuracy (25.2-25.8)
 
 (defn mean-anomaly [mjd-tt]
-  (deg (poly/horner-ascending [357.52911 35999.05029 -0.0001537] (time/centuries-J2000 mjd-tt))))
+  (c/deg (poly/horner-ascending [357.52911 35999.05029 -0.0001537] (time/centuries-J2000 mjd-tt))))
 
 (defn eccentricity
   "Eccentricity of the Earth's orbit, slowly decreasing."
@@ -41,13 +39,13 @@
 
 (defn- low-accuracy [mjd-tt]
   (let [T  (time/centuries-J2000 mjd-tt)
-        L0 (deg (poly/horner-ascending [280.46646 36000.76983 0.0003032] T))
+        L0 (c/deg (poly/horner-ascending [280.46646 36000.76983 0.0003032] T))
         M  (mean-anomaly mjd-tt)
-        C  (deg (+ (* (poly/horner-ascending [1.914602 -0.004817 -0.000014] T) (math/sin M))
-                   (* (- 0.019993 (* 0.000101 T)) (math/sin (* 2.0 M)))
-                   (* 0.000289 (math/sin (* 3.0 M)))))]
+        C  (c/deg (+ (* (poly/horner-ascending [1.914602 -0.004817 -0.000014] T) (math/sin M))
+                     (* (- 0.019993 (* 0.000101 T)) (math/sin (* 2.0 M)))
+                     (* 0.000289 (math/sin (* 3.0 M)))))]
     {:lon (am/wrap-2pi (+ L0 C)) :anomaly (am/wrap-2pi (+ M C))
-     :node (deg (- 125.04 (* 1934.136 T)))}))
+     :node (c/deg (- 125.04 (* 1934.136 T)))}))
 
 (defn true-longitude
   "The Sun's geometric longitude referred to the mean equinox of date, by
@@ -68,12 +66,12 @@
   nutation and aberration together, by the dominant nutation term."
   [mjd-tt]
   (let [{:keys [lon node]} (low-accuracy mjd-tt)]
-    (- lon (deg 0.00569) (* (deg 0.00478) (math/sin node)))))
+    (- lon (c/deg 0.00569) (* (c/deg 0.00478) (math/sin node)))))
 
 (defn true-longitude-J2000
   "`true-longitude` referred to the equinox of J2000 instead of the date."
   [mjd-tt]
-  (- (true-longitude mjd-tt) (* (deg 0.01397) (time/centuries-J2000 mjd-tt) 100.0)))
+  (- (true-longitude mjd-tt) (* (c/deg 0.01397) (time/centuries-J2000 mjd-tt) 100.0)))
 
 (defn equatorial-low
   "`[ra dec]` from the low-accuracy theory: geometric and mean, or when
@@ -83,7 +81,7 @@
   ([mjd-tt apparent?]
    (let [{:keys [node]} (low-accuracy mjd-tt)
          eps (cond-> (frames/mean-obliquity mjd-tt)
-               apparent? (+ (* (deg 0.00256) (math/cos node))))
+               apparent? (+ (* (c/deg 0.00256) (math/cos node))))
          lon (if apparent? (apparent-longitude-low mjd-tt) (true-longitude mjd-tt))]
      (coord/ecliptic->equatorial [lon 0.0] eps))))
 
@@ -185,9 +183,9 @@
   [year season]
   (let [J0 (mean-season year season)
         T  (time/centuries-J2000 J0)
-        W  (deg (- (* 35999.373 T) 2.47))
+        W  (c/deg (- (* 35999.373 T) 2.47))
         dl (+ 1.0 (* 0.0334 (math/cos W)) (* 0.0007 (math/cos (* 2.0 W))))
-        S  (reduce (fn [s [a b cc]] (+ s (* a (math/cos (deg (+ b (* cc T))))))) 0.0
+        S  (reduce (fn [s [a b cc]] (+ s (* a (math/cos (c/deg (+ b (* cc T))))))) 0.0
                    seasons-periodic)]
     (+ J0 (/ (* 0.00001 S) dl))))
 
@@ -195,7 +193,7 @@
   "`season`, found by correcting the mean instant until the Sun's apparent
   longitude is exactly 0, 90, 180 or 270 degrees (Meeus 27.1)."
   [year season]
-  (let [q (deg ({:march 0 :june 90 :september 180 :december 270} season))]
+  (let [q (c/deg ({:march 0 :june 90 :september 180 :december 270} season))]
     (loop [J (mean-season year season) i 0]
       (let [dJ (* 58.0 (math/sin (- q (first (apparent J)))))]
         (if (or (< (abs dJ) 5e-6) (>= i 20))
@@ -205,8 +203,8 @@
 ;; ---------------------------------------------------- equation of time (28)
 
 (defn- sun-mean-longitude [mjd-tt]
-  (deg (poly/horner-ascending [280.4664567 360007.6982779 0.03032028 (/ 1.0 49931) (/ -1.0 15300)
-                               (/ -1.0 2000000)] (vsop87/millennia mjd-tt))))
+  (c/deg (poly/horner-ascending [280.4664567 360007.6982779 0.03032028 (/ 1.0 49931) (/ -1.0 15300)
+                                 (/ -1.0 2000000)] (vsop87/millennia mjd-tt))))
 
 (defn equation-of-time
   "Apparent minus mean solar time, radians of hour angle (15 degrees an
@@ -217,7 +215,7 @@
   (let [[ra] (apparent-equatorial mjd-tt)
         [dpsi deps] (frames/nutation-angles mjd-tt)
         eps (+ (frames/mean-obliquity mjd-tt) deps)
-        E (- (sun-mean-longitude mjd-tt) (deg 0.0057183) ra (- (* dpsi (math/cos eps))))]
+        E (- (sun-mean-longitude mjd-tt) (c/deg 0.0057183) ra (- (* dpsi (math/cos eps))))]
     (am/wrap-angle E)))
 
 (defn equation-of-time-smart
@@ -246,8 +244,8 @@
   [mjd]
   (let [jd  (+ mjd c/jd-mjd-offset)
         th  (am/wrap-2pi (* (/ (- jd 2398220.0) 25.38) c/two-pi))
-        I   (deg 7.25)
-        K   (+ (deg 73.6667) (* (deg 1.3958333) (/ (- jd 2396758.0) 36525.0)))
+        I   (c/deg 7.25)
+        K   (+ (c/deg 73.6667) (* (c/deg 1.3958333) (/ (- jd 2396758.0) 36525.0)))
         [L _ R] (geometric mjd)
         [dpsi deps] (frames/nutation-angles mjd)
         eps (+ (frames/mean-obliquity mjd) deps)
@@ -265,7 +263,7 @@
   solar rotations from 1853 November 9, when Carrington started counting,
   and still the way sunspot records are indexed."
   [n]
-  (let [m (deg (+ 281.96 (* 26.882476 n)))]
+  (let [m (c/deg (+ 281.96 (* 26.882476 n)))]
     (- (+ 2398140.227 (* 27.2752316 n)
           (* 0.1454 (math/sin m)) (* -0.0085 (math/sin (* 2.0 m))) (* -0.0141 (math/cos (* 2.0 m))))
        c/jd-mjd-offset)))

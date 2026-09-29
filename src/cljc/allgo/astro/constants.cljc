@@ -14,6 +14,11 @@
 (def arcsec (/ math/PI 180.0 3600.0))
 (def degrees (/ math/PI 180.0))
 
+(defn deg
+  "Degrees to radians -- the conversion every almanac formula starts with."
+  [x]
+  (* x degrees))
+
 ;; --------------------------------------------------------------- the Earth
 
 (def GM-earth

@@ -51,7 +51,8 @@
   "Apparent less mean sidereal time, the IAU's 1994 form with the two terms
   added in 1997 for the kinematic effect of the node's regression: dpsi cos
   eps_A + 0.00264'' sin Omega + 0.000063'' sin 2 Omega, eps_A the mean
-  obliquity."
+  obliquity. (`allgo.astro.frames/equation-of-equinoxes` is the classical
+  form without them.)"
   [mjd-tt eop]
   (let [om (nth (frames/delaunay mjd-tt) 4)]
     (+ (eqe-1982 mjd-tt eop)

@@ -172,9 +172,10 @@
 ;; ------------------------------------------------------- satellite frames
 
 (defn rsw
-  "The radial, along-track, cross-track frame of a state: rows R, S, W."
+  "The radial, along-track, cross-track frame of a state: rows R, S, W --
+  `allgo.astro.geodesy/rtn-frame`, taking the state whole."
   [[r v]]
-  (let [R (v3/normalize r) W (v3/normalize (v3/cross r v)) S (v3/cross W R)] [R S W]))
+  (geodesy/rtn-frame r v))
 
 (defn ntw
   "The frame along the velocity: N in-plane normal to it, T along it, W

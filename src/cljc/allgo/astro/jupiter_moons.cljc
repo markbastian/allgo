@@ -26,8 +26,6 @@
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
-(defn- deg [x] (* x c/degrees))
-
 ;; --------------------------------------------------------- low precision
 
 (defn positions-low-precision
@@ -35,34 +33,34 @@
   from circular orbits with the main perturbation of each."
   [mjd-tt]
   (let [d  (- mjd-tt c/mjd-J2000)
-        V  (deg (+ 172.74 (* 0.00111588 d)))
-        M  (deg (+ 357.529 (* 0.9856003 d)))
+        V  (c/deg (+ 172.74 (* 0.00111588 d)))
+        M  (c/deg (+ 357.529 (* 0.9856003 d)))
         sV (math/sin V)
-        N  (+ (deg (+ 20.02 (* 0.0830853 d))) (* (deg 0.329) sV))
-        J  (- (deg (+ 66.115 (* 0.9025179 d))) (* (deg 0.329) sV))
-        A  (+ (* (deg 1.915) (math/sin M)) (* (deg 0.020) (math/sin (* 2 M))))
-        B  (+ (* (deg 5.555) (math/sin N)) (* (deg 0.168) (math/sin (* 2 N))))
+        N  (+ (c/deg (+ 20.02 (* 0.0830853 d))) (* (c/deg 0.329) sV))
+        J  (- (c/deg (+ 66.115 (* 0.9025179 d))) (* (c/deg 0.329) sV))
+        A  (+ (* (c/deg 1.915) (math/sin M)) (* (c/deg 0.020) (math/sin (* 2 M))))
+        B  (+ (* (c/deg 5.555) (math/sin N)) (* (c/deg 0.168) (math/sin (* 2 N))))
         K  (- (+ J A) B)
         R  (- 1.00014 (* 0.01671 (math/cos M)) (* 0.00014 (math/cos (* 2 M))))
         r  (- 5.20872 (* 0.25208 (math/cos N)) (* 0.00611 (math/cos (* 2 N))))
         delta (math/sqrt (- (+ (* r r) (* R R)) (* 2 r R (math/cos K))))
         psi (math/asin (* (/ R delta) (math/sin K)))
-        lam (+ (deg (+ 34.35 (* 0.083091 d))) (* (deg 0.329) sV) B)
-        DS  (* (deg 3.12) (math/sin (+ lam (deg 42.8))))
-        DE  (- DS (* (deg 2.22) (math/sin psi) (math/cos (+ lam (deg 22))))
-               (* (deg 1.3) (/ (- r delta) delta) (math/sin (- lam (deg 100.5)))))
+        lam (+ (c/deg (+ 34.35 (* 0.083091 d))) (* (c/deg 0.329) sV) B)
+        DS  (* (c/deg 3.12) (math/sin (+ lam (c/deg 42.8))))
+        DE  (- DS (* (c/deg 2.22) (math/sin psi) (math/cos (+ lam (c/deg 22))))
+               (* (c/deg 1.3) (/ (- r delta) delta) (math/sin (- lam (c/deg 100.5)))))
         dd  (- d (/ delta 173.0))
-        u   (fn [a b] (+ (deg (+ a (* b dd))) psi (- B)))
+        u   (fn [a b] (+ (c/deg (+ a (* b dd))) psi (- B)))
         u1 (u 163.8069 203.4058646) u2 (u 358.414 101.2916335)
         u3 (u 5.7176 50.234518)     u4 (u 224.8092 21.48798)
-        G  (deg (+ 331.18 (* 50.310482 dd)))
-        H  (deg (+ 87.45 (* 21.569231 dd)))
+        G  (c/deg (+ 331.18 (* 50.310482 dd)))
+        H  (c/deg (+ 87.45 (* 21.569231 dd)))
         sde (math/sin DE)
         xy (fn [u r] [(* r (math/sin u)) (* (- r) (math/cos u) sde)])]
-    [(xy (+ u1 (* (deg 0.473) (math/sin (* 2 (- u1 u2))))) (- 5.9057 (* 0.0244 (math/cos (* 2 (- u1 u2))))))
-     (xy (+ u2 (* (deg 1.065) (math/sin (* 2 (- u2 u3))))) (- 9.3966 (* 0.0882 (math/cos (* 2 (- u2 u3))))))
-     (xy (+ u3 (* (deg 0.165) (math/sin G))) (- 14.9883 (* 0.0216 (math/cos G))))
-     (xy (+ u4 (* (deg 0.843) (math/sin H))) (- 26.3627 (* 0.1939 (math/cos H))))]))
+    [(xy (+ u1 (* (c/deg 0.473) (math/sin (* 2 (- u1 u2))))) (- 5.9057 (* 0.0244 (math/cos (* 2 (- u1 u2))))))
+     (xy (+ u2 (* (c/deg 1.065) (math/sin (* 2 (- u2 u3))))) (- 9.3966 (* 0.0882 (math/cos (* 2 (- u2 u3))))))
+     (xy (+ u3 (* (c/deg 0.165) (math/sin G))) (- 14.9883 (* 0.0216 (math/cos G))))
+     (xy (+ u4 (* (c/deg 0.843) (math/sin H))) (- 26.3627 (* 0.1939 (math/cos H))))]))
 
 ;; --------------------------------------------------------------- E5 theory
 
@@ -335,7 +333,7 @@
   [jd-light mjd-tt]
   (let [jd (+ mjd-tt c/jd-mjd-offset)
         t  (- jd-light 2443000.5)
-        lin (fn [a b] (deg (+ a (* b t))))
+        lin (fn [a b] (c/deg (+ a (* b t))))
         args0 {:l1 (lin 106.07719 203.48895579) :l2 (lin 175.73161 101.374724735)
                :l3 (lin 120.55883 50.317609207) :l4 (lin 84.44459 21.571071177)
                :pi1 (lin 97.0881 0.16138586) :pi2 (lin 154.8663 0.04726307)
@@ -343,10 +341,10 @@
                :om1 (lin 312.3346 -0.13279386) :om2 (lin 100.4411 -0.03263064)
                :om3 (lin 119.1942 -0.00717703) :om4 (lin 322.6186 -0.00175934)
                :phi (lin 199.6766 0.1737919) :psi (lin 316.5182 -0.00000208)
-               :G' (lin 31.97853 0.0334597339) :PI (deg 13.469942)
+               :G' (lin 31.97853 0.0334597339) :PI (c/deg 13.469942)
                :G (+ (lin 30.23756 0.0830925701)
-                     (* (deg 0.33033) (math/sin (deg (+ 163.679 (* 0.0010512 t)))))
-                     (* (deg 0.03439) (math/sin (deg (- 34.486 (* 0.0161731 t))))))}
+                     (* (c/deg 0.33033) (math/sin (c/deg (+ 163.679 (* 0.0010512 t)))))
+                     (* (c/deg 0.03439) (math/sin (c/deg (- 34.486 (* 0.0161731 t))))))}
         S  (mapv #(* c/degrees (series math/sin (sigma %) args0)) [:sigma1 :sigma2 :sigma3 :sigma4])
         L  (mapv #(+ (args0 %1) %2) [:l1 :l2 :l3 :l4] S)
         args (merge args0 (zipmap [:L1 :L2 :L3 :L4] L) (zipmap [:S1 :S2 :S3 :S4] S))
@@ -354,9 +352,9 @@
         Rs (mapv #(* %1 (+ 1.0 (series math/cos %2 args))) mean-radius radius)
         ;; precession since B1950, to refer the longitudes to the equinox of date
         T0 (/ (- jd 2433282.423) 36525.0)
-        P  (* (+ (deg 1.3966626) (* (deg 0.0003088) T0)) T0)
+        P  (* (+ (c/deg 1.3966626) (* (c/deg 0.0003088) T0)) T0)
         psi (+ (:psi args) P)
-        I  (deg (+ 3.120262 (* 0.0006 (/ (- jd 2415020.0) 36525.0))))
+        I  (c/deg (+ 3.120262 (* 0.0006 (/ (- jd 2415020.0) 36525.0))))
         xyz (conj (mapv (fn [l b r] [(* r (math/cos (- (+ l P) psi)) (math/cos b))
                                      (* r (math/sin (- (+ l P) psi)) (math/cos b))
                                      (* r (math/sin b))])

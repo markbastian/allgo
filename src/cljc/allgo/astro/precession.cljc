@@ -22,9 +22,6 @@
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
-(defn- unit-vector [[a d]]
-  [(* (math/cos d) (math/cos a)) (* (math/cos d) (math/sin a)) (math/sin d)])
-
 (defn- angles [[x y z]]
   [(am/wrap-2pi (math/atan2 y x)) (math/atan2 z (math/hypot x y))])
 
@@ -43,7 +40,7 @@
   ([[ra dec] from to [pm-ra pm-dec]]
    (let [years (/ (- to from) 365.25)]
      (angles (lin/mat-vec (equatorial-matrix from to)
-                          (unit-vector [(+ ra (* years pm-ra)) (+ dec (* years pm-dec))]))))))
+                          (coord/unit-vector [(+ ra (* years pm-ra)) (+ dec (* years pm-dec))]))))))
 
 (defn annual-precession
   "`[dra ddec]`, the annual precession of `[ra dec]` in radians a year
@@ -74,7 +71,7 @@
   space rather than along the sky. For a nearby fast star over millennia
   the two differ; Barnard's star is the classic case."
   [[ra dec] from to distance radial-velocity [pm-ra pm-dec]]
-  (let [[x y z] (lin/scale (unit-vector [ra dec]) distance)
+  (let [[x y z] (lin/scale (coord/unit-vector [ra dec]) distance)
         mrr (/ radial-velocity distance)
         zm  (* z pm-dec)
         mx  (- (* x mrr) (* zm (math/cos ra)) (* y pm-ra))

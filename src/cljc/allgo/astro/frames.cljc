@@ -36,6 +36,13 @@
         th   (* c/arcsec (- (* 2004.3109 T) (* 0.42665 T2) (* 0.041833 T3)))]
     (rot/chain (rot/rz (- z)) (rot/ry th) (rot/rz (- zeta)))))
 
+(defn ecliptic->equatorial
+  "A vector on the ecliptic turned onto the equator of obliquity `eps`: a
+  rotation about the equinox, the x axis."
+  [[x y z] eps]
+  (let [ce (math/cos eps) se (math/sin eps)]
+    [x (- (* ce y) (* se z)) (+ (* se y) (* ce z))]))
+
 (defn mean-obliquity
   "Obliquity of the ecliptic referred to the mean equator, radians
   (IAU 1980). It is decreasing by about 47 arcseconds a century."
@@ -244,7 +251,9 @@
 (defn equation-of-equinoxes
   "The gap between apparent and mean sidereal time, radians. It is the
   nutation in longitude projected onto the equator -- the true equinox
-  wanders, so a clock keeping time by it wanders too, by up to a second."
+  wanders, so a clock keeping time by it wanders too, by up to a second.
+  The classical form; `allgo.astro.reduction/equation-of-equinoxes` adds
+  the IAU's 1994 kinematic terms, as the FK5 reduction wants."
   [mjd-tt]
   (let [[dpsi deps] (nutation-angles mjd-tt)]
     (* dpsi (math/cos (+ (mean-obliquity mjd-tt) deps)))))

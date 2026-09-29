@@ -27,6 +27,7 @@
   O2's (his 16 and 17); they are taken here the way round Jacchia's
   mixing gives them. Heights km, densities g/cm^3 and cm^-3."
   (:require [allgo.astro.jacchia :as j]
+            [allgo.numerics.complex :as cx]
             [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
@@ -41,11 +42,6 @@
 (def ^:private avogadro 6.02257e23)
 
 ;; ------------------------------------------------------ complex numbers
-
-(defn- c+ [[a b] [c d]] [(+ a c) (+ b d)])
-(defn- c- [[a b] [c d]] [(- a c) (- b d)])
-(defn- c* [[a b] [c d]] [(- (* a c) (* b d)) (+ (* a d) (* b c))])
-(defn- c-div [[a b] [c d]] (let [m (+ (* c c) (* d d))] [(/ (+ (* a c) (* b d)) m) (/ (- (* b c) (* a d)) m)]))
 
 ;; ---------------------------------------------------- the quartic profile
 
@@ -73,7 +69,7 @@
   of (Z - 100), highest first: by partial fractions, the residues at the
   roots and the double pole at -Ra."
   [{:keys [r1 r2 x y]} coeffs za zb]
-  (let [horner (fn [z] (reduce (fn [acc c] (c+ (c* acc (c- z [100.0 0.0])) [c 0.0])) [0.0 0.0] coeffs))
+  (let [horner (fn [z] (reduce (fn [acc c] (cx/+ (cx/* acc (cx/- z [100.0 0.0])) [c 0.0])) [0.0 0.0] coeffs))
         n (fn [v] (first (horner [v 0.0])))
         n' (fn [v] (let [k (dec (count coeffs))]
                      (first (reduce (fn [[acc i] c] [(+ (* acc (- v 100.0)) (* i c)) (dec i)])
@@ -88,9 +84,9 @@
         p2 (/ (n r1) (* (math/pow (+ r1 ra) 2) (- r1 r2) (q r1)))
         p3 (/ (n r2) (* (math/pow (+ r2 ra) 2) (- r2 r1) (q r2)))
         c [x y]
-        [re im] (c-div (horner c)
-                       (reduce c* [(c* (c+ c [ra 0.0]) (c+ c [ra 0.0]))
-                                   (c- c [r1 0.0]) (c- c [r2 0.0]) [0.0 (* 2.0 y)]]))
+        [re im] (cx// (horner c)
+                      (reduce cx/* [(cx/* (cx/+ c [ra 0.0]) (cx/+ c [ra 0.0]))
+                                    (cx/- c [r1 0.0]) (cx/- c [r2 0.0]) [0.0 (* 2.0 y)]]))
         ln-ratio (fn [f] (math/log (/ (f zb) (f za))))]
     (+ (* lead (- zb za))
        (* p1 (ln-ratio #(+ % ra)))

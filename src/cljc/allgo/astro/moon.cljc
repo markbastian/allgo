@@ -25,8 +25,6 @@
             [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
-(defn- deg [x] (* x c/degrees))
-
 (defn arguments
   "The fundamental arguments at `mjd-tt`, radians: the Moon's mean
   longitude `:L'`, the mean elongation `:D`, the Sun's and Moon's mean
@@ -34,11 +32,11 @@
   eccentricity factor."
   [mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)]
-    {:L' (deg (poly/horner-ascending [218.3164477 481267.88123421 -0.0015786 (/ 1.0 538841) (/ -1.0 65194000)] T))
-     :D  (deg (poly/horner-ascending [297.8501921 445267.1114034 -0.0018819 (/ 1.0 545868) (/ -1.0 113065000)] T))
-     :M  (deg (poly/horner-ascending [357.5291092 35999.0502909 -0.0001535 (/ 1.0 24490000)] T))
-     :M' (deg (poly/horner-ascending [134.9633964 477198.8675055 0.0087414 (/ 1.0 69699) (/ -1.0 14712000)] T))
-     :F  (deg (poly/horner-ascending [93.272095 483202.0175233 -0.0036539 (/ -1.0 3526000) (/ 1.0 863310000)] T))
+    {:L' (c/deg (poly/horner-ascending [218.3164477 481267.88123421 -0.0015786 (/ 1.0 538841) (/ -1.0 65194000)] T))
+     :D  (c/deg (poly/horner-ascending [297.8501921 445267.1114034 -0.0018819 (/ 1.0 545868) (/ -1.0 113065000)] T))
+     :M  (c/deg (poly/horner-ascending [357.5291092 35999.0502909 -0.0001535 (/ 1.0 24490000)] T))
+     :M' (c/deg (poly/horner-ascending [134.9633964 477198.8675055 0.0087414 (/ 1.0 69699) (/ -1.0 14712000)] T))
+     :F  (c/deg (poly/horner-ascending [93.272095 483202.0175233 -0.0036539 (/ -1.0 3526000) (/ 1.0 863310000)] T))
      :E  (poly/horner-ascending [1.0 -0.002516 -0.0000074] T)}))
 
 ;; ------------------------------------------------------------ position (47)
@@ -180,9 +178,9 @@
   [mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)
         {:keys [L' D M M' F E]} (arguments mjd-tt)
-        A1 (deg (+ 119.75 (* 131.849 T)))
-        A2 (deg (+ 53.09 (* 479264.290 T)))
-        A3 (deg (+ 313.45 (* 481266.484 T)))
+        A1 (c/deg (+ 119.75 (* 131.849 T)))
+        A2 (c/deg (+ 53.09 (* 479264.290 T)))
+        A3 (c/deg (+ 313.45 (* 481266.484 T)))
         e-of (fn [m] (case (long (abs m)) 0 1.0 1 E 2 (* E E)))
         [sl sr] (reduce (fn [[sl sr] [d m m' f l r]]
                           (let [a (+ (* d D) (* m M) (* m' M') (* f F))
@@ -195,7 +193,7 @@
                    (+ (* -2235 (math/sin L')) (* 382 (math/sin A3)) (* 175 (math/sin (- A1 F)))
                       (* 175 (math/sin (+ A1 F))) (* 127 (math/sin (- L' M'))) (* -115 (math/sin (+ L' M'))))
                    latitude-terms)]
-    [(am/wrap-2pi (+ L' (deg (* sl 1e-6)))) (deg (* sb 1e-6)) (+ 385000.56 (* sr 1e-3))]))
+    [(am/wrap-2pi (+ L' (c/deg (* sl 1e-6)))) (c/deg (* sb 1e-6)) (+ 385000.56 (* sr 1e-3))]))
 
 (defn geocentric-J2000
   "The Moon's geocentric position, km, in EME2000: `position` turned from
@@ -209,7 +207,10 @@
 
 (defn horizontal-parallax
   "The Moon's equatorial horizontal parallax at `distance` km: the Earth's
-  equatorial radius as seen from it, nearly a degree."
+  equatorial radius as seen from it, nearly a degree. Meeus's form, the
+  radius 6378.14 km; `allgo.astro.coordinates/horizontal-parallax` is for
+  bodies at distances in AU, from the solar parallax 8.794'', which
+  differs from it in the fifth digit."
   [distance]
   (math/asin (/ 6378.14 distance)))
 
@@ -232,7 +233,7 @@
   "Longitude of the mean ascending node of the lunar orbit, which
   regresses around the ecliptic every 18.6 years."
   [mjd-tt]
-  (am/wrap-2pi (deg (poly/horner-ascending [125.0445479 -1934.1362891 0.0020754 (/ 1.0 467441) (/ -1.0 60616000)] (time/centuries-J2000 mjd-tt)))))
+  (am/wrap-2pi (c/deg (poly/horner-ascending [125.0445479 -1934.1362891 0.0020754 (/ 1.0 467441) (/ -1.0 60616000)] (time/centuries-J2000 mjd-tt)))))
 
 (defn true-node
   "Longitude of the true ascending node: the mean node with its periodic
@@ -240,15 +241,15 @@
   [mjd-tt]
   (let [{:keys [D M M' F]} (arguments mjd-tt)]
     (am/wrap-2pi (+ (mean-node mjd-tt)
-                    (deg (+ (* -1.4979 (math/sin (* 2 (- D F)))) (* -0.1500 (math/sin M))
-                            (* -0.1226 (math/sin (* 2 D))) (* 0.1176 (math/sin (* 2 F)))
-                            (* -0.0801 (math/sin (* 2 (- M' F))))))))))
+                    (c/deg (+ (* -1.4979 (math/sin (* 2 (- D F)))) (* -0.1500 (math/sin M))
+                              (* -0.1226 (math/sin (* 2 D))) (* 0.1176 (math/sin (* 2 F)))
+                              (* -0.0801 (math/sin (* 2 (- M' F))))))))))
 
 (defn mean-perigee
   "Longitude of the mean perigee of the lunar orbit, which advances around
   the ecliptic every 8.85 years."
   [mjd-tt]
-  (am/wrap-2pi (deg (poly/horner-ascending [83.3532465 4069.0137287 -0.0103200 (/ -1.0 80053) (/ 1.0 18999000)] (time/centuries-J2000 mjd-tt)))))
+  (am/wrap-2pi (c/deg (poly/horner-ascending [83.3532465 4069.0137287 -0.0103200 (/ -1.0 80053) (/ 1.0 18999000)] (time/centuries-J2000 mjd-tt)))))
 
 ;; ------------------------------------------------ illuminated fraction (48)
 
@@ -271,8 +272,8 @@
   [mjd-tt]
   (let [{:keys [D M M']} (arguments mjd-tt)]
     (+ (- math/PI (am/wrap-2pi D))
-       (deg (+ (* -6.289 (math/sin M')) (* 2.100 (math/sin M)) (* -1.274 (math/sin (- (* 2 D) M')))
-               (* -0.658 (math/sin (* 2 D))) (* -0.214 (math/sin (* 2 M'))) (* -0.110 (math/sin D)))))))
+       (c/deg (+ (* -6.289 (math/sin M')) (* 2.100 (math/sin M)) (* -1.274 (math/sin (- (* 2 D) M')))
+                 (* -0.658 (math/sin (* 2 D))) (* -0.214 (math/sin (* 2 M'))) (* -0.110 (math/sin D)))))))
 
 (defn illuminated-fraction
   "Fraction of the disk lit at phase angle `i`."
@@ -297,35 +298,35 @@
   "Inclination of the mean lunar equator to the ecliptic, 1.54242 degrees
   -- the Moon's axis is nearly perpendicular to its orbit's reference
   plane, which is Cassini's second law."
-  (deg 1.54242))
+  (c/deg 1.54242))
 
 (defn- physical-libration-terms [mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)
         {:keys [D M M' F E]} (arguments mjd-tt)
         om (mean-node mjd-tt)
-        K1 (deg (+ 119.75 (* 131.849 T)))
-        K2 (deg (+ 72.56 (* 20.186 T)))
+        K1 (c/deg (+ 119.75 (* 131.849 T)))
+        K2 (c/deg (+ 72.56 (* 20.186 T)))
         s math/sin cs math/cos]
-    {:rho (deg (+ (* -0.02752 (cs M')) (* -0.02245 (s F)) (* 0.00684 (cs (- M' (* 2 F))))
-                  (* -0.00293 (cs (* 2 F))) (* -0.00085 (cs (* 2 (- F D))))
-                  (* -0.00054 (cs (- M' (* 2 D)))) (* -0.00020 (s (+ M' F)))
-                  (* -0.00020 (cs (+ M' (* 2 F)))) (* -0.00020 (cs (- M' F)))
-                  (* 0.00014 (cs (+ M' (* 2 (- F D)))))))
-     :sigma (deg (+ (* -0.02816 (s M')) (* 0.02244 (cs F)) (* -0.00682 (s (- M' (* 2 F))))
-                    (* -0.00279 (s (* 2 F))) (* -0.00083 (s (* 2 (- F D))))
-                    (* 0.00069 (s (- M' (* 2 D)))) (* 0.00040 (cs (+ M' F)))
-                    (* -0.00025 (s (* 2 M'))) (* -0.00023 (s (+ M' (* 2 F))))
-                    (* 0.00020 (cs (- M' F))) (* 0.00019 (s (- M' F)))
-                    (* 0.00013 (s (+ M' (* 2 (- F D))))) (* -0.00010 (cs (- M' (* 3 F))))))
-     :tau (deg (+ (* 0.02520 E (s M)) (* 0.00473 (s (* 2 (- M' F)))) (* -0.00467 (s M'))
-                  (* 0.00396 (s K1)) (* 0.00276 (s (* 2 (- M' D)))) (* 0.00196 (s om))
-                  (* -0.00183 (cs (- M' F))) (* 0.00115 (s (- M' (* 2 D))))
-                  (* -0.00096 (s (- M' D))) (* 0.00046 (s (* 2 (- F D))))
-                  (* -0.00039 (s (- M' F))) (* -0.00032 (s (- M' M D)))
-                  (* 0.00027 (s (- (* 2 (- M' D)) M))) (* 0.00023 (s K2))
-                  (* -0.00014 (s (* 2 D))) (* 0.00014 (cs (* 2 (- M' F))))
-                  (* -0.00012 (s (- M' (* 2 F)))) (* -0.00012 (s (* 2 M')))
-                  (* 0.00011 (s (* 2 (- M' M D))))))
+    {:rho (c/deg (+ (* -0.02752 (cs M')) (* -0.02245 (s F)) (* 0.00684 (cs (- M' (* 2 F))))
+                    (* -0.00293 (cs (* 2 F))) (* -0.00085 (cs (* 2 (- F D))))
+                    (* -0.00054 (cs (- M' (* 2 D)))) (* -0.00020 (s (+ M' F)))
+                    (* -0.00020 (cs (+ M' (* 2 F)))) (* -0.00020 (cs (- M' F)))
+                    (* 0.00014 (cs (+ M' (* 2 (- F D)))))))
+     :sigma (c/deg (+ (* -0.02816 (s M')) (* 0.02244 (cs F)) (* -0.00682 (s (- M' (* 2 F))))
+                      (* -0.00279 (s (* 2 F))) (* -0.00083 (s (* 2 (- F D))))
+                      (* 0.00069 (s (- M' (* 2 D)))) (* 0.00040 (cs (+ M' F)))
+                      (* -0.00025 (s (* 2 M'))) (* -0.00023 (s (+ M' (* 2 F))))
+                      (* 0.00020 (cs (- M' F))) (* 0.00019 (s (- M' F)))
+                      (* 0.00013 (s (+ M' (* 2 (- F D))))) (* -0.00010 (cs (- M' (* 3 F))))))
+     :tau (c/deg (+ (* 0.02520 E (s M)) (* 0.00473 (s (* 2 (- M' F)))) (* -0.00467 (s M'))
+                    (* 0.00396 (s K1)) (* 0.00276 (s (* 2 (- M' D)))) (* 0.00196 (s om))
+                    (* -0.00183 (cs (- M' F))) (* 0.00115 (s (- M' (* 2 D))))
+                    (* -0.00096 (s (- M' D))) (* 0.00046 (s (* 2 (- F D))))
+                    (* -0.00039 (s (- M' F))) (* -0.00032 (s (- M' M D)))
+                    (* 0.00027 (s (- (* 2 (- M' D)) M))) (* 0.00023 (s K2))
+                    (* -0.00014 (s (* 2 D))) (* 0.00014 (cs (* 2 (- M' F))))
+                    (* -0.00012 (s (- M' (* 2 F)))) (* -0.00012 (s (* 2 M')))
+                    (* 0.00011 (s (* 2 (- M' M D))))))
      :F F :om om}))
 
 (defn- librate

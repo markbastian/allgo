@@ -23,8 +23,6 @@
             [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
-(defn- deg [x] (* x c/degrees))
-
 ;; ------------------------------------------------------ mean elements (31)
 
 (def ^:private mean-elements-of-date
@@ -92,8 +90,8 @@
   [planet mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)
         at (fn [k] (poly/horner-ascending (get-in mean-elements-of-date [planet k]) T))
-        L (deg (at :L)) node (deg (at :node)) peri (deg (at :peri))]
-    {:L (am/wrap-2pi L) :a (at :a) :e (at :e) :i (deg (at :i))
+        L (c/deg (at :L)) node (c/deg (at :node)) peri (c/deg (at :peri))]
+    {:L (am/wrap-2pi L) :a (at :a) :e (at :e) :i (c/deg (at :i))
      :raan (am/wrap-2pi node) :peri (am/wrap-2pi peri)
      :argp (am/wrap-2pi (- peri node)) :M (am/wrap-2pi (- L peri))}))
 
@@ -161,7 +159,7 @@
         jd (poly/horner-ascending poly k)
         jd (if (= planet :earth)
              (let [{:keys [args] :as corr} earth-apsis-correction]
-               (+ jd (reduce + (map (fn [[a b] cc] (* cc (math/sin (deg (+ a (* b k))))))
+               (+ jd (reduce + (map (fn [[a b] cc] (* cc (math/sin (c/deg (+ a (* b k))))))
                                     args (corr (if aphelion? :aphelion :perihelion))))))
              jd)]
     (- jd c/jd-mjd-offset)))
@@ -305,9 +303,9 @@
   (let [T (time/centuries-J2000 mjd-tt)
         y (time/mjd->julian-epoch mjd-tt)]
     (when (<= 1885.0 y 2100.0)
-      (let [J (deg (+ 34.35 (* 3034.9057 T)))
-            S (deg (+ 50.08 (* 1222.1138 T)))
-            P (deg (+ 238.96 (* 144.96 T)))
+      (let [J (c/deg (+ 34.35 (* 3034.9057 T)))
+            S (c/deg (+ 50.08 (* 1222.1138 T)))
+            P (c/deg (+ 238.96 (* 144.96 T)))
             [l b r] (reduce (fn [[l b r] [i j k la lb ba bb ra rb]]
                               (let [a  (+ (* i J) (* j S) (* k P))
                                     sa (math/sin a) ca (math/cos a)]
@@ -315,8 +313,8 @@
                                  (+ b (* ba sa) (* bb ca))
                                  (+ r (* ra sa) (* rb ca))]))
                             [0.0 0.0 0.0] pluto-terms)]
-        [(am/wrap-2pi (deg (+ l 238.958116 (* 144.96 T))))
-         (deg (- b 3.908239))
+        [(am/wrap-2pi (c/deg (+ l 238.958116 (* 144.96 T))))
+         (c/deg (- b 3.908239))
          (+ r 40.7241346)]))))
 
 (defn pluto-astrometric

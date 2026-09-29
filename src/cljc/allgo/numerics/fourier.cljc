@@ -8,7 +8,9 @@
 
   Transforms follow `allgo.numerics.fft`: forward with e^(-i 2 pi j k/N)
   and unscaled, the inverse carrying 1/N. Complex numbers are `[re im]`."
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.numerics.complex :as cx]
+            [allgo.numerics.fft :as fft]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.quadrature :as quad]
             [clojure.math :as math]))
@@ -50,24 +52,20 @@
       :a (mapv (fn [k] (* 2.0 (avg #(* (f %) (math/cos (* k w %)))))) (range 1 (inc n)))
       :b (mapv (fn [k] (* 2.0 (avg #(* (f %) (math/sin (* k w %)))))) (range 1 (inc n)))})))
 
-(defn- cmul [[a b] [c d]] [(- (* a c) (* b d)) (+ (* a d) (* b c))])
-
-(defn- ->complex [x] (if (number? x) [(double x) 0.0] x))
-
 (defn dft
   "The discrete Fourier transform of `xs` (numbers or `[re im]`), taken
   directly -- N^2 complex products, any length N: F_k = sum_n x_n
   e^(-i 2 pi k n/N). With `:inverse? true` the inverse, carrying 1/N."
   ([xs] (dft xs {}))
   ([xs {:keys [inverse?]}]
-   (let [xs (mapv ->complex xs)
+   (let [xs (mapv cx/complex xs)
          n (count xs)
          sign (if inverse? 1.0 -1.0)
          scale (if inverse? (/ 1.0 n) 1.0)]
      (mapv (fn [k]
              (let [[re im] (reduce (fn [acc j]
                                      (let [ang (/ (* sign 2.0 math/PI k j) n)]
-                                       (mapv + acc (cmul (xs j) [(math/cos ang) (math/sin ang)]))))
+                                       (mapv + acc (cx/* (xs j) (cx/expi ang)))))
                                    [0.0 0.0] (range n))]
                [(* scale re) (* scale im)]))
            (range n)))))
@@ -80,7 +78,7 @@
   half the length, recursively. The length must be a power of two. The
   result is in natural order."
   [xs]
-  (let [xs (mapv ->complex xs)
+  (let [xs (mapv cx/complex xs)
         n (count xs)]
     (if (= n 1)
       xs
@@ -89,7 +87,7 @@
             sums (mapv #(mapv + %1 %2) top bottom)
             diffs (mapv (fn [j a b]
                           (let [ang (/ (* -2.0 math/PI j) n)]
-                            (cmul (mapv - a b) [(math/cos ang) (math/sin ang)])))
+                            (cx/* (mapv - a b) (cx/expi ang))))
                         (range h) top bottom)
             evens (sande-tukey sums)
             odds (sande-tukey diffs)]
@@ -103,7 +101,7 @@
   the direct transform when N is not a power of two)."
   [xs dt]
   (let [n (count xs)
-        pow2? (and (pos? n) (zero? (bit-and n (dec n))))
+        pow2? (fft/power-of-two? n)
         F (if pow2? (sande-tukey xs) (dft xs))]
     (vec (for [k (range (inc (quot n 2)))]
            (let [[re im] (F k)

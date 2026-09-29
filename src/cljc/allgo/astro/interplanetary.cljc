@@ -98,8 +98,6 @@
 
 ;; ------------------------------------------------- hyperbolas in space
 
-(defn- unit [v] (v3/scale v (/ 1.0 (v3/length v))))
-
 (defn- asymptote-angle
   "The true anomaly of the asymptotes of the hyperbola of periapsis `rp`
   and excess speed `v-inf`, acos(-1/e), and its speed at periapsis."
@@ -115,7 +113,7 @@
   asymptote S lies at the true anomaly nu = acos(-1/e) from periapsis, so
   periapsis is at cos nu S - sin nu (h x S)."
   [mu rp v-inf h]
-  (let [s (unit v-inf)
+  (let [s (v3/normalize v-inf)
         [nu vp] (asymptote-angle mu rp (v3/length v-inf))
         p (v3/sub (v3/scale s (math/cos nu)) (v3/scale (v3/cross h s) (math/sin nu)))]
     [(v3/scale p rp) (v3/scale (v3/cross h p) vp)]))
@@ -127,7 +125,7 @@
   comes from the true anomaly -nu, travelling along -cos nu P + sin nu Q,
   so periapsis is at -cos nu S - sin nu (h x S)."
   [mu rp v-inf h]
-  (let [s (unit v-inf)
+  (let [s (v3/normalize v-inf)
         [nu vp] (asymptote-angle mu rp (v3/length v-inf))
         p (v3/sub (v3/scale s (- (math/cos nu))) (v3/scale (v3/cross h s) (math/sin nu)))]
     [(v3/scale p rp) (v3/scale (v3/cross h p) vp)]))
@@ -140,7 +138,7 @@
   declination delta, the normal's node lies where cos(Omega - alpha) =
   -cot i tan delta, alpha S's right ascension."
   [v-inf i k]
-  (let [s (unit v-inf)
+  (let [s (v3/normalize v-inf)
         sk (v3/dot s k)
         perp (v3/sub s (v3/scale k sk))
         pm (v3/length perp)]

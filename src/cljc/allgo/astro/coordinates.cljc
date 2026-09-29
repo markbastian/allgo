@@ -311,18 +311,17 @@
   [p1 p2 p3]
   (am/wrap-2pi (- (position-angle p2 p3) (position-angle p2 p1))))
 
-(defn- unit-vector [[a d]]
+(defn unit-vector
+  "The unit vector toward right ascension and declination (or longitude
+  and latitude) `[a d]`."
+  [[a d]]
   [(* (math/cos d) (math/cos a)) (* (math/cos d) (math/sin a)) (math/sin d)])
-
-(defn- norm [v] (math/sqrt (reduce + (map * v v))))
-
-(defn- dot [a b] (reduce + (map * a b)))
 
 (defn great-circle-distance
   "Distance of point `p0` from the great circle through `p1` and `p2`."
   [p1 p2 p0]
   (let [n (v3/cross (unit-vector p1) (unit-vector p2))]
-    (math/asin (/ (dot n (unit-vector p0)) (norm n)))))
+    (math/asin (/ (v3/dot n (unit-vector p0)) (v3/length n)))))
 
 (defn collinearity
   "`[psi omega]` for three points: the angle between the great circles
@@ -332,8 +331,8 @@
   [p1 p2 p3]
   (let [[u1 u2 u3] (map unit-vector [p1 p2 p3])
         n12 (v3/cross u1 u2) n23 (v3/cross u2 u3) n13 (v3/cross u1 u3)]
-    [(math/acos (/ (dot n12 n23) (* (norm n12) (norm n23))))
-     (math/asin (/ (dot u2 n13) (* (norm u2) (norm n13))))]))
+    [(math/acos (/ (v3/dot n12 n23) (* (v3/length n12) (v3/length n23))))
+     (math/asin (/ (v3/dot u2 n13) (* (v3/length u2) (v3/length n13))))]))
 
 ;; ------------------------------------------------------- smallest circle (20)
 
