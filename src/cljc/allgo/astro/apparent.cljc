@@ -16,7 +16,7 @@
             [allgo.astro.solar :as solar]
             [allgo.astro.time :as time]
             [allgo.math :as am]
-            [allgo.numerics.interpolation :refer [horner]]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (def aberration-constant
@@ -27,7 +27,7 @@
   "Longitude of the Earth's perihelion, which enters because an elliptic
   orbit adds a small fixed term to the aberration, the E-terms."
   [mjd-tt]
-  (* c/degrees (horner (time/centuries-J2000 mjd-tt) [102.93735 1.71946 0.00046])))
+  (* c/degrees (poly/horner-ascending [102.93735 1.71946 0.00046] (time/centuries-J2000 mjd-tt))))
 
 (defn nutation
   "`[dra ddec]`, nutation's shift of a star's right ascension and

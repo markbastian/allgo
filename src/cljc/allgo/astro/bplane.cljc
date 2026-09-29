@@ -20,6 +20,7 @@
   (:require [allgo.astro.kepler :as kepler]
             [allgo.astro.universal :as universal]
             [allgo.geometry.vec3 :as v3]
+            [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
@@ -101,13 +102,8 @@
            (< (apply max (map abs res)) tol) {:dv dv :bt (:bt bp) :br (:br bp) :iterations i}
            (> i 30) nil
            :else
-           (let [h 1e-7
-                 ;; the 2 x 3 Jacobian of (B.T, B.R) in the velocity change
-                 jac (lin/transpose
-                      (for [j (range 3)]
-                        (let [e (assoc [0.0 0.0 0.0] j h)
-                              [p] (miss (v3/add dv e)) [m] (miss (v3/sub dv e))]
-                          (mapv #(/ (- %1 %2) (* 2.0 h)) p m))))
+           (let [;; the 2 x 3 Jacobian of (B.T, B.R) in the velocity change
+                 jac (d/jacobian #(first (miss %)) dv {:steps [1e-7 1e-7 1e-7] :richardson? false})
                  ;; the least-norm step: J^T (J J^T)^-1 res
                  jjt (lin/mat-mul jac (lin/transpose jac))
                  [[p q] [r s]] jjt

@@ -22,6 +22,7 @@
             [allgo.numerics.core :as core]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.rk :as rk]))
 
 (defn- flat [r v] (vec (concat r v)))
@@ -55,7 +56,7 @@
   [prior batches]
   (let [n (count (:H (ffirst (filter seq batches))))
         [N0 b0] (if prior
-                  (let [Pinv (lin/inverse-general (:P prior))]
+                  (let [Pinv (ls/inverse (:P prior))]
                     [Pinv (lin/mat-vec Pinv (:x prior))])
                   [(lin/mat-scale (lin/eye n) 0.0) (vec (repeat n 0.0))])]
     (->> batches
@@ -68,7 +69,7 @@
                                 b rows)])
                      [N0 b0])
          rest
-         (mapv (fn [[N b]] (let [P (lin/inverse-general N)] {:x (lin/mat-vec P b) :P P}))))))
+         (mapv (fn [[N b]] (let [P (ls/inverse N)] {:x (lin/mat-vec P b) :P P}))))))
 
 ;; ------------------------------------------------------------- batch
 
@@ -149,18 +150,13 @@
                 H (lin/transpose (measurement-partials model tk x1))
                 residuals (mapv - z (model tk r1 v1))
                 ;; one scalar update per component, the reference fixed at x1
-                [dx P'] (reduce (fn [[dx P] k]
-                                  (let [h (mapv #(nth % k) H)
-                                        pht (lin/mat-vec P h)
-                                        s (+ (lin/dot h pht) (* (sigma k) (sigma k)))
-                                        gain (lin/scale pht (/ 1.0 s))
-                                        innov (- (residuals k) (lin/dot h dx))
-                                        ikh (lin/mat-sub (lin/eye 6) (mapv (fn [gi] (mapv #(* gi %) h)) gain))]
-                                    [(lin/add dx (lin/scale gain innov))
-                                     (lin/mat-add (lin/mat-mul (lin/mat-mul ikh P) (lin/transpose ikh))
-                                                  (mapv (fn [gi] (mapv #(* gi % (sigma k) (sigma k)) gain)) gain))]))
-                                [(vec (repeat 6 0.0)) P1]
-                                (range (count z)))
+                {dx :x P' :P} (reduce (fn [{:keys [x P]} k]
+                                        (let [h (mapv #(nth % k) H)]
+                                          (select-keys (est/kalman-update x P h (- (residuals k) (lin/dot h x))
+                                                                          (* (sigma k) (sigma k)))
+                                                       [:x :P])))
+                                      {:x (vec (repeat 6 0.0)) :P P1}
+                                      (range (count z)))
                 x (lin/add x1 dx)]
             {:t tk :r (subvec x 0 3) :v (subvec x 3 6) :P P' :residuals residuals}))
         {:t t :r r :v v :P P})
@@ -252,7 +248,7 @@
                                (vec (for [j (range (count z))] (if (= i j) (* (sigma i) (sigma i)) 0.0)))))
                   Pzz (lin/mat-add (cov zs zbar zs zbar) noise)
                   Pxz (cov pts x1 zs zbar)
-                  K (lin/mat-mul Pxz (lin/inverse-general Pzz))
+                  K (lin/mat-mul Pxz (ls/inverse Pzz))
                   residuals (mapv - z zbar)
                   xk (lin/add x1 (lin/mat-vec K residuals))
                   Pk (lin/mat-sub P1 (lin/mat-mul (lin/mat-mul K Pzz) (lin/transpose K)))

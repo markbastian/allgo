@@ -22,7 +22,8 @@
   programs; and penalty functions for nonlinear constraints.
 
   Everything here minimizes; to maximize f, minimize -f."
-  (:require [allgo.numerics.linear-systems :as ls]
+  (:require [allgo.numerics.differentiation :as d]
+            [allgo.numerics.linear-systems :as ls]
             [allgo.random :as random]
             [clojure.math :as math]))
 
@@ -258,27 +259,7 @@
 
 ;; -------------------------------------------- several variables: gradients
 
-(defn gradient
-  "The gradient of `f` at `x` by central differences."
-  [f x]
-  (let [x (mapv double x)]
-    (mapv (fn [i]
-            (let [h (* 1e-6 (max 1.0 (abs (x i))))]
-              (/ (- (f (update x i + h)) (f (update x i - h))) (* 2.0 h))))
-          (range (count x)))))
-
-(defn hessian
-  "The Hessian of `f` at `x` by central differences."
-  [f x]
-  (let [x (mapv double x) n (count x)
-        h (mapv #(* 1e-4 (max 1.0 (abs %))) x)
-        at (fn [i di j dj] (f (-> x (update i + (* di (h i))) (update j + (* dj (h j))))))]
-    (vec (for [i (range n)]
-           (vec (for [j (range n)]
-                  (/ (- (+ (at i 1 j 1) (at i -1 j -1)) (at i 1 j -1) (at i -1 j 1))
-                     (* 4.0 (h i) (h j)))))))))
-
-(defn- grad-fn [f grad] (or grad #(gradient f %)))
+(defn- grad-fn [f grad] (or grad #(d/gradient f %)))
 
 (defn steepest-descent
   "The minimum of `f` from `x0` by steepest descent: a line minimization
@@ -331,7 +312,7 @@
   ([f x0] (newton f nil nil x0 {}))
   ([f grad hess x0] (newton f grad hess x0 {}))
   ([f grad hess x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 100}}]
-   (let [grad (grad-fn f grad) hess (or hess #(hessian f %))]
+   (let [grad (grad-fn f grad) hess (or hess #(d/hessian f %))]
      (loop [x (mapv double x0) fx (f x0) k 1]
        (if-let [dx (solve-sym (hess x) (grad x))]
          (let [x' (sub x dx) fx' (f x')]
@@ -349,7 +330,7 @@
   ([f x0] (marquardt f nil nil x0 {}))
   ([f grad hess x0] (marquardt f grad hess x0 {}))
   ([f grad hess x0 {:keys [tol max-iter alpha] :or {tol 1e-14 max-iter 500 alpha 1e3}}]
-   (let [grad (grad-fn f grad) hess (or hess #(hessian f %)) n (count x0)]
+   (let [grad (grad-fn f grad) hess (or hess #(d/hessian f %)) n (count x0)]
      (loop [x (mapv double x0) fx (f x0) alpha alpha k 1]
        (let [g (grad x) H (hess x)
              damped (mapv (fn [i row] (update row i + alpha)) (range n) H)

@@ -11,7 +11,7 @@
 
   Distances are AU, angles radians."
   (:require [allgo.astro.constants :as c]
-            [allgo.numerics.interpolation :refer [horner]]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (defn- log10 [x] (/ (math/log x) (math/log 10.0)))
@@ -71,11 +71,11 @@
                        (+ (* 0.044 (abs (/ (or du 0.0) c/degrees))) (* -2.60 s) (* 1.25 s s))))]
      (if almanac
        (case planet
-         :mercury (+ base (horner id [-0.42 0.038 -0.000273 0.000002]))
+         :mercury (+ base (poly/horner-ascending [-0.42 0.038 -0.000273 0.000002] id))
          ;; Harris's phase law; some transcriptions of Meeus flip the
          ;; signs of the last two terms, which would have Venus brighten
          ;; as its phase thins
-         :venus   (+ base (horner id [-4.40 0.0009 0.000239 -0.00000065]))
+         :venus   (+ base (poly/horner-ascending [-4.40 0.0009 0.000239 -0.00000065] id))
          :mars    (+ base -1.52 (* 0.016 id))
          :jupiter (+ base -9.40 (* 0.005 id))
          :saturn  (+ base -8.88 (ring))

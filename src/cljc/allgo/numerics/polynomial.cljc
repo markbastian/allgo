@@ -43,6 +43,12 @@
   [coeffs x]
   (reduce (fn [acc c] (+ (* acc x) c)) 0.0 coeffs))
 
+(defn horner-ascending
+  "The polynomial c0 + c1 x + c2 x^2 + ... with `coeffs` lowest power
+  first -- the order the almanacs print their series in -- at `x`."
+  [coeffs x]
+  (reduce (fn [acc c] (+ (* acc x) c)) 0.0 (rseq (vec coeffs))))
+
 (defn- c-horner
   "The polynomial and its derivative at complex `z`."
   [coeffs z]

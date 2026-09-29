@@ -22,6 +22,7 @@
             [allgo.geometry.vec3 :as v3]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as ls]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
@@ -92,7 +93,7 @@
   `classical-partials`. Singular where the elements are: circular or
   equatorial orbits."
   ([P s] (cartesian->classical mu P s))
-  ([mu P s] (lin/congruence (lin/inverse-general (classical-partials mu (classical-vector mu (flat s)))) P)))
+  ([mu P s] (lin/congruence (ls/inverse (classical-partials mu (classical-vector mu (flat s)))) P)))
 
 (defn classical->cartesian
   "Carry the covariance `P` of classical elements [a e i raan argp M]
@@ -197,7 +198,7 @@
   set as `states/state->equinoctial` chooses, through the inverse of
   `equinoctial-partials`."
   ([P s] (cartesian->equinoctial mu P s))
-  ([mu P s] (lin/congruence (lin/inverse-general (equinoctial-partials mu (states/state->equinoctial mu s))) P)))
+  ([mu P s] (lin/congruence (ls/inverse (equinoctial-partials mu (states/state->equinoctial mu s))) P)))
 
 (defn equinoctial->cartesian
   "Carry the covariance `P` of equinoctial elements `eq`, a map as

@@ -30,6 +30,7 @@
   States are `[x y z vx vy vz]`, rotating and nondimensional."
   (:require [allgo.astro.cr3bp :as cr3bp]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.rk :as rk]
             [clojure.math :as math]))
 
@@ -383,7 +384,7 @@
   (let [{:keys [state period]} orbit
         m (monodromy mu orbit)
         ;; the stable direction is the dominant one of the inverse
-        [_ v0] (dominant (if stable? (lin/inverse-general m) m))]
+        [_ v0] (dominant (if stable? (ls/inverse m) m))]
     (vec (for [k (range n)
                :let [tau (* period (/ k n))
                      {s :state phi :stm} (propagate mu state tau {:stm? true})

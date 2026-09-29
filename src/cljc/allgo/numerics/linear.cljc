@@ -103,43 +103,23 @@
       (transpose (mapv (fn [i] (cholesky-solve A (mapv #(if (= i %) 1.0 0.0) (range n))))
                        (range n))))))
 
-(defn det-3 [[[a b cc] [d e f] [g h i]]]
+(defn det-3
+  "The determinant of a 3x3 matrix, written out -- the closed form for the
+  one size that comes up everywhere; any size is
+  `allgo.numerics.linear-systems/det`."
+  [[[a b cc] [d e f] [g h i]]]
   (- (+ (* a e i) (* b f g) (* cc d h)) (+ (* cc e g) (* b d i) (* a f h))))
 
 (defn solve-3
-  "x of the 3x3 linear system m x = b, by Cramer's rule."
+  "x of the 3x3 linear system m x = b, by Cramer's rule; any size is
+  `allgo.numerics.linear-systems/gauss`."
   [m b]
-  (let [det (fn [[[a b c] [d e f] [g h i]]]
-              (- (+ (* a (- (* e i) (* f h))) (* c (- (* d h) (* e g))))
-                 (* b (- (* d i) (* f g)))))
-        d (det m)
+  (let [d (det-3 m)
         col (fn [k] (mapv (fn [row bi] (assoc row k bi)) m b))]
-    (mapv #(/ (det (col %)) d) (range 3))))
+    (mapv #(/ (det-3 (col %)) d) (range 3))))
 
 (defn congruence
   "A B A^T: a matrix `B` carried through the linear map `A`, as a
   covariance is."
   [A B]
   (mat-mul (mat-mul A B) (transpose A)))
-
-(defn inverse-general
-  "The inverse of any nonsingular square matrix, by Gauss-Jordan
-  elimination with partial pivoting -- for when `inverse`'s Cholesky, which
-  needs symmetry and positive definiteness, does not apply. nil if the
-  matrix is singular."
-  [A]
-  (let [n (count A)
-        aug (mapv (fn [i row] (into (vec row) (map #(if (= i %) 1.0 0.0) (range n)))) (range n) A)]
-    (loop [m aug col 0]
-      (if (= col n)
-        (mapv #(subvec % n) m)
-        (let [pivot (apply max-key #(abs (get-in m [% col])) (range col n))
-              pv (get-in m [pivot col])]
-          (when-not (zero? pv)
-            (let [m (assoc m pivot (m col) col (mapv #(/ % pv) (m pivot)))
-                  prow (m col)
-                  m (vec (map-indexed (fn [i row]
-                                        (if (= i col) row
-                                            (let [f (row col)] (mapv - row (map #(* f %) prow)))))
-                                      m))]
-              (recur m (inc col)))))))))

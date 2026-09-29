@@ -5,6 +5,7 @@
   on [0, 0.8], by every rule, and its other worked examples."
   (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.quadrature :as q]
+            [allgo.numerics.regression :as reg]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -79,7 +80,7 @@
   (testing "a smoothed derivative of noisy data"
     (let [xs (range 0.0 5.01 0.25)
           ys (map-indexed (fn [i x] (+ (* 2.0 x x) (* 0.05 (if (even? i) 1.0 -1.0)))) xs)]
-      (is (close? (d/smoothed-derivative xs ys 2 2.0) 8.0 0.01))))
+      (is (close? (reg/smoothed-derivative xs ys 2 2.0) 8.0 0.01))))
   (testing "partial and mixed partial derivatives of x^2 y^3"
     (let [h (fn [[x y]] (* x x y y y))]
       (is (close? (d/partial-derivative h [1.5 2.0] 0) (* 2.0 1.5 8.0) 1e-7))

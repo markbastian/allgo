@@ -11,12 +11,11 @@
   chapter 23): finite-difference formulas of any order and accuracy --
   forward, backward and centered, the book's tables generated rather than
   transcribed, by Fornberg's algorithm -- Richardson extrapolation,
-  derivatives of unequally spaced data, derivatives of noisy data through
-  a least-squares fit, and partial derivatives."
+  derivatives of unequally spaced data, and partial derivatives, the
+  gradient and the Hessian. (Derivatives of noisy data through a
+  least-squares fit are `allgo.numerics.regression/smoothed-derivative`.)"
   (:require [allgo.math :as am]
-            [allgo.numerics.linear :as lin]
-            [allgo.numerics.polynomial :as poly]
-            [allgo.numerics.regression :as reg]))
+            [allgo.numerics.linear :as lin]))
 
 (defn jacobian
   "The Jacobian of `f`, a function from a vector to a vector, at `x`, one
@@ -132,15 +131,6 @@
          ws (nth (fd-weights x (map first nearest) order) order)]
      (reduce + (map * ws (map second nearest))))))
 
-(defn smoothed-derivative
-  "The derivative at `x` of noisy data `xs` `ys` taken from their
-  least-squares polynomial of `degree` rather than from the data
-  themselves (Chapra and Canale 23.4): differentiation amplifies noise,
-  and fitting first smooths it away."
-  [xs ys degree x]
-  (let [{:keys [coeffs]} (reg/polynomial xs ys degree)]
-    (second (poly/derivatives coeffs x 1))))
-
 (defn partial-derivative
   "The partial derivative of `f`, a function of a vector, in component `i`
   at `x`, by a centered difference of step `h` (default 1e-6 of the
@@ -159,3 +149,17 @@
         hi (* 1e-4 (max 1.0 (abs (x i)))) hj (* 1e-4 (max 1.0 (abs (x j))))
         at (fn [a b] (f (-> x (update i + (* a hi)) (update j + (* b hj)))))]
     (/ (- (+ (at 1 1) (at -1 -1)) (at 1 -1) (at -1 1)) (* 4.0 hi hj))))
+
+(defn gradient
+  "The gradient of the scalar function `f` of a vector at `x`: each
+  partial derivative by `partial-derivative`."
+  [f x]
+  (mapv #(partial-derivative f x %) (range (count x))))
+
+(defn hessian
+  "The Hessian of the scalar function `f` of a vector at `x`: each second
+  partial derivative by `mixed-partial`'s four-point formula (on the
+  diagonal the centered second difference at twice the step)."
+  [f x]
+  (let [n (count x)]
+    (vec (for [i (range n)] (vec (for [j (range n)] (mixed-partial f x i j)))))))

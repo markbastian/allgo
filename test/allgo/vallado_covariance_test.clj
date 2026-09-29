@@ -11,6 +11,7 @@
             [allgo.math :as am]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as ls]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -94,7 +95,7 @@
             (str el)))))
   (testing "and their inverse is the numerical Jacobian of the elements in the state"
     (let [x (vec (concat (first s) (second s)))
-          J (lin/inverse-general (cov/classical-partials (cov/classical-vector x)))
+          J (ls/inverse (cov/classical-partials (cov/classical-vector x)))
           N (diff/jacobian cov/classical-vector x {:angles #{2 3 4 5}})]
       (is (every? true? (for [i (range 6) j (range 6)]
                           (< (abs (- (get-in J [i j]) (get-in N [i j])))

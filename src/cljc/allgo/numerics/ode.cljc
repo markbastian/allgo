@@ -11,7 +11,7 @@
 
   `f` is `(f t y)` with `y` a vector; results are `[[t y] ...]`, the start
   first."
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.rk :as rk]
             [clojure.math :as math]))
@@ -82,11 +82,6 @@
              (recur (+ t h) y' (* h (min 4.0 (* 0.9 (math/pow (max err 1e-10) -0.2)))) (conj out [(+ t h) y'])))
            (recur t y (* h (max 0.1 (* 0.9 (math/pow err -0.25)))) out)))))))
 
-(defn- numeric-jacobian [g y]
-  (lin/transpose (mapv (fn [j] (let [hj (* 1e-7 (max 1.0 (abs (y j))))]
-                                 (mapv #(/ (- %1 %2) (* 2.0 hj)) (g (update y j + hj)) (g (update y j - hj)))))
-                       (range (count y)))))
-
 (defn backward-euler
   "The implicit (backward) Euler method, `n` steps of `h`: y_i+1 = y_i +
   h f(t_i+1, y_i+1), solved for y_i+1 by Newton's method each step (the
@@ -99,7 +94,7 @@
                      (let [t1 (+ t h)
                            g (fn [z] (mapv - z y (scale (f t1 z) h)))
                            y1 (loop [z (add y (scale (f t y) h)) k 0]
-                                (let [dz (ls/gauss (numeric-jacobian g z) (mapv - (g z)))]
+                                (let [dz (ls/gauss (d/jacobian g z {:steps (mapv #(* 1e-7 (max 1.0 (abs %))) z) :richardson? false}) (mapv - (g z)))]
                                   (if (or (nil? dz) (> k 50))
                                     z
                                     (let [z' (add z dz)]

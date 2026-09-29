@@ -21,8 +21,8 @@
             [allgo.astro.time :as time]
             [allgo.astro.vsop87 :as vsop87]
             [allgo.math :as am]
-            [allgo.numerics.interpolation :refer [horner]]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (defn- deg [x] (* x c/degrees))
@@ -34,12 +34,12 @@
   eccentricity factor."
   [mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)]
-    {:L' (deg (horner T [218.3164477 481267.88123421 -0.0015786 (/ 1.0 538841) (/ -1.0 65194000)]))
-     :D  (deg (horner T [297.8501921 445267.1114034 -0.0018819 (/ 1.0 545868) (/ -1.0 113065000)]))
-     :M  (deg (horner T [357.5291092 35999.0502909 -0.0001535 (/ 1.0 24490000)]))
-     :M' (deg (horner T [134.9633964 477198.8675055 0.0087414 (/ 1.0 69699) (/ -1.0 14712000)]))
-     :F  (deg (horner T [93.272095 483202.0175233 -0.0036539 (/ -1.0 3526000) (/ 1.0 863310000)]))
-     :E  (horner T [1.0 -0.002516 -0.0000074])}))
+    {:L' (deg (poly/horner-ascending [218.3164477 481267.88123421 -0.0015786 (/ 1.0 538841) (/ -1.0 65194000)] T))
+     :D  (deg (poly/horner-ascending [297.8501921 445267.1114034 -0.0018819 (/ 1.0 545868) (/ -1.0 113065000)] T))
+     :M  (deg (poly/horner-ascending [357.5291092 35999.0502909 -0.0001535 (/ 1.0 24490000)] T))
+     :M' (deg (poly/horner-ascending [134.9633964 477198.8675055 0.0087414 (/ 1.0 69699) (/ -1.0 14712000)] T))
+     :F  (deg (poly/horner-ascending [93.272095 483202.0175233 -0.0036539 (/ -1.0 3526000) (/ 1.0 863310000)] T))
+     :E  (poly/horner-ascending [1.0 -0.002516 -0.0000074] T)}))
 
 ;; ------------------------------------------------------------ position (47)
 
@@ -232,8 +232,7 @@
   "Longitude of the mean ascending node of the lunar orbit, which
   regresses around the ecliptic every 18.6 years."
   [mjd-tt]
-  (am/wrap-2pi (deg (horner (time/centuries-J2000 mjd-tt)
-                            [125.0445479 -1934.1362891 0.0020754 (/ 1.0 467441) (/ -1.0 60616000)]))))
+  (am/wrap-2pi (deg (poly/horner-ascending [125.0445479 -1934.1362891 0.0020754 (/ 1.0 467441) (/ -1.0 60616000)] (time/centuries-J2000 mjd-tt)))))
 
 (defn true-node
   "Longitude of the true ascending node: the mean node with its periodic
@@ -249,8 +248,7 @@
   "Longitude of the mean perigee of the lunar orbit, which advances around
   the ecliptic every 8.85 years."
   [mjd-tt]
-  (am/wrap-2pi (deg (horner (time/centuries-J2000 mjd-tt)
-                            [83.3532465 4069.0137287 -0.0103200 (/ -1.0 80053) (/ 1.0 18999000)]))))
+  (am/wrap-2pi (deg (poly/horner-ascending [83.3532465 4069.0137287 -0.0103200 (/ -1.0 80053) (/ 1.0 18999000)] (time/centuries-J2000 mjd-tt)))))
 
 ;; ------------------------------------------------ illuminated fraction (48)
 

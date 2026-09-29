@@ -12,8 +12,10 @@
   the coefficient of determination (st - sr)/st, the fraction of the
   spread the model explains; and `:syx`, the standard error of the
   estimate, sqrt(sr / (n - parameters))."
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.numerics.differentiation :as d]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
+            [allgo.numerics.polynomial :as poly]
             [allgo.numerics.special :as special]
             [clojure.math :as math]))
 
@@ -105,10 +107,9 @@
    (let [m (count p0)]
      (loop [p (mapv double p0) k 1]
        (let [pred (mapv #(f % p) xs)
-             Z (mapv (fn [x] (mapv (fn [j] (let [h (* 1e-7 (max 1.0 (abs (p j))))]
-                                             (/ (- (f x (update p j + h)) (f x (update p j - h))) (* 2.0 h))))
-                                   (range m)))
-                     xs)
+             ;; the model's partials in the parameters, one row per datum
+             Z (d/jacobian (fn [p] (mapv #(f % p) xs)) p
+                           {:steps (mapv #(* 1e-7 (max 1.0 (abs %))) p) :richardson? false})
              Zt (lin/transpose Z)
              dp (ls/gauss (lin/mat-mul Zt Z) (lin/mat-vec Zt (mapv - ys pred)))
              p' (mapv + p dp)]
@@ -116,3 +117,12 @@
                  (every? true? (map #(<= (abs %1) (* tol (max 1.0 (abs %2)))) dp p')))
            (merge (stats ys (mapv #(f % p') xs) m) {:p p' :iterations k})
            (recur p' (inc k))))))))
+
+(defn smoothed-derivative
+  "The derivative at `x` of noisy data `xs` `ys` taken from their
+  least-squares polynomial of `degree` rather than from the data
+  themselves (Chapra and Canale 23.4): differentiation amplifies noise,
+  and fitting first smooths it away."
+  [xs ys degree x]
+  (let [{:keys [coeffs]} (polynomial xs ys degree)]
+    (second (poly/derivatives coeffs x 1))))

@@ -2,6 +2,7 @@
   "The small dense helpers: the 3x3 determinant and solve, and carrying a
   matrix through a linear map."
   (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as ls]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private m [[2.0 -1.0 0.5] [0.3 4.0 -2.0] [1.0 1.0 3.0]])
@@ -28,6 +29,6 @@
 (deftest general-inverse
   (testing "an unsymmetric matrix, and a zero on the diagonal that pivoting must step round"
     (let [A [[0.0 2.0 1.0] [1.0 -1.0 4.0] [3.0 0.5 -2.0]]]
-      (is (every? #(< (abs %) 1e-12) (flatten (lin/mat-sub (lin/mat-mul A (lin/inverse-general A)) (lin/eye 3)))))))
+      (is (every? #(< (abs %) 1e-12) (flatten (lin/mat-sub (lin/mat-mul A (ls/inverse A)) (lin/eye 3)))))))
   (testing "and nil for a singular one"
-    (is (nil? (lin/inverse-general [[1.0 2.0] [2.0 4.0]])))))
+    (is (nil? (ls/inverse [[1.0 2.0] [2.0 4.0]])))))

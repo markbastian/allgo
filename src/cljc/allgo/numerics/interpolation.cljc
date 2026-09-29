@@ -21,13 +21,9 @@
   and inverse interpolation (Chapra and Canale, *Numerical Methods for
   Engineers*, chapter 18); splines are `allgo.numerics.splines`."
   (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.polynomial :as poly]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
-
-(defn horner
-  "c0 + c1 x + c2 x^2 + ..., evaluated from the highest power down."
-  [x coeffs]
-  (reduce (fn [acc c] (+ (* acc x) c)) 0.0 (rseq (vec coeffs))))
 
 (defn- iterate-n
   "Iterate n <- (f n) from zero until it settles. nil if it diverges."
@@ -54,7 +50,7 @@
   is -1 at the first value and 1 at the last; for a 5-point one, -2 and 2."
   [{:keys [y2 a b c coeffs]} n]
   (if coeffs
-    (horner n coeffs)
+    (poly/horner-ascending coeffs n)
     (+ y2 (* 0.5 n (+ a b (* n c))))))
 
 (defn- n-of [{:keys [x1 x3 x5]} x]
@@ -114,23 +110,23 @@
   (let [den (- k (* 12.0 f))]
     (when-not (zero? den)
       ;; (3.9)
-      (when-let [n (iterate-n (fn [n] (/ (horner n [(- (* 6.0 (+ b c)) h j)
-                                                    0.0
-                                                    (* 3.0 (+ h j))
-                                                    (* 2.0 k)])
+      (when-let [n (iterate-n (fn [n] (/ (poly/horner-ascending [(- (* 6.0 (+ b c)) h j)
+                                                                 0.0
+                                                                 (* 3.0 (+ h j))
+                                                                 (* 2.0 k)] n)
                                          den)))]
         (when (<= -2.0 n 2.0)
-          [(x-of t n) (horner n coeffs)])))))
+          [(x-of t n) (poly/horner-ascending coeffs n)])))))
 
 (defn- zero-5 [{:keys [y3 b c f h j k coeffs] :as t} strong?]
   (let [iter (if strong?
                (let [[_ q p nn m] coeffs
                      d [q (* 2.0 p) (* 3.0 nn) (* 4.0 m)]]
-                 (fn [n] (- n (/ (horner n coeffs) (horner n d)))))
+                 (fn [n] (- n (/ (poly/horner-ascending coeffs n) (poly/horner-ascending d n)))))
                ;; (3.10)
                (let [den (- (* 12.0 (+ b c)) (* 2.0 (+ h j)))
                      num [(* -24.0 y3) 0.0 (- k (* 12.0 f)) (* -2.0 (+ h j)) (- k)]]
-                 (fn [n] (/ (horner n num) den))))
+                 (fn [n] (/ (poly/horner-ascending num n) den))))
         n (iterate-n iter)]
     (when (and n (<= -2.0 n 2.0)) (x-of t n))))
 

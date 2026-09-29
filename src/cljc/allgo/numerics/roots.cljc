@@ -8,7 +8,7 @@
   position, Newton-Raphson and its version for multiple roots, the secant
   and modified secant methods, Brent's method, and Newton's method and
   fixed-point iteration for systems."
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear-systems :as ls]
             [clojure.math :as math]))
 
@@ -261,14 +261,6 @@
              x'
              (recur x' (inc i)))))))))
 
-(defn- numeric-jacobian [f x]
-  (let [n (count x)]
-    (lin/transpose
-     (vec (for [j (range n)]
-            (let [h (* 1e-7 (max 1.0 (abs (x j))))
-                  fp (f (update x j + h)) fm (f (update x j - h))]
-              (mapv #(/ (- %1 %2) (* 2.0 h)) fp fm)))))))
-
 (defn newton-system
   "The solution of F(x) = 0, `x0` a vector, by Newton-Raphson for
   systems: each step solves J dx = -F, J the Jacobian -- `jacobian`, a
@@ -278,7 +270,7 @@
   ([F x0] (newton-system F nil x0 {}))
   ([F jacobian x0] (newton-system F jacobian x0 {}))
   ([F jacobian x0 {:keys [tol max-iter] :or {tol 1e-13 max-iter 50}}]
-   (let [J (or jacobian #(numeric-jacobian F %))]
+   (let [J (or jacobian #(d/jacobian F % {:steps (mapv (fn [xi] (* 1e-7 (max 1.0 (abs xi)))) %) :richardson? false}))]
      (loop [x (vec x0) i 0]
        (when (< i max-iter)
          (when-let [dx (ls/gauss (J x) (mapv - (F x)))]

@@ -13,7 +13,7 @@
 
   Times are MJD (TT); `year` is a decimal year near the wanted event."
   (:require [allgo.astro.constants :as c]
-            [allgo.numerics.interpolation :refer [horner]]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (defn- deg [x] (* x c/degrees))
@@ -124,7 +124,7 @@
 (defn- mean-phase-jd [k]
   (let [T (/ k 1236.85)]
     (+ 2451550.09766 (* 29.530588861 k)
-       (* T T (horner T [0.00015437 -0.000000150 0.00000000073])))))
+       (* T T (poly/horner-ascending [0.00015437 -0.000000150 0.00000000073] T)))))
 
 (defn mean-phase
   "MJD of the mean new moon (`phase` 0), first quarter (0.25), full moon
@@ -140,11 +140,11 @@
   [year phase]
   (let [k  (phase-k year phase)
         T  (/ k 1236.85)
-        E  (horner T [1.0 -0.002516 -0.0000074])
-        env {:M  (deg (+ 2.5534 (* 29.10535670 k) (* T T (horner T [-0.0000014 -0.00000011]))))
-             :Mp (deg (+ 201.5643 (* 385.81693528 k) (* T T (horner T [0.0107582 0.00001238 -0.000000058]))))
-             :F  (deg (+ 160.7108 (* 390.67050284 k) (* T T (horner T [-0.0016118 -0.00000227 0.000000011]))))
-             :Om (deg (+ 124.7746 (* -1.56375588 k) (* T T (horner T [0.0020672 0.00000215]))))}
+        E  (poly/horner-ascending [1.0 -0.002516 -0.0000074] T)
+        env {:M  (deg (+ 2.5534 (* 29.10535670 k) (* T T (poly/horner-ascending [-0.0000014 -0.00000011] T))))
+             :Mp (deg (+ 201.5643 (* 385.81693528 k) (* T T (poly/horner-ascending [0.0107582 0.00001238 -0.000000058] T))))
+             :F  (deg (+ 160.7108 (* 390.67050284 k) (* T T (poly/horner-ascending [-0.0016118 -0.00000227 0.000000011] T))))
+             :Om (deg (+ 124.7746 (* -1.56375588 k) (* T T (poly/horner-ascending [0.0020672 0.00000215] T))))}
         A  (map #(deg (+ (first %) (* (second %) k)))
                 [[299.77 0.107408] [251.88 0.016321] [251.83 26.651886] [349.42 36.412478]
                  [84.66 18.206239] [141.74 53.303771] [207.17 2.453732] [154.84 7.306860]
@@ -329,10 +329,10 @@
              (if apogee? 0.5 0.0))
         T (/ k 1325.55)]
     {:k k :T T
-     :jd (+ 2451534.6698 (* 27.55454989 k) (* T T (horner T [-0.0006691 -0.000001098 0.0000000052])))
-     :env {:D (deg (+ 171.9179 (* 335.9106046 k) (* T T (horner T [-0.0100383 -0.00001156 0.000000055]))))
-           :M (deg (+ 347.3477 (* 27.1577721 k) (* T T (horner T [-0.0008130 -0.0000010]))))
-           :F (deg (+ 316.6109 (* 364.5287911 k) (* T T (horner T [-0.0125053 -0.0000148]))))}}))
+     :jd (+ 2451534.6698 (* 27.55454989 k) (* T T (poly/horner-ascending [-0.0006691 -0.000001098 0.0000000052] T)))
+     :env {:D (deg (+ 171.9179 (* 335.9106046 k) (* T T (poly/horner-ascending [-0.0100383 -0.00001156 0.000000055] T))))
+           :M (deg (+ 347.3477 (* 27.1577721 k) (* T T (poly/horner-ascending [-0.0008130 -0.0000010] T))))
+           :F (deg (+ 316.6109 (* 364.5287911 k) (* T T (poly/horner-ascending [-0.0125053 -0.0000148] T))))}}))
 
 (defn perigee
   "`[mjd parallax]` of the lunar perigee nearest `year`, and the Moon's
@@ -393,15 +393,15 @@
    (let [h (if descending? 0.5 0.0)
          k (+ (math/floor (+ (- (* (- year 2000.05) 13.4223) h) 0.5)) h)
          T (/ k 1342.23)
-         E (horner T [1.0 -0.002516 -0.0000074])
-         om (deg (+ 123.9767 (* -1.44098956 k) (* T T (horner T [0.0020608 0.00000214 -0.000000016]))))
-         env {:D  (deg (+ 183.6380 (* 331.73735682 k) (* T T (horner T [0.0014852 0.00000209 -0.00000001]))))
-              :M  (deg (+ 17.4006 (* 26.8203725 k) (* T T (horner T [0.0001186 0.00000006]))))
-              :Mp (deg (+ 38.3776 (* 355.52747313 k) (* T T (horner T [0.0123499 0.000014627 -0.000000069]))))
+         E (poly/horner-ascending [1.0 -0.002516 -0.0000074] T)
+         om (deg (+ 123.9767 (* -1.44098956 k) (* T T (poly/horner-ascending [0.0020608 0.00000214 -0.000000016] T))))
+         env {:D  (deg (+ 183.6380 (* 331.73735682 k) (* T T (poly/horner-ascending [0.0014852 0.00000209 -0.00000001] T))))
+              :M  (deg (+ 17.4006 (* 26.8203725 k) (* T T (poly/horner-ascending [0.0001186 0.00000006] T))))
+              :Mp (deg (+ 38.3776 (* 355.52747313 k) (* T T (poly/horner-ascending [0.0123499 0.000014627 -0.000000069] T))))
               :Om om
               :V  (deg (+ 299.75 (* 132.85 T) (* -0.009173 T T)))
               :P  (+ om (deg (- 272.75 (* 2.3 T))))}]
-     (jd->mjd (+ 2451565.1619 (* 27.212220817 k) (* T T (horner T [0.0002762 0.000000021 -0.000000000088]))
+     (jd->mjd (+ 2451565.1619 (* 27.212220817 k) (* T T (poly/horner-ascending [0.0002762 0.000000021 -0.000000000088] T))
                  (series node-terms env T E))))))
 
 ;; ------------------------------------------ greatest declinations (52)
@@ -582,15 +582,15 @@
   ([year south?]
    (let [k (math/floor (+ (* (- year 2000.03) 13.3686) 0.5))
          T (/ k 1336.86)
-         E (horner T [1.0 -0.002516 -0.0000074])
+         E (poly/horner-ascending [1.0 -0.002516 -0.0000074] T)
          [D0 M0 Mp0 F0 jd0] (if south?
                               [345.6676 1.3951 186.2100 145.1633 2451548.9289]
                               [152.2029 14.8591 4.6881 325.8867 2451562.5897])
-         env {:D  (deg (+ D0 (* 333.0705546 k) (* T T (horner T [-0.0004214 0.00000011]))))
-              :M  (deg (+ M0 (* 26.9281592 k) (* T T (horner T [-0.0000355 -0.0000001]))))
-              :Mp (deg (+ Mp0 (* 356.9562794 k) (* T T (horner T [0.0103066 0.00001251]))))
-              :F  (deg (+ F0 (* 1.4467807 k) (* T T (horner T [-0.0020690 -0.00000215]))))}
-         jd (+ jd0 (* 27.321582247 k) (* T T (horner T [0.000119804 -0.000000141]))
+         env {:D  (deg (+ D0 (* 333.0705546 k) (* T T (poly/horner-ascending [-0.0004214 0.00000011] T))))
+              :M  (deg (+ M0 (* 26.9281592 k) (* T T (poly/horner-ascending [-0.0000355 -0.0000001] T))))
+              :Mp (deg (+ Mp0 (* 356.9562794 k) (* T T (poly/horner-ascending [0.0103066 0.00001251] T))))
+              :F  (deg (+ F0 (* 1.4467807 k) (* T T (poly/horner-ascending [-0.0020690 -0.00000215] T))))}
+         jd (+ jd0 (* 27.321582247 k) (* T T (poly/horner-ascending [0.000119804 -0.000000141] T))
                (series (if south? south-time-terms north-time-terms) env T E))
          dec (+ 23.6961 (* -0.013004 T) (series (if south? south-dec-terms north-dec-terms) env T E))]
      [(jd->mjd jd) (deg (if south? (- dec) dec))])))

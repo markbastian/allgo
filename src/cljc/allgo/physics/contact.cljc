@@ -75,6 +75,7 @@
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.math :as am]
+            [allgo.numerics.roots :as roots]
             [allgo.physics.rigid :as rigid]
             [allgo.spatial.sweep :as sweep]
             [clojure.math :as math]))
@@ -511,15 +512,8 @@
                     (map #(* step (double %)) (range torus-samples)))]
     (if (= ##-Inf (depth-at best))
       []
-      (let [phi (/ (- (math/sqrt 5.0) 1.0) 2.0)
-            t (loop [lo (- (double best) step) hi (+ (double best) step) k 0]
-                (if (= k 24)
-                  (* 0.5 (+ lo hi))
-                  (let [m1 (- hi (* phi (- hi lo)))
-                        m2 (+ lo (* phi (- hi lo)))]
-                    (if (> (depth-at m1) (depth-at m2))
-                      (recur lo m2 (inc k))
-                      (recur m1 hi (inc k))))))
+      (let [;; golden section between the best sample's neighbors, 24 narrowings
+            t (roots/maximize depth-at (- (double best) step) (+ (double best) step) {:tol 0.0 :max-iter 23})
             t (if (>= (depth-at t) (depth-at best)) t best)]
         (mapv #(assoc % :id :torus-box)
               (sphere-box ia ib {:pos (ring-point a t) :radius r} b margin))))))

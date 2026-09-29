@@ -23,8 +23,8 @@
             [allgo.astro.time :as time]
             [allgo.astro.vsop87 :as vsop87]
             [allgo.math :as am]
-            [allgo.numerics.interpolation :refer [horner]]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (defn- deg [x] (* x c/degrees))
@@ -32,18 +32,18 @@
 ;; --------------------------------------------------- low accuracy (25.2-25.8)
 
 (defn mean-anomaly [mjd-tt]
-  (deg (horner (time/centuries-J2000 mjd-tt) [357.52911 35999.05029 -0.0001537])))
+  (deg (poly/horner-ascending [357.52911 35999.05029 -0.0001537] (time/centuries-J2000 mjd-tt))))
 
 (defn eccentricity
   "Eccentricity of the Earth's orbit, slowly decreasing."
   [mjd-tt]
-  (horner (time/centuries-J2000 mjd-tt) [0.016708634 -0.000042037 -0.0000001267]))
+  (poly/horner-ascending [0.016708634 -0.000042037 -0.0000001267] (time/centuries-J2000 mjd-tt)))
 
 (defn- low-accuracy [mjd-tt]
   (let [T  (time/centuries-J2000 mjd-tt)
-        L0 (deg (horner T [280.46646 36000.76983 0.0003032]))
+        L0 (deg (poly/horner-ascending [280.46646 36000.76983 0.0003032] T))
         M  (mean-anomaly mjd-tt)
-        C  (deg (+ (* (horner T [1.914602 -0.004817 -0.000014]) (math/sin M))
+        C  (deg (+ (* (poly/horner-ascending [1.914602 -0.004817 -0.000014] T) (math/sin M))
                    (* (- 0.019993 (* 0.000101 T)) (math/sin (* 2.0 M)))
                    (* 0.000289 (math/sin (* 3.0 M)))))]
     {:lon (am/wrap-2pi (+ L0 C)) :anomaly (am/wrap-2pi (+ M C))
@@ -173,7 +173,7 @@
 
 (defn- mean-season [year season]
   (let [[table y] (if (< year 1000) [seasons-before-1000 year] [seasons-after-1000 (- year 2000)])]
-    (- (horner (* 0.001 y) (table season)) c/jd-mjd-offset)))
+    (- (poly/horner-ascending (table season) (* 0.001 y)) c/jd-mjd-offset)))
 
 (defn season
   "MJD (TT) of the March or September equinox or the June or December
@@ -205,9 +205,8 @@
 ;; ---------------------------------------------------- equation of time (28)
 
 (defn- sun-mean-longitude [mjd-tt]
-  (deg (horner (vsop87/millennia mjd-tt)
-               [280.4664567 360007.6982779 0.03032028 (/ 1.0 49931) (/ -1.0 15300)
-                (/ -1.0 2000000)])))
+  (deg (poly/horner-ascending [280.4664567 360007.6982779 0.03032028 (/ 1.0 49931) (/ -1.0 15300)
+                               (/ -1.0 2000000)] (vsop87/millennia mjd-tt))))
 
 (defn equation-of-time
   "Apparent minus mean solar time, radians of hour angle (15 degrees an

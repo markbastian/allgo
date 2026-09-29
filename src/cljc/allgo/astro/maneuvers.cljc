@@ -16,6 +16,7 @@
   Radii in km, speeds in km/s, times in seconds, angles in radians. `mu`
   defaults to the Earth's."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.kepler :as kepler]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
@@ -175,7 +176,7 @@
 
 ;; ------------------------------------------------------------ rendezvous
 
-(defn- mean-motion [a] (math/sqrt (/ mu (* a a a))))
+(defn- mean-motion [a] (kepler/mean-motion mu a))
 
 (defn rendezvous-same-orbit
   "Catching a target that leads by `lead` radians on the same circular

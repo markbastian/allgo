@@ -10,7 +10,8 @@
   the equation is linear, Newton's method when not.
 
   Solutions are `[[x y] ...]` at the grid points, both ends included."
-  (:require [allgo.numerics.linear-systems :as ls]
+  (:require [allgo.numerics.differentiation :as d]
+            [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.rk :as rk]
             [allgo.numerics.roots :as roots]
             [allgo.numerics.tridiagonal :as tri]))
@@ -87,11 +88,7 @@
     (loop [ys start k 0]
       (when (< k 50)
         (let [r (residual ys)
-              ;; the Jacobian, column by column, turned into rows
-              J (apply mapv vector
-                       (map (fn [j] (let [h (* 1e-6 (max 1.0 (abs (ys j))))]
-                                      (mapv #(/ (- %1 %2) (* 2.0 h)) (residual (update ys j + h)) (residual (update ys j - h)))))
-                            (range (count ys))))]
+              J (d/jacobian residual ys {:steps (mapv #(* 1e-6 (max 1.0 (abs %))) ys) :richardson? false})]
           (when-let [dy (ls/gauss J (mapv - r))]
             (let [ys' (mapv + ys dy)]
               (if (< (apply max (map #(abs %) dy)) (* 1e-12 (max 1.0 (apply max (map abs ys')))))

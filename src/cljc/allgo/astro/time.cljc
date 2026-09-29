@@ -8,6 +8,7 @@
   supplies."
   (:require [allgo.astro.constants :as c]
             [allgo.numerics.interpolation :as interp]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (defn calendar->mjd
@@ -336,5 +337,4 @@
 (defn delta-t-polynomial
   "ΔT in seconds at `mjd` from one of `delta-t-polynomials`."
   [which mjd]
-  (interp/horner (/ (- (mjd->jd mjd) 2415020.0) 36525.0)
-                 (delta-t-polynomials which)))
+  (poly/horner-ascending (delta-t-polynomials which) (/ (- (mjd->jd mjd) 2415020.0) 36525.0)))

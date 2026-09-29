@@ -19,7 +19,7 @@
 
   Times are MJD (TT)."
   (:require [allgo.astro.constants :as c]
-            [allgo.numerics.interpolation :refer [horner]]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (def ^:private tables
@@ -218,10 +218,10 @@
   (set (keys tables)))
 
 (defn- series [T M rows]
-  (reduce + (horner T (first rows))
+  (reduce + (poly/horner-ascending (first rows) T)
           (map-indexed (fn [i [s cc]]
                          (let [a (* (inc i) M)]
-                           (+ (* (math/sin a) (horner T s)) (* (math/cos a) (horner T cc)))))
+                           (+ (* (math/sin a) (poly/horner-ascending s T)) (* (math/cos a) (poly/horner-ascending cc T)))))
                        (partition 2 (rest rows)))))
 
 (defn phenomenon
@@ -238,7 +238,7 @@
         dJ (+ (series T M (take n terms))
               (reduce + (map (fn [[cc f] [s co]]
                                (let [a (* c/degrees (+ cc (* f T)))]
-                                 (+ (* (math/sin a) (horner T s)) (* (math/cos a) (horner T co)))))
+                                 (+ (* (math/sin a) (poly/horner-ascending s T)) (* (math/cos a) (poly/horner-ascending co T)))))
                              extra (partition 2 (drop n terms)))))
         mjd (- (+ J dJ) c/jd-mjd-offset)]
     (if elongation

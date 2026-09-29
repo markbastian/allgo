@@ -20,8 +20,8 @@
             [allgo.astro.solar :as solar]
             [allgo.astro.time :as time]
             [allgo.astro.vsop87 :as vsop87]
-            [allgo.numerics.interpolation :refer [horner]]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (def names [:mimas :enceladus :tethys :dione :rhea :titan :hyperion :iapetus])
@@ -192,8 +192,8 @@
         e'   (+ 0.028298 (* 0.001156 t11))
         peri0 (+ (* 352.91 d) (* 11.71 d t11))
         mu   (+ (* 76.3852 d) (* 4.53795125 d t10))
-        i'   (* d (horner t11 [18.4602 -0.9518 -0.072 0.0054]))
-        om'  (* d (horner t11 [143.198 -3.919 0.116 0.008]))
+        i'   (* d (poly/horner-ascending [18.4602 -0.9518 -0.072 0.0054] t11))
+        om'  (* d (poly/horner-ascending [143.198 -3.919 0.116 0.008] t11))
         l    (- mu peri0)
         g    (- peri0 om' psi)
         g1   (- peri0 om' phi)

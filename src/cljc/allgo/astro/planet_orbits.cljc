@@ -19,7 +19,8 @@
             [allgo.astro.vsop87 :as vsop87]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
-            [allgo.numerics.interpolation :as interp :refer [horner]]
+            [allgo.numerics.interpolation :as interp]
+            [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
 (defn- deg [x] (* x c/degrees))
@@ -90,7 +91,7 @@
   zero and its node undefined; it is reported as zero."
   [planet mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)
-        at (fn [k] (horner T (get-in mean-elements-of-date [planet k])))
+        at (fn [k] (poly/horner-ascending (get-in mean-elements-of-date [planet k]) T))
         L (deg (at :L)) node (deg (at :node)) peri (deg (at :peri))]
     {:L (am/wrap-2pi L) :a (at :a) :e (at :e) :i (deg (at :i))
      :raan (am/wrap-2pi node) :peri (am/wrap-2pi peri)
@@ -157,7 +158,7 @@
   (let [[f off poly] (apsis-k (if (= planet :earth-moon) :earth planet))
         x (* f (- year off))
         k (if aphelion? (+ (math/floor x) 0.5) (math/floor (+ x 0.5)))
-        jd (horner k poly)
+        jd (poly/horner-ascending poly k)
         jd (if (= planet :earth)
              (let [{:keys [args] :as corr} earth-apsis-correction]
                (+ jd (reduce + (map (fn [[a b] cc] (* cc (math/sin (deg (+ a (* b k))))))
