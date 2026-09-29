@@ -369,6 +369,53 @@
                             (* (/ mu3 (* r3 r3 r3))
                                (- (* 1.5 0.5 (- tr (v3/dot h3 Mh))) (* 0.5 tr)))))))
 
+;; ------------------------------------------------------------ tides
+
+;; The bulge a body of parameter mu3 raises on the Earth pulls back on a
+;; satellite with the potential k2 (mu3/r3) (R/r3)^2 (R/r)^3 P2(cos S), S
+;; the angle between satellite and body seen from the center (Vallado,
+;; section 9.5.3; Kaula, Rev. Geophys. 2, 1964) -- the third body's own
+;; quadrupole scaled by the Love number k2 and (R/r)^5, turned to fall off
+;; as the cube of the satellite's distance instead of growing as its
+;; square. The Earth's k2 is about 0.30.
+
+(defn tidal-acceleration
+  "The acceleration, km/s^2, of the tide raised with Love number `k2` on a
+  body of radius `R` by a body of parameter `mu3` at `r3`, on a
+  satellite at `r`: the gradient of k2 mu3 R^5 / (2 r3^3) [3 (r.s)^2/r^5
+  - 1/r^3], s the body's direction."
+  [k2 R mu3 r3 r]
+  (let [m3 (v3/length r3)
+        s (v3/scale r3 (/ 1.0 m3))
+        rm (v3/length r)
+        rs (v3/dot r s)
+        k (/ (* k2 mu3 (math/pow R 5.0)) (* 2.0 m3 m3 m3))
+        r5 (math/pow rm 5.0) r7 (math/pow rm 7.0)]
+    (v3/scale (v3/add (v3/scale s (/ (* 6.0 rs) r5))
+                      (v3/scale r (- (/ 3.0 r5) (/ (* 15.0 rs rs) r7))))
+              k)))
+
+(defn tidal-averaged-potential
+  "The tidal disturbing function averaged over the satellite's orbit `el`,
+  the tide-raising body held at distance `r3` in direction `n3` (a unit
+  vector): k2 mu3 R^5 (1 - 3 (h.n3)^2) / (4 r3^3 a^3 (1 - e^2)^(3/2)), h
+  the orbit normal -- <cos^2 S / r^3> over the orbit being (1 -
+  (h.n3)^2) / (2 a^3 (1-e^2)^(3/2)), the eccentric weighting cancelling."
+  [el k2 R mu3 r3 n3]
+  (let [{:keys [a e i raan]} el
+        h [(* (math/sin i) (math/sin raan)) (- (* (math/sin i) (math/cos raan))) (math/cos i)]
+        c (v3/dot h n3)]
+    (/ (* k2 mu3 (math/pow R 5.0) (- 1.0 (* 3.0 c c)))
+       (* 4.0 r3 r3 r3 a a a (math/pow (- 1.0 (* e e)) 1.5)))))
+
+(defn tidal-secular
+  "The secular rates of the elements `el` under the tide a body of
+  parameter `mu3` raises, held at distance `r3` in direction `n3`, with
+  Love number `k2` on a body of radius `R`: `tidal-averaged-potential`
+  through Lagrange's equations."
+  [el k2 R mu3 r3 n3]
+  (lagrange-rates-of el #(tidal-averaged-potential % k2 R mu3 r3 n3)))
+
 (defn third-body-node-perigee
   "The classical closed forms for a near-circular orbit of mean motion `n`
   and inclination `i` under a third body of parameter `mu3` on a circular
