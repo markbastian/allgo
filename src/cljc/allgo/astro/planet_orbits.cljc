@@ -296,7 +296,10 @@
   Pluto has no VSOP87 series: it was fitted separately, and only from
   1885 to 2099, the years the numerical ephemeris behind it spans. Outside
   them this is not merely less accurate but meaningless, so it returns nil
-  there. Within them, a few hundredths of an arcsecond."
+  there. Within them, a few hundredths of an arcsecond from the ephemeris
+  it was fitted to; against JPL's DE441 the difference grows smoothly
+  from that near 2000 to some 3 arcseconds by 2100, the older
+  ephemeris's own error."
   [mjd-tt]
   (let [T (time/centuries-J2000 mjd-tt)
         y (time/mjd->julian-epoch mjd-tt)]

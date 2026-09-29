@@ -70,15 +70,16 @@
   total along the rest), `:mjd` is the instant of greatest eclipse, and
   `:magnitude` -- the fraction of the Sun's diameter covered -- is given
   for partial eclipses. A non-central total or annular eclipse is one
-  where the umbra grazes the Earth near a pole; Meeus reports those as
-  total whether the cone's vertex reaches the Earth or not."
+  where the umbra (or antumbra) grazes the Earth near a pole; which of
+  the two it is follows from the sign of u, as for a central one --
+  negative, the umbral cone's vertex beyond the Earth, total."
   [year]
   (when-let [{:keys [mjd gamma u]} (circumstances (syzygy year 0.0) -0.4075 0.1721)]
     (let [g (abs gamma)]
       (when (<= g (+ 1.5433 u))
         (let [central? (< g 0.9972)
               type (cond
-                     (not central?) (if (< g (+ 0.9972 (abs u))) :total :partial)
+                     (not central?) (if (< g (+ 0.9972 (abs u))) (if (neg? u) :total :annular) :partial)
                      (neg? u) :total
                      (> u 0.0047) :annular
                      (< u (* 0.00464 (math/sqrt (- 1.0 (* gamma gamma))))) :hybrid

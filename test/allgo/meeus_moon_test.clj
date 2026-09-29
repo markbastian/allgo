@@ -139,3 +139,32 @@
     (let [n (count (ecl/solar-eclipses 2024.0 2024.99))]
       (is (<= 2 n 5)))
     (is (= [:total :total] (mapv :type (ecl/lunar-eclipses 2025.0 2025.99))))))
+
+(def ^:private erfa-moon98
+  "ERFA's eraMoon98 (BSD; a separate implementation of Meeus chapter 47,
+  compiled locally) at dates from 1900 to 2100: MJD (TT), and the ecliptic
+  longitude and latitude of date (rad) and distance (km) before its
+  rotation into the GCRS."
+  [[15020.0 -1.528690662834109 0.019344726755660 368391.602286300]
+   [21000.25 -2.246540590652771 -0.082881678850777 364762.774523616]
+   [28123.5 -3.867155862732842 -0.050744422807410 400113.436639407]
+   [33282.0 -5.211349976951466 0.065996586303254 399601.725356845]
+   [40587.75 -2.788867082698899 -0.052519018690097 387811.387772077]
+   [45000.1 -5.906128698529827 -0.091834499635346 377311.920170246]
+   [51544.5 3.897650395562911 0.090255863898317 402444.812387244]
+   [55197.0 1.801660086238916 0.012648109200478 359367.306516674]
+   [58849.33 6.109711764070158 -0.087595348743545 404229.512299345]
+   [62502.0 4.160953377008764 -0.042066535789128 364522.473705170]
+   [70000.9 0.926089860145161 -0.006238239667531 382613.268358961]
+   [88069.0 2.747152738199672 0.019061726155735 371715.470667818]])
+
+(deftest against-erfa
+  (testing "chapter 47's series against ERFA's implementation of it, 1900-2100: identical but for ERFA's
+            mean-longitude constant, Simon et al.'s 218.31665436 degrees where Meeus's 218.3164477 includes
+            the -0.70 arcsecond light-time term"
+    (let [offset (deg (- 218.31665436 218.3164477))]
+      (doseq [[mjd l b r] erfa-moon98]
+        (let [[l' b' r'] (moon/position mjd)]
+          (is (< (abs (->arcsec (am/wrap-angle (- (+ l' offset) l)))) 1e-4) (str mjd))
+          (is (< (abs (->arcsec (- b' b))) 1e-3) (str mjd))
+          (is (< (abs (- r' r)) 1e-5) (str mjd)))))))

@@ -250,6 +250,9 @@ The demos draw on other people's data, used under their terms:
   phenomena series under `allgo.astro`): converted by script from Sonia
   Keys's Go port of *Astronomical Algorithms*,
   [soniakeys/meeus](https://github.com/soniakeys/meeus), MIT license.
+  Checked, beyond the book's worked examples, against sources that owe
+  nothing to Meeus: ERFA's eraMoon98, JPL Horizons, the US Naval
+  Observatory and NASA's eclipse catalog (`test/data/meeus/`).
 - **SGP4** (`allgo.astro.sgp4`): transcribed from the C++ that
   accompanies Vallado, Crawford, Hujsak and Kelso, *Revisiting Spacetrack
   Report #3* (AIAA 2006-6753), after Hoots and Roehrich's *Spacetrack
