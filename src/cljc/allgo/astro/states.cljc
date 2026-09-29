@@ -194,6 +194,31 @@
    (let [{:keys [i raan argp]} (state->classical mu [r v])]
      (into-frame (perifocal-axes i raan argp) [r v]))))
 
+(defn eci->hill
+  "The state of `interceptor` relative to `target`, both inertial `[r v]`,
+  in the target's rotating Hill frame -- x radial, y along-track, z
+  cross-track, the RSW axes turning with the target (Vallado's ECI2HILL):
+  rho = R (r_i - r_t), and rho' = R (v_i - v_t) - omega x rho, omega =
+  h/r^2 about the orbit normal the frame's rate. The linear
+  Clohessy-Wiltshire solution (`maneuvers/hill`) lives in this frame."
+  [target interceptor]
+  (let [[rt vt] target [ri vi] interceptor
+        axes (rsw target)
+        rho (mv axes (v3/sub ri rt))
+        w (/ (v3/length (v3/cross rt vt)) (v3/dot rt rt))]
+    [rho (v3/sub (mv axes (v3/sub vi vt)) (v3/cross [0.0 0.0 w] rho))]))
+
+(defn hill->eci
+  "The inertial state of an interceptor at `rel`, `[rho rho']` in the
+  Hill frame of `target` (Vallado's HILL2ECI): the inverse of `eci->hill`."
+  [target [rho drho]]
+  (let [[rt vt] target
+        axes (rsw target)
+        back (lin/transpose axes)
+        w (/ (v3/length (v3/cross rt vt)) (v3/dot rt rt))]
+    [(v3/add rt (mv back rho))
+     (v3/add vt (mv back (v3/add drho (v3/cross [0.0 0.0 w] rho))))]))
+
 ;; -------------------------------------------------- site, SEZ and radar
 
 (defn sez-axes
@@ -231,6 +256,17 @@
   (let [[rs vs] (razel->sez razel)
         m (lin/transpose (sez-axes lat lon))]
     [(v3/add (geodesy/geodetic->cartesian lat lon alt) (mv m rs)) (mv m vs)]))
+
+(defn site-track
+  "The inertial state of a target a site sees at `razel` -- range,
+  azimuth, elevation and their rates -- from geodetic `lat` `lon` and
+  height `alt` km, at `mjd-tt` `mjd-ut1` with Earth orientation `eop`
+  (Vallado's SITE-TRACK, algorithm 50): the site-relative state in SEZ,
+  turned to the Earth-fixed frame and added to the site's position, then
+  reduced to the GCRF, the Earth's turning adding its omega x r."
+  ([razel lat lon alt mjd-tt mjd-ut1] (site-track razel lat lon alt mjd-tt mjd-ut1 {}))
+  ([razel lat lon alt mjd-tt mjd-ut1 eop]
+   (reduction/ecef->eci (razel->ecef razel lat lon alt) mjd-tt mjd-ut1 eop)))
 
 (defn ecef->razel
   "Range, azimuth, elevation and rates of an Earth-fixed state from a site."
