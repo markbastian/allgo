@@ -29,7 +29,6 @@
 
   States are `[x y z vx vy vz]`, rotating and nondimensional."
   (:require [allgo.astro.cr3bp :as cr3bp]
-            [allgo.numerics.core :as core]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.rk :as rk]
             [clojure.math :as math]))
@@ -53,43 +52,131 @@
         uyz (+ (* q1 y z) (* q2 y z))]
     [[uxx uxy uxz] [uxy uyy uyz] [uxz uyz uzz]]))
 
-(defn- rhs
-  "The equations of motion, and with `stm?` the variational equations
-  alongside -- the state followed by the 6x6 transition matrix row by
-  row -- negated with `backward?` to run time the other way."
-  [mu stm? backward?]
-  (let [f (cr3bp/derivative mu)
-        sgn (if backward? -1.0 1.0)]
-    (fn [t y]
-      (let [s (subvec y 0 6)
-            ds (f t s)]
-        (if-not stm?
-          (mapv #(* sgn %) ds)
-          (let [phi (partition 6 (subvec y 6))
-                [p0 p1 p2 p3 p4 p5] (map vec phi)
-                [[h00 h01 h02] [h10 h11 h12] [h20 h21 h22]] (hessian mu s)
-                row (fn [h0 h1 h2 extra] (mapv (fn [a b c e] (+ (* h0 a) (* h1 b) (* h2 c) e)) p0 p1 p2 extra))
-                d3 (row h00 h01 h02 (mapv #(* 2.0 %) p4))
-                d4 (row h10 h11 h12 (mapv #(* -2.0 %) p3))
-                d5 (row h20 h21 h22 (vec (repeat 6 0.0)))]
-            (mapv #(* sgn %) (concat ds p3 p4 p5 d3 d4 d5))))))))
+;; The flow is integrated by Dormand and Prince's 5(4) pair -- the same
+;; tableau as `allgo.numerics.rk/dopri54`, the same error norm and step
+;; law as `allgo.numerics.core` -- but on primitive arrays, the forty-two
+;; equations of the state and its transition matrix written straight into
+;; a buffer: the generic integrator's vectors cost twenty times as much
+;; here, where continuation and correction fly thousands of periods.
 
-(def ^:private tolerance {:tol-abs 1e-13 :tol-rel 1e-13})
+(defn- deriv!
+  "The derivatives of `y` -- the state, and with `n` = 42 the transition
+  matrix row by row after it -- into `dy`, times `sgn` (-1 to run time
+  backward)."
+  [mu sgn n ^doubles y ^doubles dy]
+  (let [x (aget y 0) yy (aget y 1) z (aget y 2)
+        vx (aget y 3) vy (aget y 4) vz (aget y 5)
+        m1 (- 1.0 mu)
+        a (+ x mu) b (- x m1)
+        r1s (+ (* a a) (* yy yy) (* z z)) r2s (+ (* b b) (* yy yy) (* z z))
+        r1 (math/sqrt r1s) r2 (math/sqrt r2s)
+        p1 (/ m1 (* r1s r1)) p2 (/ mu (* r2s r2))]
+    (aset dy 0 (* sgn vx)) (aset dy 1 (* sgn vy)) (aset dy 2 (* sgn vz))
+    (aset dy 3 (* sgn (+ (* 2.0 vy) x (- (* p1 a)) (- (* p2 b)))))
+    (aset dy 4 (* sgn (+ (* -2.0 vx) yy (- (* p1 yy)) (- (* p2 yy)))))
+    (aset dy 5 (* sgn (- (+ (* p1 z) (* p2 z)))))
+    (when (> n 6)
+      (let [q1 (/ (* 3.0 p1) r1s) q2 (/ (* 3.0 p2) r2s)
+            uxx (+ 1.0 (- p1) (- p2) (* q1 a a) (* q2 b b))
+            uyy (+ 1.0 (- p1) (- p2) (* q1 yy yy) (* q2 yy yy))
+            uzz (+ (- p1) (- p2) (* q1 z z) (* q2 z z))
+            uxy (+ (* q1 a yy) (* q2 b yy))
+            uxz (+ (* q1 a z) (* q2 b z))
+            uyz (+ (* q1 yy z) (* q2 yy z))]
+        (dotimes [j 6]
+          (let [f0 (aget y (+ 6 j)) f1 (aget y (+ 12 j)) f2 (aget y (+ 18 j))
+                f3 (aget y (+ 24 j)) f4 (aget y (+ 30 j)) f5 (aget y (+ 36 j))]
+            (aset dy (+ 6 j) (* sgn f3))
+            (aset dy (+ 12 j) (* sgn f4))
+            (aset dy (+ 18 j) (* sgn f5))
+            (aset dy (+ 24 j) (* sgn (+ (* uxx f0) (* uxy f1) (* uxz f2) (* 2.0 f4))))
+            (aset dy (+ 30 j) (* sgn (+ (* uxy f0) (* uyy f1) (* uyz f2) (* -2.0 f3))))
+            (aset dy (+ 36 j) (* sgn (+ (* uxz f0) (* uyz f1) (* uzz f2))))))))
+    dy))
 
-(defn- with-stm [s] (into (vec s) (flatten (lin/eye 6))))
+(def ^:private tableau
+  ;; the last stage is taken at the fifth-order solution itself, so the
+  ;; weights b are its row of a, and only their difference from b-hat,
+  ;; the error estimate, is wanted apart
+  (let [{:keys [a b b-hat]} rk/dopri54]
+    {:a (into-array (map double-array a))
+     :e (double-array (map - b b-hat))}))
 
-(defn- unpack [y] {:state (subvec y 0 6) :stm (when (> (count y) 6) (mapv vec (partition 6 (subvec y 6))))})
+(defn- copy! [^doubles from ^doubles to]
+  (dotimes [i (alength from)] (aset to i (aget from i)))
+  to)
+
+(def ^:private tol 1e-13)
+
+(defn- fly!
+  "Integrates `y0` (a double array of 6 or 42) forward in its own time
+  from 0 to `t-end`, backward in the problem's when `sgn` is -1. With
+  `stop?`, instead until y changes sign after the first moment, returning
+  `[t-before y-before]` -- the last step's start -- for refining; otherwise
+  the final array."
+  [mu y0 t-end sgn stop?]
+  (let [n (alength ^doubles y0)
+        {:keys [^objects a ^doubles e]} tableau
+        ks (object-array (repeatedly 7 #(double-array n)))
+        tmp (double-array n)
+        y5 (double-array n)
+        f! (fn [^doubles y ^doubles dy] (deriv! mu sgn n y dy))]
+    (f! y0 (aget ks 0))
+    (loop [t 0.0 h (if stop? 1e-3 (* 0.01 t-end)) ^doubles y (aclone ^doubles y0)]
+      (if (and (not stop?) (<= (- t-end t) (* 1e-12 (max 1.0 t-end))))
+        y
+        (let [h (if stop? h (min h (- t-end t)))]
+          ;; the stages
+          (dotimes [s 6]
+            (let [^doubles as (aget a (inc s))]
+              (dotimes [i n]
+                (aset tmp i (+ (aget y i)
+                               (* h (loop [j 0 acc 0.0]
+                                      (if (< j (alength as))
+                                        (recur (inc j) (+ acc (* (aget as j) (aget ^doubles (aget ks j) i))))
+                                        acc))))))
+              (f! tmp (aget ks (inc s)))))
+          ;; the fifth-order solution is the last stage's point; the error
+          (let [^doubles k6 (aget ks 6)
+                err (loop [i 0 acc 0.0]
+                      (if (< i n)
+                        (let [ei (* h (loop [j 0 s 0.0]
+                                        (if (< j 7) (recur (inc j) (+ s (* (aget e j) (aget ^doubles (aget ks j) i)))) s)))
+                              sc (+ tol (* tol (abs (aget tmp i))))]
+                          (recur (inc i) (+ acc (* (/ ei sc) (/ ei sc)))))
+                        (math/sqrt (/ acc n))))
+                scale (if (or (zero? err) (NaN? err)) 5.0 (min 5.0 (max 0.2 (* 0.9 (math/pow (/ 1.0 err) 0.2)))))
+                h' (* h scale)]
+            (if (> err 1.0)
+              (recur t h' y)
+              (let [t' (+ t h)]
+                (copy! tmp y5)
+                (if (and stop? (> t' 1e-2) (not= (neg? (aget y 1)) (neg? (aget y5 1))))
+                  [t (aclone y)]
+                  (do
+                    ;; first same as last
+                    (copy! k6 (aget ks 0))
+                    (recur t' h' (aclone y5))))))))))))
+
+(defn- ->array [y] (double-array y))
+
+(defn- with-stm [s] (double-array (concat s (flatten (lin/eye 6)))))
+
+(defn- unpack [^doubles y]
+  (let [v (vec y)]
+    {:state (subvec v 0 6) :stm (when (> (count v) 6) (mapv vec (partition 6 (subvec v 6))))}))
+
+(defn- fly-for
+  "The array `dt` on from `y` (negative for backward)."
+  [mu ^doubles y dt]
+  (if (zero? dt) (aclone y) (fly! mu y (abs dt) (if (neg? dt) -1.0 1.0) false)))
 
 (defn propagate
   "The state `t` after `state` (before it, for negative `t`), and with
   `:stm? true` the transition matrix too: `{:state :stm}`."
   ([mu state t] (propagate mu state t {}))
   ([mu state t {:keys [stm?]}]
-   (if (zero? t)
-     (unpack (if stm? (with-stm state) (vec state)))
-     (let [y0 (if stm? (with-stm state) (vec state))
-           integ (rk/integrator rk/dopri54 (rhs mu stm? (neg? t)) 0.0 y0 (* 0.01 (abs t)) tolerance)]
-       (unpack (:y (core/step-until integ (abs t))))))))
+   (unpack (fly-for mu (if stm? (with-stm state) (->array state)) t))))
 
 (defn trajectory
   "States along the trajectory from `state` for `t` (negative for
@@ -108,21 +195,12 @@
   start with `stm?`. Stepped until y changes sign, then Newton's method on
   the time from the step before, y' being vy."
   [mu state stm?]
-  (let [y0 (if stm? (with-stm state) (vec state))
-        integ (rk/integrator rk/dopri54 (rhs mu stm? false) 0.0 y0 1e-3 tolerance)
-        steps (->> (core/trajectory integ) (drop-while #(< (:t %) 1e-2)))
-        sign #(neg? (get-in % [:y 1]))
-        [before _] (first (filter (fn [[a b]] (not= (sign a) (sign b))) (partition 2 1 steps)))
-        refine (fn [{:keys [t y]}]
-                 (loop [t t y y i 0]
-                   (let [dt (- (/ (y 1) (y 4)))]
-                     (if (or (< (abs (y 1)) 1e-13) (> i 20))
-                       {:t t :y y}
-                       (let [back? (neg? dt)
-                             integ (rk/integrator rk/dopri54 (rhs mu stm? back?) 0.0 y (* 0.5 (abs dt)) tolerance)
-                             y' (:y (core/step-until integ (abs dt)))]
-                         (recur (+ t dt) y' (inc i)))))))
-        {:keys [t y]} (refine before)]
+  (let [[t0 y0] (fly! mu (if stm? (with-stm state) (->array state)) 1e9 1.0 true)
+        [t ^doubles y] (loop [t t0 ^doubles y y0 i 0]
+                         (let [dt (- (/ (aget y 1) (aget y 4)))]
+                           (if (or (< (abs (aget y 1)) 1e-13) (> i 20))
+                             [t y]
+                             (recur (+ t dt) (fly-for mu y dt) (inc i)))))]
     (assoc (unpack y) :t t)))
 
 ;; ------------------------------------------------------ correcting orbits
