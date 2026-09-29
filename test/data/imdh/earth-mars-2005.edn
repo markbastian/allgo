@@ -1,0 +1,13 @@
+;; NASA/TM-2010-216764, appendix A: the 2005 Earth-to-Mars energy minima,
+;; table 12 as MIDAS computed them and table 13 as the handbook's
+;; reference 6 (JPL) gives them, nil where that table prints a dash. Each
+;; row: source, transfer type, departure and arrival dates [y m d], C3
+;; km^2/s^2, Mars arrival excess speed km/s.
+[[:midas 1 [2005 8 10] [2006 2 20] 15.89  3.219]
+ [:midas 2 [2005 9  1] [2006 10 4] 15.45  3.459]
+ [:midas 1 [2005 9  7] [2006 4 19] 25.45  2.361]
+ [:midas 2 [2005 6 21] [2006 4  3] 31.44  2.466]
+ [:jpl   1 [2005 8 10] [2006 2 22] 15.883 nil]
+ [:jpl   2 [2005 9  2] [2006 10 8] 15.445 nil]
+ [:jpl   1 [2005 9  8] [2006 4 20] nil    2.3602]
+ [:jpl   2 [2005 6 21] [2006 4  4] nil    2.4668]]

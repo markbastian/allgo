@@ -16,9 +16,12 @@
 
   km, km/s, seconds, radians; heliocentric vectors in equatorial J2000."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.frames :as frames]
             [allgo.astro.iod :as iod]
             [allgo.astro.planets :as planets]
             [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (def ^:private mu-sun c/GM-sun)
@@ -108,20 +111,37 @@
      :v-inf-arrive (abs (- (speed r2 r2) (speed r2 at)))
      :tof (* math/PI (math/sqrt (/ (* at at at) mu-sun)))}))
 
+(defn asymptote
+  "Right ascension and declination `[ra dec]`, radians, of an excess
+  velocity `v-inf` given in EME2000 -- or, with `mjd-tt`, referred to the
+  mean equator and equinox of that date, as launch asymptotes are usually
+  quoted (NASA's mission design handbooks among them)."
+  ([v-inf]
+   (let [[x y z] v-inf]
+     [(am/wrap-2pi (math/atan2 y x)) (math/asin (/ z (v3/length v-inf)))]))
+  ([v-inf mjd-tt] (asymptote (lin/mat-vec (frames/precession mjd-tt) v-inf))))
+
 (defn transfer
   "The heliocentric transfer from `from` at TT MJD `depart` to `to` at
-  `arrive`, the short way unless `:long?`: Lambert's problem between the
-  planets' places. Returns `{:v1 :v2 :v-inf-depart :v-inf-arrive :c3
-  :dla}` -- the transfer's velocities, the excess velocities at each
-  planet, the launch energy C3 = v-inf^2 and the declination of the
-  departure asymptote, which a launch site's latitude must reach."
+  `arrive`, the short way (type I) unless `:long?` (type II): Lambert's
+  problem between the planets' places. Returns `{:v1 :v2 :v-inf-depart
+  :v-inf-arrive :c3 :rla :dla}` -- the transfer's velocities, the excess
+  velocities at each planet, the launch energy C3 = v-inf^2 and the right
+  ascension and declination of the departure asymptote in EME2000 (the
+  declination is what a launch site's latitude must reach).
+
+  The planets' places come from `:ephemeris`, a function of planet and TT
+  MJD giving heliocentric `[r v]` in EME2000; by default the mean elements
+  of `allgo.astro.planets`, whose Earth is the Earth-Moon barycenter --
+  which is what NASA's mission design handbooks use too, and against which
+  this reproduces them to their printed precision."
   ([from depart to arrive] (transfer from depart to arrive {}))
-  ([from depart to arrive opts]
-   (let [[r1 vp1] (planets/heliocentric-state from depart)
-         [r2 vp2] (planets/heliocentric-state to arrive)
+  ([from depart to arrive {:keys [ephemeris] :or {ephemeris planets/heliocentric-state} :as opts}]
+   (let [[r1 vp1] (ephemeris from depart)
+         [r2 vp2] (ephemeris to arrive)
          [v1 v2] (iod/lambert mu-sun r1 r2 (* 86400.0 (- arrive depart)) opts)
          vinf1 (v3/sub v1 vp1)
-         vinf2 (v3/sub v2 vp2)]
+         vinf2 (v3/sub v2 vp2)
+         [rla dla] (asymptote vinf1)]
      {:v1 v1 :v2 v2 :v-inf-depart vinf1 :v-inf-arrive vinf2
-      :c3 (v3/dot vinf1 vinf1)
-      :dla (math/asin (/ (nth vinf1 2) (v3/length vinf1)))})))
+      :c3 (v3/dot vinf1 vinf1) :rla rla :dla dla})))

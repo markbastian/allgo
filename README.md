@@ -245,6 +245,11 @@ The demos draw on other people's data, used under their terms:
   code of the model's distributors was used. Its tests compare against
   densities computed with Orekit 12.2 (Apache License 2.0), in
   `test/data/jb2008/`.
+- **Interplanetary transfers** (`allgo.astro.interplanetary`): checked
+  against the energy minima of NASA's *Interplanetary Mission Design
+  Handbook: Earth-to-Mars Mission Opportunities 2026 to 2045*
+  (NASA/TM-2010-216764), a work of the US government, transcribed in
+  `test/data/imdh/`.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
