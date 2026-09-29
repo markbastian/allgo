@@ -134,14 +134,18 @@
   MJD giving heliocentric `[r v]` in EME2000; by default the mean elements
   of `allgo.astro.planets`, whose Earth is the Earth-Moon barycenter --
   which is what NASA's mission design handbooks use too, and against which
-  this reproduces them to their printed precision."
+  this reproduces them to their printed precision.
+
+  nil when no transfer fits: arrival not after departure, or too little
+  time for the revolutions asked."
   ([from depart to arrive] (transfer from depart to arrive {}))
   ([from depart to arrive {:keys [ephemeris] :or {ephemeris planets/heliocentric-state} :as opts}]
-   (let [[r1 vp1] (ephemeris from depart)
-         [r2 vp2] (ephemeris to arrive)
-         [v1 v2] (iod/lambert mu-sun r1 r2 (* 86400.0 (- arrive depart)) opts)
-         vinf1 (v3/sub v1 vp1)
-         vinf2 (v3/sub v2 vp2)
-         [rla dla] (asymptote vinf1)]
-     {:v1 v1 :v2 v2 :v-inf-depart vinf1 :v-inf-arrive vinf2
-      :c3 (v3/dot vinf1 vinf1) :rla rla :dla dla})))
+   (when (> arrive depart)
+     (let [[r1 vp1] (ephemeris from depart)
+           [r2 vp2] (ephemeris to arrive)]
+       (when-let [[v1 v2] (iod/lambert mu-sun r1 r2 (* 86400.0 (- arrive depart)) opts)]
+         (let [vinf1 (v3/sub v1 vp1)
+               vinf2 (v3/sub v2 vp2)
+               [rla dla] (asymptote vinf1)]
+           {:v1 v1 :v2 v2 :v-inf-depart vinf1 :v-inf-arrive vinf2
+            :c3 (v3/dot vinf1 vinf1) :rla rla :dla dla}))))))

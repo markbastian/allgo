@@ -305,8 +305,11 @@
          f (fn [psi] (tof-of-psi mu m1 m2 A psi))
          two-pi (* 2.0 math/PI)
          psi (if (zero? revs)
-               ;; one branch: time rises monotonically with psi
-               (bisect-psi f (* -4.0 math/PI math/PI) (* two-pi two-pi) dt true)
+               ;; one branch: time rises monotonically with psi, from the
+               ;; fastest hyperbolas -- psi = -1e4 is sqrt(-psi) = 100
+               ;; radians of hyperbolic anomaly, far past any of interest,
+               ;; while cosh stays finite -- to the edge of one revolution
+               (bisect-psi f -1e4 (* two-pi two-pi) dt true)
                ;; revs >= 1: the band between (2 pi N)^2 and (2 pi (N+1))^2,
                ;; with a minimum time inside it and an orbit either side
                (let [lo (math/pow (* two-pi revs) 2.0)
