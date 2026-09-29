@@ -218,7 +218,9 @@ The demos draw on other people's data, used under their terms:
 - **ERFA** ([liberfa/erfa](https://github.com/liberfa/erfa), derived from
   the IAU's SOFA library, BSD-3 license): the IAU 2006/2000A series in
   `allgo.astro.cio-data` are taken from it, with its copyright notice,
-  conditions and disclaimer at the head of that file; and the FK5 and CIO
+  conditions and disclaimer at the head of that file, and checked
+  coefficient by coefficient against the IERS Conventions (2010) tables
+  5.2a, 5.2b and 5.2d (`test/data/iers/`); and the FK5 and CIO
   reductions' tests compare against values computed with it.
 - **Lear's and Gottlieb's gravity algorithms** (`allgo.astro.gravity`):
   transcribed from the normalized MATLAB listings in Eckman, Brown and
