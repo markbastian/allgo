@@ -12,6 +12,8 @@
             [allgo.astro.reduction :as rd]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
+            [allgo.numerics.core :as core]
+            [allgo.numerics.rk :as rk]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -105,3 +107,63 @@
       (is (< (:elevation fov) 1e-5))
       (is (close? (:central-angle fov) central-angle 1e-5))
       (is (nil? (ms/field-of-view h (+ nadir 1e-6)))))))
+
+;; ------------------------------------------- repeat ground-track upkeep
+
+(defn- j2-accel
+  "The point mass and J2, with an optional steady drag-like deceleration
+  `f` km/s^2 along the velocity."
+  [f]
+  (fn [_ [x y z vx vy vz]]
+    (let [r [x y z] v [vx vy vz]
+          a (v3/add (geo/acceleration {:GM mu :R R :normalized? false :C {[0 0] 1.0 [2 0] (- geo/J2)} :S {}} r 2)
+                    (v3/scale (v3/normalize v) (- f)))]
+      (into v a))))
+
+(defn- nodes
+  "The ascending nodes over `duration` seconds of the orbit from `s0`:
+  `[[t longitude] ...]`, the longitude east of Greenwich (the Earth turned
+  from 0 at t = 0), each crossing refined by Newton's method on z."
+  [f s0 duration]
+  (let [rhs (j2-accel f)
+        opts {:tol-abs 1e-12 :tol-rel 1e-12}
+        fly (fn [y dt] (:y (core/step-until (rk/integrator rk/dopri54 rhs 0.0 y (* 0.1 dt) opts) dt)))
+        steps (take-while #(< (:t %) duration) (core/trajectory (rk/integrator rk/dopri54 rhs 0.0 s0 30.0 opts)))]
+    (vec (for [[a b] (partition 2 1 steps)
+               :when (and (neg? (get-in a [:y 2])) (not (neg? (get-in b [:y 2]))))]
+           (let [{:keys [t y]} (loop [t (:t a) y (:y a) i 0]
+                                 (let [dt (- (/ (y 2) (y 5)))]
+                                   (if (or (< (abs (y 2)) 1e-9) (> i 10))
+                                     {:t t :y y}
+                                     (recur (+ t dt) (if (pos? dt) (fly y dt) y) (inc i)))))]
+             [t (am/wrap-angle (- (math/atan2 (y 1) (y 0)) (* c/omega-earth t)))])))))
+
+(defn- circular [a i] [a 0.0 0.0 0.0 (* (math/sqrt (/ mu a)) (math/cos i)) (* (math/sqrt (/ mu a)) (math/sin i))])
+
+(deftest ground-track-drift
+  (testing "two orbits a km apart, flown under J2, their nodes compared rev
+            for rev, slide apart at K per km"
+    (let [a 7078.0 i (deg 98.2) days 2.0
+          lo (nodes 0.0 (circular a i) (* days 86400.0))
+          hi (nodes 0.0 (circular (+ a 1.0) i) (* days 86400.0))
+          n (dec (min (count lo) (count hi)))
+          apart (fn [k] (am/wrap-angle (- (second (hi k)) (second (lo k)))))
+          measured (/ (- (apart n) (apart 0)) (- (first (lo n)) (first (lo 0))))]
+      (is (< (abs (- measured (ms/ground-track-drift a 0.0 i))) (* 0.02 (abs measured)))))))
+
+(deftest ground-track-maintenance
+  (testing "started da0 high at the east edge, drag brings the track to the west
+            edge and back in one cycle, as flown under J2 against the orbit
+            without drag"
+    (let [a 7078.0 i (deg 98.2) tol 1.0
+          a-rate (/ -2.0 86400.0)                     ; a steep 2 km a day, to keep the flight short
+          {:keys [da cycle]} (ms/ground-track-maintenance a 0.0 i a-rate tol)
+          ;; the tangential deceleration that lowers a circular orbit at a-rate
+          f (/ (* (- a-rate) mu) (* 2.0 a a (math/sqrt (/ mu a))))
+          ref (nodes 0.0 (circular a i) (* 1.05 cycle))
+          kept (nodes f (circular (+ a da) i) (* 1.05 cycle))
+          ;; both start on a node, so rev for rev from there
+          err (map (fn [[_ l] [_ m]] (* R (am/wrap-angle (- m l)))) ref kept)]
+      (is (< 0.5 da 1.5) "about a kilometer")
+      (is (< (abs (+ (apply min err) (* 2.0 tol))) (* 0.1 tol)) "the far edge just reached")
+      (is (< (abs (last err)) (* 0.25 tol)) "and back by the cycle's end"))))

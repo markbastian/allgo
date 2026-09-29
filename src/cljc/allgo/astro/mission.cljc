@@ -75,6 +75,42 @@
         a-guess (orbit-for-period (/ (* days 86164.0905) revs))]
     (roots/bisect miss (* 0.8 a-guess) (* 1.2 a-guess))))
 
+(defn ground-track-drift
+  "How fast the ground track of an orbit at `a` + da slides against that
+  of the orbit at `a` (eccentricity `e`, inclination `i`), per km of da:
+  rad/s of longitude at the node, east positive. Each revolution the node
+  moves (dOmega/dt - omega_earth) P in longitude; a higher orbit takes
+  longer over it, the Earth turning further beneath, and its node
+  regresses more slowly -- the derivative of that per-revolution shift,
+  divided by the period, taken by central difference."
+  [a e i]
+  (let [shift (fn [a] (* (- (:raan (perturbations/j2-secular a e i)) c/omega-earth) (nodal-period a e i)))
+        h 1e-3]
+    (/ (/ (- (shift (+ a h)) (shift (- a h))) (* 2.0 h)) (nodal-period a e i))))
+
+(defn ground-track-maintenance
+  "Keeping a repeat ground track within `tolerance` km east or west at the
+  equator while drag lowers the orbit at `a-rate` km/s (negative; see
+  `perturbations/circular-decay-rate`), for the reference orbit `a` `e`
+  `i` (Vallado, algorithm 71; Wertz, Mission Geometry, 2001).
+
+  An orbit da above the reference slides west at K da (see
+  `ground-track-drift`); decaying, da falls through zero and the slide
+  turns round, so the track's error traces a parabola in time. Started at
+  the east edge da0 above the reference, it just grazes the west edge
+  when da0 = sqrt(4 tolerance a-rate / (K R)) and comes back to the east
+  edge after 2 da0 / |a-rate|, da0 below -- when a burn lifts the orbit
+  2 da0 again. Returns `{:drift :da :cycle :dv :dv-per-year}`: K, da0 in
+  km, the cycle in s, each burn's speed km/s (v da/a, the two-impulse
+  raise of a near-circular orbit taken as one) and a year's worth."
+  [a e i a-rate tolerance]
+  (let [k (ground-track-drift a e i)
+        band (/ tolerance c/R-earth)
+        da (math/sqrt (/ (* 4.0 band a-rate) k))
+        cycle (/ (* 2.0 da) (abs a-rate))
+        dv (* (math/sqrt (/ c/GM-earth a)) (/ da a))]
+    {:drift k :da da :cycle cycle :dv dv :dv-per-year (* dv (/ (* 365.25 86400.0) cycle))}))
+
 ;; --------------------------------------------------------------- frozen
 
 (def J3
