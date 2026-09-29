@@ -252,6 +252,9 @@ The demos draw on other people's data, used under their terms:
   `test/data/imdh/`. Gravity-assist tours (`allgo.astro.tour`) are
   checked against Galileo's, Cassini's and Voyager 2's flyby dates and
   distances as NASA and JPL published them (cited in `tour_test`).
+  Halo and Lyapunov orbits (`allgo.astro.halo`) are checked against a
+  sample of JPL's Three-Body Periodic Orbits catalog, in
+  `test/data/jpl-periodic/`.
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.
