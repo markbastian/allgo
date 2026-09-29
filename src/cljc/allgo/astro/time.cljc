@@ -217,6 +217,42 @@
   ([mjd-utc] mjd-utc)
   ([mjd-utc dut1] (shift mjd-utc dut1)))
 
+;; ------------------------------------------------------ coordinate times
+
+;; TCG and TCB are the coordinate times of the geocentric and barycentric
+;; reference systems, the times their metrics are written in; TT and TDB
+;; are them rescaled to tick with clocks on the geoid. The scalings are
+;; defined constants: TT = TCG - L_G (TCG - T0) (IAU 2000 Resolution
+;; B1.9) and TDB = TCB - L_B (TCB - T0) + TDB0 (IAU 2006 Resolution B3),
+;; T0 1977 January 1, 0h TAI, when all four agreed but for TDB0. The rates
+;; are why TCG gains a second on TT every 45 years and TCB one on TDB
+;; every two.
+
+(def ^:private L-G 6.969290134e-10)
+(def ^:private L-B 1.550519768e-8)
+(def ^:private TDB0 (/ -6.55e-5 86400.0))
+(def ^:private T0 43144.0003725)
+
+(defn tt->tcg
+  "Geocentric Coordinate Time from TT, MJD."
+  [mjd-tt]
+  (+ mjd-tt (* (/ L-G (- 1.0 L-G)) (- mjd-tt T0))))
+
+(defn tcg->tt
+  "TT from Geocentric Coordinate Time, MJD."
+  [mjd-tcg]
+  (- mjd-tcg (* L-G (- mjd-tcg T0))))
+
+(defn tdb->tcb
+  "Barycentric Coordinate Time from TDB, MJD."
+  [mjd-tdb]
+  (+ T0 (/ (- mjd-tdb T0 TDB0) (- 1.0 L-B))))
+
+(defn tcb->tdb
+  "TDB from Barycentric Coordinate Time, MJD."
+  [mjd-tcb]
+  (+ (- mjd-tcb (* L-B (- mjd-tcb T0))) TDB0))
+
 (defn tt->tdb
   "Barycentric Dynamical Time from Terrestrial Time, MJD.
 
