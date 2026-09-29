@@ -632,3 +632,83 @@
                                       (< s 1e-4) nil
                                       :else (recur (* 0.5 s)))))]
                    (when step (recur (first step) (second step) (inc i)))))))))))))
+
+;; ----------------------------------------------- ranges and range rates
+;;
+;; Mixed observations (Vallado, section 7.4): a radar or laser that
+;; measures only distance, and a Doppler system that measures its rate,
+;; fix an orbit when several sites see the satellite at once. Three ranges
+;; put it on three spheres, which meet in two points mirrored in the
+;; sites' plane; a fourth, or knowing which side of that plane it lies,
+;; picks one. With the position known, each range rate is linear in the
+;; velocity -- the rate is the relative velocity along the line of sight
+;; -- and three of them give it.
+
+(defn trilaterate
+  "The positions `r` km from each of the sites `sites` (positions, three
+  or more) at one instant. With three, the two points the spheres share,
+  `[above below]` -- the first on the far side of the sites' plane from
+  the origin, where a satellite over ground sites is; with more, the one
+  point that fits them all best, Gauss-Newton from the first three's
+  point above. nil if the spheres do not meet."
+  [sites ranges]
+  (let [[p1 p2 p3] sites [r1 r2 r3] ranges
+        d12 (v3/sub p2 p1) d (v3/length d12)
+        ex (v3/scale d12 (/ 1.0 d))
+        d13 (v3/sub p3 p1)
+        i (v3/dot ex d13)
+        ey (v3/normalize (v3/sub d13 (v3/scale ex i)))
+        ez (v3/cross ex ey)
+        j (v3/dot ey d13)
+        x (/ (+ (- (* r1 r1) (* r2 r2)) (* d d)) (* 2.0 d))
+        y (- (/ (+ (- (* r1 r1) (* r3 r3)) (* i i) (* j j)) (* 2.0 j)) (* (/ i j) x))
+        z2 (- (* r1 r1) (* x x) (* y y))]
+    (when (>= z2 (- (* 1e-12 r1 r1)))
+      (let [z (math/sqrt (max 0.0 z2))
+            base (v3/add p1 (v3/add (v3/scale ex x) (v3/scale ey y)))
+            ;; ez points away from the origin when ez . p1 is positive
+            up (if (neg? (v3/dot ez p1)) -1.0 1.0)
+            pair [(v3/add base (v3/scale ez (* up z))) (v3/sub base (v3/scale ez (* up z)))]]
+        (if (= 3 (count sites))
+          (vec pair)
+          ;; least squares on every range, from the point above
+          (loop [r (first pair) k 0]
+            (let [rows (map (fn [s rho] (let [dv (v3/sub r s) m (v3/length dv)]
+                                          [(v3/scale dv (/ 1.0 m)) (- rho m)]))
+                            sites ranges)
+                  N (reduce (fn [acc [u]] (lin/mat-add acc (mapv (fn [a] (mapv #(* a %) u)) u)))
+                            (lin/mat-scale (lin/eye 3) 0.0) rows)
+                  b (reduce (fn [acc [u res]] (v3/add acc (v3/scale u res))) [0.0 0.0 0.0] rows)
+                  dx (lin/cholesky-solve N b)]
+              (if (or (nil? dx) (> k 20) (< (v3/length dx) 1e-10))
+                (if dx (v3/add r dx) r)
+                (recur (v3/add r dx) (inc k))))))))))
+
+(defn range-rate-velocity
+  "The velocity of a satellite at `r` from the range rates `rates` seen
+  by sites at `sites` moving at `site-velocities` (three or more): each
+  rate is (r - s)/|r - s| . (v - s'), linear in v, solved by least
+  squares."
+  [r sites site-velocities rates]
+  (let [rows (map (fn [s sv rate] (let [u (v3/normalize (v3/sub r s))] [u (+ rate (v3/dot u sv))]))
+                  sites site-velocities rates)
+        N (reduce (fn [acc [u]] (lin/mat-add acc (mapv (fn [a] (mapv #(* a %) u)) u)))
+                  (lin/mat-scale (lin/eye 3) 0.0) rows)
+        b (reduce (fn [acc [u y]] (v3/add acc (v3/scale u y))) [0.0 0.0 0.0] rows)]
+    (lin/cholesky-solve N b)))
+
+(defn range-only
+  "An orbit from ranges alone: at each of three times `t1` `t2` `t3`
+  (seconds), the sites' positions and the ranges from them, each set
+  trilaterated (the point above, for three sites), and the velocity at the
+  middle time from the three positions -- by Gibbs, or by Herrick-Gibbs
+  when they are within `:close` degrees (default 3) of one another.
+  Returns `[r2 v2]`."
+  ([obs] (range-only mu obs {}))
+  ([mu [[t1 s1 g1] [t2 s2 g2] [t3 s3 g3]] {:keys [close] :or {close 3.0}}]
+   (let [pos (fn [sites ranges] (let [p (trilaterate sites ranges)] (if (= 3 (count sites)) (first p) p)))
+         r1 (pos s1 g1) r2 (pos s2 g2) r3 (pos s3 g3)
+         angle (fn [a b] (math/to-degrees (math/acos (min 1.0 (/ (v3/dot a b) (* (v3/length a) (v3/length b)))))))
+         near? (< (max (angle r1 r2) (angle r2 r3)) close)
+         {:keys [v2]} (if near? (herrick-gibbs mu r1 r2 r3 t1 t2 t3) (gibbs mu r1 r2 r3))]
+     [r2 v2])))
