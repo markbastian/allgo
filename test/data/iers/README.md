@@ -1,6 +1,7 @@
 # IERS Conventions (2010) tables 5.2a, 5.2b and 5.2d
 
-Copied unchanged from the IERS Conventions Centre,
+Copied, unchanged but for trailing whitespace and final newlines, from
+the IERS Conventions Centre,
 https://iers-conventions.obspm.fr/content/chapter5/additional_info/ --
 the series for the coordinates X and Y of the celestial intermediate pole
 and for s + XY/2, IAU 2006 precession and IAU 2000A_R06 nutation, as the
