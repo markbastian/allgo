@@ -15,7 +15,8 @@
   velocity less the planet's.
 
   km, km/s, seconds, radians; heliocentric vectors in equatorial J2000."
-  (:require [allgo.astro.constants :as c]
+  (:require [allgo.astro.bplane :as bplane]
+            [allgo.astro.constants :as c]
             [allgo.astro.frames :as frames]
             [allgo.astro.iod :as iod]
             [allgo.astro.planets :as planets]
@@ -94,6 +95,97 @@
                    (v3/scale k (* (v3/dot k vi) (- 1.0 (math/cos d)))))
         v-out (v3/add v-planet vo)]
     {:v-out v-out :v-inf v-inf :turn d :dv (v3/distance v-out v-in)}))
+
+;; ------------------------------------------------- hyperbolas in space
+
+(defn- unit [v] (v3/scale v (/ 1.0 (v3/length v))))
+
+(defn- asymptote-angle
+  "The true anomaly of the asymptotes of the hyperbola of periapsis `rp`
+  and excess speed `v-inf`, acos(-1/e), and its speed at periapsis."
+  [mu rp v-inf]
+  (let [e (+ 1.0 (/ (* rp v-inf v-inf) mu))]
+    [(math/acos (/ -1.0 e)) (math/sqrt (+ (* v-inf v-inf) (/ (* 2.0 mu) rp)))]))
+
+(defn escape-hyperbola
+  "The state `[r v]` at periapsis, radius `rp`, of the hyperbola about a
+  body of parameter `mu` whose outgoing excess velocity is the vector
+  `v-inf`, in the plane of unit normal `h` (which must be normal to
+  `v-inf`; the motion is counterclockwise about it). The outgoing
+  asymptote S lies at the true anomaly nu = acos(-1/e) from periapsis, so
+  periapsis is at cos nu S - sin nu (h x S)."
+  [mu rp v-inf h]
+  (let [s (unit v-inf)
+        [nu vp] (asymptote-angle mu rp (v3/length v-inf))
+        p (v3/sub (v3/scale s (math/cos nu)) (v3/scale (v3/cross h s) (math/sin nu)))]
+    [(v3/scale p rp) (v3/scale (v3/cross h p) vp)]))
+
+(defn approach-hyperbola
+  "The state `[r v]` at periapsis, radius `rp`, of the hyperbola about a
+  body of parameter `mu` arriving with the excess velocity `v-inf`, in the
+  plane of unit normal `h` (normal to `v-inf`). The incoming asymptote
+  comes from the true anomaly -nu, travelling along -cos nu P + sin nu Q,
+  so periapsis is at -cos nu S - sin nu (h x S)."
+  [mu rp v-inf h]
+  (let [s (unit v-inf)
+        [nu vp] (asymptote-angle mu rp (v3/length v-inf))
+        p (v3/sub (v3/scale s (- (math/cos nu))) (v3/scale (v3/cross h s) (math/sin nu)))]
+    [(v3/scale p rp) (v3/scale (v3/cross h p) vp)]))
+
+(defn planes
+  "The orbit normals of inclination `i` to the equator of pole `k` whose
+  planes contain the direction `v-inf`: two, one when `i` just reaches the
+  direction's declination, none when it falls short -- no orbit less
+  inclined than an asymptote's declination can hold it. With S's
+  declination delta, the normal's node lies where cos(Omega - alpha) =
+  -cot i tan delta, alpha S's right ascension."
+  [v-inf i k]
+  (let [s (unit v-inf)
+        sk (v3/dot s k)
+        perp (v3/sub s (v3/scale k sk))
+        pm (v3/length perp)]
+    (if (< pm 1e-12)
+      []
+      (let [e1 (v3/scale perp (/ 1.0 pm))
+            e2 (v3/cross k e1)
+            si (math/sin i)
+            c (if (< (abs si) 1e-15) ##Inf (/ (* -1.0 (math/cos i) sk) (* si pm)))]
+        (cond
+          (> (abs c) (+ 1.0 1e-12)) []
+          :else
+          (let [w (math/acos (max -1.0 (min 1.0 c)))
+                normal #(v3/add (v3/scale k (math/cos i))
+                                (v3/scale (v3/add (v3/scale e1 (math/cos %)) (v3/scale e2 (math/sin %))) si))]
+            (if (< w 1e-9) [(normal 0.0)] [(normal w) (normal (- w))])))))))
+
+(defn departure-orbits
+  "Leaving a circular parking orbit of radius `rp` and inclination `i`
+  (to the equator of pole `k`, default z -- the Earth's in EME2000) with
+  the excess velocity vector `v-inf`: for each parking-orbit plane that
+  holds the asymptote (see `planes`), `{:h :r :v :dv}` -- the plane's
+  normal, the injection state at periapsis, and the burn there, which is
+  along the circular velocity since both are normal to the radius."
+  ([mu rp v-inf i] (departure-orbits mu rp v-inf i [0.0 0.0 1.0]))
+  ([mu rp v-inf i k]
+   (let [vc (math/sqrt (/ mu rp))]
+     (vec (for [h (planes v-inf i k)
+                :let [[r v] (escape-hyperbola mu rp v-inf h)]]
+            {:h h :r r :v v :dv (- (v3/length v) vc)})))))
+
+(defn arrival-orbits
+  "Arriving with the excess velocity vector `v-inf` and braking at
+  periapsis `rp` into an orbit of apoapsis `ra` and inclination `i` to the
+  equator of pole `k` (for a planet, `allgo.astro.rotation/pole`): for
+  each plane that holds the approach asymptote, `{:h :r :v :dv :bt :br}`
+  -- the plane's normal, the state at periapsis on the approach
+  hyperbola, the braking burn there, and the B-plane aim point (about `k`)
+  that the approach must be steered to."
+  [mu rp ra v-inf i k]
+  (let [dv (capture mu rp (v3/length v-inf) ra)]
+    (vec (for [h (planes v-inf i k)
+               :let [[r v] (approach-hyperbola mu rp v-inf h)
+                     {:keys [bt br]} (bplane/b-plane mu [r v] k)]]
+           {:h h :r r :v v :dv dv :bt bt :br br}))))
 
 ;; ------------------------------------------------------ between planets
 
