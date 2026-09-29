@@ -249,7 +249,9 @@ The demos draw on other people's data, used under their terms:
   against the energy minima of NASA's *Interplanetary Mission Design
   Handbook: Earth-to-Mars Mission Opportunities 2026 to 2045*
   (NASA/TM-2010-216764), a work of the US government, transcribed in
-  `test/data/imdh/`.
+  `test/data/imdh/`. Gravity-assist tours (`allgo.astro.tour`) are
+  checked against Galileo's, Cassini's and Voyager 2's flyby dates and
+  distances as NASA and JPL published them (cited in `tour_test`).
 - **VSOP87** (`allgo.astro.vsop87-data`): Bretagnon and Francou's
   planetary theory, version D, from CDS catalog VI/81, truncated as
   NOTES describes.

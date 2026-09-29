@@ -93,3 +93,19 @@
   ([planet mjd-tt] (equatorial-J2000 planet mjd-tt (ecliptic-of-date->J2000 mjd-tt)))
   ([planet mjd-tt to-J2000]
    (lin/mat-vec to-J2000 (rectangular planet mjd-tt))))
+
+(defn heliocentric-state
+  "Position and velocity `[r v]` of `planet` relative to the Sun, km and
+  km/s, in EME2000 -- the same shape as `allgo.astro.planets`'s, so it
+  can stand in for that where arcseconds matter more than speed: in
+  `allgo.astro.interplanetary/transfer` as its `:ephemeris`, say. The
+  velocity is the position's central difference over two hours, whose
+  error, of order the acceleration's rate times the step squared, is
+  below a millimeter a second."
+  [planet mjd-tt]
+  (let [h (/ 1.0 24.0)
+        m (ecliptic-of-date->J2000 mjd-tt)
+        at #(lin/mat-vec m (rectangular planet %))
+        au c/AU]
+    [(mapv #(* au %) (at mjd-tt))
+     (mapv #(/ (* au (- %1 %2)) (* 2.0 h 86400.0)) (at (+ mjd-tt h)) (at (- mjd-tt h)))]))
