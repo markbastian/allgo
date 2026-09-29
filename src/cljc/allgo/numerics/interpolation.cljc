@@ -15,8 +15,13 @@
   and last abscissa and the differences, so the same table can be asked
   for values, an extremum and a zero without recomputing them. The
   interpolating factor n runs from -1 to 1 across a 3-point table (0 at
-  the middle value) and from -2 to 2 across a 5-point one."
+  the middle value) and from -2 to 2 across a 5-point one.
+
+  At any spacing, besides Lagrange's form, Newton's divided differences
+  and inverse interpolation (Chapra and Canale, *Numerical Methods for
+  Engineers*, chapter 18); splines are `allgo.numerics.splines`."
   (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 (defn horner
@@ -206,3 +211,43 @@
      (comb (/ 2.0 (* tau1 (- tau1 tau3)))
            (/ 2.0 (* tau1 tau3))
            (/ 2.0 (* tau3 (- tau3 tau1))))]))
+
+;; ------------------------------------------------------ Newton's form
+
+(defn divided-differences
+  "The coefficients b0, b1, ... of Newton's interpolating polynomial
+  through `points`, `[[x y] ...]` at any spacing: b_k = f[x_k, ..., x_0],
+  the k-th divided difference, so that f(x) = b0 + b1 (x - x0) + b2 (x -
+  x0)(x - x1) + ..."
+  [points]
+  (let [xs (mapv first points)]
+    (loop [col (mapv second points) k 1 out [(second (first points))]]
+      (if (= k (count points))
+        out
+        (let [col (mapv (fn [i] (/ (- (col (inc i)) (col i)) (- (xs (+ i k)) (xs i)))) (range (dec (count col))))]
+          (recur col (inc k) (conj out (first col))))))))
+
+(defn newton
+  "Newton's interpolating polynomial through `points` evaluated at `x`,
+  and at every lower order on the way: `{:value :values :errors}` --
+  `:values` the estimates of order 0, 1, 2, ... and `:errors` each order's
+  error estimate, the next term, which says when adding points stops
+  helping (Chapra and Canale 18.1.4)."
+  [points x]
+  (let [b (divided-differences points)
+        xs (mapv first points)
+        terms (map-indexed (fn [k bk] (* bk (reduce * (map #(- x (xs %)) (range k))))) b)
+        values (vec (reductions + terms))]
+    {:value (peek values) :values values :errors (vec (rest terms))}))
+
+(defn inverse
+  "The x at which the interpolating polynomial through `points` takes the
+  value `y`, within the span of the xs: the polynomial's root minus y,
+  found by Brent's method in the interval where it changes sign. nil if
+  there is none."
+  [points y]
+  (let [f #(- (lagrange points %) y)
+        xs (sort (map first points))
+        brackets (roots/incremental-search f (first xs) (last xs) (* 20 (count xs)))]
+    (when-let [[a b] (first brackets)]
+      (roots/brent f a b))))
