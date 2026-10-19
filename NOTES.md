@@ -381,6 +381,17 @@ difference that is the result.) The arithmetic is the vector version's
 in the same order, and 120 steps of the wall come out identical to the
 last bit.
 
+Then the narrow phase, in `allgo.physics.contact/box-box`: the fifteen
+separating axes, and the face clipping that makes a manifold, both off
+vec3s and onto primitive doubles and two small buffers. On the same
+wall detection went from 13.0 ms of a 36 ms step to 4.0 ms of a 29 ms
+one, `box-box` itself from 11 ms to 2 over 687 pairs. One unhinted
+`aset` of a long into the id array had it at 14 ms for a while -- a
+reflective call per corner -- which is the reflection check earning its
+place. Same answers to the bit again: the wall's 120 steps, and 200,000
+random pairs of rotated boxes against the vector version, every kind of
+contact among them.
+
 
 ### Sweep and prune
 

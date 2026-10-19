@@ -103,15 +103,6 @@
           (q/rotate rot [0.0 1.0 0.0])
           (q/rotate rot [0.0 0.0 1.0])]})
 
-(defn- radius-on
-  "How far the box reaches from its center along `axis`."
-  ^double [{:keys [half axes]} axis]
-  (let [[hx hy hz] half
-        [ax ay az] axes]
-    (+ (* hx (abs (v/dot ax axis)))
-       (* hy (abs (v/dot ay axis)))
-       (* hz (abs (v/dot az axis))))))
-
 (def speculative
   "How far apart two bodies can be and still be given a contact.
 
@@ -166,61 +157,6 @@
   ^double [a b ^double dt]
   (+ speculative (travel a dt) (travel b dt)))
 
-(defn- overlap-on
-  "How much the two boxes overlap along `axis`.
-
-  Three answers, and telling them apart matters. `[o n]` is an overlap of
-  `o` along the unit axis `n`; `:separated` is a gap, which proves the
-  boxes miss and ends the search; `:degenerate` is an axis that is not an
-  axis at all.
-
-  The last is the case that bites. The cross product of two parallel edge
-  directions is the zero vector, and two boxes sitting square to each
-  other have three such pairs. Reading those as separating -- which is
-  what a single nil answer invites -- reports every axis-aligned box in
-  the world as touching nothing."
-  [a b axis ^double margin]
-  (let [len (v/length axis)]
-    (if (<= len 1e-6)
-      :degenerate
-      (let [n (v/scale axis (/ 1.0 len))
-            d (abs (v/dot (v/sub (:pos b) (:pos a)) n))
-            o (- (+ (radius-on a n) (radius-on b n)) d)]
-        ;; Within the margin counts as touching. `o` comes back negative
-        ;; there and stays negative all the way to the solver, which is
-        ;; what tells it this is a gap, not an overlap.
-        (if (pos? (+ o margin)) [o n] :separated)))))
-
-(defn- face-verts
-  "The four corners of the box face whose outward normal is `axis-index`
-  in direction `sign`, counter-clockwise about that normal."
-  [{:keys [pos half axes]} axis-index sign]
-  (let [h half
-        as axes
-        n (v/scale (nth as axis-index) (double sign))
-        i (mod (inc (long axis-index)) 3)
-        j (mod (inc (long i)) 3)
-        u (v/scale (nth as i) (nth h i))
-        w (v/scale (nth as j) (nth h j))
-        c (v/add pos (v/scale n (nth h axis-index)))]
-    [(v/sub (v/sub c u) w)
-     (v/sub (v/add c u) w)
-     (v/add (v/add c u) w)
-     (v/add (v/sub c u) w)]))
-
-(defn- most-opposed-face
-  "The face of `b` pointing most directly back along `n`.
-
-  `n` runs from the reference box toward this one, so the face we want
-  is the one whose outward normal is closest to `-n` -- the face being
-  pressed into."
-  [{:keys [axes]} n]
-  (let [as axes]
-    (first
-     (sort-by second
-              (for [i (range 3) s [1.0 -1.0]]
-                [[i s] (v/dot (v/scale (nth as i) s) n)])))))
-
 (def ^:private clip-eps
   "A corner this close to a clip plane counts as inside it.
 
@@ -234,51 +170,53 @@
   for as long as it stands there."
   1e-9)
 
-(defn- clip-against-plane
-  "Sutherland-Hodgman: the part of `poly` on the inner side of the plane
-  `(dot n x) <= d`.
+(defn- clip!
+  "Sutherland-Hodgman: the part of a polygon on the inner side of a plane.
 
-  `poly` is a sequence of `[point id]`, and the ids are the point of it.
-  A corner that survives the clip keeps the id it came in with; a point
-  made by cutting an edge gets one built from the plane that cut it and
-  the corner the cut started from. So the same configuration next step
-  produces the same ids, and a contact can be recognized as the one that
-  was there before rather than merely as one nearby."
-  [poly n d tag]
-  (let [pts (vec poly)
-        cnt (count pts)]
-    (into []
-          (mapcat (fn [i]
-                    (let [[p pid] (nth pts i)
-                          [q' qid] (nth pts (mod (inc i) cnt))
-                          dp (- (v/dot n p) d)
-                          dq (- (v/dot n q') d)
-                          cut (fn [] [(v/lerp p q' (/ dp (- dp dq))) [tag pid]])]
-                      (cond
-                        (and (<= dp clip-eps) (<= dq clip-eps)) [[q' qid]]
-                        (<= dp clip-eps) [(cut)]
-                        (<= dq clip-eps) [(cut) [q' qid]]
-                        :else []))))
-          (range cnt))))
+  The polygon is the first `cnt` points of `src`, flat, with their ids in
+  `sids`; the plane is `[nx ny nz d]`, inside where `(dot n x) <= d`.
+  What survives goes into `dst` and `dids`, and the count is returned.
 
-(defn- distinct-points
-  "A transducer over `[point id]` pairs dropping any point already seen.
-
-  Within `tol` counts as already seen. The comparison is against every
-  point kept so far, which is fine at four of them and would not be at
-  four hundred."
-  [tol]
-  (let [tol (double tol)]
-    (fn [rf]
-      (let [seen (volatile! [])]
-        (fn
-          ([] (rf))
-          ([acc] (rf acc))
-          ([acc [p _ :as x]]
-           (if (some #(< (v/distance p %) tol) @seen)
-             acc
-             (do (vswap! seen conj p)
-                 (rf acc x)))))))))
+  The ids are the point of it. A corner that survives the clip keeps the
+  id it came in with; a point made by cutting an edge gets `[tag id]`,
+  after the plane that cut it and the corner the cut started from. So the
+  same configuration next step produces the same ids, and a contact can be
+  recognized as the one that was there before rather than merely as one
+  nearby."
+  [^doubles src ^objects sids cnt ^doubles dst ^objects dids ^doubles plane tag]
+  (let [cnt (long cnt)
+        snx (aget plane 0) sny (aget plane 1) snz (aget plane 2) sd (aget plane 3)]
+    (loop [i 0 out 0]
+      (if (= i cnt)
+        out
+        (let [q (rem (inc i) cnt)
+              i3 (* 3 i) q3 (* 3 q)
+              px (aget src i3) py (aget src (+ i3 1)) pz (aget src (+ i3 2))
+              qx (aget src q3) qy (aget src (+ q3 1)) qz (aget src (+ q3 2))
+              dp (- (+ (* snx px) (* sny py) (* snz pz)) sd)
+              dq (- (+ (* snx qx) (* sny qy) (* snz qz)) sd)
+              p-in? (<= dp clip-eps)
+              q-in? (<= dq clip-eps)
+              o3 (* 3 out)]
+          (when (not= p-in? q-in?)
+            ;; The cut, where the edge crosses the plane: `v/lerp`.
+            (let [t (/ dp (- dp dq))]
+              (aset dst o3 (+ px (* (- qx px) t)))
+              (aset dst (+ o3 1) (+ py (* (- qy py) t)))
+              (aset dst (+ o3 2) (+ pz (* (- qz pz) t)))
+              (aset dids out [tag (aget sids i)])))
+          (cond
+            (and p-in? q-in?)
+            (do (aset dst o3 qx) (aset dst (+ o3 1) qy) (aset dst (+ o3 2) qz)
+                (aset dids out (aget sids q))
+                (recur (inc i) (inc out)))
+            p-in? (recur (inc i) (inc out))
+            q-in?
+            (let [o3 (+ o3 3)]
+              (aset dst o3 qx) (aset dst (+ o3 1) qy) (aset dst (+ o3 2) qz)
+              (aset dids (inc out) (aget sids q))
+              (recur (inc i) (+ out 2)))
+            :else (recur (inc i) out)))))))
 
 (defn- face-contacts
   "Contacts from a face of `ref-body` pressing into `inc-body`.
@@ -286,57 +224,140 @@
   The reference face's four side planes bound the region the contact can
   lie in; clipping the opposing face to them and keeping what is still
   below the reference plane gives the resting polygon."
+  ;; On primitive doubles, the polygon clipped back and forth between two
+  ;; small buffers. Written over vec3s, with the polygon a vector of
+  ;; `[point id]` pairs, this was most of the narrow phase once the axis
+  ;; search was on primitives -- it runs for every touching pair. The
+  ;; rewrite kept that version's arithmetic in its order, so the points
+  ;; and their ids came out the same to the last bit.
   [ia ib ref-body inc-body ref-axis ref-sign n flip? margin]
   (let [margin (double margin)
-        h (:half ref-body)
-        as (:axes ref-body)
-        ref-n (v/scale (nth as ref-axis) (double ref-sign))
-        ref-c (v/add (:pos ref-body) (v/scale ref-n (nth h ref-axis)))
-        ref-d (v/dot ref-n ref-c)
-        [[inc-axis inc-sign] _] (most-opposed-face inc-body ref-n)
-        poly (map-indexed (fn [i p] [p i]) (face-verts inc-body inc-axis inc-sign))
-        ;; The four sides of the reference face, as planes facing outward,
-        ;; each tagged so that a point cut by one can say which.
-        sides (map-indexed
-               (fn [t [sn sd]] [sn sd t])
-               (for [k (range 3) :when (not= k ref-axis) s [1.0 -1.0]]
-                 [(v/scale (nth as k) s)
-                  (v/dot (v/scale (nth as k) s)
-                         (v/add (:pos ref-body) (v/scale (nth as k) (* s (nth h k)))))]))
-        clipped (reduce (fn [p [sn sd t]] (if (seq p) (clip-against-plane p sn sd t) p))
-                        poly
-                        sides)]
-    (into []
-          ;; A face clipped against a face it exactly coincides with --
-          ;; two identical bricks, square on -- has every corner sitting
-          ;; on a clip plane, and Sutherland-Hodgman answers each of those
-          ;; twice. Keeping both gives a pair six or eight contact points
-          ;; where it has four, and which of them survive changes from
-          ;; step to step. One point per place, first id wins, and the
-          ;; ordering is the incident face's own, so the choice is the
-          ;; same every step.
-          (comp (distinct-points 1e-6)
-                (keep (fn [[p pid]]
-                        (let [depth (- ref-d (v/dot ref-n p))]
-                          (when (>= depth (- margin))
-                      ;; Reported on the reference surface rather than at
-                      ;; the clipped point, so both bodies agree where the
-                      ;; touch is.
-                            {:a ia :b ib
-                             :point (v/add-scaled p ref-n (* 0.5 depth))
-                             :normal (if flip? (v/negate n) n)
-                       ;; Which corner of which face, pressed into which
-                       ;; face -- the same answer every step for as long
-                       ;; as the two bodies stay in the same arrangement,
-                       ;; which is what warm starting needs to recognize
-                       ;; it by. `flip?` is in it because it says which
-                       ;; body was the reference, and that decides what
-                       ;; the rest of the id means.
-                             :id [(boolean flip?) ref-axis ref-sign inc-axis inc-sign pid]
-                             ;; Signed: positive is an overlap, negative
-                             ;; a gap the solver is allowed to see coming.
-                             :depth depth})))))
-          clipped)))
+        ref-axis (long ref-axis)
+        ref-sign (double ref-sign)
+        rh (:half ref-body) ras (:axes ref-body) [rpx rpy rpz] (:pos ref-body)
+        rpx (double rpx) rpy (double rpy) rpz (double rpz)
+        ;; The reference face: its outward normal, and its plane.
+        [rax ray raz] (nth ras ref-axis)
+        rnx (* (double rax) ref-sign) rny (* (double ray) ref-sign) rnz (* (double raz) ref-sign)
+        rha (double (nth rh ref-axis))
+        ref-d (+ (* rnx (+ rpx (* rnx rha))) (* rny (+ rpy (* rny rha))) (* rnz (+ rpz (* rnz rha))))
+        ias (:axes inc-body) ih (:half inc-body) [ipx ipy ipz] (:pos inc-body)
+        ipx (double ipx) ipy (double ipy) ipz (double ipz)
+        ;; The incident face: the one of the other box pointing most
+        ;; directly back along the reference normal -- the face being
+        ;; pressed into. Ties go to the first in order, compared as
+        ;; `compare` does, which is how the sort this replaced chose.
+        k (loop [k 0 best-k 0 best 0.0]
+            (if (= k 6)
+              best-k
+              (let [[ux uy uz] (nth ias (quot k 2))
+                    sign (if (even? k) 1.0 -1.0)
+                    dv (+ (* (* (double ux) sign) rnx) (* (* (double uy) sign) rny) (* (* (double uz) sign) rnz))]
+                (if (or (zero? k) (neg? (compare dv best)))
+                  (recur (inc k) k dv)
+                  (recur (inc k) best-k best)))))
+        inc-axis (quot (long k) 2)
+        inc-sign (if (even? (long k)) 1.0 -1.0)
+        ;; Its four corners, counter-clockwise about its normal, ids 0 to
+        ;; 3. A quadrilateral clipped by four planes gains at most a corner
+        ;; a plane, so eight is room enough.
+        ^doubles pa (a/f64 24) ^doubles pb (a/f64 24)
+        ^objects ida (object-array 8) ^objects idb (object-array 8)
+        _ (let [ii (mod (inc inc-axis) 3)
+                jj (mod (inc ii) 3)
+                hi (double (nth ih ii)) hj (double (nth ih jj)) hk (double (nth ih inc-axis))
+                [nx ny nz] (nth ias inc-axis)
+                [ux uy uz] (nth ias ii)
+                [wx wy wz] (nth ias jj)
+                ux (* (double ux) hi) uy (* (double uy) hi) uz (* (double uz) hi)
+                wx (* (double wx) hj) wy (* (double wy) hj) wz (* (double wz) hj)
+                cx (+ ipx (* (* (double nx) inc-sign) hk))
+                cy (+ ipy (* (* (double ny) inc-sign) hk))
+                cz (+ ipz (* (* (double nz) inc-sign) hk))]
+            ;; c - u - w, c + u - w, c + u + w, c - u + w. Adding the
+            ;; negation is subtracting, exactly.
+            (dotimes [c 4]
+              (let [su (if (or (= c 0) (= c 3)) -1.0 1.0)
+                    sw (if (< c 2) -1.0 1.0)
+                    c3 (* 3 c)]
+                (aset pa c3 (+ (+ cx (* su ux)) (* sw wx)))
+                (aset pa (+ c3 1) (+ (+ cy (* su uy)) (* sw wy)))
+                (aset pa (+ c3 2) (+ (+ cz (* su uz)) (* sw wz)))
+                ;; Boxed: the ids are objects, and cut points' ids are
+                ;; vectors.
+                (aset ida c (identity c)))))
+        ;; The reference face's four sides, as outward planes tagged 0 to
+        ;; 3: each axis but the reference one, outward then inward.
+        k0 (if (= ref-axis 0) 1 0)
+        k1 (if (= ref-axis 2) 1 2)
+        ^doubles plane (a/f64 4)
+        [cnt ^doubles pts ^objects ids]
+        (loop [t 0 cnt 4 src pa sids ida dst pb dids idb]
+          (if (or (= t 4) (zero? (long cnt)))
+            [cnt src sids]
+            (let [kk (if (< t 2) k0 k1)
+                  s (if (even? t) 1.0 -1.0)
+                  [ux uy uz] (nth ras kk)
+                  ux (double ux) uy (double uy) uz (double uz)
+                  sh (* s (double (nth rh kk)))
+                  snx (* ux s) sny (* uy s) snz (* uz s)]
+              (aset plane 0 snx) (aset plane 1 sny) (aset plane 2 snz)
+              (aset plane 3 (+ (* snx (+ rpx (* ux sh))) (* sny (+ rpy (* uy sh))) (* snz (+ rpz (* uz sh)))))
+              (recur (inc t) (clip! src sids cnt dst dids plane t) dst dids src sids))))
+        cnt (long cnt)
+        normal (if flip? (v/negate n) n)
+        ^longs kept (long-array 8)]
+    ;; A face clipped against a face it exactly coincides with -- two
+    ;; identical bricks, square on -- has every corner sitting on a clip
+    ;; plane, and Sutherland-Hodgman answers each of those twice. Keeping
+    ;; both gives a pair six or eight contact points where it has four,
+    ;; and which of them survive changes from step to step. One point per
+    ;; place, first id wins, and the ordering is the incident face's own,
+    ;; so the choice is the same every step. A point is judged a duplicate
+    ;; before its depth is: one that matches a point kept but then found
+    ;; too far away to report is still dropped.
+    (loop [i 0 nkept 0 out (transient [])]
+      (if (= i cnt)
+        (persistent! out)
+        (let [i3 (* 3 i)
+              px (aget pts i3) py (aget pts (+ i3 1)) pz (aget pts (+ i3 2))
+              dup? (loop [m 0]
+                     (if (= m nkept)
+                       false
+                       (let [j3 (* 3 (aget kept m))
+                             dx (- px (aget pts j3)) dy (- py (aget pts (+ j3 1))) dz (- pz (aget pts (+ j3 2)))]
+                         (if (< (math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))) 1e-6)
+                           true
+                           (recur (inc m))))))]
+          (if dup?
+            (recur (inc i) nkept out)
+            (let [_ (aset kept nkept i)
+                  depth (- ref-d (+ (* rnx px) (* rny py) (* rnz pz)))]
+              (if (>= depth (- margin))
+                (let [hd (* 0.5 depth)]
+                  (recur (inc i) (inc nkept)
+                         (conj! out
+                                {:a ia :b ib
+                                   ;; Reported on the reference surface
+                                   ;; rather than at the clipped point, so
+                                   ;; both bodies agree where the touch is.
+                                 :point [(+ px (* rnx hd)) (+ py (* rny hd)) (+ pz (* rnz hd))]
+                                 :normal normal
+                                   ;; Which corner of which face, pressed
+                                   ;; into which face -- the same answer
+                                   ;; every step for as long as the two
+                                   ;; bodies stay in the same arrangement,
+                                   ;; which is what warm starting needs to
+                                   ;; recognize it by. `flip?` is in it
+                                   ;; because it says which body was the
+                                   ;; reference, and that decides what the
+                                   ;; rest of the id means.
+                                 :id [(boolean flip?) ref-axis ref-sign inc-axis inc-sign (aget ids i)]
+                                   ;; Signed: positive is an overlap,
+                                   ;; negative a gap the solver is allowed
+                                   ;; to see coming.
+                                 :depth depth})))
+                (recur (inc i) (inc nkept) out)))))))))
 
 (defn- closest-on-segments
   "The midpoint of the shortest link between two segments."
@@ -385,49 +406,111 @@
   "The manifold between two boxes, or an empty vector.
 
   `a` and `b` are `frame`s, not bodies."
+  ;; The fifteen axes on primitive doubles: each box's center, extents and
+  ;; axes read out once, and the best axis so far carried in the loop
+  ;; rather than in a map rebuilt at every improvement. Written over vec3s
+  ;; this asked for a dozen vectors per axis -- the axis, its unit vector,
+  ;; the offset between the centers, each projection -- and was most of
+  ;; the narrow phase. The rewrite kept that version's arithmetic in its
+  ;; order, so the answers came out the same to the last bit.
   [ia ib a b margin]
   (let [margin (double margin)
         as (:axes a)
         bs (:axes b)
-        face-tests (concat (map-indexed (fn [i ax] [:a i nil ax]) as)
-                           (map-indexed (fn [j ax] [:b nil j ax]) bs))
-        edge-tests (for [i (range 3) j (range 3)]
-                     [:edge i j (v/cross (nth as i) (nth bs j))])
+        [pax pay paz] (:pos a) [pbx pby pbz] (:pos b)
+        [hax hay haz] (:half a) [hbx hby hbz] (:half b)
+        [[a0x a0y a0z] [a1x a1y a1z] [a2x a2y a2z]] as
+        [[b0x b0y b0z] [b1x b1y b1z] [b2x b2y b2z]] bs
+        pax (double pax) pay (double pay) paz (double paz)
+        pbx (double pbx) pby (double pby) pbz (double pbz)
+        hax (double hax) hay (double hay) haz (double haz)
+        hbx (double hbx) hby (double hby) hbz (double hbz)
+        a0x (double a0x) a0y (double a0y) a0z (double a0z)
+        a1x (double a1x) a1y (double a1y) a1z (double a1z)
+        a2x (double a2x) a2y (double a2y) a2z (double a2z)
+        b0x (double b0x) b0y (double b0y) b0z (double b0z)
+        b1x (double b1x) b1y (double b1y) b1z (double b1z)
+        b2x (double b2x) b2y (double b2y) b2z (double b2z)
+        dpx (- pbx pax) dpy (- pby pay) dpz (- pbz paz)
         ;; Faces get a small handicap in their favor, and a's faces one
-        ;; over b's. Equal overlaps otherwise flip between a face result
-        ;; and an edge result, or between a's face and b's, on
-        ;; floating-point noise -- and a resting brick loses three of its
-        ;; four contact points for a frame, or keeps four points that are
-        ;; named after the other box and so match nothing from last step.
-        ;; Two identical bricks stacked square on each other tie exactly,
-        ;; which is the commonest case there is.
-        best (reduce (fn [best [kind i j ax]]
-                       (let [r (overlap-on a b ax margin)]
-                         (cond
-                           (= r :separated) (reduced nil)
-                           (= r :degenerate) best
-                           :else
-                           (let [[o n] r
-                                 score (if (= kind :edge) (* o 1.02) o)]
-                             (if (or (nil? best) (< score (:score best)))
-                               {:score score :kind kind :i i :j j :normal n :depth o}
-                               best)))))
-                     nil
-                     (concat face-tests edge-tests))]
-    (if (nil? best)
+        ;; over b's -- which is the order they are tried in, a's first,
+        ;; since only a strictly better score displaces the best. Equal
+        ;; overlaps otherwise flip between a face result and an edge
+        ;; result, or between a's face and b's, on floating-point noise --
+        ;; and a resting brick loses three of its four contact points for
+        ;; a frame, or keeps four points that are named after the other
+        ;; box and so match nothing from last step. Two identical bricks
+        ;; stacked square on each other tie exactly, which is the
+        ;; commonest case there is.
+        ;;
+        ;; `t` runs over the axes: 0-2 a's faces, 3-5 b's, then the nine
+        ;; edge pairs, a's edge `(quot (- t 6) 3)` against b's `(rem ...)`.
+        ;; `kind` is 0 for none yet, 1 for a face of a, 2 of b, 3 an edge
+        ;; pair; -1 is a separating axis, and ends the search.
+        [kind bi bj bnx bny bnz bdepth]
+        (loop [t 0 kind 0 bi 0 bj 0 score 0.0 bnx 0.0 bny 0.0 bnz 0.0 bdepth 0.0]
+          (if (= t 15)
+            [kind bi bj bnx bny bnz bdepth]
+            (let [face? (< t 6)
+                  ei (quot (- t 6) 3) ej (rem (- t 6) 3)
+                  ;; Component by component rather than as a vector, which
+                  ;; would be one more allocation per axis.
+                  u (long (if face? t ei))
+                  ux (case u 0 a0x 1 a1x 2 a2x 3 b0x 4 b1x b2x)
+                  uy (case u 0 a0y 1 a1y 2 a2y 3 b0y 4 b1y b2y)
+                  uz (case u 0 a0z 1 a1z 2 a2z 3 b0z 4 b1z b2z)
+                  wx (case (long ej) 0 b0x 1 b1x b2x)
+                  wy (case (long ej) 0 b0y 1 b1y b2y)
+                  wz (case (long ej) 0 b0z 1 b1z b2z)
+                  ;; A face axis as it stands; an edge pair's cross product.
+                  x (if face? ux (- (* uy wz) (* uz wy)))
+                  y (if face? uy (- (* uz wx) (* ux wz)))
+                  z (if face? uz (- (* ux wy) (* uy wx)))
+                  len (math/sqrt (+ (* x x) (* y y) (* z z)))]
+              ;; The cross product of two parallel edges is the zero
+              ;; vector, no axis at all, and two boxes sitting square to
+              ;; each other have three such pairs. Skipped, and not read
+              ;; as separating: that reports every axis-aligned box in the
+              ;; world as touching nothing.
+              (if (<= len 1e-6)
+                (recur (inc t) kind bi bj score bnx bny bnz bdepth)
+                (let [inv (/ 1.0 len)
+                      nx (* x inv) ny (* y inv) nz (* z inv)
+                      d (abs (+ (* dpx nx) (* dpy ny) (* dpz nz)))
+                      ra (+ (* hax (abs (+ (* a0x nx) (* a0y ny) (* a0z nz))))
+                            (* hay (abs (+ (* a1x nx) (* a1y ny) (* a1z nz))))
+                            (* haz (abs (+ (* a2x nx) (* a2y ny) (* a2z nz)))))
+                      rb (+ (* hbx (abs (+ (* b0x nx) (* b0y ny) (* b0z nz))))
+                            (* hby (abs (+ (* b1x nx) (* b1y ny) (* b1z nz))))
+                            (* hbz (abs (+ (* b2x nx) (* b2y ny) (* b2z nz)))))
+                      o (- (+ ra rb) d)]
+                  ;; Within the margin counts as touching. `o` comes back
+                  ;; negative there and stays negative all the way to the
+                  ;; solver, which is what tells it this is a gap.
+                  (if-not (pos? (+ o margin))
+                    [-1 0 0 0.0 0.0 0.0 0.0]
+                    (let [sc (if face? o (* o 1.02))]
+                      (if (or (zero? kind) (< sc score))
+                        (recur (inc t)
+                               (cond (< t 3) 1 face? 2 :else 3)
+                               (if face? (rem t 3) ei) ej
+                               sc nx ny nz o)
+                        (recur (inc t) kind bi bj score bnx bny bnz bdepth)))))))))
+        kind (long kind)]
+    (if (<= kind 0)
       []
-      (let [{:keys [kind i j normal depth]} best
+      (let [bnx (double bnx) bny (double bny) bnz (double bnz)
             ;; Point the axis from a toward b.
-            n (if (neg? (v/dot normal (v/sub (:pos b) (:pos a))))
-                (v/negate normal)
-                normal)]
+            n (if (neg? (+ (* bnx dpx) (* bny dpy) (* bnz dpz)))
+                [(- bnx) (- bny) (- bnz)]
+                [bnx bny bnz])]
         (case kind
-          :a (face-contacts ia ib a b i
-                            (if (pos? (v/dot (nth as i) n)) 1.0 -1.0) n false margin)
-          :b (face-contacts ia ib b a j
-                            (if (pos? (v/dot (nth bs j) (v/negate n))) 1.0 -1.0)
-                            (v/negate n) true margin)
-          :edge (edge-contact ia ib a b n depth i j))))))
+          1 (face-contacts ia ib a b bi
+                           (if (pos? (v/dot (nth as bi) n)) 1.0 -1.0) n false margin)
+          2 (face-contacts ia ib b a bi
+                           (if (pos? (v/dot (nth bs bi) (v/negate n))) 1.0 -1.0)
+                           (v/negate n) true margin)
+          3 (edge-contact ia ib a b n bdepth bi bj))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Spheres

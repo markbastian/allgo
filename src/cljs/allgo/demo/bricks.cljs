@@ -175,8 +175,9 @@
   asks fifteen questions of every touching pair and each is a handful of
   dot and cross products, which on the JVM the escape analysis makes
   nearly free and in JavaScript allocates a three-element vector apiece.
-  The solve is already written in primitive doubles for that reason; the
-  collision detection is not, and that is the next thing.
+  The solve is written in primitive doubles for that reason, and since
+  that table was measured so is the box-box test: on the JVM detection
+  fell from 13 ms a step to 4.
 
   It was not always the top of the list. Until recently most of a step
   was neither detection nor solve but the cost of carrying bodies and
