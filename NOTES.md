@@ -372,6 +372,15 @@ typed arrays out of lazy sequences of boxed doubles. Moving those onto
 Collision detection then rose to the top of what was left, for the
 first time honestly rather than by default.
 
+XPBD's velocity pass followed onto primitive doubles. Over vec3s it
+built a dozen vectors per contact per substep; on the same wall settled
+by `solver/settled`, at eight iterations and four substeps, it went from
+13.4 ms of a 48 ms step to 0.9 ms of a 37 ms one. (That step is slower
+than the 32.9 above, measured in a different session; it is the
+difference that is the result.) The arithmetic is the vector version's
+in the same order, and 120 steps of the wall come out identical to the
+last bit.
+
 
 ### Sweep and prune
 

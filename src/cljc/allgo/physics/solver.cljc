@@ -237,16 +237,6 @@
           (aset omega (+ b3 1) (+ (aget omega (+ b3 1)) dy))
           (aset omega (+ b3 2) (+ (aget omega (+ b3 2)) dz)))))))
 
-(defn- effective-mass
-  "The inverse of how much the pair gives to an impulse along `n`."
-  [^doubles ii ^doubles inv-mass ia ib ra rb n]
-  (let [ia (long ia)
-        ib (long ib)
-        k (+ (aget inv-mass ia) (aget inv-mass ib)
-             (v/dot n (v/cross (mul-inertia ii ia (v/cross ra n)) ra))
-             (v/dot n (v/cross (mul-inertia ii ib (v/cross rb n)) rb)))]
-    (if (> k 1e-12) (/ 1.0 k) 0.0)))
-
 (defn- relative-velocity
   [^doubles vel ^doubles omega ia ib ra rb]
   (let [ia (long ia) ib (long ib)]
@@ -808,7 +798,13 @@
   impulse solvers there is no non-negative clamp, because the correction
   wanted here is usually negative -- it is taking energy the position
   solve put in."
-  [{:keys [vel omega ii inv-mass]} cs h opts]
+  ;; On primitive doubles, as `solve-velocities!` is, and for the same
+  ;; reason: written over vec3s it built a dozen vectors per contact per
+  ;; substep and was a third of an XPBD step. The arithmetic is the
+  ;; vector version's in the same order -- the impulse built before its
+  ;; moment is taken, and one relative velocity read for both tangents --
+  ;; so it gives the same answers to the last bit.
+  [{:keys [^doubles vel ^doubles omega ^doubles ii ^doubles inv-mass]} cs h opts]
   (let [^doubles normal (:normal cs)
         ^doubles t1 (:t1 cs) ^doubles t2 (:t2 cs)
         ^doubles ra-arr (:ra cs) ^doubles rb-arr (:rb cs)
@@ -830,39 +826,114 @@
       ;; nothing.
       (when (pos? (aget lambda k))
         (let [ia (aget ia-arr k) ib (aget ib-arr k)
-              ra (vec3-at ra-arr k) rb (vec3-at rb-arr k)
-              n (vec3-at normal k)
+              k3 (* 3 k)
+              rax (aget ra-arr k3) ray (aget ra-arr (+ k3 1)) raz (aget ra-arr (+ k3 2))
+              rbx (aget rb-arr k3) rby (aget rb-arr (+ k3 1)) rbz (aget rb-arr (+ k3 2))
+              ia3 (* 3 ia) ib3 (* 3 ib) ia9 (* 9 ia) ib9 (* 9 ib)
+              ima (aget inv-mass ia) imb (aget inv-mass ib)
               pre (aget approach k)
-              rv (relative-velocity vel omega ia ib ra rb)
-              vn (v/dot rv n)
-              target (if (< pre (- threshold)) (* (- e) pre) 0.0)
-              dv (- target vn)
-              m (effective-mass ii inv-mass ia ib ra rb n)
-              p (v/scale n (* m dv))]
-          (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
-          (apply-impulse! vel omega ii inv-mass ib rb p 1.0)
-          ;; Friction against the normal force that actually held this
-          ;; contact -- the multiplier the position solve needed, over the
-          ;; substep: `mu * lambda / h`.
-          ;;
-          ;; It used to be bounded by the approach speed instead, and that
-          ;; is zero for anything at rest, so a settled stack had no
-          ;; friction at all. Nothing then removed the sideways and
-          ;; angular velocity the position solve hands back -- it reads
-          ;; velocity off the correction at the substep rate, so a
-          ;; millimeter of pushout is a quarter of a meter a second -- and
-          ;; a six brick column wound itself from 6mm/s to 29m/s in five
-          ;; seconds.
-          (let [limit (* friction (/ (abs (aget lambda k)) h))
-                rv (relative-velocity vel omega ia ib ra rb)]
-            (doseq [tarr [t1 t2]]
-              (let [t (vec3-at ^doubles tarr k)
-                    vt (v/dot rv t)
-                    mt (effective-mass ii inv-mass ia ib ra rb t)
-                    j (am/clamp (* mt (- vt)) (- limit) limit)
-                    p (v/scale t j)]
-                (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
-                (apply-impulse! vel omega ii inv-mass ib rb p 1.0)))))))))
+              ;; Friction against the normal force that actually held
+              ;; this contact -- the multiplier the position solve needed,
+              ;; over the substep: `mu * lambda / h`.
+              ;;
+              ;; It used to be bounded by the approach speed instead, and
+              ;; that is zero for anything at rest, so a settled stack had
+              ;; no friction at all. Nothing then removed the sideways and
+              ;; angular velocity the position solve hands back -- it reads
+              ;; velocity off the correction at the substep rate, so a
+              ;; millimeter of pushout is a quarter of a meter a second --
+              ;; and a six brick column wound itself from 6mm/s to 29m/s in
+              ;; five seconds.
+              limit (* friction (/ (abs (aget lambda k)) h))]
+          ;; The normal, then the two tangents. The normal velocity is
+          ;; set to what restitution asks of the approach; the tangents
+          ;; are pushed toward rest, within the friction limit, from the
+          ;; relative velocity as the normal impulse left it -- read once,
+          ;; after the normal, for both.
+          (loop [dir 0 rvx 0.0 rvy 0.0 rvz 0.0]
+            (when (< dir 3)
+              (let [^doubles darr (case dir 0 normal 1 t1 t2)
+                    dx (aget darr k3) dy (aget darr (+ k3 1)) dz (aget darr (+ k3 2))
+                    fresh? (< dir 2)
+                    rvx (if fresh?
+                          (- (+ (aget vel ib3)
+                                (- (* (aget omega (+ ib3 1)) rbz) (* (aget omega (+ ib3 2)) rby)))
+                             (+ (aget vel ia3)
+                                (- (* (aget omega (+ ia3 1)) raz) (* (aget omega (+ ia3 2)) ray))))
+                          rvx)
+                    rvy (if fresh?
+                          (- (+ (aget vel (+ ib3 1))
+                                (- (* (aget omega (+ ib3 2)) rbx) (* (aget omega ib3) rbz)))
+                             (+ (aget vel (+ ia3 1))
+                                (- (* (aget omega (+ ia3 2)) rax) (* (aget omega ia3) raz))))
+                          rvy)
+                    rvz (if fresh?
+                          (- (+ (aget vel (+ ib3 2))
+                                (- (* (aget omega ib3) rby) (* (aget omega (+ ib3 1)) rbx)))
+                             (+ (aget vel (+ ia3 2))
+                                (- (* (aget omega ia3) ray) (* (aget omega (+ ia3 1)) rax))))
+                          rvz)
+                    vd (+ (* rvx dx) (* rvy dy) (* rvz dz))
+                    ;; The effective mass: r x d through the inverse
+                    ;; inertia and back across r, for each body.
+                    cax (- (* ray dz) (* raz dy))
+                    cay (- (* raz dx) (* rax dz))
+                    caz (- (* rax dy) (* ray dx))
+                    iax (+ (* (aget ii ia9) cax) (* (aget ii (+ ia9 1)) cay) (* (aget ii (+ ia9 2)) caz))
+                    iay (+ (* (aget ii (+ ia9 3)) cax) (* (aget ii (+ ia9 4)) cay) (* (aget ii (+ ia9 5)) caz))
+                    iaz (+ (* (aget ii (+ ia9 6)) cax) (* (aget ii (+ ia9 7)) cay) (* (aget ii (+ ia9 8)) caz))
+                    ka (+ (* dx (- (* iay raz) (* iaz ray)))
+                          (* dy (- (* iaz rax) (* iax raz)))
+                          (* dz (- (* iax ray) (* iay rax))))
+                    cbx (- (* rby dz) (* rbz dy))
+                    cby (- (* rbz dx) (* rbx dz))
+                    cbz (- (* rbx dy) (* rby dx))
+                    ibx (+ (* (aget ii ib9) cbx) (* (aget ii (+ ib9 1)) cby) (* (aget ii (+ ib9 2)) cbz))
+                    iby (+ (* (aget ii (+ ib9 3)) cbx) (* (aget ii (+ ib9 4)) cby) (* (aget ii (+ ib9 5)) cbz))
+                    ibz (+ (* (aget ii (+ ib9 6)) cbx) (* (aget ii (+ ib9 7)) cby) (* (aget ii (+ ib9 8)) cbz))
+                    kb (+ (* dx (- (* iby rbz) (* ibz rby)))
+                          (* dy (- (* ibz rbx) (* ibx rbz)))
+                          (* dz (- (* ibx rby) (* iby rbx))))
+                    keff (+ ima imb ka kb)
+                    m (if (> keff 1e-12) (/ 1.0 keff) 0.0)
+                    ;; The impulse's size along d. No non-negative clamp on
+                    ;; the normal, unlike the impulse solvers: the
+                    ;; correction wanted here is usually negative, taking
+                    ;; back energy the position solve put in.
+                    j (if (zero? dir)
+                        (let [target (if (< pre (- threshold)) (* (- e) pre) 0.0)]
+                          (* m (- target vd)))
+                        (am/clamp (* m (- vd)) (- limit) limit))
+                    px (* dx j) py (* dy j) pz (* dz j)]
+                (when (pos? ima)
+                  (let [;; r x p through the inverse inertia, negated for
+                        ;; the body the impulse pushes against.
+                        qx (- (* ray pz) (* raz py))
+                        qy (- (* raz px) (* rax pz))
+                        qz (- (* rax py) (* ray px))]
+                    (aset vel ia3 (- (aget vel ia3) (* px ima)))
+                    (aset vel (+ ia3 1) (- (aget vel (+ ia3 1)) (* py ima)))
+                    (aset vel (+ ia3 2) (- (aget vel (+ ia3 2)) (* pz ima)))
+                    (aset omega ia3 (- (aget omega ia3)
+                                       (+ (* (aget ii ia9) qx) (* (aget ii (+ ia9 1)) qy) (* (aget ii (+ ia9 2)) qz))))
+                    (aset omega (+ ia3 1) (- (aget omega (+ ia3 1))
+                                             (+ (* (aget ii (+ ia9 3)) qx) (* (aget ii (+ ia9 4)) qy) (* (aget ii (+ ia9 5)) qz))))
+                    (aset omega (+ ia3 2) (- (aget omega (+ ia3 2))
+                                             (+ (* (aget ii (+ ia9 6)) qx) (* (aget ii (+ ia9 7)) qy) (* (aget ii (+ ia9 8)) qz))))))
+                (when (pos? imb)
+                  (let [qx (- (* rby pz) (* rbz py))
+                        qy (- (* rbz px) (* rbx pz))
+                        qz (- (* rbx py) (* rby px))]
+                    (aset vel ib3 (+ (aget vel ib3) (* px imb)))
+                    (aset vel (+ ib3 1) (+ (aget vel (+ ib3 1)) (* py imb)))
+                    (aset vel (+ ib3 2) (+ (aget vel (+ ib3 2)) (* pz imb)))
+                    (aset omega ib3 (+ (aget omega ib3)
+                                       (+ (* (aget ii ib9) qx) (* (aget ii (+ ib9 1)) qy) (* (aget ii (+ ib9 2)) qz))))
+                    (aset omega (+ ib3 1) (+ (aget omega (+ ib3 1))
+                                             (+ (* (aget ii (+ ib9 3)) qx) (* (aget ii (+ ib9 4)) qy) (* (aget ii (+ ib9 5)) qz))))
+                    (aset omega (+ ib3 2) (+ (aget omega (+ ib3 2))
+                                             (+ (* (aget ii (+ ib9 6)) qx) (* (aget ii (+ ib9 7)) qy) (* (aget ii (+ ib9 8)) qz))))))
+                (recur (inc dir) rvx rvy rvz)))))))))
 
 (defn- warm-start! [{:keys [vel omega ii inv-mass]} cs]
   (let [^doubles normal (:normal cs)
