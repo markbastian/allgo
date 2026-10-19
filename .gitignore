@@ -31,3 +31,6 @@ scratch.clj
 
 # scratch demo pages
 /resources/public/_*.html
+
+# source material kept locally, not redistributed (see nocommit/README.md)
+/nocommit/
