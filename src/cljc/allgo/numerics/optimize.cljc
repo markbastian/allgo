@@ -437,9 +437,10 @@
                             (map #(if (= % i) 1.0 0.0) art)
                             [(double (b i))])))
          T0 (mapv row (range m))
+         slack-col (zipmap slack (range)) art-col (zipmap art (range))
          basis0 (mapv (fn [i] (if (= :<= (kinds i))
-                                (+ n (.indexOf slack i))
-                                (+ n ns (.indexOf art i))))
+                                (+ n (slack-col i))
+                                (+ n ns (art-col i))))
                       (range m))
          ;; phase one: minimize the artificial variables' sum
          phase1-obj (let [base (vec (concat (repeat (+ n ns) 0.0) (repeat na 1.0) [0.0]))]
