@@ -402,6 +402,28 @@
       :id [:edge i j]
       :depth depth}]))
 
+(def ^:private b-face-bias
+  "How much less a face of `b` must overlap than a face of `a` to be taken
+  as the reference instead, in meters.
+
+  Two identical bricks one on the other give the two boxes' faces nearly
+  the same overlap, and a standing wall tilts each brick by fractions of a
+  milliradian -- enough to put either face ahead by a fraction of a
+  millimeter, and to swap them from one step to the next. Preferring a's
+  only on a tie, as the order of the tests used to, the reference changed
+  hands that way all the time, every point on the pair was renamed with
+  it, and warm starting found last step's impulse for 54% of the contacts
+  in a settled 16x16 wall under XPBD, 90% under TGS. With 5mm it finds
+  97% and 98%.
+
+  It decides the reference, not the depth: a face of a that is a few
+  millimeters deeper is still a fine one to clip against, and columns and
+  walls under all three solvers stood no worse for it, beyond the noise
+  between runs. Box2D's box test has the same preference with a tenth of
+  its linear slop, half a millimeter; here a millimeter left sequential
+  impulse and TGS at 94%, and five took them to 96-98%."
+  0.005)
+
 (defn box-box
   "The manifold between two boxes, or an empty vector.
 
@@ -432,23 +454,21 @@
         b1x (double b1x) b1y (double b1y) b1z (double b1z)
         b2x (double b2x) b2y (double b2y) b2z (double b2z)
         dpx (- pbx pax) dpy (- pby pay) dpz (- pbz paz)
-        ;; Faces get a small handicap in their favor, and a's faces one
-        ;; over b's -- which is the order they are tried in, a's first,
-        ;; since only a strictly better score displaces the best. Equal
-        ;; overlaps otherwise flip between a face result and an edge
-        ;; result, or between a's face and b's, on floating-point noise --
-        ;; and a resting brick loses three of its four contact points for
-        ;; a frame, or keeps four points that are named after the other
-        ;; box and so match nothing from last step. Two identical bricks
-        ;; stacked square on each other tie exactly, which is the
-        ;; commonest case there is.
+        ;; Faces are favored over edge pairs, and a's faces over b's, so
+        ;; that near-equal overlaps do not flip the answer on noise: from
+        ;; a face to an edge pair, and a resting brick loses three of its
+        ;; four contact points for a frame; or from a's face to b's, and
+        ;; it keeps four points that are named after the other box and so
+        ;; match nothing from last step. An edge pair must beat the best
+        ;; face of either box by 2%, and a face of b must beat a's by
+        ;; `b-face-bias`.
         ;;
         ;; `t` runs over the axes: 0-2 a's faces, 3-5 b's, then the nine
         ;; edge pairs, a's edge `(quot (- t 6) 3)` against b's `(rem ...)`.
         ;; `kind` is 0 for none yet, 1 for a face of a, 2 of b, 3 an edge
         ;; pair; -1 is a separating axis, and ends the search.
         [kind bi bj bnx bny bnz bdepth]
-        (loop [t 0 kind 0 bi 0 bj 0 score 0.0 bnx 0.0 bny 0.0 bnz 0.0 bdepth 0.0]
+        (loop [t 0 kind 0 bi 0 bj 0 score 0.0 bnx 0.0 bny 0.0 bnz 0.0 bdepth 0.0 fmin ##Inf]
           (if (= t 15)
             [kind bi bj bnx bny bnz bdepth]
             (let [face? (< t 6)
@@ -473,7 +493,7 @@
               ;; as separating: that reports every axis-aligned box in the
               ;; world as touching nothing.
               (if (<= len 1e-6)
-                (recur (inc t) kind bi bj score bnx bny bnz bdepth)
+                (recur (inc t) kind bi bj score bnx bny bnz bdepth fmin)
                 (let [inv (/ 1.0 len)
                       nx (* x inv) ny (* y inv) nz (* z inv)
                       d (abs (+ (* dpx nx) (* dpy ny) (* dpz nz)))
@@ -489,13 +509,26 @@
                   ;; solver, which is what tells it this is a gap.
                   (if-not (pos? (+ o margin))
                     [-1 0 0 0.0 0.0 0.0 0.0]
-                    (let [sc (if face? o (* o 1.02))]
-                      (if (or (zero? kind) (< sc score))
+                    (let [sc (if face? o (* o 1.02))
+                          fmin (if face? (min fmin o) fmin)
+                          ;; What the candidate has to beat. A face of b
+                          ;; takes over from a face of a only by the bias. An
+                          ;; edge pair takes over from a face only by beating
+                          ;; the best face of either box: when a's face is
+                          ;; kept over a slightly smaller one of b's, a tilted
+                          ;; edge pair can come in between the two, and it
+                          ;; is a single point where a resting face is four.
+                          better? (cond
+                                    (zero? kind) true
+                                    (and face? (>= t 3) (= kind 1)) (< (+ sc b-face-bias) score)
+                                    (and (not face?) (not= kind 3)) (< sc fmin)
+                                    :else (< sc score))]
+                      (if better?
                         (recur (inc t)
                                (cond (< t 3) 1 face? 2 :else 3)
                                (if face? (rem t 3) ei) ej
-                               sc nx ny nz o)
-                        (recur (inc t) kind bi bj score bnx bny bnz bdepth)))))))))
+                               sc nx ny nz o fmin)
+                        (recur (inc t) kind bi bj score bnx bny bnz bdepth fmin)))))))))
         kind (long kind)]
     (if (<= kind 0)
       []

@@ -212,3 +212,33 @@
     (testing "the pair works in either order"
       (let [c (first (ct/between 0 1 floor (wheel [0.0 (- (+ big r) 0.01) 0.0] q/identity-q)))]
         (is (< (v/distance (:normal c) [0.0 1.0 0.0]) 1e-9))))))
+
+(deftest reference-face-test
+  ;; Two identical bricks, one on the other, tilted by the fractions of a
+  ;; milliradian a standing wall really has. The two boxes' faces give
+  ;; overlaps that differ by less than a millimeter either way, and when
+  ;; the nearer won outright the reference flipped from one box to the
+  ;; other from step to step -- renaming every point, so warm starting
+  ;; matched about half the contacts in a 16x16 wall under XPBD.
+  (let [size [1.2 0.24 0.4]
+        lower (box [0.0 0.12 0.0] size)
+        tilts (for [ax [-1e-3 -3e-4 0.0 3e-4 1e-3] az [-1e-3 -3e-4 0.0 3e-4 1e-3]
+                    dx [0.0 0.3]]
+                [dx (q/mul (q/from-axis-angle [1.0 0.0 0.0] ax)
+                           (q/from-axis-angle [0.0 0.0 1.0] az))])
+        manifold (fn [[dx rot]] (ct/between 0 1 lower (box [dx 0.354 0.0] size rot)))]
+    (testing "the lower box's face stays the reference however the upper one tilts"
+      (doseq [t tilts]
+        (let [cs (manifold t)]
+          (is (seq cs))
+          (is (every? #(false? (first (:id %))) cs) (str "tilt " t)))))
+
+    (testing "and the contact stays a face rather than becoming an edge pair"
+      ;; Holding the lower face over a slightly smaller upper one leaves
+      ;; room for a tilted edge pair to come in between them, whose axis
+      ;; is nearly vertical; one point then holds up a brick where four
+      ;; did, and a four course wall lost half its bricks.
+      (doseq [t tilts]
+        (let [cs (manifold t)]
+          (is (= 4 (count cs)) (str "tilt " t))
+          (is (not-any? #(= :edge (first (:id %))) cs) (str "tilt " t)))))))
