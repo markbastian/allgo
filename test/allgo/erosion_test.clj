@@ -231,3 +231,113 @@
   (testing "a field too small to interpolate across is refused"
     (is (thrown? clojure.lang.ExceptionInfo
                  (e/erode {:heights (double-array 1) :dim 1} {:rng (seeded 1)})))))
+
+;; ---------------------------------------------------------------------------
+;; Talus
+
+(defn- field
+  "A `dim`-square field whose height at row `r`, column `c` is `(f r c)`."
+  [dim f]
+  {:heights (double-array (for [r (range dim) c (range dim)] (double (f r c))))
+   :dim dim})
+
+(defn- steepest
+  "The steepest slope anywhere in the field, between any cell and any of its
+  eight neighbors, in height per cell of distance."
+  [{:keys [^doubles heights dim]}]
+  (let [dim (long dim)]
+    (reduce max 0.0
+            (for [r (range dim) c (range dim)
+                  [dr dc len] [[0 1 1.0] [1 0 1.0] [1 1 (Math/sqrt 2.0)] [1 -1 (Math/sqrt 2.0)]]
+                  :let [nr (+ r dr) nc (+ c dc)]
+                  :when (and (< nr dim) (<= 0 nc) (< nc dim))]
+              (/ (abs (- (aget heights (+ (* r dim) c)) (aget heights (+ (* nr dim) nc))))
+                 len)))))
+
+(deftest slump-repose-test
+  (testing "ground already at or under the talus slope does not move"
+    ;; Exact, not approximate: no pair is over the slope, so no pass
+    ;; computes a single move. The diagonals of this ramp fall the same
+    ;; 0.008 over the longer distance, and stay under too.
+    (doseq [g [(flat 32 0.5) (ramp 32 0.008)]]
+      (is (= (heights g) (heights (e/slump g {:talus 0.01}))))))
+
+  (testing "a spike relaxes to the talus slope and no steeper"
+    (let [spike (field 41 (fn [r c] (if (= [r c] [20 20]) 1.0 0.0)))
+          slopes (mapv #(steepest (e/slump spike {:talus 0.01 :iterations %})) [1 10 100 400])]
+      (is (apply > slopes) (str "steepest after 1, 10, 100, 400 passes: " slopes))
+      (is (< (peek slopes) 0.0101) (str "still " (peek slopes) " after 400 passes")))))
+
+(deftest slump-mass-test
+  (testing "material moves but none is made or lost, even at the border"
+    ;; Unlike the droplets, nothing leaves the map: a cell only ever
+    ;; gives to a neighbor, so the total is the starting one to rounding.
+    (let [g (terrain)
+          f (e/slump g {:talus 0.002 :iterations 100})]
+      (is (not= (heights g) (heights f)))
+      (is (< (abs (- (total f) (total g))) (* 1e-12 (count (heights g)))))))
+
+  (testing "a corner spike stays on the map"
+    (let [corner (field 16 (fn [r c] (if (= [r c] [0 0]) 1.0 0.0)))
+          f (e/slump corner {:talus 0.01 :iterations 200})]
+      (is (< (abs (- 1.0 (total f))) 1e-12)))))
+
+(deftest slump-stability-test
+  ;; The case that rules out moving by cells all at once: a one-cell pit
+  ;; with eight neighbors over it takes from all eight in the same pass,
+  ;; and moved by cells came out four times higher than any of them --
+  ;; then settled into a mound, the pit turned inside out.
+  (testing "a pit fills toward its rim and no higher"
+    ;; For a pass it may stand above its neighbors, which have each just
+    ;; given it an eighth of what they had over it -- but never above the
+    ;; rim they started at, and it ends as a dip at the talus slope.
+    (let [pit (field 9 (fn [r c] (if (= [r c] [4 4]) 0.0 1.0)))]
+      (doseq [n [1 2 5 50]]
+        (is (<= (reduce max (heights (e/slump pit {:talus 0.01 :iterations n}))) 1.0)
+            (str "rose above the rim after " n)))
+      (let [f (e/slump pit {:talus 0.01 :iterations 200})
+            hs (heights f)]
+        (is (= (reduce min hs) (hs 40)) "the pit is the low point again")
+        (is (< (steepest f) 0.0101)))))
+
+  (testing "no pass makes a new peak or a new pit"
+    (let [g (terrain)
+          [lo hi] (extremes g)
+          [lo' hi'] (extremes (e/slump g {:talus 0.002 :iterations 20}))]
+      (is (<= lo lo'))
+      (is (<= hi' hi)))))
+
+(deftest slump-order-test
+  (testing "the result does not depend on the order cells are visited in"
+    ;; A spike in the middle of a square is symmetric under transposing
+    ;; it, and so must the slumped result be. A sweep in place would not
+    ;; be: it carries material along rows and columns differently.
+    (let [dim 21
+          spike (field dim (fn [r c] (if (= [r c] [10 10]) 1.0 0.0)))
+          ^doubles h (:heights (e/slump spike {:talus 0.01 :iterations 60}))]
+      (is (every? (fn [[r c]] (< (abs (- (aget h (+ (* r dim) c)) (aget h (+ (* c dim) r)))) 1e-12))
+                  (for [r (range dim) c (range dim)] [r c]))))))
+
+(deftest slump-after-rain-test
+  (testing "it clips the cliffs hydraulic erosion leaves, and spares the rest"
+    ;; The droplets steepen the top of the slope distribution well past
+    ;; anything in the raw terrain. Slumping takes that tail down to the
+    ;; talus slope and leaves the gentle majority of the map alone.
+    (let [g (terrain)
+          dim (:dim g)
+          wet (e/erode g {:rng (seeded 3) :droplets (* 4 dim dim)})
+          dry (e/slump wet {:talus 0.01 :iterations 200})
+          changed (count (filter (fn [[a b]] (not= a b)) (map vector (heights wet) (heights dry))))]
+      (is (> (steepest wet) 0.03))
+      ;; Within a tenth: relaxation slows as the slopes near the talus,
+      ;; and 200 passes is where it is worth stopping.
+      (is (< (steepest dry) 0.011))
+      (is (< changed (* 0.5 dim dim)) (str changed " of " (* dim dim) " cells moved")))))
+
+(deftest slump-purity-test
+  (testing "slump leaves the field alone, slump! writes it"
+    (let [g (terrain) before (heights g)]
+      (e/slump g {:talus 0.002})
+      (is (= before (heights g)))
+      (e/slump! g {:talus 0.002})
+      (is (not= before (heights g))))))

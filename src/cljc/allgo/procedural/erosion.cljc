@@ -1,5 +1,6 @@
 (ns allgo.procedural.erosion
-  "Hydraulic erosion: rain on a heightmap, and what the water takes with it.
+  "Hydraulic erosion: rain on a heightmap, and what the water takes with it
+  -- and thermal erosion, the loose material sliding off what is left.
 
   Fractal terrain is self-similar everywhere, and that is exactly what is
   wrong with it. Real landscape is not: it has been sorted by something
@@ -136,7 +137,41 @@
   every droplet that ever did. That is the drainage accumulation, and it
   is the thing to threshold if you want to know where the rivers are --
   the carved channel alone does not tell you, because a dry valley and a
-  wet one have the same shape."
+  wet one have the same shape.
+
+  ## Talus
+
+  The water leaves cliffs: where it cuts a channel it steepens the banks,
+  and on a diamond-square map the steepest one percent of slopes comes out
+  of the rain steeper than anything in the terrain it fell on. Real banks
+  that steep do not stand. Weathered rock falls and slides until it rests
+  at its angle of repose and piles up as scree at the foot of the face.
+
+  `slump!` is that, as Musgrave, Kolb and Mace (1989) pair it with the
+  water: wherever two neighboring cells differ by more than the talus
+  slope allows across their distance, the higher gives the lower a share
+  of the difference. Over enough passes every slope relaxes to `:talus`
+  and no further, and slopes already under it are never touched -- which
+  is what makes it erosion rather than a blur. Run it after `erode!` to
+  put screes under the cliffs; between rounds of rain it keeps the banks
+  from undercutting.
+
+  It does not move material by the paper's rule, which takes from a cell
+  a share of its largest excess and splits it among the lower neighbors.
+  Applied to every cell at once -- so that the order of the sweep does not
+  drag material along it -- that rule is unstable: a one-cell pit takes a
+  share from each of its eight neighbors and comes out nearly four times
+  as high as the rim it started below. Here each pair of neighbors settles its own excess, an
+  eighth at a time at most, and then no pass can make a new peak or a new
+  pit. `slump-pass!` has the argument.
+
+  `:talus` is in height per cell, like `:min-slope`, and is read against
+  the same scale. Measured on a diamond-square map at `:width 1.0`, 129 on
+  a side, after four droplets per cell: the median slope is near 0.002,
+  the 99th percentile near 0.028 and the steepest 0.07. The default 0.01
+  touches the steepest five percent or so at that size and the steepest one
+  percent at 257, where every slope is about half as steep -- cliffs and
+  nothing else. Lower takes it from screes toward a general softening."
   (:require [allgo.array :as a]
             [allgo.procedural.shaping :as shaping]
             [clojure.math :as math]))
@@ -462,6 +497,102 @@
        (assoc :heights (copy-doubles (:heights field)))
        (dissoc :flux)
        (erode! opts))))
+
+;; ---------------------------------------------------------------------------
+;; Talus
+
+(def thermal-defaults
+  "Parameters for `slump!`, with the meanings the namespace docstring gives
+  them."
+  {;; The steepest slope loose material holds, in height units per cell --
+   ;; read against the heightmap's scale, like `:min-slope`. See the note
+   ;; on choosing it in the namespace docstring.
+   :talus      0.01
+   ;; The fraction of each excess that moves in one pass, at most 1/8: see
+   ;; `slump-pass!`.
+   :rate       0.125
+   :iterations 50})
+
+;; Four of the eight neighbors, each with its distance in cells. Every
+;; pair of neighboring cells is visited once, from the cell earlier in
+;; row-major order, and settled in whichever direction it slopes.
+(def ^:private pair-dr (a/i32 [0 1 1 1]))
+(def ^:private pair-dc (a/i32 [1 -1 0 1]))
+(def ^:private pair-len (a/f64 [1.0 (math/sqrt 2.0) 1.0 (math/sqrt 2.0)]))
+
+(defn- slump-pass!
+  "One pass of talus slippage. Between every pair of neighboring cells,
+  the eight around each cell, the higher one gives the lower `rate` of
+  the excess: how far the lower sits below the talus slope down from the
+  higher, its height difference less `talus` times their distance.
+
+  Every move is worked out from the heights as they stood at the start of
+  the pass and written into `delta` before any is applied, so the result
+  does not depend on the order cells are visited in -- sweeping in place
+  instead drags material along the sweep, a row at a time. `delta` comes
+  in zeroed and is left zeroed.
+
+  Moving by pairs rather than by cells is what keeps the pass stable.
+  Musgrave, Kolb and Mace move from each cell a share of its largest
+  excess, split among the neighbors it is too steep toward; done all at
+  once, a pit with eight such neighbors takes a share from each and comes
+  out several times higher than any of them. By pairs, each cell's new
+  height is a weighted mean of its old one and its neighbors' as long as
+  the eight shares together are not more than all of it, which is `rate`
+  at most 1/8: no pass makes a new peak or a new pit, only relaxes toward
+  the talus slope."
+  [^doubles heights ^doubles delta rows cols talus rate]
+  (let [rows  (long rows)
+        cols  (long cols)
+        talus (double talus)
+        rate  (double rate)
+        ^ints pdr pair-dr
+        ^ints pdc pair-dc
+        ^doubles plen pair-len]
+    (dotimes [r rows]
+      (dotimes [c cols]
+        (let [id (+ (* r cols) c)
+              h  (aget heights id)]
+          (dotimes [k 4]
+            (let [nr (+ r (aget pdr k))
+                  nc (+ c (aget pdc k))]
+              (when (and (< nr rows) (<= 0 nc) (< nc cols))
+                (let [nid  (+ (* nr cols) nc)
+                      d    (- h (aget heights nid))
+                      ;; Positive: this cell is the higher one, and gives.
+                      e    (- (abs d) (* talus (aget plen k)))]
+                  (when (pos? e)
+                    (let [moved (* rate (if (pos? d) e (- e)))]
+                      (aset delta id (- (aget delta id) moved))
+                      (aset delta nid (+ (aget delta nid) moved)))))))))))
+    (dotimes [i (* rows cols)]
+      (aset heights i (+ (aget heights i) (aget delta i)))
+      (aset delta i 0.0))))
+
+(defn slump!
+  "Lets loose material slide in place until the slopes approach `:talus`,
+  and returns the field. Any field `erode!` takes; `:flux`, if there, is
+  left as it was.
+
+  `:iterations` passes of `:rate` each. The steep faces relax toward the
+  talus slope over the passes rather than in one, and what comes off
+  them piles at their feet: material only ever moves downhill, from a
+  cell to its neighbors, so nothing is created or lost and nothing leaves
+  the map."
+  ([field] (slump! field {}))
+  ([{:keys [heights] :as field} opts]
+   (let [{:keys [talus rate iterations]} (merge thermal-defaults opts)
+         [rows cols] (dimensions field)
+         ^doubles delta (a/f64 (* rows cols))]
+     (dotimes [_ (long iterations)]
+       (slump-pass! heights delta rows cols talus rate))
+     field)))
+
+(defn slump
+  "`slump!` on a copy, leaving the field it was given alone."
+  ([field] (slump field {}))
+  ([field opts]
+   (slump! (assoc field :heights (copy-doubles (:heights field))) opts)))
 
 (defn drainage
   "How much water crossed cell `i j`, summed over every droplet.

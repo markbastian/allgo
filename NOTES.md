@@ -123,9 +123,20 @@ cosmetic: without it the cells beside the edge are mined by every
 droplet that leaves and refilled by none, and the map grows a trench
 that deepens without bound.
 
-*Thermal erosion is not implemented* — Musgrave, Kolb and Mace pair
-the two, and talus slippage is what would put screes under the cliffs
-this leaves bare.
+Thermal erosion is `erosion/slump!`, the talus slippage Musgrave, Kolb
+and Mace pair with the water: material slides wherever neighboring cells
+are steeper than `:talus`, and run after the rain it puts screes under
+the cliffs the droplets cut. Two things changed from the paper, and both
+were measured rather than assumed. Every move in a pass is computed from
+the same heights before any is applied, since sweeping in place drags
+material along the sweep. And material moves by pairs of cells, at most
+an eighth of each excess a pass, instead of the paper's share of a
+cell's largest excess split among its lower neighbors: applied all at
+once that rule took a one-cell pit to nearly four times its rim in one
+pass and left it a mound, and by pairs no pass can make a new peak or
+pit. Mass is conserved exactly -- nothing slides off the map -- and the
+default talus of 0.01 touches only the steepest few percent of an
+eroded diamond-square map.
 
 ## Diffusion-limited aggregation
 

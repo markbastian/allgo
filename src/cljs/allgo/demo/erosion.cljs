@@ -34,7 +34,16 @@
   erosion: that floor sits above almost every slope in this heightmap, so
   every droplet everywhere carries the same load, and what you get is the
   terrain blurred rather than carved. It is worth doing once, because the
-  failure looks like an effect rather than like a bug."
+  failure looks like an effect rather than like a bug.
+
+  ## Talus
+
+  The rain leaves cliffs, steeper than anything in the terrain it fell on.
+  `slump` lets them fall: a few passes of `allgo.procedural.erosion/slump!`
+  a frame, after the droplets, slide what is steeper than `talus` down to
+  the foot of the face. It runs while the rain is stopped, too, so turn
+  the rain off after a while and watch the banks settle -- in `change`,
+  as blue screes along the red channels."
   (:require [allgo.demo.fps :as fps]
             [allgo.procedural.erosion :as erosion]
             [allgo.procedural.terrain :as terrain]
@@ -60,7 +69,10 @@
    ;; the mesh at 129 on a side, which leaves room to spare at sixty
    ;; frames a second; the slider goes up for anyone who would rather
    ;; have the result than watch it arrive.
-   :droplets-per-frame 800})
+   :droplets-per-frame 800
+   ;; Passes of talus slippage per frame, a fraction of a millisecond each
+   ;; at 129 on a side: enough that the banks keep up with the cutting.
+   :slump-passes 5})
 
 (defn- size->iterations [size]
   (long (js/Math.round (/ (js/Math.log (dec size)) (js/Math.log 2)))))
@@ -248,6 +260,9 @@
                           :inertia (:inertia erosion/defaults)
                           :radius (:radius erosion/defaults)
                           :border (:border erosion/defaults)
+                          :slump true
+                          :talus (:talus erosion/thermal-defaults)
+                          :passes (:slump-passes config)
                           :rained "0.0 per cell"
                           :reset (fn [])}]
     (set! (.-background scene) (THREE/Color. 0x0b0d14))
@@ -275,6 +290,10 @@
                  :inertia (double (.-inertia controls))
                  :radius (long (.-radius controls))
                  :border (double (.-border controls))})
+              (slump-opts []
+                {:talus (double (.-talus controls))
+                 :rate (:rate erosion/thermal-defaults)
+                 :iterations (long (.-passes controls))})
               (repaint! []
                 (refresh-geometry! (:geometry @state) (:field @state) (view-opts)))
               (report! []
@@ -316,8 +335,11 @@
                         (swap! state update :field
                                #(erosion/erode! % (assoc (rain-opts) :droplets n)))
                         (swap! state update :droplets + n))
-                      (repaint!)
                       (report!))
+                    (when (.-slump controls)
+                      (swap! state update :field #(erosion/slump! % (slump-opts))))
+                    (when (or (.-rain controls) (.-slump controls))
+                      (repaint!))
                     (.update orbit)
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
@@ -327,6 +349,7 @@
         (let [gui (GUI. #js {:container container})
               rain-folder (.addFolder gui "rain")
               model (.addFolder gui "model")
+              talus (.addFolder gui "talus")
               view (.addFolder gui "view")]
           (doto rain-folder
             (.add controls "rain")
@@ -347,6 +370,10 @@
             (-> (.add controls "inertia" 0.0 0.6 0.01))
             (-> (.add controls "radius" 1 6 1))
             (-> (.add controls "border" 0 32 1)))
+          (doto talus
+            (.add controls "slump")
+            (-> (.add controls "talus" 0.002 0.05 0.001))
+            (-> (.add controls "passes" 1 40 1)))
           (doto view
             (-> (.add controls "show" #js ["drainage" "terrain" "change"])
                 (.onChange (fn [_] (repaint!))))
