@@ -90,7 +90,8 @@
             d (/ 1.0 (clamp (+ 1.0 (* aa d)))) c (clamp (+ 1.0 (/ aa c)))
             del (* d c)
             h (* h del)]
-        (if (or (< (abs (- del 1.0)) 1e-16) (> m 1000)) h (recur (inc m) c d h))))))
+        ;; a few ulps: |del - 1| < 1e-16 would demand del = 1 exactly
+        (if (or (< (abs (- del 1.0)) (* 4.0 (math/ulp 1.0))) (> m 1000)) h (recur (inc m) c d h))))))
 
 (defn regularized-beta
   "The regularized incomplete beta function I_x(a, b), from its continued

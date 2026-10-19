@@ -174,7 +174,9 @@
            (let [x0 (math/cos (/ (* math/PI (- i 0.25)) (+ n 0.5)))
                  x (loop [x x0 k 0]
                      (let [[pn dp] (p x) x' (- x (/ pn dp))]
-                       (if (or (< (abs (- x' x)) 1e-16) (> k 100)) x' (recur x' (inc k)))))
+                       ;; a few ulps of 1: near +-1 Newton can bounce between
+                       ;; neighboring doubles and never meet a 1e-16 test
+                       (if (or (< (abs (- x' x)) (* 4.0 (math/ulp 1.0))) (> k 100)) x' (recur x' (inc k)))))
                  [_ dp] (p x)]
              [x (/ 2.0 (* (- 1.0 (* x x)) dp dp))])))))
 
