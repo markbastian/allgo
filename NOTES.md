@@ -1,8 +1,8 @@
 # Notes
 
 How the finished parts of this repository work, what was measured along
-the way, and what was tried and not kept. Open work is in
-[TODOs.md](TODOs.md); how to build and run is in the [README](README.md).
+the way, and what was tried and not kept. How to build and run is in the
+[README](README.md).
 
 The namespace docstrings are the reference. These notes are the
 reasoning that does not fit in one docstring: decisions that cut across
@@ -231,7 +231,7 @@ realm holds one town, so a language per realm would mean no two places
 on the map ever share one.
 
 **Not implemented**: states as distinct from realms, religions,
-population, history. See [TODOs.md](TODOs.md).
+population, history.
 
 ## A spatial index for the triangulation
 
@@ -358,9 +358,8 @@ three vectors per contact twice a substep, and `prepare` built a dozen
 typed arrays out of lazy sequences of boxed doubles. Moving those onto
 `body-arrays` took the three solvers from 19.9 / 32.9 / 91.0 ms.
 
-The ranking of what is left is in [TODOs.md](TODOs.md). Collision
-detection is at the top of it for the first time honestly rather than by
-default.
+Collision detection then rose to the top of what was left, for the
+first time honestly rather than by default.
 
 
 ### Sweep and prune
@@ -519,8 +518,8 @@ That was a missing bound, not a depth limit: it reads velocity back off
 the position correction over the substep, so an unbounded correction is
 an unbounded velocity. It is now bounded by `max-push-speed`, the same
 number the impulse solvers have always used, and `pushout-bound-test`
-holds it there. It still cannot stack past eight courses; why is the
-tall-column entry in [TODOs.md](TODOs.md).
+holds it there. It still cannot stack past eight courses, and tall
+columns remain open work.
 
 ## Tried and not kept
 

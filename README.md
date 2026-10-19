@@ -6,7 +6,6 @@ show. The demos run live at <https://markbastian.github.io/allgo/>.
 
 - **[NOTES.md](NOTES.md)**: how the finished parts work, what was
   measured along the way, and what was tried and not kept.
-- **[TODOs.md](TODOs.md)**: what is still open.
 - The namespace docstrings are the reference for each algorithm.
 
 ## Layout

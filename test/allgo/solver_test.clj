@@ -113,7 +113,7 @@
     ;; keeps about one substep of it -- 0.05 m/s that no contact model
     ;; fixes. XPBD is still quietly pushing overlap out through the
     ;; position solve at this point and creeps a centimeter over the five
-    ;; seconds. Both are in TODOs.
+    ;; seconds. Both are still open.
     (doseq [solver [:sequential-impulse]]
       (let [bodies (vec (cons (floor)
                               (for [i (range 6)]
