@@ -206,12 +206,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Impulses
 
-(defn- ang-vel [^doubles w ^long i]
-  [(aget w (* i 3)) (aget w (+ (* i 3) 1)) (aget w (+ (* i 3) 2))])
-
-(defn- lin-vel [^doubles vel ^long i]
-  [(aget vel (* i 3)) (aget vel (+ (* i 3) 1)) (aget vel (+ (* i 3) 2))])
-
 (defn- mul-inertia [^doubles ii ^long i [x y z]]
   (let [b (* i 9)]
     [(+ (* (aget ii b) x) (* (aget ii (+ b 1)) y) (* (aget ii (+ b 2)) z))
@@ -236,12 +230,6 @@
           (aset omega b3 (+ (aget omega b3) dx))
           (aset omega (+ b3 1) (+ (aget omega (+ b3 1)) dy))
           (aset omega (+ b3 2) (+ (aget omega (+ b3 2)) dz)))))))
-
-(defn- relative-velocity
-  [^doubles vel ^doubles omega ia ib ra rb]
-  (let [ia (long ia) ib (long ib)]
-    (v/sub (v/add (lin-vel vel ib) (v/cross (ang-vel omega ib) rb))
-           (v/add (lin-vel vel ia) (v/cross (ang-vel omega ia) ra)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The world
@@ -950,16 +938,41 @@
         (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
         (apply-impulse! vel omega ii inv-mass ib rb p 1.0)))))
 
-(defn- record-approach! [{:keys [vel omega]} cs]
+(defn- record-approach!
+  "How fast each contact's surfaces are closing, along its normal, as the
+  step begins: what restitution is measured against.
+
+  On primitive doubles. Over vec3s, the relative velocity at the contact
+  dotted with its normal, it built a handful of vectors per contact per
+  substep -- two and a half thousand contacts on a 16x16 wall -- and was a
+  tenth of an XPBD step. The rewrite kept that arithmetic in its order, so
+  the answers came out the same to the last bit."
+  [{:keys [^doubles vel ^doubles omega]} cs]
   (let [^doubles normal (:normal cs)
         ^doubles ra-arr (:ra cs) ^doubles rb-arr (:rb cs)
         ^doubles approach (:approach cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)]
     (dotimes [k (long (:n cs))]
-      (aset approach k
-            (v/dot (relative-velocity vel omega (aget ia-arr k) (aget ib-arr k)
-                                      (vec3-at ra-arr k) (vec3-at rb-arr k))
-                   (vec3-at normal k))))))
+      (let [ia3 (* 3 (aget ia-arr k)) ib3 (* 3 (aget ib-arr k))
+            k3 (* 3 k)
+            rax (aget ra-arr k3) ray (aget ra-arr (+ k3 1)) raz (aget ra-arr (+ k3 2))
+            rbx (aget rb-arr k3) rby (aget rb-arr (+ k3 1)) rbz (aget rb-arr (+ k3 2))
+            ;; v_b + w_b x r_b, less v_a + w_a x r_a.
+            rvx (- (+ (aget vel ib3)
+                      (- (* (aget omega (+ ib3 1)) rbz) (* (aget omega (+ ib3 2)) rby)))
+                   (+ (aget vel ia3)
+                      (- (* (aget omega (+ ia3 1)) raz) (* (aget omega (+ ia3 2)) ray))))
+            rvy (- (+ (aget vel (+ ib3 1))
+                      (- (* (aget omega (+ ib3 2)) rbx) (* (aget omega ib3) rbz)))
+                   (+ (aget vel (+ ia3 1))
+                      (- (* (aget omega (+ ia3 2)) rax) (* (aget omega ia3) raz))))
+            rvz (- (+ (aget vel (+ ib3 2))
+                      (- (* (aget omega ib3) rby) (* (aget omega (+ ib3 1)) rbx)))
+                   (+ (aget vel (+ ia3 2))
+                      (- (* (aget omega ia3) ray) (* (aget omega (+ ia3 1)) rax))))]
+        (aset approach k (+ (* rvx (aget normal k3))
+                            (* rvy (aget normal (+ k3 1)))
+                            (* rvz (aget normal (+ k3 2)))))))))
 
 (defn- refresh-anchors!
   "Recomputes lever arms and overlap from where the bodies now are.

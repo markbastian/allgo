@@ -392,6 +392,10 @@ place. Same answers to the bit again: the wall's 120 steps, and 200,000
 random pairs of rotated boxes against the vector version, every kind of
 contact among them.
 
+`record-approach!`, the closing speed restitution is measured against,
+went the same way: 1.6 ms of a 17 ms step to 0.08, measured in a warm
+REPL, and the three solvers' 120 steps identical to the bit.
+
 
 ### Sweep and prune
 
