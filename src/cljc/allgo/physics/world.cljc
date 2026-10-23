@@ -46,8 +46,9 @@
   ## What this is not
 
   It is a sequential impulse solver and only that. There is no
-  substepping and no XPBD, and nothing sleeps; contacts are rigid with a
-  Baumgarte push unless `:soft?` asks for springs. `allgo.physics.solver`
+  substepping and no XPBD; contacts are rigid with a Baumgarte push
+  unless `:soft?` asks for springs. Bodies and models sleep, by islands,
+  as `allgo.physics.solver`'s do (see Sleeping, below). `allgo.physics.solver`
   has all of those and is still the thing to reach for when the scene is
   only bricks; this one is for a scene that mixes kinds, and it says so
   rather than pretending to replace it.
@@ -104,7 +105,14 @@
    :soft? false
    :contact-hertz 30.0
    :contact-damping 10.0
-   :max-push-speed 3.0})
+   :max-push-speed 3.0
+   ;; Sleeping, as `allgo.physics.solver` has it: an island still for
+   ;; `time-to-sleep` stops being simulated, and wakes when something
+   ;; awake touches it.
+   :allow-sleep? true
+   :time-to-sleep 0.5
+   :linear-sleep-speed 0.01
+   :angular-sleep-speed 0.035})
 
 (defn world
   "A scene of loose `bodies` and jointed `models`.
@@ -146,6 +154,22 @@
 
 (defn- same-model? [a b]
   (and (not (rigid-side? a)) (not (rigid-side? b)) (= (second a) (second b))))
+
+(defn- asleep?
+  "Whether the body on `side` is asleep: a loose body, or a whole model."
+  [{:keys [bodies models]} side]
+  (case (first side)
+    :rigid (rigid/sleeping? (nth bodies (second side)))
+    :link (true? (:sleeping? (nth models (second side))))
+    false))
+
+(defn- awake?
+  "Whether the body on `side` moves this step: not static, not asleep."
+  [{:keys [bodies models]} side]
+  (case (first side)
+    :rigid (not (rigid/inert? (nth bodies (second side))))
+    :link (not (:sleeping? (nth models (second side))))
+    false))
 
 ;; ---------------------------------------------------------------------------
 ;; Finding the contacts
@@ -201,7 +225,7 @@
   another, which is what two bodies pinned together in an overlapping
   pose want -- a rider's knees tucked in against a tank."
   [{:keys [bodies models self-collide? collide-models?]
-    :or {self-collide? true collide-models? true}} configs]
+    :or {self-collide? true collide-models? true} :as w} configs]
   (let [parts (model-bodies models configs)]
     (-> []
         ;; Rigid against rigid.
@@ -218,6 +242,9 @@
                     ;; two or three of them; the rest are ruled out by
                     ;; their bounding balls before any exact test.
                     :when (near? body rb)
+                    ;; two bodies asleep, or asleep and static, have
+                    ;; nothing to say to each other
+                    :when (or (awake? w side) (awake? w [:rigid bi]))
                     c (pair-contacts side body [:rigid bi] rb)]
                 c))
         ;; One model's parts against another's. Each side answers for its
@@ -229,11 +256,13 @@
                       {side-b :side body-b :body} parts
                       :when (< (long (second side-a)) (long (second side-b)))
                       :when (near? body-a body-b)
+                      :when (or (awake? w side-a) (awake? w side-b))
                       c (pair-contacts side-a body-a side-b body-b)]
                   c)))
         ;; And each model against itself, unless told not to.
         (into (when self-collide?
-                (for [[mi {:keys [model pose]}] (map-indexed vector models)
+                (for [[mi {:keys [model pose sleeping?]}] (map-indexed vector models)
+                      :when (not sleeping?)
                       c (ab/self-contacts model (:q pose) (:base pose)
                                           (:frames (nth configs mi)))]
                   {:a [:link mi (:link c)] :b [:link mi (:other c)]
@@ -254,7 +283,7 @@
 (defn- prepare-rigid
   [bodies i point dir]
   (let [b (nth bodies i)]
-    (if (rigid/static? b)
+    (if (rigid/inert? b)
       {:kind :static}
       (let [r (v/sub point (:pos b))
             ;; I^-1 (r x d), in the world, which is both the angular
@@ -268,9 +297,11 @@
          :w (+ (double (:inv-mass b)) (v/dot (v/cross r dir) iw))}))))
 
 (defn- prepare-side
-  [{:keys [bodies models]} configs side point dir]
+  [{:keys [bodies models] :as w} configs side point dir]
   (cond
     (= :static (first side)) {:kind :static}
+    ;; asleep, a model is as fixed as the ground until something wakes it
+    (asleep? w side) {:kind :static}
     (rigid-side? side)
     (prepare-rigid bodies (second side) point dir)
     :else
@@ -337,7 +368,7 @@
         dt (double dt)
         bias-factor (double (or (:pin-bias opts) 0.3))
         max-push (* 2.0 (double (:max-push-speed opts)))
-        pair? (same-model? a b)
+        pair? (and (same-model? a b) (not (asleep? w a)))
         mid (v/scale (v/add pa pb) 0.5)]
     {:rows (mapv (fn [d]
                    (if pair?
@@ -358,7 +389,7 @@
   [{:keys [models] :as opts} configs dt]
   (into []
         (for [[mi {:keys [model]}] (map-indexed vector models)
-              :when (ab/limited? model)
+              :when (and (ab/limited? model) (not (:sleeping? (nth models mi))))
               row (ab/limit-constraints model (nth configs mi) dt opts)]
           (assoc row :mi mi))))
 
@@ -633,6 +664,157 @@
                  [[] {}]
                  cs)))
 
+;; ---------------------------------------------------------------------------
+;; Sleeping
+;;
+;; As `allgo.physics.solver` sleeps its bodies, by islands -- everything
+;; joined by a contact or a pin sleeps together or not at all -- with a
+;; whole model as one member of an island. A model sleeps when its base and
+;; every joint are slow, and never while anything drives it: a `:tau` with
+;; anything in it is somebody holding the controls.
+;;
+;; Asleep, a body is left out of the step entirely and answers every
+;; contact as the ground does. When an island goes to sleep its members
+;; are stamped with an island id, and anything awake that touches one of
+;; them wakes them all at once: nothing finds contacts between two
+;; sleeping bodies, so there would be no other way to know that the brick
+;; under the one struck was holding it up.
+
+(defn- driven? [{:keys [tau]}]
+  (boolean (some #(not (zero? (double %))) tau)))
+
+(defn- who
+  "What waking the body on `side` wakes: its island, or the body alone
+  if it fell asleep outside one -- placed asleep with `rigid/asleep`."
+  [{:keys [bodies models]} side]
+  (let [x (if (rigid-side? side) (nth bodies (second side)) (nth models (second side)))]
+    (cond (:island x) [:island (:island x)]
+          (rigid-side? side) side
+          :else [:link (second side) -1])))
+
+(defn- wake-all
+  "Wakes everything asleep that `disturbed` names: by island, or by side."
+  [w disturbed]
+  (let [hit? (fn [x side] (or (disturbed side) (some-> (:island x) (#(disturbed [:island %])))))]
+    (assoc w
+           :bodies (vec (map-indexed (fn [i b]
+                                       (if (and (rigid/sleeping? b) (hit? b [:rigid i]))
+                                         (dissoc (rigid/wake b) :island)
+                                         b))
+                                     (:bodies w)))
+           :models (vec (map-indexed (fn [mi m]
+                                       (if (and (:sleeping? m) (hit? m [:link mi -1]))
+                                         (-> m (assoc :sleeping? false :sleep-time 0.0) (dissoc :island))
+                                         m))
+                                     (:models w))))))
+
+(defn wake
+  "`w` with whatever is on `side` awake, and the rest of its island.
+
+  Anything that changes a body from outside the step -- a push, a new
+  velocity, a new place -- has to wake it, or a sleeping body ignores
+  it until something bumps into it. A side is `[:rigid i]` or
+  `[:link model-index link-index]`, as for pins."
+  [w side]
+  (if (asleep? w side) (wake-all w #{(who w side)}) w))
+
+(defn- rouse
+  "Wakes whatever something awake has come to touch or is pinned to,
+  with the rest of its island, and any sleeping model given a torque.
+  Returns `[world woke?]`."
+  [w cs]
+  (let [disturbed (into #{}
+                        (mapcat (fn [{:keys [a b]}]
+                                  (cond
+                                    (and (asleep? w a) (awake? w b)) [(who w a)]
+                                    (and (asleep? w b) (awake? w a)) [(who w b)]
+                                    :else [])))
+                        (concat cs (:pins w)))
+        disturbed (into disturbed
+                        (keep-indexed (fn [mi m]
+                                        (when (and (:sleeping? m) (driven? m))
+                                          (who w [:link mi -1]))))
+                        (:models w))]
+    (if (empty? disturbed)
+      [w false]
+      [(wake-all w disturbed) true])))
+
+(defn- still-model?
+  "A model at rest: its base turning and moving slower than the
+  thresholds, and every joint turning slower than the angular one."
+  [{:keys [model pose]} lin ang]
+  (let [u (ab/velocity model pose)
+        base? (ab/base model)]
+    (every? true? (map-indexed (fn [i x]
+                                 (< (abs (double x)) (if (and base? (<= 3 i 5)) lin ang)))
+                               u))))
+
+(defn- settle
+  "Runs each awake body's sleep clock, and puts to sleep every island
+  whose members have all been still for `:time-to-sleep`."
+  [{:keys [bodies models pins] :as w} cs dt]
+  (let [dt (double dt)
+        lin (double (:linear-sleep-speed w))
+        ang (double (:angular-sleep-speed w))
+        wait (double (:time-to-sleep w))
+        tick (fn [x still?] (assoc x :sleep-time (if still? (+ (double (or (:sleep-time x) 0.0)) dt) 0.0)))
+        bodies (mapv (fn [b]
+                       (if (rigid/inert? b)
+                         b
+                         (tick b (and (< (v/length (:vel b)) lin) (< (v/length (:omega b)) ang)))))
+                     bodies)
+        models (mapv (fn [m]
+                       (if (:sleeping? m)
+                         m
+                         (tick m (and (not (driven? m)) (still-model? m lin ang)))))
+                     models)
+        w (assoc w :bodies bodies :models models)
+        nb (count bodies)
+        node (fn [side] (when (awake? w side)
+                          (if (rigid-side? side) (long (second side)) (+ nb (long (second side))))))
+        clock (fn [^long i] (double (or (:sleep-time (if (< i nb) (nth bodies i) (nth models (- i nb)))) 0.0)))
+        n (+ nb (count models))]
+    ;; An island sleeps on the clock of its youngest member, so until
+    ;; some body has been still long enough no island can.
+    (if-not (some #(and (node %) (>= (clock (node %)) wait))
+                  (concat (map (fn [i] [:rigid i]) (range nb)) (map (fn [i] [:link i -1]) (range (count models)))))
+      w
+      (let [^ints parent (a/i32 (range n))
+            find (fn find [^long i]
+                   (let [p (aget parent i)]
+                     (if (= p i) i (let [r (find p)] (aset parent i (int r)) r))))]
+        (doseq [{:keys [a b]} (concat cs pins)]
+          (let [x (node a) y (node b)]
+            (when (and x y)
+              (let [rx (find x) ry (find y)]
+                (when-not (= rx ry) (aset parent (int rx) (int ry)))))))
+        (let [members (group-by find (filter #(node (if (< (long %) nb) [:rigid %] [:link (- (long %) nb) -1]))
+                                             (range n)))
+              sleepy (filter (fn [[_ ms]] (every? #(>= (clock %) wait) ms)) members)
+              base (long (or (:next-island w) 0))]
+          (reduce (fn [w [k [_ ms]]]
+                    (let [id (+ base (long k))]
+                      (reduce (fn [w i]
+                                (if (< (long i) nb)
+                                  (update-in w [:bodies i] assoc :sleeping? true :island id
+                                             :vel v/zero :omega v/zero)
+                                  (update-in w [:models (- (long i) nb)]
+                                             (fn [{:keys [model] :as m}]
+                                               (-> m
+                                                   (assoc :sleeping? true :island id)
+                                                   (update :pose #(ab/with-velocity model %
+                                                                    (vec (repeat (count (ab/velocity model %)) 0.0)))))))))
+                              w ms)))
+                  (update w :next-island #(+ (long (or % 0)) (count sleepy)))
+                  (map-indexed vector sleepy)))))))
+
+(defn- sleepers
+  "The entries of `m`, keyed by contact, whose two sides are both asleep
+  or fixed: contacts not solved this step, whose memory is kept for when
+  they wake."
+  [w m]
+  (into {} (filter (fn [[k _]] (not (or (awake? w (nth k 0)) (awake? w (nth k 1)))))) m))
+
 (defn- recall
   "Last step's impulse for each of `cs`, keyed `ks`: by key, or, for a
   contact whose key is new, from the nearest point of the same pair that
@@ -675,36 +857,51 @@
   them together, then positions. The order is the same one the other
   two solvers use and for the same reason: a body is stopped before it
   moves into something, rather than pulled back out afterward."
-  [{:keys [bodies models gravity] :as w} dt]
+  [w dt]
   (let [dt (double dt)
+        ;; Where everything is does not change until the end of the step,
+        ;; so neither do the joints' frames or the contacts.
+        configs (mapv (fn [{:keys [model pose]}]
+                        (ab/configuration model (:q pose) (:base pose)))
+                      (:models w))
+        ;; Waking comes first, so that whatever is woken is solved in the
+        ;; same step that reached it. Nothing found contacts among the
+        ;; sleepers, so once some wake their contacts are found again --
+        ;; or a column woken at the top would fall through itself for a
+        ;; step -- and those may wake more.
+        [w cs] (loop [w w cs (contacts w configs)]
+                 (let [[w' woke?] (rouse w cs)]
+                   (if woke? (recur w' (contacts w' configs)) [w cs])))
+        {:keys [bodies models gravity]} w
         ;; Gravity on the loose bodies. `rigid/integrate` moves them as
         ;; well, so only the velocity half is wanted here.
         bodies (mapv (fn [b]
-                       (if (rigid/static? b)
+                       (if (rigid/inert? b)
                          b
                          (update b :vel v/add-scaled gravity dt)))
                      bodies)
         ;; And the jointed ones, whose accelerations come from the whole
         ;; tree at once.
-        models (mapv (fn [{:keys [model pose tau] :as m}]
-                       (let [root (ab/base model)
-                             {:keys [qdd base-acc]}
-                             (ab/forward-dynamics model (:q pose) (:qd pose)
-                                                  (or tau (vec (repeat (ab/dof model) 0.0)))
-                                                  (cond-> {:gravity gravity}
-                                                    root (assoc :base (:base pose))))
-                             accel (if root (vec (concat base-acc qdd)) (vec qdd))]
-                         (assoc m :pose
-                                (ab/with-velocity
-                                  model pose
-                                  (mapv (fn [a c] (+ (double a) (* dt (double c))))
-                                        (ab/velocity model pose) accel)))))
+        models (mapv (fn [{:keys [model pose tau sleeping?] :as m}]
+                       (if sleeping?
+                         m
+                         (let [root (ab/base model)
+                               {:keys [qdd base-acc]}
+                               (ab/forward-dynamics model (:q pose) (:qd pose)
+                                                    (or tau (vec (repeat (ab/dof model) 0.0)))
+                                                    (cond-> {:gravity gravity}
+                                                      root (assoc :base (:base pose))))
+                               accel (if root (vec (concat base-acc qdd)) (vec qdd))]
+                           (assoc m :pose
+                                  (ab/with-velocity
+                                    model pose
+                                    (mapv (fn [a c] (+ (double a) (* dt (double c))))
+                                          (ab/velocity model pose) accel))))))
                      models)
         w (assoc w :bodies bodies :models models)
-        configs (mapv (fn [{:keys [model pose]}]
-                        (ab/configuration model (:q pose) (:base pose)))
-                      models)
-        cs (contacts w configs)
+        ;; Two sleepers, or a sleeper and the ground, have nothing to
+        ;; solve; what they pushed with is kept for when they wake.
+        cs (filterv #(or (awake? w (:a %)) (awake? w (:b %))) cs)
         limits (prepare-limits w configs dt)
         pins (mapv #(prepare-pin w configs % dt w) (:pins w))
         [vel omega] (body-arrays bodies)
@@ -758,18 +955,20 @@
                                #(ab/with-velocity (:model m) % (vec (seq ^doubles (nth us i))))))
                      models
                      (range (count models)))]
-    (assoc w
-           :pin-impulses carried
-           :contact-impulses (zipmap ks (:contacts solved))
-           :contact-points (zipmap ks (map :point cs))
-           ;; Positions last, from whatever the sweep left behind.
-           :bodies (mapv (fn [b]
-                           (if (rigid/static? b)
-                             b
-                             (rigid/integrate b dt [0.0 0.0 0.0])))
-                         bodies)
-           ;; Only moved, not accelerated again: everything that was
-           ;; going to change a velocity has already changed it.
-           :models (mapv (fn [{:keys [model pose] :as m}]
-                           (assoc m :pose (ab/advance pose model dt)))
-                         models))))
+    (cond->
+     (assoc w
+            :pin-impulses carried
+            :contact-impulses (into (sleepers w remembered) (zipmap ks (:contacts solved)))
+            :contact-points (into (sleepers w (:contact-points w)) (zipmap ks (map :point cs)))
+            ;; Positions last, from whatever the sweep left behind.
+            :bodies (mapv (fn [b]
+                            (if (rigid/inert? b)
+                              b
+                              (rigid/integrate b dt [0.0 0.0 0.0])))
+                          bodies)
+            ;; Only moved, not accelerated again: everything that was
+            ;; going to change a velocity has already changed it.
+            :models (mapv (fn [{:keys [model pose sleeping?] :as m}]
+                            (if sleeping? m (assoc m :pose (ab/advance pose model dt))))
+                          models))
+      (:allow-sleep? w) (settle cs dt))))

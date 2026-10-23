@@ -326,9 +326,13 @@
                       ;; about its own neck.
                       chest (ab/frame-of model (:q pose) (:base pose) 0)
                       where (v/add (:pos chest) (q/rotate (:rot chest) [0.0 0.25 0.0]))]
-                  (swap! world update-in [:scene :models 0 :pose]
-                         #(ab/apply-impulse model % 0 where unit
-                                            (.-shoveForce controls)))))
+                  ;; Woken first: a figure that has come to rest is
+                  ;; asleep, and would ignore the push.
+                  (swap! world update :scene
+                         (fn [sc]
+                           (update-in (pw/wake sc [:link 0 -1]) [:models 0 :pose]
+                                      #(ab/apply-impulse model % 0 where unit
+                                                         (.-shoveForce controls)))))))
               (opts []
                 {:gravity [0.0 -9.81 0.0]
                  :friction (.-friction controls)

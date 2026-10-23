@@ -491,6 +491,9 @@
                seat (:pos (:base bp))
                j (abs (double push))]
            (-> released
+               ;; awake to take the push, should either have come to rest
+               (pw/wake [:link 1 -1])
+               (pw/wake [:link 0 -1])
                (update-in [:models 1 :pose] #(ab/apply-impulse rm % rider/torso chest dir j))
                (update-in [:models 0 :pose] #(ab/apply-impulse bm % -1 seat (v/negate dir) j)))))))))
 

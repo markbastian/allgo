@@ -339,3 +339,59 @@
       ;; the edges of the bricks below, and the box test renames them.
       (is (< (drift (run (column 0.01) 600 (/ 1.0 60.0))) 0.05))
       (is (> (drift (run (column nil) 600 (/ 1.0 60.0))) 0.5)))))
+
+(def ^:private hinged
+  "Two boxes on a hinge, free to fall."
+  {:base {:mass 5.0 :com [0.0 0.0 0.0] :inertia (box-inertia [0.4 0.1 0.2] 5.0)
+          :shape :box :size [0.4 0.1 0.2] :shape-pose {:rot idq :pos [0.0 0.0 0.0]}}
+   :links [{:parent -1 :joint :revolute :axis [0.0 0.0 1.0] :origin {:rot nil :pos [0.2 0.0 0.0]}
+            :mass 2.0 :com [0.2 0.0 0.0] :inertia (box-inertia [0.4 0.1 0.2] 2.0)
+            :shape :box :size [0.4 0.1 0.2] :shape-pose {:rot idq :pos [0.2 0.0 0.0]}}]})
+
+(defn- dropped [bodies]
+  (w/world (into [floor] bodies)
+           [{:model hinged
+             :pose {:q [0.3] :qd [0.0]
+                    :base {:rot idq :pos [0.0 0.5 0.0] :vel [0.0 0.0 0.0 0.0 0.0 0.0]}}}]
+           {:gravity g}))
+
+(defn- frames [s n] (vec (take n (iterate #(w/step % (/ 1.0 60.0)) s))))
+
+(deftest sleeping-test
+  (testing "a column at rest falls asleep, all of it at once, and remembers what held it up"
+    (let [s (run (w/world (into [floor] (for [r (range 4)] (brick [0.0 (+ 0.125 (* 0.25 r)) 0.0])))
+                          [] {:gravity g})
+                 180 (/ 1.0 60.0))
+          bricks (rest (:bodies s))]
+      (is (every? rigid/sleeping? bricks))
+      (is (= 1 (count (set (map :island bricks)))))
+      (is (= 16 (count (:contact-impulses s))))
+      (testing "and the step a ball reaches it, the whole column wakes"
+        (let [ball (assoc (rigid/ball {:pos [-1.0 0.875 0.0] :radius 0.1 :density 1000.0})
+                          :vel [6.0 0.0 0.0])
+              fs (frames (update s :bodies conj ball) 30)
+              touched (first (keep-indexed (fn [i s] (when (seq (filter #(= [:rigid 5] (second %))
+                                                                        (keys (:contact-impulses s))))
+                                                       i))
+                                           fs))]
+          (is (some? touched))
+          (is (not-any? rigid/sleeping? (rest (:bodies (nth fs touched)))))))))
+  (testing "a model at rest falls asleep, a brick dropped on it wakes it, and so does `wake`"
+    (let [fs (frames (dropped []) 200)
+          asleep (first (keep-indexed (fn [i s] (when (:sleeping? (first (:models s))) i)) fs))
+          s (nth fs (inc asleep))]
+      (is (< 30 asleep 120) (str asleep))
+      (is (not (:sleeping? (first (:models (w/wake s [:link 0 0]))))))
+      (let [brick (rigid/box {:pos [0.0 0.5 0.0] :size [0.1 0.1 0.1] :density 2000.0})
+            fs (frames (update s :bodies conj brick) 40)]
+        (is (some #(not (:sleeping? (first (:models %)))) fs)))))
+  (testing "a model with a torque on it never sleeps"
+    (is (not-any? #(:sleeping? (first (:models %)))
+                  (frames (assoc-in (dropped []) [:models 0 :tau] [0.01]) 300))))
+  (testing "a brick resting on a model sleeps with it, in one island"
+    (let [s (run (dropped [(rigid/box {:pos [-0.05 0.62 0.0] :size [0.1 0.1 0.1] :density 500.0})])
+                 500 (/ 1.0 60.0))
+          m (first (:models s))
+          b (second (:bodies s))]
+      (is (and (:sleeping? m) (rigid/sleeping? b)))
+      (is (= (:island m) (:island b))))))
