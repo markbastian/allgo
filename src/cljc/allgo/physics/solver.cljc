@@ -1,10 +1,10 @@
 (ns allgo.physics.solver
-  "Three ways to make contacts hold, in one engine, so they can be
+  "Four ways to make contacts hold, in one engine, so they can be
   compared on the same pile of bricks.
 
   `allgo.physics.contact` says where bodies touch. What to *do* about it
   is a separate question with more than one respectable answer, and the
-  three here are the ones in use:
+  four here are the ones in use:
 
     :sequential-impulse   the classic. Work in velocities: for each
                           contact compute the impulse that would stop the
@@ -20,11 +20,18 @@
                           until they no longer overlap, then read the
                           velocity back off how far each one traveled.
                           `allgo.physics.rigid` and Müller's papers.
+    :convex               every contact at once. The step's velocities as the
+                          minimum of one convex function, found by Newton's
+                          method: MuJoCo's solver, and Drake's SAP. See
+                          `allgo.physics.convex`.
 
   ## What actually separates them
 
-  All three are Gauss-Seidel: they visit constraints one at a time and
-  each one sees the effect of the last. The differences are *when the
+  The first three are Gauss-Seidel: they visit constraints one at a time
+  and each one sees the effect of the last. (`:convex` is not, which is
+  the point of it: what the floor knows reaches the top of a column in
+  one Newton step, and a column of forty stands where the best of the
+  others holds fourteen.) The differences are *when the
   geometry is evaluated* and *what quantity is being corrected*.
 
   Sequential impulse linearizes once, at the top of the step, and every
@@ -106,6 +113,7 @@
             [allgo.geometry.vec3 :as v]
             [allgo.math :as am]
             [allgo.physics.contact :as contact]
+            [allgo.physics.convex :as convex]
             [allgo.physics.rigid :as rigid]
             [allgo.physics.toi :as toi]
             [clojure.math :as math]))
@@ -1648,6 +1656,159 @@
               _ (solve-xpbd-velocities! arrays cs h w)]
           (recur (write-back bodies arrays) (- remaining h) (inc slices)))))))
 
+(defn- convex-problem
+  "This step's contacts as `allgo.physics.convex` takes them: a velocity
+  vector over the bodies that move, each contact's three Jacobian rows,
+  its regularization and the separating speed it asks for.
+
+  The regularization is SAP's near-rigid one: along the normal the
+  contact's own effective inverse mass over `4 pi^2` -- stiff enough that
+  it closes in about a step, which is as stiff as the step can see --
+  and along the tangents a thousandth of it, so friction holds as nearly
+  as it can. The normal asks for an overlap past the slop to be pushed out
+  over `:convex-tau` steps, no faster than `max-push-speed`, and lets a
+  gap within the margin be closed this step and no further."
+  [w arrays cs dt]
+  (let [dt (double dt)
+        n (long (:n arrays))
+        ^doubles inv-mass (:inv-mass arrays) ^doubles ii (:ii arrays)
+        ^doubles vel (:vel arrays) ^doubles omega (:omega arrays)
+        bodies (:bodies w)
+        ;; where each moving body starts in the velocity vector
+        ^ints offset (a/i32 n)
+        nb (loop [i 0 nb 0]
+             (if (= i n)
+               nb
+               (let [moving? (and (awake? (nth bodies i)) (pos? (aget inv-mass i)))]
+                 (aset offset i (int (if moving? (* 6 nb) -1)))
+                 (recur (inc i) (if moving? (inc nb) nb)))))
+        ^doubles mass (a/f64 nb) ^doubles inertia (a/f64 (* 9 nb))
+        ^doubles im (a/f64 nb) ^doubles iinv (a/f64 (* 9 nb))
+        ^doubles vstar (a/f64 (* 6 nb))
+        ^doubles scratch (a/f64 9)]
+    (dotimes [i n]
+      (let [o (aget offset i)]
+        (when-not (neg? o)
+          (let [b (quot o 6) b (long b) b9 (* 9 b) i3 (* 3 i) i9 (* 9 i)
+                body (nth bodies i)
+                [ix iy iz] (:inv-inertia body)]
+            (aset mass b (/ 1.0 (aget inv-mass i)))
+            (aset im b (aget inv-mass i))
+            (dotimes [k 9] (aset iinv (+ b9 k) (aget ii (+ i9 k))))
+            (inverse-inertia-world scratch 0 (:rot body) [(/ 1.0 (double ix)) (/ 1.0 (double iy)) (/ 1.0 (double iz))])
+            (dotimes [k 9] (aset inertia (+ b9 k) (aget scratch k)))
+            (dotimes [k 3]
+              (aset vstar (+ o k) (aget vel (+ i3 k)))
+              (aset vstar (+ o 3 k) (aget omega (+ i3 k))))))))
+    (let [nc (long (:n cs))
+          ^ints ca (:a cs) ^ints cb (:b cs)
+          ^doubles ra (:ra cs) ^doubles rb (:rb cs) ^doubles depth (:depth cs)
+          ^doubles approach (:approach cs)
+          dirs [(:normal cs) (:t1 cs) (:t2 cs)]
+          ^doubles jac (a/f64 (* 36 nc)) ^ints oa (a/i32 nc) ^ints ob (a/i32 nc)
+          ^doubles rn (a/f64 nc) ^doubles rt (a/f64 nc) ^doubles vhat (a/f64 nc) ^doubles mu (a/f64 nc)
+          slop (double (:slop w))
+          tau (double (or (:convex-tau w) 1.0))
+          max-push (double (:max-push-speed w))
+          e (double (:restitution w))
+          threshold (double (:restitution-threshold w))
+          friction (double (:friction w))
+          beta (double (or (:convex-beta w) 0.1))]
+      (dotimes [c nc]
+        (let [ia (aget ca c) ib (aget cb c)
+              c3 (* 3 c) base (* 36 c)
+              pa (aget offset ia) pb (aget offset ib)
+              rax (aget ra c3) ray (aget ra (+ c3 1)) raz (aget ra (+ c3 2))
+              rbx (aget rb c3) rby (aget rb (+ c3 1)) rbz (aget rb (+ c3 2))]
+          (aset oa c (int pa)) (aset ob c (int pb))
+          ;; Normal, then the two tangents. A row is the direction and the
+          ;; lever arm crossed with it, for each body: a is pushed along -d
+          ;; and b along +d.
+          (dotimes [k 3]
+            (let [^doubles d (nth dirs k)
+                  dx (aget d c3) dy (aget d (+ c3 1)) dz (aget d (+ c3 2))
+                  r (+ base (* 12 k))]
+              (aset jac r (- dx)) (aset jac (+ r 1) (- dy)) (aset jac (+ r 2) (- dz))
+              (aset jac (+ r 3) (- (- (* ray dz) (* raz dy))))
+              (aset jac (+ r 4) (- (- (* raz dx) (* rax dz))))
+              (aset jac (+ r 5) (- (- (* rax dy) (* ray dx))))
+              (aset jac (+ r 6) dx) (aset jac (+ r 7) dy) (aset jac (+ r 8) dz)
+              (aset jac (+ r 9) (- (* rby dz) (* rbz dy)))
+              (aset jac (+ r 10) (- (* rbz dx) (* rbx dz)))
+              (aset jac (+ r 11) (- (* rbx dy) (* rby dx)))))
+          ;; the normal's effective inverse mass, as the impulse solvers have it
+          (let [w-of (fn [^long i ^long off j0]
+                       (if (neg? off)
+                         0.0
+                         (let [i9 (* 9 i)
+                               x (aget jac (+ base j0 3)) y (aget jac (+ base j0 4)) z (aget jac (+ base j0 5))]
+                           (+ (aget inv-mass i)
+                              (* x (+ (* (aget ii i9) x) (* (aget ii (+ i9 1)) y) (* (aget ii (+ i9 2)) z)))
+                              (* y (+ (* (aget ii (+ i9 3)) x) (* (aget ii (+ i9 4)) y) (* (aget ii (+ i9 5)) z)))
+                              (* z (+ (* (aget ii (+ i9 6)) x) (* (aget ii (+ i9 7)) y) (* (aget ii (+ i9 8)) z)))))))
+                wn (+ (double (w-of ia pa 0)) (double (w-of ib pb 6)))
+                wn (max wn 1e-9)
+                over (- (aget depth c) slop)
+                push (if (pos? over)
+                       (min max-push (/ over (* tau dt)))
+                       (/ over dt))
+                va (aget approach c)
+                ;; a rebound only for a material that has one, so that
+                ;; otherwise a gap is closed this step and no further
+                bounce (when (and (pos? e) (< va (- threshold))) (* (- e) va))]
+            (aset rn c (/ (* beta beta wn) (* 4.0 math/PI math/PI)))
+            (aset rt c (* 1e-3 wn))
+            (aset vhat c (if bounce (max push (double bounce)) push))
+            (aset mu c friction))))
+      {:nb nb :mass mass :inertia inertia :inv-mass im :inv-inertia iinv :vstar vstar
+       :nc nc :oa oa :ob ob :jac jac :rn rn :rt rt :vhat vhat :mu mu
+       :offset offset})))
+
+(defn- step-convex
+  "Every contact at once, by Newton's method on one convex problem
+  (`allgo.physics.convex`): solve the velocities, then move.
+
+  Everything around the solve is what the other solvers use -- collision
+  detection, the contact arrays, warm starting by contact id, sleeping
+  -- so this is one more `:solver` rather than a world of its own. Warm
+  started from last step's impulses when they make a better first guess
+  than none."
+  [{:keys [bodies gravity] :as w} dt]
+  (let [contacts (contact/all bodies (:broad w) dt)
+        bodies (rouse bodies contacts)
+        w (assoc w :bodies bodies)
+        arrays (body-arrays bodies)
+        _ (accelerate! arrays bodies gravity dt)
+        cs (prepare arrays contacts (:contacts w))
+        _ (record-approach! arrays cs)
+        problem (convex-problem w arrays cs dt)
+        nc (long (:nc problem))
+        ^doubles pn (:pn cs) ^doubles p1 (:p1 cs) ^doubles p2 (:p2 cs)
+        warm (let [g (a/f64 (* 3 nc))]
+               (dotimes [c nc]
+                 (aset g (* 3 c) (aget pn c))
+                 (aset g (+ (* 3 c) 1) (aget p1 c))
+                 (aset g (+ (* 3 c) 2) (aget p2 c)))
+               (convex/pushed problem g))
+        v0 (when (and (:warm-start? w) (< (convex/cost problem warm) (convex/cost problem (:vstar problem))))
+             warm)
+        {:keys [^doubles v ^doubles impulses]} (convex/solve problem v0 (select-keys w [:max-iterations]))
+        ^ints offset (:offset problem)
+        ^doubles vel (:vel arrays) ^doubles omega (:omega arrays)]
+    (dotimes [i (alength offset)]
+      (let [o (aget offset i)]
+        (when-not (neg? o)
+          (dotimes [k 3]
+            (aset vel (+ (* 3 i) k) (aget v (+ o k)))
+            (aset omega (+ (* 3 i) k) (aget v (+ o 3 k)))))))
+    (dotimes [c nc]
+      (aset pn c (aget impulses (* 3 c)))
+      (aset p1 c (aget impulses (+ (* 3 c) 1)))
+      (aset p2 c (aget impulses (+ (* 3 c) 2))))
+    (assoc w
+           :bodies (-> bodies (write-back arrays) (advance dt) (settle contacts dt w))
+           :contacts (contact-state cs))))
+
 (defn step
   "One step of the world, by whichever `:solver` it carries."
   ([w] (step w (/ 1.0 60.0)))
@@ -1655,6 +1816,7 @@
    (case (:solver w)
      :tgs (step-tgs w dt)
      :xpbd (step-xpbd w dt)
+     :convex (step-convex w dt)
      (step-sequential-impulse w dt))))
 
 (defn settled

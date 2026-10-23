@@ -242,3 +242,23 @@
         (let [cs (manifold t)]
           (is (= 4 (count cs)) (str "tilt " t))
           (is (not-any? #(= :edge (first (:id %))) cs) (str "tilt " t)))))))
+
+(deftest gap-face-test
+  ;; A box settling flat onto a floor much larger than itself, a few
+  ;; millimeters above it and inside the speculative margin. The edge
+  ;; axes there are the face's own normal over again, and the handicap
+  ;; that keeps a resting face from being taken for an edge pair, applied
+  ;; to a negative overlap, used to favor the edge: one point, on the
+  ;; floor's far side, seven meters from the box.
+  (let [floor (box [0.0 -0.5 0.0] [60.0 1.0 30.0])
+        ;; falling fast enough that the margin, which is as far as the
+        ;; bodies can travel in the step, reaches the floor
+        hovering (assoc (box [0.0 0.2333 0.0] [0.9 0.45 0.45]) :vel [0.0 -3.83 0.0])
+        cs (ct/all [floor hovering] nil (/ 1.0 60.0))]
+    (testing "four points under the box, named as a face's corners, each a gap"
+      (is (= 4 (count cs)))
+      (is (not-any? #(= :edge (first (:id %))) cs))
+      (is (every? #(neg? (double (:depth %))) cs))
+      (is (every? #(and (<= (abs (double (nth (:point %) 0))) 0.4501)
+                        (<= (abs (double (nth (:point %) 2))) 0.2251))
+                  cs)))))

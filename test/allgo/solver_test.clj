@@ -5,7 +5,7 @@
             [allgo.physics.solver :as s]
             [clojure.test :refer [deftest is testing]]))
 
-(def ^:private solvers [:sequential-impulse :tgs :xpbd])
+(def ^:private solvers [:sequential-impulse :tgs :xpbd :convex])
 (def ^:private dt (/ 1.0 60.0))
 
 (defn- floor [] (rigid/box {:pos [0.0 -0.5 0.0] :size [60.0 1.0 60.0]}))
@@ -384,3 +384,17 @@
       (let [w (nth (iterate #(s/step % dt) (column 11 {})) 600)]
         (is (every? rigid/sleeping? (dynamics w)))
         (is (< (abs (double (first (:pos (last (:bodies w)))))) 0.05))))))
+
+(deftest convex-column-test
+  (testing "every contact solved at once: forty courses of the bricks demo's column stand, with
+            nothing asleep to hold them -- TGS, the best of the other three, stands fourteen"
+    (let [w (s/settled
+             (s/world (into [(floor)]
+                            (for [r (range 40)]
+                              (rigid/box {:pos [0.0 (+ 0.225 (* 0.45 r)) 0.0] :size [0.9 0.45 0.45]
+                                          :density 1.6})))
+                      {:solver :convex :friction 0.55 :allow-sleep? false}))
+          w (nth (iterate #(s/step % dt) w) 1200)
+          [x _ z] (:pos (last (:bodies w)))]
+      (is (< (abs (double x)) 0.05))
+      (is (< (abs (double z)) 0.05)))))

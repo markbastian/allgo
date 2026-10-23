@@ -1,10 +1,11 @@
 (ns allgo.demo.bricks
   "Shoot a ball at a stack of bricks, with the solver switchable underneath.
 
-  The same scene, the same contacts, three different answers to what to
+  The same scene, the same contacts, four different answers to what to
   do about them -- which is the only honest way to compare
-  `:sequential-impulse`, `:tgs` and `:xpbd`, because each one's character
-  shows in how a *pile* behaves rather than in any single collision.
+  `:sequential-impulse`, `:tgs`, `:xpbd` and `:convex`, because each
+  one's character shows in how a *pile* behaves rather than in any single
+  collision.
 
   ## What to look for
 
@@ -123,6 +124,10 @@
   it now lasts about twice as long before leaning over, and is quiet
   enough to fall asleep first, which by the same test on the JVM is
   eleven courses standing.
+
+  `:convex` came later and is not in the table: it solves every contact
+  at once (`allgo.physics.convex`), and by the same test on the JVM a
+  column of forty stands with nothing asleep, where TGS stands fourteen.
 
   `start asleep`, on by default, is how a game gets past that. Every
   brick begins asleep and is not simulated until something awake
@@ -585,7 +590,7 @@
         (let [gui (GUI. #js {:container container})
               ^js scene-ctl (.add gui controls "scene" (clj->js scene-names))]
           (doto gui
-            (-> (.add controls "solver" #js ["sequential-impulse" "tgs" "xpbd"]))
+            (-> (.add controls "solver" #js ["sequential-impulse" "tgs" "xpbd" "convex"]))
             (-> (.add controls "iterations" 1 20 1))
             (-> (.add controls "substeps" 1 8 1))
             (-> (.add controls "friction" 0.0 1.2 0.05))

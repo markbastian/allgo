@@ -568,6 +568,67 @@ number the impulse solvers have always used, and `pushout-bound-test`
 holds it there. It still cannot stack past eight courses, and tall
 columns remain open work.
 
+**XPBD's normals turn with their faces now** (2026-10-23). It measured
+penetration each substep along the normal as detection found it, while
+a leaning column tilted the faces under it; measured across the face as
+it now stands, a column lasts about twice as long before it leans over
+and is quiet enough to fall asleep first -- eleven courses with
+sleeping on, seven before. Running collision detection every substep
+instead did less (nine) for four times the detection.
+
+## Every contact at once
+
+`allgo.physics.convex`, the fourth `:solver` (2026-10-23), and the
+first that is not Gauss-Seidel. The step's velocities minimize one
+convex function -- kinetic energy measured from where the bodies would
+go untouched, plus a term per contact whose gradient is its impulse,
+projected onto its friction cone in the norm of a small regularization
+-- which is Drake's SAP (Castro, Han and Permenter 2022) and the same
+shape as MuJoCo's solver (Todorov 2014). Newton's method finds it: each
+step one solve with `M + J' G J`, which couples every body to every
+other through the contacts, and a backtracking line search. On the
+bricks demo's column (0.9 x 0.45 x 0.45, friction 0.55, nothing asleep,
+20 s):
+
+    stands up to      sequential impulse  7    xpbd  9    tgs  14
+                      convex             40, and 50 falls at 2.7 s
+
+What it took, in the order it was found:
+
+- **Stiffness is the whole of it.** SAP's "near rigid" regularization,
+  `R = beta^2 w / 4 pi^2` with `beta` 1, stood twelve courses and lost
+  sixteen in two seconds. `beta` 0.1, with an overlap pushed out over one
+  step rather than two, stands forty. 0.03 is worse again, presumably
+  the Newton matrix's conditioning. The slop was suspected first and is
+  not it: none at all bought a few seconds, not courses.
+- **The Newton matrix is stored by its envelope.** Dense, a 16x16 wall
+  is 1,536 rows and 600 ms a step. Numbered by reverse Cuthill-McKee so
+  that bodies that touch sit near each other, and kept from each row's
+  first nonzero to the diagonal, it is a tenth of the dense size and a
+  column is a band. Then reflection -- arrays bound without hints -- was
+  most of what was left: 102 ms a step on the wall became 16, and a
+  forty course column 0.6 ms, under TGS's 1.5.
+- **A gap asks for nothing but itself.** A contact within the margin
+  asks only that the gap close no faster than the step allows; asking
+  for at least zero instead, as a missing condition on restitution did,
+  let a dropped box through the floor by six centimeters and threw it
+  back up at three meters a second.
+- **And it found a bug in `contact/box-box` the others had hidden.** A
+  box settling flat onto a much larger one, inside the margin, came back
+  as a single edge contact on the larger box's far edge: the 2% handicap
+  that keeps an edge pair from displacing a face multiplied a *negative*
+  overlap and so favored the edge. The impulse solvers correct the next
+  step and never showed it; the convex solve satisfied the bogus point
+  by spinning the box rather than stopping it. Scaled by 0.98 for a gap,
+  and `gap-face-test` holds it. TGS's column went from thirteen courses
+  to fourteen.
+
+On the 16x16 wall it steps in about 16 ms, against 6.4 / 13.8 / 12.8
+for sequential impulse / TGS / XPBD, and it passes every test in
+`solver-test` the other three do. What it does not have yet: joints or
+articulated bodies, which MuJoCo is built for and `allgo.physics.world`
+would want.
+
 ## Tried and not kept
 
 - **Manifold reduction to four points.** Standard practice — Box2D and

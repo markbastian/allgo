@@ -509,7 +509,13 @@
                   ;; solver, which is what tells it this is a gap.
                   (if-not (pos? (+ o margin))
                     [-1 0 0 0.0 0.0 0.0 0.0]
-                    (let [sc (if face? o (* o 1.02))
+                    (let [;; An edge pair is handicapped against a face: it has
+                          ;; to fit two percent better to be taken. Scaled the
+                          ;; other way for a gap, whose overlap is negative --
+                          ;; times 1.02 there made the edge the better fit, and a
+                          ;; box settling flat onto the floor within the margin
+                          ;; came back as one point on the floor's far edge.
+                          sc (cond face? o (pos? o) (* o 1.02) :else (* o 0.98))
                           fmin (if face? (min fmin o) fmin)
                           ;; What the candidate has to beat. A face of b
                           ;; takes over from a face of a only by the bias. An
