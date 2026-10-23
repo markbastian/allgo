@@ -22,8 +22,8 @@
   the same way, the planet's shadow across the rings behind it and the
   rings' across the hemisphere the Sun is not over. The Events folder jumps to the next or
   previous of any phenomenon `allgo.astro.almanac` knows -- phases,
-  eclipses, seasons, oppositions -- and looks at the body it concerns; a
-  Moon in the Earth's shadow goes copper. The readout says what an almanac
+  eclipses, seasons, oppositions, a moon's shadow on Jupiter -- and looks
+  at the body it concerns; a Moon in the Earth's shadow goes copper. The readout says what an almanac
   would of the body in focus: a planet's distance, phase, magnitude, size
   and elongation, the Sun's axis and Carrington rotation, the Moon's phase
   and libration, the equation of time; and, in the overview, the date in
@@ -581,6 +581,7 @@
     (#{:new-moon :first-quarter :full-moon :last-quarter :lunar-eclipse :perigee :apogee} event) :moon
     (#{:solar-eclipse :march-equinox :june-solstice :september-equinox :december-solstice
        :perihelion :aphelion} event) :earth
+    (#{:io-shadow :europa-shadow :ganymede-shadow :callisto-shadow} event) :jupiter
     :else (keyword (first (.split (name event) "-")))))
 
 (defn- norm [v] (math/sqrt (reduce + (map * v v))))
@@ -787,8 +788,9 @@
     (.appendChild container back)
     (doseq [[_ m] meshes] (.add scene m))
     (.add (bodies :saturn) rings)
-    (let [[r0 r1] (map #(/ % (rot/radius :saturn)) saturn-rings)]
-      (.set (.. (:shadow (systems :saturn)) -ringSpan -value) r0 r1))
+    (let [[r0 r1] (map #(/ % (rot/radius :saturn)) saturn-rings)
+          ^js u (:shadow (systems :saturn))]
+      (.set (.. u -ringSpan -value) r0 r1))
     (doseq [[_ {:keys [group]}] systems] (.add scene group))
     (.add scene sunlight)
     (.add scene ambient)
@@ -1134,7 +1136,8 @@
                       [x y z] ((:planet (ephemeris (:mjd @state))) :saturn)]
                   (.updateMatrixWorld pm true)
                   (.invert (.copy frame (.-matrixWorld pm)))
-                  (.copy (.. (:shadow (systems :saturn)) -planetFrame -value) frame)
+                  (let [^js u (:shadow (systems :saturn))]
+                    (.copy (.. u -planetFrame -value) frame))
                   (set! (.. ring-shadow -sunSize -value)
                         (/ (rot/radius :sun) (math/sqrt (+ (* x x) (* y y) (* z z)))))))
               (publish! []
@@ -1252,7 +1255,7 @@
           (-> (.add gui controls "daysPerSecond" 0 200 0.01) (.listen))
           (.add gui controls "moonZoom" 1 2000 1)
           (.add gui controls "showOrbits")
-          (-> (.add gui controls "showMoons") (.name "moons of Jupiter, Saturn"))
+          (-> (.add gui controls "showMoons") (.name "moons of Jupiter, Saturn") (.listen))
           (.add gui controls "showEcliptic")
           (-> (.add gui controls "showStars") (.name "stars"))
           (-> (.add gui controls "starLimit" 1.0 6.5 0.1) (.name "faintest star")
@@ -1269,6 +1272,9 @@
                             (swap! state assoc :mjd t)
                             (reset! details-cache nil)
                             (set! (.-running controls) false)
+                            ;; a moon's shadow is drawn only with the moons
+                            (when (= :jupiter (event-focus k))
+                              (set! (.-showMoons controls) true))
                             (rebuild-orbits!)
                             (let [b (event-focus k)]
                               (if (= (body-names b) (.-focus controls))

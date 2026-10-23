@@ -21,6 +21,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.elliptic :as elliptic]
             [allgo.astro.planet-orbits :as orbits]
+            [allgo.astro.rotation :as rot]
             [allgo.astro.solar :as solar]
             [allgo.astro.vsop87 :as vsop87]
             [allgo.numerics.linear :as lin]
@@ -429,3 +430,108 @@
                   W (/ delta (+ delta (/ B 2095.0)))]
               [(* x W) (* y W)]))
           (pop view) Rs perspective)))
+
+;; ------------------------------------------------------- shadow transits
+
+(def synodic-periods
+  "Each satellite's synodic period, days -- the time between conjunctions
+  with the Sun as seen from Jupiter, which is how often its shadow can
+  cross the planet: 360 degrees over the mean daily motions in
+  `positions-low-precision`."
+  {:io (/ 360.0 203.4058646) :europa (/ 360.0 101.2916335)
+   :ganymede (/ 360.0 50.234518) :callisto (/ 360.0 21.48798)})
+
+(defn sun-from-jupiter
+  "Unit vector from Jupiter toward the Sun at `mjd-tt`, EME2000,
+  geometric -- the same frame and the same instant as `positions-3d`."
+  [mjd-tt]
+  (let [[l b r] (vsop87/heliocentric :jupiter mjd-tt)
+        [x y z] (lin/mat-vec (vsop87/ecliptic-of-date->J2000 mjd-tt)
+                             [(* r (math/cos b) (math/cos l)) (* r (math/cos b) (math/sin l))
+                              (* r (math/sin b))])
+        n (math/sqrt (+ (* x x) (* y y) (* z z)))]
+    [(- (/ x n)) (- (/ y n)) (- (/ z n))]))
+
+(def ^:private index (zipmap names (range)))
+
+(defn- dot [a b] (reduce + (map * a b)))
+
+(defn- cross [[a b c] [d e f]]
+  [(- (* b f) (* c e)) (- (* c d) (* a f)) (- (* a e) (* b d))])
+
+(defn- geometry
+  "Where `moon`'s shadow is at `mjd-tt`: `:miss`, how far the line from
+  the moon away from the Sun passes from Jupiter's center, in a frame
+  stretched along the pole so the oblate planet is the unit sphere --
+  below 1 the shadow is on the disk -- and `:side`, the moon's offset
+  around the planet from the Sun's direction, which changes sign at each
+  conjunction and opposition. `:sunward?` tells the two apart."
+  [moon mjd-tt]
+  (let [m (nth (positions-3d mjd-tt) (index moon))
+        s (sun-from-jupiter mjd-tt)
+        pole (rot/pole :jupiter mjd-tt)
+        [a _ c] (:radii (rot/models :jupiter))
+        stretch (fn [v] (let [k (* (dot v pole) (- (/ a c) 1.0))]
+                          (mapv + v (map #(* k %) pole))))
+        p (stretch m)
+        d (let [d (stretch (mapv - s)) n (math/sqrt (dot d d))] (mapv #(/ % n) d))
+        t (- (dot p d))]
+    {:miss (math/sqrt (max 0.0 (- (dot p p) (* t t))))
+     :side (dot (cross s m) pole)
+     :sunward? (pos? (dot s m))}))
+
+(defn- root
+  "Where `f` changes sign between `a` and `b`, by bisection to about a
+  second."
+  [f a b]
+  (loop [a (double a) b (double b) fa (double (f a))]
+    (let [m (* 0.5 (+ a b))]
+      (if (< (abs (- b a)) 1e-5)
+        m
+        (let [fm (double (f m))]
+          (if (= (neg? fm) (neg? fa)) (recur m b fm) (recur a m fa)))))))
+
+(defn shadow-transit
+  "The first crossing of Jupiter by `moon`'s shadow whose middle comes
+  after `mjd-tt` -- or before it, with `direction` -1 -- as `{:moon
+  :ingress :egress :mid}`, MJD (TT); nil if there is none within
+  `years`, seven by default.
+
+  Geometric, as `positions-3d` is: the shadow as it falls on the planet
+  at that instant, not as the Earth sees it some forty minutes later.
+  That is the right time for a model and the wrong one for an eyepiece.
+  Ingress and egress are when the shadow's center crosses the limb.
+
+  Each shadow can fall on the planet only near the satellite's
+  conjunction with the Sun as seen from Jupiter, so those are found
+  first, stepping an eighth of a synodic period at a time, and only a
+  conjunction whose shadow passes within the disk is looked at closer.
+  Io, Europa and Ganymede transit at every conjunction; Callisto's
+  shadow misses the planet for years at a time, whenever Jupiter's
+  equinox is far enough off."
+  ([moon mjd-tt] (shadow-transit moon mjd-tt 1 7.0))
+  ([moon mjd-tt direction] (shadow-transit moon mjd-tt direction 7.0))
+  ([moon mjd-tt direction years]
+   (let [period (synodic-periods moon)
+         h (* direction (/ period 8.0))
+         limit (* years 365.25)
+         side #(:side (geometry moon %))
+         off #(- (:miss (geometry moon %)) 1.0)
+         ;; a margin, so that asking again from the middle of one finds
+         ;; the next and not the same one recomputed a second off
+         after? (if (pos? direction) #(> % (+ mjd-tt 1e-4)) #(< % (- mjd-tt 1e-4)))]
+     (loop [t (double mjd-tt) st (side mjd-tt)]
+       (when (< (abs (- t mjd-tt)) limit)
+         (let [t' (+ t h)
+               st' (side t')
+               found (when (not= (neg? st) (neg? st'))
+                       (let [t0 (root side t t')
+                             g (geometry moon t0)]
+                         (when (and (:sunward? g) (< (:miss g) 1.0))
+                           (let [q (/ period 8.0)
+                                 in (root off (- t0 q) t0)
+                                 out (root off t0 (+ t0 q))
+                                 mid (* 0.5 (+ in out))]
+                             (when (after? mid)
+                               {:moon moon :ingress in :egress out :mid mid})))))]
+           (or found (recur t' st'))))))))

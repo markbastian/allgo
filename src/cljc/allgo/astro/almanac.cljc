@@ -1,8 +1,9 @@
 (ns allgo.astro.almanac
   "The next or previous of each recurring event Meeus's chapters predict:
   lunar phases and eclipses, the seasons, the Moon's perigee and apogee,
-  the Earth's perihelion, and the planets' oppositions, conjunctions and
-  greatest elongations.
+  the Earth's perihelion, the planets' oppositions, conjunctions and
+  greatest elongations, and the Galilean satellites' shadows crossing
+  Jupiter.
 
   Each of those chapters answers a different question -- the event
   nearest a given year -- so this turns them into the one a calendar
@@ -13,6 +14,7 @@
 
   Times are MJD (TT)."
   (:require [allgo.astro.eclipse :as eclipse]
+            [allgo.astro.jupiter-moons :as jm]
             [allgo.astro.lunar-events :as lunar]
             [allgo.astro.phenomena :as phenomena]
             [allgo.astro.planet-orbits :as orbits]
@@ -25,7 +27,10 @@
 (def events
   "Each event: `:name`, `:period` in days (roughly -- only used to step
   from one to the next), and `:at`, which gives the MJD of the event
-  nearest a decimal year, or nil if there is none that lunation."
+  nearest a decimal year, or nil if there is none that lunation. An
+  event found by searching from a moment instead has `:find`, which takes
+  the MJD and a direction, 1 or -1, and gives the MJD of the next or
+  previous one."
   (array-map
    :new-moon      {:name "New Moon" :period synodic-month :at #(lunar/moon-phase % 0.0)}
    :first-quarter {:name "First quarter" :period synodic-month :at #(lunar/moon-phase % 0.25)}
@@ -60,9 +65,17 @@
    :uranus-opposition {:name "Uranus at opposition" :period 369.6560
                        :at #(phenomena/phenomenon :uranus-opposition %)}
    :neptune-opposition {:name "Neptune at opposition" :period 367.4867
-                        :at #(phenomena/phenomenon :neptune-opposition %)}))
+                        :at #(phenomena/phenomenon :neptune-opposition %)}
+   ;; The middle of each, geometric -- see `jupiter-moons/shadow-transit`.
+   :io-shadow {:name "Io's shadow on Jupiter" :period (jm/synodic-periods :io) :find #(:mid (jm/shadow-transit :io %1 %2))}
+   :europa-shadow {:name "Europa's shadow on Jupiter" :period (jm/synodic-periods :europa)
+                   :find #(:mid (jm/shadow-transit :europa %1 %2))}
+   :ganymede-shadow {:name "Ganymede's shadow on Jupiter" :period (jm/synodic-periods :ganymede)
+                     :find #(:mid (jm/shadow-transit :ganymede %1 %2))}
+   :callisto-shadow {:name "Callisto's shadow on Jupiter" :period (jm/synodic-periods :callisto)
+                     :find #(:mid (jm/shadow-transit :callisto %1 %2))}))
 
-(defn- step [event mjd direction]
+(defn- search [event mjd direction]
   (let [{:keys [at period sparse]} (events event)
         year (fn [t] (time/mjd->julian-epoch t))
         later? (if (pos? direction) #(> % (+ mjd 1e-4)) #(< % (- mjd 1e-4)))
@@ -73,6 +86,11 @@
           (if (and t (later? t))
             t
             (recur (+ y dy) (inc i))))))))
+
+(defn- step [event mjd direction]
+  (if-let [find (:find (events event))]
+    (find mjd direction)
+    (search event mjd direction)))
 
 (defn next-event
   "MJD of the first `event` (a key of `events`) after `mjd`."
