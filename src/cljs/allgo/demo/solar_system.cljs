@@ -789,7 +789,7 @@
         ;; the planet's shadow on them, and its moons'
         ring-shadow (shadowed! (.-material rings) {:planet? true})
         ;; and the Moon's on the Earth, from the true geometry
-        earth-eclipse (eclipsed! (.-material (meshes :earth)))
+        ^js earth-eclipse (eclipsed! (.-material (meshes :earth)))
         ;; The Sun is a point of light at the center, and since the radial
         ;; scale keeps every direction from the Sun true, it lights each
         ;; planet from the side it really does. (The Moon, pushed out from
