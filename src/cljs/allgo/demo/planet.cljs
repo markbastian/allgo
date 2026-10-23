@@ -24,7 +24,14 @@
     blue over the day side, red along the terminator, black at night --
     faded toward the rim by the length of the path a grazing ray takes.
     That is why the glow reddens where the sun is setting without anyone
-    having said that it should."
+    having said that it should.
+
+  The ground can come from somewhere else: **plates**, from
+  `allgo.procedural.tectonics`. Then the continents and ranges are where
+  plates meet rather than where a noise is high -- mountains along
+  colliding margins, rifts where continents part, trenches and island
+  arcs at sea -- with the boundaries drawn over the globe, red where the
+  plates converge, blue where they part, yellow where they slide past."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.tri-mesh :as tri-mesh]
             [allgo.procedural.atmosphere :as atmosphere]
@@ -32,6 +39,7 @@
             [allgo.procedural.fractal :as fractal]
             [allgo.procedural.noise :as noise]
             [allgo.procedural.planet :as planet]
+            [allgo.procedural.tectonics :as tectonics]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
@@ -608,14 +616,66 @@
       :H roughness
       :sample-spacing (:sample-spacing opts)})))
 
-(defn- build-world [{:keys [sea-level clouds sample-spacing] :as opts}]
-  (planet/planet {:radius (:radius config)
-                  :relief (:relief config)
-                  :sea-level (* sea-level (:relief config))
-                  :cloud-cover clouds
-                  :samples (:samples config)
-                  :sample-spacing sample-spacing
-                  :terrain (build-terrain opts)}))
+(defn- build-world
+  "The planet, its terrain from the fractal controls or, given `:plates`,
+  from that `allgo.procedural.tectonics` world."
+  [{:keys [sea-level clouds sample-spacing plates seed] :as opts}]
+  (let [pl (planet/planet {:radius (:radius config)
+                           :relief (:relief config)
+                           :sea-level (* sea-level (:relief config))
+                           :cloud-cover clouds
+                           :samples (:samples config)
+                           :sample-spacing sample-spacing
+                           :terrain (if plates
+                                      (tectonics/terrain plates {:seed seed
+                                                                 :sample-spacing sample-spacing})
+                                      (build-terrain opts))})]
+    (if plates
+      ;; The plates put the sea where their ground is zero, wherever the
+      ;; measured range puts that; the control moves it from there.
+      (assoc pl :sea-level (* (:relief pl) (+ (:terrain-shift pl) (* 0.5 sea-level))))
+      pl)))
+
+(def ^:private boundary-colors
+  "Linear, as everything going into the renderer is: its sRGB output
+  lifts a 0.35 to 0.63, which turns a red to a pink, so these are kept
+  near the primaries."
+  {:converging [1.0 0.02 0.0] :diverging [0.0 0.3 1.0] :transform [1.0 0.75 0.0]})
+
+(defn- plate-lines
+  "The plate boundaries as lines just above the highest ground, colored by
+  what each is doing: red where plates converge, blue where they part,
+  yellow where they slide past.
+
+  A boundary runs between cells, so it is drawn through the triangles
+  whose corners are on different plates: from the middle of each edge
+  that crosses it to the triangle's center, and so from triangle to
+  triangle."
+  [{:keys [points tris plate boundaries]} radius]
+  (let [kind (into {} (map (fn [{:keys [a b kind]}] [[a b] kind])) boundaries)
+        at (fn [v] (let [l (js/Math.sqrt (reduce + (map * v v)))] (mapv #(* radius (/ % l)) v)))
+        segments (for [[a b c] tris
+                       :let [mixed (filter (fn [[u w]] (not= (plate u) (plate w))) [[a b] [b c] [c a]])]
+                       :when (seq mixed)
+                       :let [g (at (map + (points a) (points b) (points c)))]
+                       [u w] mixed]
+                   [(at (map + (points u) (points w))) g
+                    (boundary-colors (kind [(min u w) (max u w)]) [1.0 1.0 1.0])])
+        n (count segments)
+        pos (js/Float32Array. (* 6 n))
+        col (js/Float32Array. (* 6 n))]
+    (doseq [[i [p q [r g b]]] (map-indexed vector segments)]
+      (doseq [[j [x y z]] [[0 p] [1 q]]]
+        (let [o (+ (* 6 i) (* 3 j))]
+          (aset pos o x) (aset pos (+ o 1) y) (aset pos (+ o 2) z)
+          (aset col o r) (aset col (+ o 1) g) (aset col (+ o 2) b))))
+    (THREE/LineSegments.
+     (doto (THREE/BufferGeometry.)
+       (.setAttribute "position" (THREE/BufferAttribute. pos 3))
+       (.setAttribute "color" (THREE/BufferAttribute. col 3)))
+     ;; not tone mapped: the filmic curve that keeps the sunlit ground
+     ;; from clipping would wash these out to white
+     (THREE/LineBasicMaterial. #js {:vertexColors true :toneMapped false}))))
 
 ;; ---------------------------------------------------------------------------
 ;; The scene
@@ -650,6 +710,10 @@
                           :clouds 0.4
                           :detail (:detail config)
                           :seed 1
+                          :source "fractal"
+                          :plates 14
+                          :continents 0.35
+                          :showPlates true
                           :showClouds true
                           :showAir true
                           :wireframe false
@@ -679,7 +743,7 @@
       (letfn [;; Variadic because lil-gui hands its handlers the new value,
               ;; and this is also called directly with none.
               (rebuild! [& _]
-                (doseq [k [:ground :cloud :air]]
+                (doseq [k [:ground :cloud :air :lines]]
                   (when-let [^js m (get @state k)]
                     (.remove group m)
                     (dispose! m)))
@@ -689,7 +753,20 @@
                       ;; generating, and to the geometry so it is not
                       ;; subdivided twice.
                       mesh (tri-mesh/geodesic detail)
-                      opts {:basis (.-basis controls)
+                      ;; the plates are kept between rebuilds that do not
+                      ;; change them: a sea level or a detail level is no
+                      ;; reason to grow them again
+                      plates (when (= "plates" (.-source controls))
+                               (let [k [(long (.-seed controls)) (long (.-plates controls))
+                                        (double (.-continents controls))]]
+                                 (if (= k (:plates-key @state))
+                                   (:plates @state)
+                                   (let [w (tectonics/plates {:seed (first k) :plates (second k)
+                                                              :continental (nth k 2)})]
+                                     (swap! state assoc :plates-key k :plates w)
+                                     w))))
+                      opts {:plates plates
+                            :basis (.-basis controls)
                             :construction (.-construction controls)
                             :octaves (double (.-octaves controls))
                             :lacunarity (double (.-lacunarity controls))
@@ -734,7 +811,11 @@
                   (.add group ground)
                   (.add group cloud)
                   (.add group air)
-                  (swap! state assoc :ground ground :cloud cloud :air air)))
+                  (let [lines (when plates
+                                (doto (plate-lines plates (* 1.002 (+ (:radius pl) (:relief pl))))
+                                  (-> .-visible (set! (.-showPlates controls)))))]
+                    (when lines (.add group lines))
+                    (swap! state assoc :ground ground :cloud cloud :air air :lines lines))))
               (on-resize []
                 ;; A hidden card measures 0x0, which would make the aspect NaN.
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
@@ -757,9 +838,21 @@
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (rebuild!)
         (let [gui (GUI. #js {:container container})
+              ;; Where the ground comes from: the fractal controls below,
+              ;; or plates whose meetings raise the ranges and sink the
+              ;; trenches. First, since it decides which folder matters.
+              _ (-> (.add gui controls "source" #js ["fractal" "plates"]) (.name "terrain from")
+                    (.onChange rebuild!))
+              plates-folder (.addFolder gui "plates")
               terrain-folder (.addFolder gui "terrain")
               world-folder (.addFolder gui "world")
               view-folder (.addFolder gui "view")]
+          (doto plates-folder
+            (-> (.add controls "plates" 4 30 1) (.onFinishChange rebuild!))
+            (-> (.add controls "continents" 0.1 0.8 0.01) (.name "continental crust")
+                (.onFinishChange rebuild!))
+            (-> (.add controls "showPlates") (.name "show boundaries")
+                (.onChange (fn [v] (when-let [^js l (:lines @state)] (set! (.-visible l) v))))))
           (doto terrain-folder
             (-> (.add controls "construction" (clj->js constructions)) (.onChange rebuild!))
             (-> (.add controls "basis" (clj->js (vec (keys basis-functions)))) (.onChange rebuild!))
