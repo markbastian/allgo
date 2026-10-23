@@ -363,6 +363,26 @@
     (aset out 2 (aget src (+ k3 2)))
     out))
 
+(defn- live-normal
+  "A function of a contact `k` and an `out` array, writing the normal of
+  that contact as the bodies now stand: turned with the body whose face
+  it is, or as detection found it for a contact with no face -- an edge
+  pair, a ball. With `:rotate?` off, always as detection found it.
+
+  Made once per pass, so the arrays are looked up once rather than per
+  contact: through the maps, every pass over the wall's 2,500 contacts
+  cost a quarter of the XPBD step."
+  [arrays cs]
+  (let [rotate? (boolean (:rotate? cs))
+        ^ints ref (:ref cs) ^ints a-arr (:a cs) ^ints b-arr (:b cs)
+        ^doubles normal (:normal cs) ^doubles nloc (:normal-local cs)
+        ^doubles rot (:rot arrays)]
+    (fn [^long k ^doubles out]
+      (let [side (if rotate? (aget ref k) 0)]
+        (if (zero? side)
+          (load3! normal k out)
+          (qrot! rot (if (= side 1) (aget a-arr k) (aget b-arr k)) (load3! nloc k out) out))))))
+
 ;; ---------------------------------------------------------------------------
 ;; The contacts' own arrays
 
@@ -414,6 +434,10 @@
         ra (a/f64 (* n 3)) rb (a/f64 (* n 3))
         ral (a/f64 (* n 3)) rbl (a/f64 (* n 3))
         pn (a/f64 n) p1 (a/f64 n) p2 (a/f64 n)
+        ;; Which body's face the normal belongs to -- 1 for a, 2 for b, 0
+        ;; for an edge pair or a ball, which have no face -- and the normal
+        ;; in that body's frame, so it can turn with the face.
+        ^ints ref-arr (a/i32 n) nloc (a/f64 (* n 3))
         t0 (a/f64 3) s0 (a/f64 3)]
     (dotimes [k n]
       (let [c (nth contacts k)
@@ -436,6 +460,15 @@
         (aset t2-arr k3 (double bx))
         (aset t2-arr (+ k3 1) (double by))
         (aset t2-arr (+ k3 2) (double bz))
+        (let [id (:id c)
+              side (if (and (vector? id) (boolean? (first id))) (if (first id) 2 1) 0)]
+          (aset ref-arr k (int side))
+          (when-not (zero? side)
+            (aset t0 0 (double nx)) (aset t0 1 (double ny)) (aset t0 2 (double nz))
+            (qrot! inv-rot (if (= side 1) ia ib) t0 s0)
+            (aset nloc k3 (aget s0 0))
+            (aset nloc (+ k3 1) (aget s0 1))
+            (aset nloc (+ k3 2) (aget s0 2))))
         (aset depth k (double (:depth c)))
         ;; The overlap as collision detection found it, kept so that
         ;; `refresh-anchors!` can add the drift to it rather than to a
@@ -486,6 +519,7 @@
      :depth depth :depth0 depth0
      :ra ra :rb rb :ra-local ral :rb-local rbl
      :pn pn :p1 p1 :p2 p2
+     :ref ref-arr :normal-local nloc
      ;; What the XPBD position solve had to push with to keep this contact
      ;; apart, summed over the last substep. Only that solver fills it,
      ;; and it is what bounds friction there.
@@ -1004,11 +1038,16 @@
   [arrays cs]
   (let [^doubles ra-arr (:ra cs) ^doubles rb-arr (:rb cs)
         ^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
-        ^doubles depth (:depth cs) ^doubles normal (:normal cs)
+        ^doubles depth (:depth cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)
         ^doubles depth0 (:depth0 cs)
         ^doubles pos (:pos arrays)
-        pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3)]
+        pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3) nl (a/f64 3)
+        ;; the fixed normal is read straight from its array, as it
+        ;; always was: TGS calls this twice a substep and has no use for
+        ;; the turning one
+        ^doubles nl-src (if (:rotate? cs) nl (:normal cs))
+        live-normal! (when (:rotate? cs) (live-normal arrays cs))]
     (dotimes [k (long (:n cs))]
       (let [ia (aget ia-arr k) ib (aget ib-arr k)
             _ (anchor! arrays ia (load3! ral k t0) pa)
@@ -1022,10 +1061,11 @@
         (aset rb-arr (+ k3 2) (- (aget pb 2) (aget pos (+ ib3 2))))
         ;; How far the two anchors have drifted along the normal since
         ;; the contact was found, added to the overlap it had then.
-        (aset depth k (+ (aget depth0 k)
-                         (* (- (aget pa 0) (aget pb 0)) (aget normal k3))
-                         (* (- (aget pa 1) (aget pb 1)) (aget normal (+ k3 1)))
-                         (* (- (aget pa 2) (aget pb 2)) (aget normal (+ k3 2)))))))))
+        (let [n3 (if live-normal! (do (live-normal! k nl) 0) k3)]
+          (aset depth k (+ (aget depth0 k)
+                           (* (- (aget pa 0) (aget pb 0)) (aget nl-src n3))
+                           (* (- (aget pa 1) (aget pb 1)) (aget nl-src (+ n3 1)))
+                           (* (- (aget pa 2) (aget pb 2)) (aget nl-src (+ n3 2))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Moving the bodies
@@ -1134,8 +1174,7 @@
   solving it harder -- more passes, more substeps -- made it worse, which
   is what says the trouble is the read-back and not convergence."
   [arrays cs slop max-push]
-  (let [^doubles normal (:normal cs)
-        ^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
+  (let [^doubles ral (:ra-local cs) ^doubles rbl (:rb-local cs)
         ^doubles depth0 (:depth0 cs)
         ^doubles lambda (:lambda cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)
@@ -1147,15 +1186,16 @@
         ;; Scratch, allocated once for the whole pass rather than per
         ;; contact. `pa` and `pb` have to survive the correction that
         ;; follows them; the rest are working room.
-        pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3) t1 (a/f64 3) t2 (a/f64 3)]
+        pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3) t1 (a/f64 3) t2 (a/f64 3) nl (a/f64 3)
+        live-normal! (live-normal arrays cs)]
     (dotimes [k (long (:n cs))]
       (let [ia (aget ia-arr k) ib (aget ib-arr k)
             ma (aget movable ia) mb (aget movable ib)]
         (when-not (and (zero? ma) (zero? mb))
           (let [_ (anchor! arrays ia (load3! ral k t0) pa)
                 _ (anchor! arrays ib (load3! rbl k t0) pb)
-                k3 (* k 3)
-                nx (aget normal k3) ny (aget normal (+ k3 1)) nz (aget normal (+ k3 2))
+                _ (live-normal! k nl)
+                nx (aget nl 0) ny (aget nl 1) nz (aget nl 2)
                 pen (+ (aget depth0 k)
                        (* (- (aget pa 0) (aget pb 0)) nx)
                        (* (- (aget pa 1) (aget pb 1)) ny)
@@ -1550,7 +1590,16 @@
         h (/ (double dt) substeps)
         contacts (contact/all bodies (:broad w) dt)
         bodies (rouse bodies contacts)
-        cs (prepare (body-arrays bodies) contacts (:contacts w))
+        ;; Each contact's normal turns with the face it belongs to as the
+        ;; substeps move the bodies, rather than staying as detection found
+        ;; it: a column leans, the faces it stands on lean with it, and the
+        ;; overlap is measured across the face as it is. A column lasts
+        ;; about twice as long before it leans over -- ten courses twelve
+        ;; seconds rather than six, with sleeping off -- and is quiet
+        ;; enough to fall asleep before it does, so with sleeping on eleven
+        ;; courses stand where seven did. TGS measures its bias the same
+        ;; way and stood no taller for it, so it keeps the fixed normal.
+        cs (assoc (prepare (body-arrays bodies) contacts (:contacts w)) :rotate? true)
         slop (double (:slop w))
         ;; The furthest a contact may push in one substep is bounded --
         ;; the impulse solvers have had this since they were written and

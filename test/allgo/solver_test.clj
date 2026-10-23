@@ -360,3 +360,27 @@
       (doseq [solver [:sequential-impulse :tgs]]
         (is (not (through? solver 20000))
             (str (name solver) " let a ball through at 20000 m/s"))))))
+
+(deftest xpbd-column-test
+  ;; The bricks demo's column: 0.9 by 0.45 by 0.45, gripping at 0.55,
+  ;; settled first as the demo settles it.
+  (let [column (fn [n opts]
+                 (s/settled
+                  (s/world (into [(floor)]
+                                 (for [r (range n)]
+                                   (rigid/box {:pos [0.0 (+ 0.225 (* 0.45 r)) 0.0] :size [0.9 0.45 0.45]
+                                               :density 1.6})))
+                           (merge {:solver :xpbd :friction 0.55} opts))))
+        upright-for (fn [w secs]
+                      (loop [w w i 0]
+                        (let [[x _ z] (:pos (last (:bodies w)))]
+                          (cond (or (> (abs x) 0.45) (> (abs z) 0.225)) (/ i 60.0)
+                                (>= i (* 60 secs)) secs
+                                :else (recur (s/step w dt) (inc i))))))]
+    (testing "measured across faces that turn with their bodies, ten courses lean over in no less
+              than ten seconds -- it was six, when the normal stayed as detection found it"
+      (is (<= 10.0 (upright-for (column 10 {:allow-sleep? false}) 20))))
+    (testing "and eleven are quiet enough to fall asleep before they lean, and stand"
+      (let [w (nth (iterate #(s/step % dt) (column 11 {})) 600)]
+        (is (every? rigid/sleeping? (dynamics w)))
+        (is (< (abs (double (first (:pos (last (:bodies w)))))) 0.05))))))

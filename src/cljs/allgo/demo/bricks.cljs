@@ -118,7 +118,11 @@
       xpbd                --   --   --   --   --  8.4  5.3  4.2
 
   So seven courses for sequential impulse, nine for XPBD and eleven for
-  TGS. Those are with `start asleep` off.
+  TGS. Those are with `start asleep` off. XPBD's row is from before its
+  contact normals turned with the faces they belong to (2026-10-23):
+  it now lasts about twice as long before leaning over, and is quiet
+  enough to fall asleep first, which by the same test on the JVM is
+  eleven courses standing.
 
   `start asleep`, on by default, is how a game gets past that. Every
   brick begins asleep and is not simulated until something awake
