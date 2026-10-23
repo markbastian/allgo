@@ -31,11 +31,16 @@
   plates meet rather than where a noise is high -- mountains along
   colliding margins, rifts where continents part, trenches and island
   arcs at sea -- with the boundaries drawn over the globe, red where the
-  plates converge, blue where they part, yellow where they slide past."
+  plates converge, blue where they part, yellow where they slide past.
+  And with plates comes a climate, from `allgo.procedural.climate`: the
+  lowlands colored by biome, rainforest on the windward coasts in the
+  trades, desert under the subtropical highs and in the lee of the
+  ranges."
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.tri-mesh :as tri-mesh]
             [allgo.procedural.atmosphere :as atmosphere]
             [allgo.procedural.cellular :as cellular]
+            [allgo.procedural.climate :as climate]
             [allgo.procedural.fractal :as fractal]
             [allgo.procedural.noise :as noise]
             [allgo.procedural.planet :as planet]
@@ -307,49 +312,66 @@
   Two attributes beyond position and normal: the elevation at the vertex
   and how steep the mesh is there. Both are scalars, both interpolate
   meaningfully across a triangle -- unlike a color, which does not --
-  and between them they are the whole input to the palette."
-  [pl {:keys [verts tri-ids]}]
-  (let [dirs (vertex-directions verts)
-        n (/ (count verts) 3)
-        positions (js/Float32Array. (* 3 n))
-        normals (js/Float32Array. (* 3 n))
-        elevations (js/Float32Array. n)
-        steepness (js/Float32Array. n)
-        index (index-array tri-ids)]
+  and between them they are the whole input to the palette.
+
+  A third, when there is a climate: `land-color`, a function of the
+  direction and the elevation there giving the biome's color, which the
+  shader lays over the palette's lowlands. A color it is, and it smears
+  across triangles as colors do -- but only on land, where a biome's edge
+  is a gradient anyway; the coast is still the palette's, drawn from the
+  elevation per pixel."
+  ([pl mesh] (ground-geometry pl mesh nil))
+  ([pl {:keys [verts tri-ids]} land-color]
+   (let [dirs (vertex-directions verts)
+         n (/ (count verts) 3)
+         positions (js/Float32Array. (* 3 n))
+         normals (js/Float32Array. (* 3 n))
+         lands (js/Float32Array. (* 3 n))
+         elevations (js/Float32Array. n)
+         steepness (js/Float32Array. n)
+         index (index-array tri-ids)]
     ;; The terrain is evaluated once per vertex and no more.
-    (dotimes [i n]
-      (let [b (* 3 i)
-            d [(aget dirs b) (aget dirs (+ b 1)) (aget dirs (+ b 2))]
-            h (planet/elevation pl d)
-            r (+ (:radius pl) (max (:sea-level pl) h))]
-        (aset elevations i h)
-        (aset positions b (* r (nth d 0)))
-        (aset positions (+ b 1) (* r (nth d 1)))
-        (aset positions (+ b 2) (* r (nth d 2)))))
-    (smooth-normals! positions index normals)
-    (dotimes [i n]
-      (let [b (* 3 i)
+     (dotimes [i n]
+       (let [b (* 3 i)
+             d [(aget dirs b) (aget dirs (+ b 1)) (aget dirs (+ b 2))]
+             h (planet/elevation pl d)
+             r (+ (:radius pl) (max (:sea-level pl) h))]
+         (aset elevations i h)
+         (aset positions b (* r (nth d 0)))
+         (aset positions (+ b 1) (* r (nth d 1)))
+         (aset positions (+ b 2) (* r (nth d 2)))
+         (when land-color
+           (let [[cr cg cb] (land-color d h)]
+             (aset lands b (srgb->linear cr))
+             (aset lands (+ b 1) (srgb->linear cg))
+             (aset lands (+ b 2) (srgb->linear cb))))))
+     (smooth-normals! positions index normals)
+     (dotimes [i n]
+       (let [b (* 3 i)
             ;; The angle between the mesh normal and straight up is the
             ;; slope, and the mesh knows both already -- so this costs
             ;; nothing, where asking the terrain would cost four more
             ;; evaluations and would answer about a surface finer than the
             ;; one being drawn.
-            c (min 1.0 (max -1.0 (+ (* (aget normals b) (aget dirs b))
-                                    (* (aget normals (+ b 1)) (aget dirs (+ b 1)))
-                                    (* (aget normals (+ b 2)) (aget dirs (+ b 2))))))]
-        (aset steepness i (/ (js/Math.acos c) (* 0.5 js/Math.PI)))))
-    (doto (THREE/BufferGeometry.)
-      (.setAttribute "position" (THREE/BufferAttribute. positions 3))
-      (.setAttribute "normal" (THREE/BufferAttribute. normals 3))
-      (.setAttribute "aElev" (THREE/BufferAttribute. elevations 1))
-      (.setAttribute "aSteep" (THREE/BufferAttribute. steepness 1))
-      (.setIndex (THREE/BufferAttribute. index 1)))))
+             c (min 1.0 (max -1.0 (+ (* (aget normals b) (aget dirs b))
+                                     (* (aget normals (+ b 1)) (aget dirs (+ b 1)))
+                                     (* (aget normals (+ b 2)) (aget dirs (+ b 2))))))]
+         (aset steepness i (/ (js/Math.acos c) (* 0.5 js/Math.PI)))))
+     (doto (THREE/BufferGeometry.)
+       (.setAttribute "position" (THREE/BufferAttribute. positions 3))
+       (.setAttribute "normal" (THREE/BufferAttribute. normals 3))
+       (.setAttribute "aElev" (THREE/BufferAttribute. elevations 1))
+       (.setAttribute "aSteep" (THREE/BufferAttribute. steepness 1))
+       (.setAttribute "aLand" (THREE/BufferAttribute. lands 3))
+       (.setIndex (THREE/BufferAttribute. index 1))))))
 
 (def ^:private ground-vertex-shader
   "attribute float aElev;
    attribute float aSteep;
+   attribute vec3 aLand;
    varying float vElev;
    varying float vSteep;
+   varying vec3 vLand;
    varying vec3 vNormal;
    varying vec3 vWorld;
    varying vec3 vObject;
@@ -357,6 +379,7 @@
    void main() {
      vElev = aElev;
      vSteep = aSteep;
+     vLand = aLand;
      // Both spaces, because they are wanted for different things. World
      // space is where the light is and where the screen-space derivatives
      // have to be resolved; object space is where the planet is, and
@@ -389,8 +412,10 @@
    uniform float uSnowLine;
    uniform float uPoleEffect;
    uniform float uSteepLimit;
+   uniform float uLandMix;
    varying float vElev;
    varying float vSteep;
+   varying vec3 vLand;
    varying vec3 vNormal;
    varying vec3 vWorld;
    varying vec3 vObject;
@@ -444,12 +469,18 @@
      vec2 uv = vec2(clamp((vElev + uRelief) / (2.0 * uRelief), 0.0, 1.0),
                     clamp(vSteep, 0.0, 1.0));
      vec3 base = texture2D(uPalette, uv).rgb;
+     float t = clamp((vElev - uSeaLevel) / max(1e-9, uRelief - uSeaLevel), 0.0, 1.0);
+
+     // A climate's biome over the lowlands and the middle heights, giving
+     // way to the palette's rock where the ground is high or steep.
+     base = mix(base, vLand, uLandMix * land
+                             * (1.0 - smoothstep(0.35, 0.7, t))
+                             * (1.0 - smoothstep(0.36, 0.6, vSteep)));
 
      // Snow: the line comes down toward the poles, and will not lie on
      // anything too steep to hold it.
      float lat = abs(asin(clamp(up.y, -1.0, 1.0))) / 1.5707963;
      float line = max(0.0, uSnowLine - uPoleEffect * lat);
-     float t = clamp((vElev - uSeaLevel) / max(1e-9, uRelief - uSeaLevel), 0.0, 1.0);
      float snowy = smoothstep(line, line + 0.12, t)
                  * (1.0 - smoothstep(0.8 * uSteepLimit, uSteepLimit, vSteep))
                  * step(uSeaLevel, vElev);
@@ -465,7 +496,7 @@
      #include <encodings_fragment>
    }")
 
-(defn- ground-material [pl sun]
+(defn- ground-material [pl sun climate?]
   (let [{:keys [snow-line steep pole-effect]} (:palette-opts config)
         [sr sg sb] (mapv srgb->linear (:snow planet/terran))
         [ar ag ab] (:ambient config)
@@ -488,7 +519,8 @@
                :uSeaLevel #js {:value (:sea-level pl)}
                :uSnowLine #js {:value snow-line}
                :uPoleEffect #js {:value pole-effect}
-               :uSteepLimit #js {:value steep}}
+               :uSteepLimit #js {:value steep}
+               :uLandMix #js {:value (if climate? 1.0 0.0)}}
           :vertexShader ground-vertex-shader
           :fragmentShader ground-fragment-shader
           ;; dFdx/dFdy are an extension under GLSL ES 1.00.
@@ -636,6 +668,32 @@
       (assoc pl :sea-level (* (:relief pl) (+ (:terrain-shift pl) (* 0.5 sea-level))))
       pl)))
 
+(defn- plate-units
+  "The plates' own elevation units for a planet elevation `h`: the inverse
+  of the normalization `planet/planet` applied to their terrain."
+  [pl h]
+  (/ (- (/ h (:relief pl)) (:terrain-shift pl)) (:terrain-scale pl)))
+
+(defn- land-color
+  "A function of a direction and the planet's elevation there giving the
+  color of the biome, from `clim` over the `plates` world.
+
+  Rain comes across from the cells, interpolated; temperature is worked
+  out again at the vertex's own height, so that the detail the terrain
+  adds above the cells' -- a peak the cells average away -- is as cold
+  as it is high."
+  [pl plates clim]
+  (let [locate (tectonics/locator plates)
+        sea (plate-units pl (:sea-level pl))
+        {:keys [rain lake?]} clim]
+    (fn [d h]
+      (let [[[i j k] [wi wj wk]] (locate d)
+            r (+ (* wi (rain i)) (* wj (rain j)) (* wk (rain k)))
+            nearest (nth [i j k] (apply max-key #(nth [wi wj wk] %) [0 1 2]))
+            t (climate/temperature (climate/latitude d)
+                                   (* (:km-per-unit climate/defaults) (- (plate-units pl h) sea)))]
+        (climate/biome-colors (if (lake? nearest) :lake (climate/biome t r)))))))
+
 (def ^:private boundary-colors
   "Linear, as everything going into the renderer is: its sRGB output
   lifts a 0.35 to 0.63, which turns a red to a pink, so these are kept
@@ -714,6 +772,7 @@
                           :plates 14
                           :continents 0.35
                           :showPlates true
+                          :climate true
                           :showClouds true
                           :showAir true
                           :wireframe false
@@ -777,9 +836,14 @@
                             :clouds (double (.-clouds controls))
                             :sample-spacing (tri-mesh/mean-edge-length mesh)}
                       pl (build-world opts)
+                      ;; The plates' climate, worked out at this sea level:
+                      ;; raise the sea and the coasts, and so the rain,
+                      ;; move with it.
+                      clim (when (and plates (.-climate controls))
+                             (climate/climate plates {:sea-level (plate-units pl (:sea-level pl))}))
                       ground (THREE/Mesh.
-                              (ground-geometry pl mesh)
-                              (let [m (ground-material pl sun)]
+                              (ground-geometry pl mesh (when clim (land-color pl plates clim)))
+                              (let [m (ground-material pl sun (some? clim))]
                                 (set! (.-wireframe m) (.-wireframe controls))
                                 m))
                       cloud (THREE/Mesh.
@@ -851,6 +915,7 @@
             (-> (.add controls "plates" 4 30 1) (.onFinishChange rebuild!))
             (-> (.add controls "continents" 0.1 0.8 0.01) (.name "continental crust")
                 (.onFinishChange rebuild!))
+            (-> (.add controls "climate") (.name "climate") (.onChange rebuild!))
             (-> (.add controls "showPlates") (.name "show boundaries")
                 (.onChange (fn [v] (when-let [^js l (:lines @state)] (set! (.-visible l) v))))))
           (doto terrain-folder
