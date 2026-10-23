@@ -47,7 +47,13 @@
 
   It is a sequential impulse solver and only that. There is no
   substepping and no XPBD; contacts are rigid with a Baumgarte push
-  unless `:soft?` asks for springs. Bodies and models sleep, by islands,
+  unless `:soft?` asks for springs. `:solver :convex` instead solves
+  every contact, pin and joint limit at once by Newton's method
+  (`allgo.physics.convex`, `solve-convex!`): a column of thirty cubes
+  stands where the sequential impulse holds six. It is not the default:
+  the motorcycle was tuned under the sequential impulse, and its tires,
+  gripping as nearly rigidly as the convex solve makes them, keep a
+  riderless bike upright that the rider tests expect to fall. Bodies and models sleep, by islands,
   as `allgo.physics.solver`'s do (see Sleeping, below). `allgo.physics.solver`
   has all of those and is still the thing to reach for when the scene is
   only bricks; this one is for a scene that mixes kinds, and it says so
@@ -78,6 +84,7 @@
             [allgo.math :as am]
             [allgo.physics.articulated :as ab]
             [allgo.physics.contact :as contact]
+            [allgo.physics.convex :as convex]
             [allgo.physics.rigid :as rigid]
             [clojure.math :as math]))
 
@@ -646,6 +653,163 @@
                  (range np))}))
 
 ;; ---------------------------------------------------------------------------
+;; Every constraint at once
+
+(defn- rigid-block
+  "A loose body's six numbers: its mass and inverse as dense 6x6s, the
+  world inertia beside `m I`."
+  [{:keys [inv-mass inv-inertia rot]}]
+  (let [[[m00 m01 m02] [m10 m11 m12] [m20 m21 m22]] (q/to-matrix rot)
+        r [[m00 m01 m02] [m10 m11 m12] [m20 m21 m22]]
+        world (fn [diag] (vec (for [i (range 3) j (range 3)]
+                                (reduce + (map (fn [k] (* (double (get-in r [i k])) (double (nth diag k))
+                                                          (double (get-in r [j k]))))
+                                               (range 3))))))
+        im (double inv-mass)
+        inertia (world (mapv #(/ 1.0 (double %)) inv-inertia))
+        inverse (world (vec inv-inertia))
+        six (fn [lin ang] (vec (for [i (range 6) j (range 6)]
+                                 (cond (and (< i 3) (< j 3)) (if (= i j) lin 0.0)
+                                       (and (>= i 3) (>= j 3)) (nth ang (+ (* 3 (- i 3)) (- j 3)))
+                                       :else 0.0))))]
+    [(six (/ 1.0 im) inertia) (six im inverse)]))
+
+(defn- side-row
+  "What the body on a prepared side is, as a block, and its stretch of a
+  row: a loose body's direction and lever arm crossed with it, a model's
+  generalized force -- nil for anything that does not move."
+  [side]
+  (case (:kind side)
+    :static nil
+    :rigid (let [[rx ry rz] (:r side) [dx dy dz] (:dir side)]
+             [[:rigid (:i side)]
+              [dx dy dz (- (* ry dz) (* rz dy)) (- (* rz dx) (* rx dz)) (- (* rx dy) (* ry dx))]])
+    (:link :pair) [[:model (:mi side)] (vec (:force side))]))
+
+(defn- solve-convex!
+  "`solve!`'s job, by `allgo.physics.convex`: every contact, pin and joint
+  limit in the scene as one convex problem, solved by Newton's method --
+  what MuJoCo does, and what lets a column stand as tall as it should.
+
+  The blocks are whatever the rows touch that is awake: a loose body's
+  six numbers, or a model's whole generalized velocity with its mass
+  matrix, the inverse of `articulated/inverse-mass-matrix`. Contacts are
+  regularized and asked to push out an overlap as `allgo.physics.solver`'s
+  convex solver asks; a joint limit is a one-sided row asking for its
+  bias, a pin three two-sided ones. Writes the velocities back into
+  `vel`, `omega` and `us`, and returns what each contact and pin carried,
+  as `solve!` does."
+  [w configs cs prepared limits pins ^doubles vel ^doubles omega us dt warm pin-warm]
+  (let [dt (double dt)
+        {:keys [bodies models friction restitution max-push-speed]} w
+        beta (double (or (:convex-beta w) 0.1))
+        tau (double (or (:convex-tau w) 1.0))
+        e (double restitution)
+        ;; Its own slop, and a small one. The slop is there to keep an
+        ;; impulse solver from chasing an overlap that rounding puts back,
+        ;; which this does not do; and a very stiff contact still gives a
+        ;; little under load each step, so every contact in a stack ends
+        ;; up the whole slop deep -- five millimeters a course, and a
+        ;; column of thirty fifteen centimeters short, at the slop the
+        ;; impulse solve wants.
+        slop (double (or (:convex-slop w) 0.001))
+        regularize (fn [wn] (/ (* beta beta (max (double wn) 1e-9)) (* 4.0 math/PI math/PI)))
+        ;; blocks, made as the rows reach them
+        blocks (volatile! {})
+        builder (volatile! (convex/builder))
+        block! (fn [key]
+                 (if-let [i (get @blocks key)]
+                   i
+                   (let [[kind i] key
+                         [n mass minv vstar]
+                         (case kind
+                           :rigid (let [b (nth bodies i)]
+                                    (when-not (rigid/inert? b)
+                                      (let [[m mi] (rigid-block b) i3 (* 3 (long i))]
+                                        [6 m mi (into (mapv #(aget vel (+ i3 %)) (range 3))
+                                                      (mapv #(aget omega (+ i3 %)) (range 3)))])))
+                           :model (let [{:keys [model pose sleeping?]} (nth models i)]
+                                    (when-not sleeping?
+                                      (let [minv (vec (apply concat (ab/inverse-mass-matrix model (:q pose) (:ls (nth configs i)))))
+                                            ^doubles u (nth us i)
+                                            n (alength u)]
+                                        [n (vec (convex/spd-inverse minv n)) minv (vec u)]))))]
+                     (if-not n
+                       (do (vswap! blocks assoc key -1) -1)
+                       (let [[b' idx] (convex/add-block @builder n mass minv vstar)]
+                         (vreset! builder b')
+                         (vswap! blocks assoc key idx)
+                         idx)))))
+        ;; a prepared row as `[ka kb against-a against-b]`, the second side
+        ;; pushed the other way
+        row-of (fn [row]
+                 (if-let [p (:pair row)]
+                   (let [[key s] (side-row p)] [(block! key) -1 s nil])
+                   (let [[ka sa] (side-row (:a row)) [kb sb] (side-row (:b row))
+                         ia (if ka (block! ka) -1) ib (if kb (block! kb) -1)]
+                     [ia ib (when (>= (long ia) 0) sa) (when (>= (long ib) 0) (mapv - sb))])))
+        add! (fn [kind rows rn rt vhat mu]
+               (let [[ka kb] (first rows)]
+                 (vswap! builder convex/add-constraint kind ka kb
+                         (mapv (fn [[_ _ sa sb]] [sa sb]) rows) rn rt vhat mu)))
+        live? (fn [[ka kb]] (or (>= (long ka) 0) (>= (long kb) 0)))
+        ;; contacts, then limits, then pins' axes: each constraint's place,
+        ;; or nil for one with nothing awake on either side
+        contact-at (vec (for [[c row] (map vector cs prepared)]
+                          (let [rows (mapv row-of (:dirs row))
+                                normal (nth (:dirs row) 0)]
+                            (when (live? (first rows))
+                              (let [wn (double (:w normal))
+                                    over (- (double (:depth c)) slop)
+                                    push (if (pos? over) (min (double max-push-speed) (/ over (* tau dt))) (/ over dt))
+                                    va (double (speed-of normal vel omega us))
+                                    vhat (if (and (pos? e) (< va -0.5)) (max push (* (- e) va)) push)]
+                                (add! convex/contact rows (regularize wn) (* 1e-3 (max wn 1e-9)) vhat friction)
+                                (dec (count (:kind @builder))))))))
+        _ (doseq [{:keys [mi g m bias]} limits]
+            (let [row [(block! [:model mi]) -1 (vec g) nil]]
+              (when (live? row)
+                (add! convex/unilateral [row] (regularize (if (pos? (double m)) (/ 1.0 (double m)) 0.0)) 0.0 bias 0.0))))
+        pin-at (vec (for [{:keys [rows bias]} pins]
+                      (vec (for [r (range 3)]
+                             (let [row (nth rows r) built (row-of row)]
+                               (when (and (live? built) (> (double (:w row)) 1e-12))
+                                 (add! convex/bilateral [built] (regularize (:w row)) 0.0 (nth bias r) 0.0)
+                                 (dec (count (:kind @builder)))))))))
+        problem (convex/build @builder)
+        nk (long (:nk problem))
+        ;; last step's impulses, for the warm start
+        last-impulses (let [g (a/f64 (* 3 nk))]
+                        (doseq [[k was] (map vector contact-at warm) :when (and k was)]
+                          (dotimes [t 3] (aset g (+ (* 3 (long k)) t) (double (nth was t)))))
+                        (doseq [[ks was] (map vector pin-at pin-warm) :when was
+                                [r k] (map-indexed vector ks) :when k]
+                          (aset g (* 3 (long k)) (double (nth was r))))
+                        g)
+        warm-v (convex/pushed problem last-impulses)
+        v0 (when (and (:warm-start? w) (< (double (convex/cost problem warm-v))
+                                          (double (convex/cost problem (:vstar problem)))))
+             warm-v)
+        {:keys [^doubles v ^doubles impulses]} (convex/solve problem v0)
+        ^ints boff (:boff problem)]
+    ;; the velocities back where the rest of the step reads them
+    (doseq [[[kind i] b] @blocks :when (>= (long b) 0)]
+      (let [o (aget boff b)]
+        (case kind
+          :rigid (let [i3 (* 3 (long i))]
+                   (dotimes [k 3]
+                     (aset vel (+ i3 k) (aget v (+ o k)))
+                     (aset omega (+ i3 k) (aget v (+ o 3 k)))))
+          :model (let [^doubles u (nth us i)]
+                   (dotimes [k (alength u)] (aset u k (aget v (+ o k))))))))
+    {:contacts (mapv (fn [k] (if k
+                               (let [k3 (* 3 (long k))]
+                                 [(aget impulses k3) (aget impulses (+ k3 1)) (aget impulses (+ k3 2))])
+                               [0.0 0.0 0.0]))
+                     contact-at)
+     :pins (mapv (fn [ks] (mapv (fn [k] (if k (aget impulses (* 3 (long k))) 0.0)) ks)) pin-at)}))
+
+;; ---------------------------------------------------------------------------
 ;; A step
 
 (defn- contact-keys
@@ -910,15 +1074,17 @@
         ks (contact-keys cs)
         remembered (:contact-impulses w)
         solved (if (or (seq cs) (seq limits) (seq pins))
-                 (solve! (let [opts (cond-> w (:soft? w) (assoc :softness (softness w dt)))]
-                           (mapv #(prepare w configs % dt opts) cs))
-                         limits pins vel omega us w
-                         (if warm?
-                           (if-let [reach (:recall-reach w)]
-                             (recall cs ks remembered (:contact-points w) reach)
-                             (mapv #(get remembered %) ks))
-                           (mapv (constantly nil) ks))
-                         (mapv #(when warm? (:impulse %)) (:pins w)))
+                 (let [prepared (let [opts (cond-> w (:soft? w) (assoc :softness (softness w dt)))]
+                                  (mapv #(prepare w configs % dt opts) cs))
+                       warm (if warm?
+                              (if-let [reach (:recall-reach w)]
+                                (recall cs ks remembered (:contact-points w) reach)
+                                (mapv #(get remembered %) ks))
+                              (mapv (constantly nil) ks))
+                       pin-warm (mapv #(when warm? (:impulse %)) (:pins w))]
+                   (if (= :convex (:solver w))
+                     (solve-convex! w configs cs prepared limits pins vel omega us dt warm pin-warm)
+                     (solve! prepared limits pins vel omega us w warm pin-warm)))
                  {:contacts [] :pins []})
         carried (mapv (fn [[x y z]]
                         (math/sqrt (+ (* (double x) (double x)) (* (double y) (double y))

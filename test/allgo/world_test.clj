@@ -395,3 +395,19 @@
           b (second (:bodies s))]
       (is (and (:sleeping? m) (rigid/sleeping? b)))
       (is (= (:island m) (:island b))))))
+
+(deftest convex-test
+  (testing "every constraint at once: a column of thirty cubes stands, a millimeter a cube shorter,
+            where the sequential impulse holds six"
+    (let [s (run (w/world (into [floor] (for [r (range 30)] (brick [0.0 (+ 0.125 (* 0.25 r)) 0.0])))
+                          [] {:gravity g :solver :convex :allow-sleep? false})
+                 600 (/ 1.0 60.0))
+          top (last (:bodies s))
+          [x y z] (:pos top)]
+      (is (< (Math/hypot x z) 0.01))
+      (is (< (- (+ 0.125 (* 0.25 29)) (double y)) 0.04))))
+  (testing "and the pins, joint limits and models touching do under it what they do under the sequential impulse"
+    (with-redefs [w/defaults (assoc w/defaults :solver :convex)]
+      (doseq [t [#'pin-to-the-world-test #'pin-between-models-test #'pin-breaks-test
+                 #'limits-in-a-world-test #'contact-kinds-test #'model-alone-test #'sleeping-test]]
+        ((:test (meta t)))))))

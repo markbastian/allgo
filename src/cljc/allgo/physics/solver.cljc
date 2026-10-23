@@ -1720,7 +1720,9 @@
               pa (aget offset ia) pb (aget offset ib)
               rax (aget ra c3) ray (aget ra (+ c3 1)) raz (aget ra (+ c3 2))
               rbx (aget rb c3) rby (aget rb (+ c3 1)) rbz (aget rb (+ c3 2))]
-          (aset oa c (int pa)) (aset ob c (int pb))
+          ;; by block: a body's six numbers start at six times its block
+          (aset oa c (int (if (neg? pa) -1 (quot pa 6))))
+          (aset ob c (int (if (neg? pb) -1 (quot pb 6))))
           ;; Normal, then the two tangents. A row is the direction and the
           ;; lever arm crossed with it, for each body: a is pushed along -d
           ;; and b along +d.
@@ -1760,9 +1762,30 @@
             (aset rt c (* 1e-3 wn))
             (aset vhat c (if bounce (max push (double bounce)) push))
             (aset mu c friction))))
-      {:nb nb :mass mass :inertia inertia :inv-mass im :inv-inertia iinv :vstar vstar
-       :nc nc :oa oa :ob ob :jac jac :rn rn :rt rt :vhat vhat :mu mu
-       :offset offset})))
+      ;; Each body a block of six, its mass matrix diag(m m m) beside its
+      ;; world inertia, and each contact three rows of twelve, laid out as
+      ;; `allgo.physics.convex` reads them.
+      (let [^doubles bm (a/f64 (* 36 nb)) ^doubles bminv (a/f64 (* 36 nb))
+            ^ints krow (a/i32 nc) ^ints kind (a/i32 nc)
+            ^ints va (a/i32 (* 3 nc)) ^ints vb (a/i32 (* 3 nc))]
+        (dotimes [b nb]
+          (let [m36 (* 36 b) b9 (* 9 b)]
+            (dotimes [r 3]
+              (aset bm (+ m36 (* 7 r)) (aget mass b))
+              (aset bminv (+ m36 (* 7 r)) (aget im b))
+              (dotimes [s 3]
+                (aset bm (+ m36 (* 6 (+ 3 r)) 3 s) (aget inertia (+ b9 (* 3 r) s)))
+                (aset bminv (+ m36 (* 6 (+ 3 r)) 3 s) (aget iinv (+ b9 (* 3 r) s)))))))
+        (dotimes [c nc]
+          (aset krow c (int (* 3 c)))
+          (dotimes [k 3]
+            (aset va (+ (* 3 c) k) (int (* 12 (+ (* 3 c) k))))
+            (aset vb (+ (* 3 c) k) (int (+ 6 (* 12 (+ (* 3 c) k)))))))
+        {:nb nb :nd (* 6 nb) :bsize (a/i32 (repeat nb 6)) :boff (a/i32 (map #(* 6 %) (range nb)))
+         :moff (a/i32 (map #(* 36 %) (range nb))) :mass bm :minv bminv :vstar vstar
+         :nk nc :nr (* 3 nc) :kind kind :krow krow :ka oa :kb ob :va va :vb vb :vals jac
+         :rn rn :rt rt :vhat vhat :mu mu
+         :offset offset}))))
 
 (defn- step-convex
   "Every contact at once, by Newton's method on one convex problem
@@ -1782,7 +1805,7 @@
         cs (prepare arrays contacts (:contacts w))
         _ (record-approach! arrays cs)
         problem (convex-problem w arrays cs dt)
-        nc (long (:nc problem))
+        nc (long (:nk problem))
         ^doubles pn (:pn cs) ^doubles p1 (:p1 cs) ^doubles p2 (:p2 cs)
         warm (let [g (a/f64 (* 3 nc))]
                (dotimes [c nc]

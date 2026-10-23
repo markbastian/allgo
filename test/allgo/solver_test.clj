@@ -398,3 +398,17 @@
           [x _ z] (:pos (last (:bodies w)))]
       (is (< (abs (double x)) 0.05))
       (is (< (abs (double z)) 0.05)))))
+
+(deftest convex-jenga-test
+  (testing "a twelve level Jenga tower under the convex solver is asleep within a second, nothing moved"
+    (let [[bl bh bw] [1.2 0.24 0.4]
+          bodies (into [(floor)]
+                       (for [l (range 12) i [-1 0 1]
+                             :let [o (* i bw) y (+ (* 0.5 bh) (* l bh))]]
+                         (rigid/box (if (odd? l)
+                                      {:pos [o y 0.0] :size [bw bh bl] :density 1.6}
+                                      {:pos [0.0 y o] :size [bl bh bw] :density 1.6}))))
+          w0 (s/settled (s/world bodies {:solver :convex :friction 0.55}))
+          w (nth (iterate #(s/step % dt) w0) 60)]
+      (is (every? rigid/sleeping? (dynamics w)))
+      (is (every? (fn [[a b]] (< (v/distance (:pos a) (:pos b)) 0.01)) (map vector (dynamics w) (dynamics w0)))))))

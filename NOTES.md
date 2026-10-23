@@ -625,9 +625,68 @@ What it took, in the order it was found:
 
 On the 16x16 wall it steps in about 16 ms, against 6.4 / 13.8 / 12.8
 for sequential impulse / TGS / XPBD, and it passes every test in
-`solver-test` the other three do. What it does not have yet: joints or
-articulated bodies, which MuJoCo is built for and `allgo.physics.world`
-would want.
+`solver-test` the other three do.
+
+Its two numbers were chosen on columns, so they were then tried on
+everything else the bricks demo asks (JVM, settled first, friction
+0.55):
+
+                               sequential   tgs     xpbd    convex
+    jenga, 12 levels:
+      all asleep at                never    4.8 s   never   0.5 s
+      sleeping off, mean speed     0.031    0.000   0.008   0.000
+      blocks moved over 5 cm          21        0      31       0
+    keep 6 + rampart 3, 60 s:
+      blocks moved                     2        2       2       2
+      all asleep at                2.2 s    2.6 s   7.0 s   2.8 s
+    16x16 wall, sleeping off, 20 s:
+      bricks moved over 5 cm         191      211     256       1
+    a ball at 26 m/s into a 5x4 wall:
+      most energy at any step   all at most the shot's own 97.3 J
+      fastest brick (m/s)            5.4      6.3     6.3     8.1
+    rebound off the floor, asked 0 / 0.5 / 0.9:
+                                0/.51/.93 0/.48/.88 0/.49/.90 0/.51/.93
+    a ball rolling at 2 m/s, after 2 s:
+                                   1.99     1.22    1.41    1.99
+    a box sliding at 3 m/s, mu 0.5, stops at (exact 0.612 s):
+                                   0.60     0.60    0.65    0.617
+
+Nothing there asks for different numbers. The fastest brick is the one
+difference worth naming, and it is the stiffness doing what it should: a
+rigid wall takes the ball's momentum all at once where a springy one
+takes it over a few steps.
+
+**With articulated bodies and joints** (`allgo.physics.world`,
+`:solver :convex`). The problem is now in blocks: six numbers for a
+loose body, a model's whole generalized velocity for a model, each with
+its dense mass matrix -- the inverse of
+`articulated/inverse-mass-matrix`, whose product with a contact's
+generalized force row matches the response `world` already used to
+every digit. Three kinds of constraint: contacts with their cone, joint
+limits as one-sided rows, pins as two-sided ones. What came of it:
+
+- A column of thirty cubes stands in `world`, which the sequential
+  impulse holds at six. The convex solve has its own slop, 1 mm: a
+  regularized contact gives a little under load every step until the
+  push past the slop balances it, so every contact in a stack ends the
+  whole slop deep, and at the impulse solve's 5 mm a column of thirty
+  stood fifteen centimeters short.
+- The ragdoll scene settles completely, figure and bricks asleep, in 4
+  ms a step against the sequential impulse's 1.4. Inverting the
+  model's mass matrix through persistent vectors was 16 ms of an early
+  21; on arrays it is under 2. Newton takes ten to thirty iterations
+  there, where bricks take one to three: the Hessian checks against
+  finite differences to rounding, so it is stiff contacts on light limbs
+  changing between sticking and sliding from one iterate to the next,
+  and an exact line search (SAP's) did not shorten it. Capping it at
+  eight changed nothing anyone could see.
+- It is opt-in. Under it the motorcycle's rider tests fail one way that
+  matters: thrown off at 8 m/s, the sequential impulse lets the bail's
+  sideways push lean the bike over and it falls in three seconds; the
+  convex solve's tires, gripping as nearly rigidly as it makes them,
+  take the push without leaning, and the bike rolls on upright. The bike
+  was tuned under the sequential impulse, and whether this is the
+  truer answer is a question for its tuning, not settled here.
 
 ## Tried and not kept
 
