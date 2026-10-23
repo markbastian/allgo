@@ -1076,7 +1076,10 @@ September 7 at 22h rather than on the 8th.
 checked for the phenomena Keys transcribed, so Venus's superior
 conjunction, elongations and stations, the other stations of Mercury and
 Mars, and the conjunctions of Mars, Jupiter, Uranus and Neptune are
-missing rather than entered unverified. Table 31.B, the mean elements
+missing rather than entered unverified. `phenomena/search` finds
+them instead, from VSOP87, checked against every verified row from 1000
+to 3000: within half an hour for Mercury and Venus and a few hours for
+the outer planets and stations, about the series' own accuracy. Table 31.B, the mean elements
 referred to J2000, is derived from 31.A by precessing the orbit
 (agreeing with chapter 24's formulae to 1e-12), not copied.
 

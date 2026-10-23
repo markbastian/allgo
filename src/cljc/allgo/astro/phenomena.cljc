@@ -15,11 +15,19 @@
   independent transcription are included: see `events`. The others --
   Venus's superior conjunction, elongations and stations, the remaining
   stations of Mercury and Mars, and the conjunctions of Mars, Jupiter,
-  Uranus and Neptune -- are left out rather than entered unverified.
+  Uranus and Neptune -- are left out rather than entered unverified, and
+  `search` finds them instead, from VSOP87: any of these phenomena of
+  any planet, to a minute or so -- VSOP87's own arcsecond -- where
+  Meeus's series are good to minutes for the inner planets and hours
+  for the outer.
 
   Times are MJD (TT)."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.vsop87 :as vsop87]
+            [allgo.geometry.vec3 :as v3]
+            [allgo.math :as am]
             [allgo.numerics.polynomial :as poly]
+            [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
 (def ^:private tables
@@ -244,3 +252,87 @@
     (if elongation
       [mjd (* c/degrees (series T M elongation))]
       mjd)))
+
+;; ------------------------------------------------- found by search (VSOP87)
+
+(defn- geocentric
+  "`planet` seen from the Earth at `mjd-tt`, ecliptic rectangular of date,
+  AU: where it was when the light now arriving left it."
+  [planet mjd-tt]
+  (let [e (vsop87/rectangular :earth mjd-tt)
+        at (fn [t] (v3/sub (vsop87/rectangular planet t) e))]
+    (at (- mjd-tt (* c/light-time-au (v3/length (at mjd-tt)))))))
+
+(defn- longitude [[x y]] (math/atan2 y x))
+
+(defn- from-sun
+  "The planet's geocentric longitude less the Sun's: positive east of it,
+  in the evening sky."
+  [planet t]
+  (let [[ex ey] (vsop87/rectangular :earth t)]
+    (am/wrap-angle (- (longitude (geocentric planet t)) (math/atan2 (- ey) (- ex))))))
+
+(defn- rate
+  "The rate of `f`, an angle, by central difference over two hours."
+  [f t]
+  (let [h (/ 1.0 24.0)]
+    (/ (am/wrap-angle (- (f (+ t h)) (f (- t h)))) (* 2.0 h))))
+
+(defn elongation
+  "`planet`'s angle from the Sun as seen from the Earth at `mjd-tt`,
+  radians."
+  [planet mjd-tt]
+  (v3/angle (geocentric planet mjd-tt) (v3/negate (vsop87/rectangular :earth mjd-tt))))
+
+(def ^:private search-step
+  "Days between samples: short against the time the planet's apparent
+  motion takes to turn, so no crossing falls between two of them."
+  {:mercury 1.0 :venus 2.0 :mars 3.0 :jupiter 4.0 :saturn 4.0 :uranus 4.0 :neptune 4.0})
+
+(def kinds
+  "What `search` can find: the crossing it looks for, the sense of it
+  (rising, falling, or either), and which of the crossings it keeps."
+  {:conjunction {:f from-sun :angle? true}
+   :inferior-conjunction {:f from-sun :angle? true
+                          :keep? (fn [p t] (< (v3/length (geocentric p t)) 1.0))}
+   :superior-conjunction {:f from-sun :angle? true
+                          :keep? (fn [p t] (> (v3/length (geocentric p t)) 1.0))}
+   :opposition {:f (fn [p t] (am/wrap-angle (+ math/PI (from-sun p t)))) :angle? true}
+   ;; the longitude stops: prograde into retrograde, and back
+   :first-station {:f (fn [p t] (rate #(longitude (geocentric p %)) t)) :sense -1}
+   :second-station {:f (fn [p t] (rate #(longitude (geocentric p %)) t)) :sense 1}
+   ;; the angle from the Sun stops growing
+   :greatest-east-elongation {:f (fn [p t] (rate #(elongation p %) t)) :sense -1
+                              :keep? (fn [p t] (pos? (from-sun p t)))}
+   :greatest-west-elongation {:f (fn [p t] (rate #(elongation p %) t)) :sense -1
+                              :keep? (fn [p t] (neg? (from-sun p t)))}})
+
+(defn search
+  "MJD (TT) of the first `kind` of phenomenon (a key of `kinds`) of
+  `planet` after `mjd-tt`, or with `direction` -1 the last before it --
+  found from VSOP87 rather than Meeus's series: the instant the planet's
+  apparent geocentric longitude meets the Sun's (or is opposite it), or
+  stops, or its angle from the Sun stops growing. Light time is allowed
+  for; aberration, the same for the planet and the Sun to within a few
+  arcseconds near the Sun, is not.
+
+  Within two synodic periods, or nil."
+  ([planet kind mjd-tt] (search planet kind mjd-tt 1))
+  ([planet kind mjd-tt direction]
+   (let [{:keys [f angle? sense keep?] :or {keep? (constantly true)}} (kinds kind)
+         g #(f planet %)
+         step (* direction (search-step planet))
+         ;; a planet's synodic period is at most 780 days (Mars)
+         n (long (/ 1600.0 (search-step planet)))
+         beyond? (if (pos? direction) #(> % (+ mjd-tt 1e-6)) #(< % (- mjd-tt 1e-6)))]
+     (loop [t0 mjd-tt f0 (g mjd-tt) i 0]
+       (when (< i n)
+         (let [t1 (+ t0 step) f1 (g t1)
+               [a fa b fb] (if (pos? direction) [t0 f0 t1 f1] [t1 f1 t0 f0])
+               crossing? (and (not= (neg? fa) (neg? fb))
+                              (or (not angle?) (< (abs (- fa fb)) 1.0))
+                              (case sense 1 (neg? fa) -1 (neg? fb) true))
+               t (when crossing? (roots/brent g a b {:tol 1e-12}))]
+           (if (and t (beyond? t) (keep? planet t))
+             t
+             (recur t1 f1 (inc i)))))))))

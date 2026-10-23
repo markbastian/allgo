@@ -201,7 +201,9 @@
 (defn- format-date
   "`mjd` as the panel shows and takes it: YYYY-MM-DD HH:MM, TT."
   [mjd]
-  (let [[y m d h] (atime/mjd->calendar mjd)
+  ;; rounded to the minute first, so the last half minute of a day is
+  ;; the next day's 00:00 and not 24:00
+  (let [[y m d h] (atime/mjd->calendar (/ (math/round (* mjd 1440.0)) 1440.0))
         mins (math/round (* 60.0 h))
         pad (fn [n] (.padStart (str n) 2 "0"))]
     (str y "-" (pad m) "-" (pad d) " " (pad (quot mins 60)) ":" (pad (mod mins 60)))))
@@ -1248,7 +1250,7 @@
                   (doseq [^js o @star-labels] (set! (.-visible o) (.-showStarNames controls)))
                   (set! (.-textContent readout)
                         (str (.toFixed yr 0) "-" (.padStart (str mo) 2 "0") "-" (.padStart (str dy) 2 "0")
-                             "  " (.toFixed hr 0) "h   MJD " (.toFixed mjd 1)
+                             "  " (math/floor hr) "h   MJD " (.toFixed mjd 1)
                              (if-let [k (focused)]
                                (let [h (rot/sidereal-day k)]
                                  (str "\n" (body-names k) ": radius " (.toLocaleString (math/round (rot/radius k))) " km,"
