@@ -131,11 +131,6 @@
    :jupiter "2k_jupiter.jpg" :saturn "2k_saturn.jpg" :uranus "2k_uranus.jpg"
    :neptune "2k_neptune.jpg"})
 
-(def ^:private saturn-rings
-  "The main rings' extent, km from Saturn's center: the C ring's inner edge
-  to the A ring's outer one."
-  [74658.0 136775.0])
-
 (def ^:private flight-ms 1400.0)
 
 (def ^:private ^js controls
@@ -411,23 +406,14 @@
     (.set (.-scale mesh) r (* r (/ c a)) r)))
 
 (defn- ring
-  "Saturn's rings, as a flat annulus in its equatorial plane, in units of
-  Saturn's equatorial radius. The texture is a strip running outward, so
-  each vertex's u is its fraction of the way across."
+  "Saturn's rings, in units of its equatorial radius -- the annulus the sky
+  view draws too."
   []
-  (let [a (rot/radius :saturn)
-        [r0 r1] (map #(/ % a) saturn-rings)
-        geo (THREE/RingGeometry. r0 r1 160 1)
-        pos (.getAttribute geo "position")
-        uv  (.getAttribute geo "uv")]
-    (dotimes [i (.-count pos)]
-      (let [x (.getX pos i) y (.getY pos i)]
-        (.setXY uv i (/ (- (math/sqrt (+ (* x x) (* y y))) r0) (- r1 r0)) 0.5)))
-    (.rotateX geo (- (/ math/PI 2.0)))
-    (THREE/Mesh. geo (THREE/MeshStandardMaterial.
-                      #js {:color 0xd8c8a0 :transparent true :opacity 0.5
-                           :side THREE/DoubleSide :depthWrite false
-                           :roughness 1.0 :metalness 0.0}))))
+  (THREE/Mesh. (solar-sky/ring-geometry)
+               (THREE/MeshStandardMaterial.
+                #js {:color 0xd8c8a0 :transparent true :opacity 0.5
+                     :side THREE/DoubleSide :depthWrite false
+                     :roughness 1.0 :metalness 0.0})))
 
 (def ^:private satellite-systems
   "The moons drawn around Jupiter and Saturn: where each is, from Meeus's
@@ -784,11 +770,11 @@
     (.setSize renderer (.-clientWidth container) (.-clientHeight container))
     (set! (.-borderRadius (.-style (.-domElement renderer))) "8px")
     (.appendChild container (.-domElement renderer))
-    (reset! sky-view (solar-sky/create container renderer faintest))
+    (reset! sky-view (solar-sky/create container renderer faintest satellite-systems))
     (.appendChild container back)
     (doseq [[_ m] meshes] (.add scene m))
     (.add (bodies :saturn) rings)
-    (let [[r0 r1] (map #(/ % (rot/radius :saturn)) saturn-rings)
+    (let [[r0 r1] (map #(/ % (rot/radius :saturn)) solar-sky/saturn-rings)
           ^js u (:shadow (systems :saturn))]
       (.set (.. u -ringSpan -value) r0 r1))
     (doseq [[_ {:keys [group]}] systems] (.add scene group))
@@ -1185,7 +1171,13 @@
                       (let [text ((:frame! @sky-view) (:mjd @state)
                                                       [(* c/degrees (.-latitude controls)) (* c/degrees (.-longitude controls))]
                                                       {:lines? (.-showLines controls)
-                                                       :moon-map (.. (meshes :moon) -material -map)})]
+                                                       :moon-map (.. (meshes :moon) -material -map)
+                                                       ;; the planets' maps, loaded the first time
+                                                       ;; the sky view asks for one
+                                                       :map-of (fn [k]
+                                                                 (if (= k :saturn-ring)
+                                                                   (do (load-textures! :saturn) (.. rings -material -map))
+                                                                   (do (load-textures! k) (.. (meshes k) -material -map))))})]
                         (when-not (some-> ^js (.-activeElement js/document) (.closest ".lil-gui"))
                           (set! (.-date controls) (format-date (:mjd @state))))
                         (set! (.-textContent readout)
