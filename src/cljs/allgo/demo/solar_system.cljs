@@ -18,7 +18,9 @@
 
   Close in on Jupiter or Saturn and their moons appear at true scale
   against the planet, from Meeus's chapters 44 and 46, casting shadows
-  that are traced in the shader. The Events folder jumps to the next or
+  that are traced in the shader; Saturn and its rings shade each other
+  the same way, the planet's shadow across the rings behind it and the
+  rings' across the hemisphere the Sun is not over. The Events folder jumps to the next or
   previous of any phenomenon `allgo.astro.almanac` knows -- phases,
   eclipses, seasons, oppositions -- and looks at the body it concerns; a
   Moon in the Earth's shadow goes copper. The readout says what an almanac
@@ -455,48 +457,96 @@
   to the Sun, at the origin, passes through any occluder, with an edge as
   soft as the Sun's own disk seen from there. A shadow map at this scale
   would put Io's shadow, a few hundredths of a view unit, across one
-  texel."
-  [^js material]
-  (let [uniforms #js {:occluders #js {:value (into-array (repeatedly max-occluders #(THREE/Vector4.)))}
-                      :occluderCount #js {:value 0}
-                      :sunSize #js {:value 0.0}}]
-    (set! (.-onBeforeCompile material)
-          (fn [^js shader]
-            (js/Object.assign (.-uniforms shader) uniforms)
-            (set! (.-vertexShader shader)
-                  (-> (.-vertexShader shader)
-                      (.replace "#include <common>" "#include <common>\nvarying vec3 vSunWorld;")
-                      (.replace "#include <project_vertex>"
-                                "#include <project_vertex>\nvSunWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;")))
-            (set! (.-fragmentShader shader)
-                  (-> (.-fragmentShader shader)
-                      (.replace "#include <common>"
-                                (str "#include <common>\n"
-                                     "varying vec3 vSunWorld;\n"
-                                     "uniform vec4 occluders[" max-occluders "];\n"
-                                     "uniform int occluderCount;\n"
-                                     "uniform float sunSize;\n"
-                                     "float sunlit() {\n"
-                                     "  vec3 d = normalize(-vSunWorld);\n"
-                                     "  float lit = 1.0;\n"
-                                     "  for (int i = 0; i < " max-occluders "; i++) {\n"
-                                     "    if (i >= occluderCount) break;\n"
-                                     "    vec3 oc = occluders[i].xyz - vSunWorld;\n"
-                                     "    float t = dot(oc, d);\n"
-                                     "    if (t <= 0.0) continue;\n"
-                                     "    float miss = length(oc - d * t);\n"
-                                     "    float pen = max(t * sunSize, 1e-5);\n"
-                                     "    lit *= smoothstep(occluders[i].w - pen, occluders[i].w + pen, miss);\n"
-                                     "  }\n"
-                                     "  return lit;\n"
-                                     "}\n"))
-                      (.replace "#include <lights_fragment_end>"
-                                (str "#include <lights_fragment_end>\n"
-                                     "float sunLight = sunlit();\n"
-                                     "reflectedLight.directDiffuse *= sunLight;\n"
-                                     "reflectedLight.directSpecular *= sunLight;\n"))))))
-    (set! (.-needsUpdate material) true)
-    uniforms))
+  texel.
+
+  Saturn and its rings shade each other too, and both tests are exact in
+  the planet's own frame, where it is the unit sphere and the rings lie
+  in y = 0 between `ring-span`'s radii -- the frame the planet's mesh
+  is drawn in, so `planet-frame` is only that mesh's inverse world
+  matrix. `:rings? true` is for the planet: a fragment's way to the Sun
+  crosses the ring plane somewhere, and the ring's own opacity there is
+  how much light it stops. `:planet? true` is for the rings: a fragment
+  is in the planet's shadow if its way to the Sun meets the unit sphere,
+  which is the oblate planet and not a ball of its equatorial radius."
+  ([material] (shadowed! material nil))
+  ([^js material {:keys [rings? planet?]}]
+   (let [uniforms #js {:occluders #js {:value (into-array (repeatedly max-occluders #(THREE/Vector4.)))}
+                       :occluderCount #js {:value 0}
+                       :sunSize #js {:value 0.0}
+                       :planetFrame #js {:value (THREE/Matrix4.)}
+                       :ringSpan #js {:value (THREE/Vector2. 1.0 1.0)}
+                       :ringMap #js {:value nil}
+                       :ringMapped #js {:value 0.0}}
+         frame-glsl (str "uniform mat4 planetFrame;\n"
+                         "vec3 inPlanet(vec3 w) { return (planetFrame * vec4(w, 1.0)).xyz; }\n")
+         rings-glsl (str "uniform vec2 ringSpan;\n"
+                         "uniform sampler2D ringMap;\n"
+                         "uniform float ringMapped;\n"
+                         "float ringLit() {\n"
+                         "  vec3 p = inPlanet(vSunWorld);\n"
+                         "  vec3 d = inPlanet(vec3(0.0)) - p;\n"
+                         "  if (p.y * d.y >= 0.0) return 1.0;\n"
+                         "  float r = length(p.xz - d.xz * (p.y / d.y));\n"
+                         "  if (r < ringSpan.x || r > ringSpan.y) return 1.0;\n"
+                         "  float u = (r - ringSpan.x) / (ringSpan.y - ringSpan.x);\n"
+                         "  float a = ringMapped > 0.5 ? texture2D(ringMap, vec2(u, 0.5)).a : 0.5;\n"
+                         "  return 1.0 - a;\n"
+                         "}\n")
+         planet-glsl (str "float planetLit() {\n"
+                          "  vec3 p = inPlanet(vSunWorld);\n"
+                          "  vec3 d = normalize(inPlanet(vec3(0.0)) - p);\n"
+                          "  float t = dot(-p, d);\n"
+                          "  if (t <= 0.0) return 1.0;\n"
+                          "  float miss = length(-p - d * t);\n"
+                          "  float pen = max(t * sunSize, 1e-5);\n"
+                          "  return smoothstep(1.0 - pen, 1.0 + pen, miss);\n"
+                          "}\n")]
+     (set! (.-onBeforeCompile material)
+           (fn [^js shader]
+             (js/Object.assign (.-uniforms shader) uniforms)
+             (set! (.-vertexShader shader)
+                   (-> (.-vertexShader shader)
+                       (.replace "#include <common>" "#include <common>\nvarying vec3 vSunWorld;")
+                       (.replace "#include <project_vertex>"
+                                 "#include <project_vertex>\nvSunWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;")))
+             (set! (.-fragmentShader shader)
+                   (-> (.-fragmentShader shader)
+                       (.replace "#include <common>"
+                                 (str "#include <common>\n"
+                                      "varying vec3 vSunWorld;\n"
+                                      "uniform vec4 occluders[" max-occluders "];\n"
+                                      "uniform int occluderCount;\n"
+                                      "uniform float sunSize;\n"
+                                      "float sunlit() {\n"
+                                      "  vec3 d = normalize(-vSunWorld);\n"
+                                      "  float lit = 1.0;\n"
+                                      "  for (int i = 0; i < " max-occluders "; i++) {\n"
+                                      "    if (i >= occluderCount) break;\n"
+                                      "    vec3 oc = occluders[i].xyz - vSunWorld;\n"
+                                      "    float t = dot(oc, d);\n"
+                                      "    if (t <= 0.0) continue;\n"
+                                      "    float miss = length(oc - d * t);\n"
+                                      "    float pen = max(t * sunSize, 1e-5);\n"
+                                      "    lit *= smoothstep(occluders[i].w - pen, occluders[i].w + pen, miss);\n"
+                                      "  }\n"
+                                      "  return lit;\n"
+                                      "}\n"
+                                      (when (or rings? planet?) frame-glsl)
+                                      (when rings? rings-glsl)
+                                      (when planet? planet-glsl)))
+                       (.replace "#include <lights_fragment_end>"
+                                 (str "#include <lights_fragment_end>\n"
+                                      "float sunLight = sunlit()"
+                                      (when rings? " * ringLit()")
+                                      (when planet? " * planetLit()")
+                                      ";\n"
+                                      "reflectedLight.directDiffuse *= sunLight;\n"
+                                      "reflectedLight.directSpecular *= sunLight;\n"))))))
+    ;; three keys compiled programs on the hook's source, which is the
+    ;; same text for every variant here
+     (set! (.-customProgramCacheKey material) (fn [] (str "shadowed" (boolean rings?) (boolean planet?))))
+     (set! (.-needsUpdate material) true)
+     uniforms)))
 
 (defn- feed-occluders!
   "Sets a shadowed material's occluders to `spheres`, `[[x y z r] ...]` in
@@ -654,8 +704,10 @@
                                paths (THREE/Group.)]
                            (.add group paths)
                            [planet {:group group :moons moons :paths paths
-                                    :shadow (shadowed! (.-material (meshes planet)))}])))
+                                    :shadow (shadowed! (.-material (meshes planet)) {:rings? (= planet :saturn)})}])))
         rings    (ring)
+        ;; the planet's shadow on them, and its moons'
+        ring-shadow (shadowed! (.-material rings) {:planet? true})
         ;; The Sun is a point of light at the center, and since the radial
         ;; scale keeps every direction from the Sun true, it lights each
         ;; planet from the side it really does. (The Moon, pushed out from
@@ -735,6 +787,8 @@
     (.appendChild container back)
     (doseq [[_ m] meshes] (.add scene m))
     (.add (bodies :saturn) rings)
+    (let [[r0 r1] (map #(/ % (rot/radius :saturn)) saturn-rings)]
+      (.set (.. (:shadow (systems :saturn)) -ringSpan -value) r0 r1))
     (doseq [[_ {:keys [group]}] systems] (.add scene group))
     (.add scene sunlight)
     (.add scene ambient)
@@ -813,7 +867,10 @@
                     (swap! loaded conj :rings)
                     (.load (THREE/TextureLoader.) (asset "textures/2k_saturn_ring_alpha.png")
                            (fn [^js tex]
-                             (let [^js mat (.-material rings)]
+                             (let [^js mat (.-material rings)
+                                   ^js u (:shadow (systems :saturn))]
+                               (set! (.. u -ringMap -value) tex)
+                               (set! (.. u -ringMapped -value) 1.0)
                                (set! (.-map mat) tex)
                                (.setHex (.-color mat) 0xffffff)
                                (set! (.-opacity mat) 1.0)
@@ -1024,7 +1081,8 @@
                       (when-not show?
                         (doseq [[_ {:keys [^js label]}] moons] (set! (.-visible label) false)))
                       (if-not show?
-                        (feed-occluders! shadow [] 0.0)
+                        (do (feed-occluders! shadow [] 0.0)
+                            (when (= k :saturn) (feed-occluders! ring-shadow [] 0.0)))
                         (let [pos ((:positions (satellite-systems k)) mjd)
                               sun-size (/ (rot/radius :sun)
                                           (let [[x y z] (planet k)] (math/sqrt (+ (* x x) (* y y) (* z z)))))
@@ -1062,8 +1120,23 @@
                                                         [mk [(.-x p) (.-y p) (.-z p) (r-of mesh)]]))))
                                 others (fn [self] (vals (dissoc spheres self)))]
                             (feed-occluders! shadow (sort-by #(- (nth % 3)) (others k)) sun-size)
+                            (when (= k :saturn)
+                              (feed-occluders! ring-shadow (sort-by #(- (nth % 3)) (others k)) sun-size))
                             (doseq [[mk {:keys [shadow]}] moons]
                               (feed-occluders! shadow (others mk) sun-size)))))))))
+              (update-rings!
+                ;; Saturn and its rings shading each other, worked out in
+                ;; the planet's own frame (see `shadowed!`), whether or not
+                ;; its moons are shown
+                []
+                (let [^js pm (meshes :saturn)
+                      ^js frame (.. ring-shadow -planetFrame -value)
+                      [x y z] ((:planet (ephemeris (:mjd @state))) :saturn)]
+                  (.updateMatrixWorld pm true)
+                  (.invert (.copy frame (.-matrixWorld pm)))
+                  (.copy (.. (:shadow (systems :saturn)) -planetFrame -value) frame)
+                  (set! (.. ring-shadow -sunSize -value)
+                        (/ (rot/radius :sun) (math/sqrt (+ (* x x) (* y y) (* z z)))))))
               (publish! []
                 (let [mjd (:mjd @state)
                       [yr mo dy hr] (atime/mjd->calendar mjd)
@@ -1118,6 +1191,7 @@
                         (update-bodies!)
                         (layout!)
                         (update-moons!)
+                        (update-rings!)
                         (follow!)
                         (publish!)
                         (.update orbit)
