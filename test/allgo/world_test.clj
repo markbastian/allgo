@@ -309,3 +309,33 @@
       ;; Cold, eight iterations have to rediscover the column's weight
       ;; every step and never quite do.
       (is (< (sink true) (* 0.5 (sink false))) (str (sink true) " " (sink false))))))
+
+(deftest soft-contacts-test
+  (let [;; three bricks started 12 cm into the floor
+        sunk (fn [soft?]
+               (w/world (into [floor] (for [r (range 3)] (brick [(* 0.3 r) (- 0.125 0.12) 0.0])))
+                        [] {:gravity g :soft? soft?}))
+        fastest (fn [s] (reduce (fn [[m s] _]
+                                  (let [s (w/step s (/ 1.0 60.0))]
+                                    [(apply max m (map #(double (second (:vel %))) (rest (:bodies s)))) s]))
+                                [0.0 s] (range 120)))
+        [hard-speed hard] (fastest (sunk false))
+        [soft-speed soft] (fastest (sunk true))
+        rest-at (fn [s] (double (second (:pos (second (:bodies s))))))]
+    (testing "a soft contact pushes a deep overlap out gently, and neither overshoots"
+      (is (< soft-speed (* 0.5 hard-speed)) (str soft-speed " " hard-speed))
+      (is (< (rest-at hard) 0.125))
+      (is (< (rest-at soft) 0.125)))
+    (testing "and comes to rest a little deeper, as a spring holding the weight"
+      (is (< 0.0 (- (rest-at hard) (rest-at soft)) 0.003) (str (rest-at hard) " " (rest-at soft))))))
+
+(deftest recall-test
+  (let [column (fn [reach]
+                 (w/world (into [floor] (for [r (range 6)] (brick [0.0 (+ 0.125 (* 0.25 r)) 0.0])))
+                          [] {:gravity g :recall-reach reach}))
+        drift (fn [s] (apply max (map (fn [b] (let [[x _ z] (:pos b)] (Math/hypot x z))) (rest (:bodies s)))))]
+    (testing "a column of six stands when a renamed contact keeps its impulse, and falls when it loses it"
+      ;; The bricks sway by fractions of a millimeter, their corners cross
+      ;; the edges of the bricks below, and the box test renames them.
+      (is (< (drift (run (column 0.01) 600 (/ 1.0 60.0))) 0.05))
+      (is (> (drift (run (column nil) 600 (/ 1.0 60.0))) 0.5)))))

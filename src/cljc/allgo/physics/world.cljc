@@ -46,7 +46,8 @@
   ## What this is not
 
   It is a sequential impulse solver and only that. There is no
-  substepping and no XPBD, and nothing sleeps. `allgo.physics.solver`
+  substepping and no XPBD, and nothing sleeps; contacts are rigid with a
+  Baumgarte push unless `:soft?` asks for springs. `allgo.physics.solver`
   has all of those and is still the thing to reach for when the scene is
   only bricks; this one is for a scene that mixes kinds, and it says so
   rather than pretending to replace it.
@@ -57,6 +58,15 @@
   `allgo.physics.solver` keys them, and starts the next step from it;
   so does each pin. A joint limit does not: its rows carry nothing that
   says which limit they are, and they are few.
+
+  A contact the keys do not recognize takes the impulse of last step's
+  nearest unclaimed point on the same pair, within `:recall-reach`
+  (`recall`). The box test renames the points of a swaying brick as its
+  corners cross the edges of the one below, and here, with its rigid
+  contacts, a column sways enough for that to matter: matched by key
+  alone it loses six bricks, by nearness too it stands them, and at 32
+  iterations ten where it stood eight. `allgo.physics.solver`'s columns
+  were no taller for it, and it matches by key alone.
 
   Two articulated models touch each other through the same sweep, and
   can be pinned together; one can touch itself, and either can touch
@@ -75,10 +85,25 @@
    :self-collide? true
    :iterations 8
    :warm-start? true
+   ;; A contact whose key is new takes the impulse of last step's nearest
+   ;; unclaimed point on the same pair within this many meters: see
+   ;; `recall`. Nil matches by key alone.
+   :recall-reach 0.01
    :friction 0.6
    :restitution 0.0
    :slop 0.005
    :bias-factor 0.2
+   ;; Soft contacts, as `allgo.physics.solver` has them: an overlap is a
+   ;; damped spring of `contact-hertz` and damping ratio `contact-damping`
+   ;; instead of being pushed out at `bias-factor` of it a step. They push
+   ;; a deep overlap out about a third as fast and rest a millimeter
+   ;; deeper. They do not stand a taller column: columns here fall for
+   ;; want of iterations, not of softness, and the solver's own
+   ;; sequential impulse, soft all along, falls at the same height. So
+   ;; they are there to be asked for, not the default.
+   :soft? false
+   :contact-hertz 30.0
+   :contact-damping 10.0
    :max-push-speed 3.0})
 
 (defn world
@@ -418,12 +443,30 @@
         t1 (v/normalize (v/cross n a))]
     [t1 (v/cross n t1)]))
 
+(defn- softness
+  "The soft contact's three numbers for a step of `dt`, as
+  `allgo.physics.solver` has them (Catto's soft constraints): the rate an
+  overlap is pushed out at, how much of the ideal impulse to apply, and
+  how much of what has accumulated to give back. The frequency is capped
+  at a quarter of the step rate, above which the spring would ring
+  between steps rather than damp."
+  [{:keys [contact-hertz contact-damping]} dt]
+  (let [dt (double dt)
+        hertz (min (double contact-hertz) (* 0.25 (/ 1.0 dt)))
+        zeta (double contact-damping)
+        w (* 2.0 math/PI hertz)
+        c (* dt w (+ (* 2.0 zeta) (* dt w)))]
+    {:bias-rate (/ w (+ (* 2.0 zeta) (* dt w)))
+     :mass-scale (/ c (+ 1.0 c))
+     :impulse-scale (/ 1.0 (+ 1.0 c))}))
+
 (defn- prepare
   "One contact, ready to be iterated: three directions, each with what
-  both sides answer, and the bias that pushes an overlap apart."
+  both sides answer, and the bias that pushes an overlap apart -- with,
+  for a soft contact, the scales the normal is solved with."
   [w configs c dt opts]
   (let [dt (double dt)
-        {:keys [slop bias-factor max-push-speed]} opts
+        {:keys [slop bias-factor max-push-speed soft?]} opts
         n (v/normalize (:normal c))
         [t1 t2] (tangents n)
         pair? (same-model? (:a c) (:b c))
@@ -435,11 +478,22 @@
                         sb (prepare-side w configs (:b c) (:point c) d)]
                     {:a sa :b sb :w (+ (double (or (:w sa) 0.0))
                                        (double (or (:w sb) 0.0)))})))]
-    {:dirs [(along n) (along t1) (along t2)]
-     :bias (min (double max-push-speed)
-                (/ (* (double bias-factor)
-                      (max 0.0 (- (double (:depth c)) (double slop))))
-                   dt))}))
+    (merge
+     {:dirs [(along n) (along t1) (along t2)]
+      :mass-scale 1.0 :impulse-scale 0.0}
+     (if soft?
+       ;; Shallower than the slop, the contact is rigid and lets the two
+       ;; close only as far as the slop; deeper, it is the spring.
+       (let [over (- (double (:depth c)) (double slop))]
+         (if (pos? over)
+           (let [{:keys [bias-rate mass-scale impulse-scale]} (or (:softness opts) (softness opts dt))]
+             {:bias (min (double max-push-speed) (* (double bias-rate) over))
+              :mass-scale mass-scale :impulse-scale impulse-scale})
+           {:bias (/ over dt)}))
+       {:bias (min (double max-push-speed)
+                   (/ (* (double bias-factor)
+                         (max 0.0 (- (double (:depth c)) (double slop))))
+                      dt))}))))
 
 (defn- speed-of ^double [row ^doubles vel ^doubles omega us]
   (if-let [p (:pair row)]
@@ -534,7 +588,13 @@
               wn (double (:w nrow))
               vn (speed-of nrow vel omega us)
               old (aget acc b)
-              nw (max 0.0 (+ old (if (> wn 1e-12) (/ (- target vn) wn) 0.0)))]
+              ;; a soft normal gives back some of what it has
+              ;; accumulated each time, which is what keeps it from
+              ;; storing energy; a hard one has scales 1 and 0
+              nw (max 0.0 (+ old (if (> wn 1e-12)
+                                   (- (/ (* (double (:mass-scale row)) (- target vn)) wn)
+                                      (* (double (:impulse-scale row)) old))
+                                   0.0)))]
           (apply-to! nrow vel omega us (- nw old))
           (aset acc b nw)
           (let [limit (* (double friction) nw)]
@@ -572,6 +632,41 @@
                      [(conj out (conj k n)) (assoc seen k (inc n))]))
                  [[] {}]
                  cs)))
+
+(defn- recall
+  "Last step's impulse for each of `cs`, keyed `ks`: by key, or, for a
+  contact whose key is new, from the nearest point of the same pair that
+  no contact claimed by key, within `reach` meters.
+
+  A key is the name the box test gives a point, after the corners and
+  cuts that made it, and a brick swaying over the one below it renames
+  its points as its corners cross the edges beneath: a corner inside
+  becomes a cut and back again, and the impulse it carried is lost just
+  as the sway most needs it. The point itself has hardly moved. Matching
+  by nearness has no edges for it to slide across, which rounding to a
+  grid did."
+  [cs ks remembered points reach]
+  (let [reach (double reach)
+        claimed (into #{} (filter #(contains? remembered %)) ks)
+        spare (group-by #(subvec % 0 2) (remove claimed (keys remembered)))]
+    (first
+     (reduce (fn [[out taken] [c k]]
+               (if (claimed k)
+                 [(conj out (get remembered k)) taken]
+                 (let [p (:point c)
+                       best (reduce (fn [best o]
+                                      (let [d (v/distance p (get points o))]
+                                        (if (and (< d reach) (not (taken o))
+                                                 (or (nil? best) (< d (double (second best)))))
+                                          [o d]
+                                          best)))
+                                    nil
+                                    (get spare (subvec k 0 2)))]
+                   (if best
+                     [(conj out (get remembered (first best))) (conj taken (first best))]
+                     [(conj out nil) taken]))))
+             [[] #{}]
+             (map vector cs ks)))))
 
 (defn step
   "One step of the whole scene.
@@ -618,8 +713,14 @@
         ks (contact-keys cs)
         remembered (:contact-impulses w)
         solved (if (or (seq cs) (seq limits) (seq pins))
-                 (solve! (mapv #(prepare w configs % dt w) cs) limits pins vel omega us w
-                         (mapv #(when warm? (get remembered %)) ks)
+                 (solve! (let [opts (cond-> w (:soft? w) (assoc :softness (softness w dt)))]
+                           (mapv #(prepare w configs % dt opts) cs))
+                         limits pins vel omega us w
+                         (if warm?
+                           (if-let [reach (:recall-reach w)]
+                             (recall cs ks remembered (:contact-points w) reach)
+                             (mapv #(get remembered %) ks))
+                           (mapv (constantly nil) ks))
                          (mapv #(when warm? (:impulse %)) (:pins w)))
                  {:contacts [] :pins []})
         carried (mapv (fn [[x y z]]
@@ -660,6 +761,7 @@
     (assoc w
            :pin-impulses carried
            :contact-impulses (zipmap ks (:contacts solved))
+           :contact-points (zipmap ks (map :point cs))
            ;; Positions last, from whatever the sweep left behind.
            :bodies (mapv (fn [b]
                            (if (rigid/static? b)
