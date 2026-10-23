@@ -366,19 +366,22 @@
 ;; ---------------------------------------------------------------------------
 ;; The contacts' own arrays
 
-(defn- contact-key
-  "What counts as the same contact as last step, for warm starting.
+(defn- pair-key
+  "The pair of bodies a contact is between, as one number: what last
+  step's manifolds are looked up by. Small enough to stay exact as a
+  JavaScript number for any scene that fits in memory."
+  ^long [^long a ^long b]
+  (+ (* a 2097152) b))
 
-  The pair, and the feature id `allgo.physics.contact` stamps on the
-  point -- which corner of which face is pressed into which face. It used
-  to be the contact point rounded to two centimeters, and that is a fine
-  key for a stack that is already still and a bad one for a stack that is
-  moving: the points slide across the rounding and the match is lost
-  exactly when the impulse history is most needed. A twenty brick column
-  matched a quarter of its contacts that way and fell over; on ids it
-  matches all of them."
-  [c]
-  [(:a c) (:b c) (:id c)])
+;; What counts as the same contact as last step, for warm starting, is
+;; the pair and the feature id `allgo.physics.contact` stamps on the
+;; point -- which corner of which face is pressed into which face. It used
+;; to be the contact point rounded to two centimeters, and that is a fine
+;; key for a stack that is already still and a bad one for a stack that is
+;; moving: the points slide across the rounding and the match is lost
+;; exactly when the impulse history is most needed. A twenty brick column
+;; matched a quarter of its contacts that way and fell over; on ids it
+;; matches all of them.
 
 (defn- prepare
   "Turns a frame's contacts into the solver's own arrays.
@@ -396,9 +399,13 @@
   [arrays contacts previous]
   (let [contacts (vec contacts)
         n (count contacts)
-        ;; Last step's impulses for the same contact, which is the guess
-        ;; warm starting rests on.
-        old (reduce (fn [m c] (assoc m (contact-key c) c)) {} previous)
+        ;; Last step's manifolds, which warm starting rests on: where each
+        ;; pair's points start in the arrays, their ids, and what they
+        ;; pushed with. See `contact-state`.
+        old-index (or (:index previous) {})
+        ^objects old-ids (:ids previous)
+        ^doubles old-pn (:pn previous) ^doubles old-p1 (:p1 previous) ^doubles old-p2 (:p2 previous)
+        ^objects ids (object-array n)
         ^doubles pos (:pos arrays)
         ^doubles inv-rot (:inv-rot arrays)
         ^ints a-arr (a/i32 n) ^ints b-arr (a/i32 n)
@@ -456,17 +463,24 @@
           (aset rbl k3 (aget s0 0))
           (aset rbl (+ k3 1) (aget s0 1))
           (aset rbl (+ k3 2) (aget s0 2)))
-        (when-let [was (get old (contact-key c))]
-          (aset pn k (double (:pn was)))
+        (aset ids k (:id c))
+        (when-let [j (when-let [[start cnt] (get old-index (pair-key ia ib))]
+                       (let [id (:id c) end (+ (long start) (long cnt))]
+                         (loop [j (long start)]
+                           (cond (= j end) nil
+                                 (= id (aget old-ids j)) j
+                                 :else (recur (inc j))))))]
+          (aset pn k (aget old-pn j))
           ;; The tangential impulses come back too, now that the match is
           ;; exact. They were being dropped -- stored by `contact-state`
           ;; every step and never read -- so friction began each step
           ;; from nothing and had to be rediscovered in the iterations it
           ;; had left, which is what let a stack creep sideways while it
           ;; stood.
-          (aset p1 k (double (:p1 was)))
-          (aset p2 k (double (:p2 was))))))
+          (aset p1 k (aget old-p1 j))
+          (aset p2 k (aget old-p2 j)))))
     {:n n
+     :ids ids
      :a a-arr :b b-arr
      :normal normal :t1 t1-arr :t2 t2-arr
      :depth depth :depth0 depth0
@@ -1072,12 +1086,30 @@
   Warm starting is most of why a stack stands at eight iterations rather
   than fifty: the force a contact needed last step is a very good
   estimate of what it needs this step, and starting from it means the
-  iterations refine an answer instead of discovering one."
+  iterations refine an answer instead of discovering one.
+
+  Kept as the manifolds the solve already has, not copied back into the
+  contacts: the ids and the three impulses in the arrays the step ended
+  with, and an index from each pair to where its points start. Detection
+  hands a pair's points over together, so a contact is looked for among
+  the three or four of its own pair rather than in a map of every
+  contact in the scene. Copying the impulses into 2,500 contact maps and
+  building that map of them was 1.4 ms of a 9 ms step on a 16x16 wall."
   [cs]
-  (let [^doubles pn (:pn cs) ^doubles p1 (:p1 cs) ^doubles p2 (:p2 cs)]
-    (mapv (fn [k c] (assoc c :pn (aget pn (long k)) :p1 (aget p1 (long k)) :p2 (aget p2 (long k))))
-          (range (:n cs))
-          (:contacts cs))))
+  (let [n (long (:n cs))
+        ^ints a-arr (:a cs) ^ints b-arr (:b cs)
+        index (loop [k 0 start 0 index (transient {})]
+                (if (= k n)
+                  (persistent! index)
+                  (let [k' (inc k)
+                        ;; a run ends where the next contact is another pair
+                        last? (or (= k' n)
+                                  (not= (aget a-arr k) (aget a-arr k'))
+                                  (not= (aget b-arr k) (aget b-arr k')))]
+                    (if last?
+                      (recur k' k' (assoc! index (pair-key (aget a-arr k) (aget b-arr k)) [start (- k' start)]))
+                      (recur k' start index)))))]
+    {:index index :ids (:ids cs) :pn (:pn cs) :p1 (:p1 cs) :p2 (:p2 cs)}))
 
 (defn- project-contacts!
   "One XPBD pass: push overlapping bodies apart, positions only.

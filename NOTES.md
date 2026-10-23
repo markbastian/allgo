@@ -396,6 +396,18 @@ contact among them.
 went the same way: 1.6 ms of a 17 ms step to 0.08, measured in a warm
 REPL, and the three solvers' 120 steps identical to the bit.
 
+Then warm starting's own bookkeeping (2026-10-23). Each step copied the
+three impulses back into every contact map (0.9 ms on the wall's 2,500
+contacts) so that the next could build a map of them keyed by pair and
+feature id (0.4 ms) and look each new contact up in it. Now the step
+keeps the arrays the solve ended with, the ids beside them, and an index
+from each pair of bodies to where its points start; a contact is looked
+for among the three or four of its own pair. The wall went from 8.7 /
+15.6 / 14.5 ms to 6.4 / 13.8 / 12.8 for sequential impulse / TGS / XPBD
+-- more than the bookkeeping measured alone, which is the garbage it no
+longer makes -- and 120 steps under each, from walls settled fresh,
+are identical to the bit.
+
 
 ### Sweep and prune
 
