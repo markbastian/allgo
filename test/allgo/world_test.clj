@@ -290,3 +290,22 @@
   (testing "told not to, they pass through each other"
     (let [end (collide (/ 1.0 240.0) {:collide-models? false})]
       (is (> (double (first (:pos (:base (:pose (first (:models end))))))) 1.0)))))
+
+(deftest warm-start-test
+  (let [column (fn [warm?]
+                 (w/world (into [floor] (for [r (range 4)] (brick [0.0 (+ 0.125 (* 0.25 r)) 0.0])))
+                          [] {:gravity g :warm-start? warm?}))
+        top (fn [s] (double (second (:pos (last (:bodies s))))))
+        sink (fn [warm?] (- 0.875 (top (run (column warm?) 300 (/ 1.0 60.0)))))]
+    (testing "each contact remembers what it pushed with"
+      ;; A brick on the floor, settled: the normal impulses it is held
+      ;; up with add to its weight over the step.
+      (let [s (run (w/world [floor (brick [0.0 0.125 0.0])] [] {:gravity g}) 120 (/ 1.0 60.0))
+            m (double (:mass (second (:bodies s))))
+            held (reduce + (map first (vals (:contact-impulses s))))]
+        (is (= 4 (count (:contact-impulses s))))
+        (is (close? held (* m 9.81 (/ 1.0 60.0)) (* 0.01 held)) (str held))))
+    (testing "and starting from it, a column of four sags less than starting cold"
+      ;; Cold, eight iterations have to rediscover the column's weight
+      ;; every step and never quite do.
+      (is (< (sink true) (* 0.5 (sink false))) (str (sink true) " " (sink false))))))

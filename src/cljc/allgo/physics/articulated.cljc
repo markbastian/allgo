@@ -2065,7 +2065,8 @@
             {:link la :other lb
              :point (:point c)
              :normal (v/negate (:normal c))
-             :depth (:depth c)}))))
+             :depth (:depth c)
+             :id (:id c)}))))
 
 (defn- limit-rows
   "The joint limits currently being pushed against, as one-sided

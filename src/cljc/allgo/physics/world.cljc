@@ -46,11 +46,17 @@
   ## What this is not
 
   It is a sequential impulse solver and only that. There is no
-  substepping, no XPBD, no sleeping, and warm starting lasts a step
-  rather than crossing between them. `allgo.physics.solver` has all of
-  those and is still the thing to reach for when the scene is only
-  bricks; this one is for a scene that mixes kinds, and it says so
+  substepping and no XPBD, and nothing sleeps. `allgo.physics.solver`
+  has all of those and is still the thing to reach for when the scene is
+  only bricks; this one is for a scene that mixes kinds, and it says so
   rather than pretending to replace it.
+
+  ## Warm starting
+
+  Each contact remembers the impulse it ended a step with, keyed as
+  `allgo.physics.solver` keys them, and starts the next step from it;
+  so does each pin. A joint limit does not: its rows carry nothing that
+  says which limit they are, and they are few.
 
   Two articulated models touch each other through the same sweep, and
   can be pinned together; one can touch itself, and either can touch
@@ -68,6 +74,7 @@
   {:gravity [0.0 -9.81 0.0]
    :self-collide? true
    :iterations 8
+   :warm-start? true
    :friction 0.6
    :restitution 0.0
    :slop 0.005
@@ -135,7 +142,8 @@
   (mapv (fn [c] {:a side-a :b side-b
                  :point (:point c)
                  :normal (v/negate (:normal c))
-                 :depth (:depth c)})
+                 :depth (:depth c)
+                 :id (:id c)})
         (contact/between 0 1 body-a body-b)))
 
 (defn- reach
@@ -175,7 +183,8 @@
         (into (map (fn [c] {:a [:rigid (:a c)] :b [:rigid (:b c)]
                             :point (:point c)
                             :normal (v/negate (:normal c))
-                            :depth (:depth c)}))
+                            :depth (:depth c)
+                            :id (:id c)}))
               (contact/all bodies))
         ;; Every model's parts against every rigid body.
         (into (for [{:keys [side body]} parts
@@ -203,7 +212,8 @@
                       c (ab/self-contacts model (:q pose) (:base pose)
                                           (:frames (nth configs mi)))]
                   {:a [:link mi (:link c)] :b [:link mi (:other c)]
-                   :point (:point c) :normal (:normal c) :depth (:depth c)}))))))
+                   :point (:point c) :normal (:normal c) :depth (:depth c)
+                   :id (:id c)}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; What each side of a contact answers
@@ -450,18 +460,42 @@
   One sweep, not one per kind. That is the point of the whole namespace:
   a brick being pushed by a ragdoll's hand and by the brick beneath it
   has to see both pushes in the same iteration, or the two answers are
-  computed against a velocity neither of them ends up with."
-  [prepared limits pins ^doubles vel ^doubles omega us opts]
+  computed against a velocity neither of them ends up with.
+
+  `warm` is the impulse each contact ended last step with, as
+  `[normal t1 t2]` or nil, and `pin-warm` each pin's along the world
+  axes. Both are applied before the first iteration and the sweep
+  corrects from there. Returns what each contact and each pin carried
+  over the step, as `{:contacts :pins}` in the same shapes."
+  [prepared limits pins ^doubles vel ^doubles omega us opts warm pin-warm]
   (let [{:keys [iterations friction restitution]} opts
         k (count prepared)
         nl (count limits)
         np (count pins)
         lacc (a/f64 (max 1 nl))
         pacc (a/f64 (max 1 (* 3 np)))
+        ;; Measured before the warm start, which would otherwise hide
+        ;; the approach that restitution answers.
         approach (a/f64 (mapv (fn [row]
                                 (speed-of (nth (:dirs row) 0) vel omega us))
                               prepared))
         acc (a/f64 (* 3 k))]
+    (dotimes [i k]
+      (when-let [was (nth warm i)]
+        (let [dirs (:dirs (nth prepared i))]
+          (dotimes [t 3]
+            (let [p (double (nth was t))]
+              (when-not (zero? p)
+                (apply-to! (nth dirs t) vel omega us p)
+                (aset acc (+ (* 3 i) t) p)))))))
+    (dotimes [i np]
+      (when-let [was (nth pin-warm i)]
+        (let [rows (:rows (nth pins i))]
+          (dotimes [r 3]
+            (let [p (double (nth was r))]
+              (when (and (not (zero? p)) (> (double (:w (nth rows r))) 1e-12))
+                (apply-to! (nth rows r) vel omega us p)
+                (aset pacc (+ (* 3 i) r) p)))))))
     (dotimes [_ (long iterations)]
       ;; Limits, then pins, then contacts: a knee folded backward is a
       ;; worse thing to see than a hand a millimeter off the bars, and
@@ -513,15 +547,31 @@
                     a' (am/clamp (+ o (if (> wt 1e-12) (/ (- vt) wt) 0.0)) (- limit) limit)]
                 (apply-to! row' vel omega us (- a' o))
                 (aset acc idx a')))))))
-    ;; What each pin carried over the step, as one impulse magnitude.
-    (mapv (fn [i]
-            (math/sqrt (+ (* (aget pacc (* 3 i)) (aget pacc (* 3 i)))
-                          (* (aget pacc (+ (* 3 i) 1)) (aget pacc (+ (* 3 i) 1)))
-                          (* (aget pacc (+ (* 3 i) 2)) (aget pacc (+ (* 3 i) 2))))))
-          (range np))))
+    {:contacts (mapv (fn [i] [(aget acc (* 3 i)) (aget acc (+ (* 3 i) 1))
+                              (aget acc (+ (* 3 i) 2))])
+                     (range k))
+     :pins (mapv (fn [i] [(aget pacc (* 3 i)) (aget pacc (+ (* 3 i) 1))
+                          (aget pacc (+ (* 3 i) 2))])
+                 (range np))}))
 
 ;; ---------------------------------------------------------------------------
 ;; A step
+
+(defn- contact-keys
+  "What counts as the same contact as last step, for each of `cs`.
+
+  The two sides and the feature id `allgo.physics.contact` stamps on the
+  point, as `allgo.physics.solver` keys them -- and a count, because not
+  every shape tells its points apart: a tire against the road calls all
+  of its points `:torus-box`, and without the count they would share one
+  remembered impulse."
+  [cs]
+  (first (reduce (fn [[out seen] {:keys [a b id]}]
+                   (let [k [a b id]
+                         n (long (get seen k 0))]
+                     [(conj out (conj k n)) (assoc seen k (inc n))]))
+                 [[] {}]
+                 cs)))
 
 (defn step
   "One step of the whole scene.
@@ -564,9 +614,18 @@
         pins (mapv #(prepare-pin w configs % dt w) (:pins w))
         [vel omega] (body-arrays bodies)
         us (mapv (fn [{:keys [model pose]}] (a/f64 (ab/velocity model pose))) models)
-        carried (if (or (seq cs) (seq limits) (seq pins))
-                  (solve! (mapv #(prepare w configs % dt w) cs) limits pins vel omega us w)
-                  [])
+        warm? (:warm-start? w)
+        ks (contact-keys cs)
+        remembered (:contact-impulses w)
+        solved (if (or (seq cs) (seq limits) (seq pins))
+                 (solve! (mapv #(prepare w configs % dt w) cs) limits pins vel omega us w
+                         (mapv #(when warm? (get remembered %)) ks)
+                         (mapv #(when warm? (:impulse %)) (:pins w)))
+                 {:contacts [] :pins []})
+        carried (mapv (fn [[x y z]]
+                        (math/sqrt (+ (* (double x) (double x)) (* (double y) (double y))
+                                      (* (double z) (double z)))))
+                      (:pins solved))
         ;; A pin pulled harder than it can hold lets go, and stays gone.
         ;; With a `:break-time`, harder for that long: the force is
         ;; averaged over it first, and the average is what is held.
@@ -577,7 +636,9 @@
                            (let [load (double (or (:load pin) 0.0))]
                              (assoc pin :load (+ load (* (- f load) (min 1.0 (/ (double dt) tau))))))
                            (assoc pin :load f))))
-                     (:pins w) carried)
+                     (map (fn [pin impulse] (assoc pin :impulse impulse))
+                          (:pins w) (:pins solved))
+                     carried)
         held? (mapv (fn [pin]
                       (let [limit (:break-force pin)]
                         (or (nil? limit) (<= (double (:load pin)) (double limit)))))
@@ -598,6 +659,7 @@
                      (range (count models)))]
     (assoc w
            :pin-impulses carried
+           :contact-impulses (zipmap ks (:contacts solved))
            ;; Positions last, from whatever the sweep left behind.
            :bodies (mapv (fn [b]
                            (if (rigid/static? b)
