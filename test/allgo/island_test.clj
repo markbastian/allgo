@@ -250,3 +250,35 @@
   (testing "a different seed gives a different one"
     (is (not= (map :biome (:centers (generate {:seed 3 :rng (seeded 3)})))
               (map :biome (:centers (generate {:seed 9 :rng (seeded 9)})))))))
+
+(deftest plates-test
+  (let [m (generate {:shape :plates :points 900})
+        {:keys [centers corners plates]} m
+        by-id (into {} (map (juxt :id identity)) centers)]
+    (testing "a plate map keeps every invariant the other shapes do"
+      ;; The redistribution is what sets the fractions, and plate ground
+      ;; goes through it like any other -- negative where it is sea.
+      (is (every? #(<= 0.0 (:elevation %) 1.0) corners))
+      (is (every? #(<= 0.0 (:moisture %) 1.0) corners))
+      (is (seq (remove :water? centers)))
+      (is (every? :ocean? (filter :border? centers))))
+    (testing "the plates are on the map, in center ids"
+      (is (= (count centers) (count (:plate plates))))
+      (is (seq (:boundaries plates))))
+    (testing "the high ground stands near where plates converge"
+      ;; The heights are redistributed, but in order, so the top of the
+      ;; land is still where the plates put it -- more of it near a
+      ;; converging boundary than of the land as a whole, which on a small
+      ;; map can itself be mostly near one.
+      (let [converging (into #{} (comp (filter #(= :converging (:kind %)))
+                                       (mapcat (juxt :a :b)))
+                             (:boundaries plates))
+            near? (fn [c] (or (converging (:id c)) (some converging (:neighbors c))
+                              (some #(some converging (:neighbors (by-id %))) (:neighbors c))))
+            land (sort-by :elevation > (remove :water? centers))
+            top (take (max 1 (quot (count land) 10)) land)
+            share (fn [cs] (/ (count (filter near? cs)) (double (count cs))))]
+        (is (> (share top) (share land)) (str (share top) " against " (share land)))))
+    (testing "the same seed gives the same plates"
+      (is (= (map :elevation corners)
+             (map :elevation (:corners (generate {:shape :plates :points 900}))))))))

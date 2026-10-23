@@ -46,14 +46,17 @@
 
   ## What it is not
 
-  No plate tectonics, no climate simulation, no erosion. Elevation here
-  is distance from the coast with a curve applied, which produces a
-  plausible island and not a physical one -- `allgo.procedural.erosion`
-  is the namespace that simulates a cause. The two are complementary and
-  do not currently meet: erosion carves a grid and this builds a graph."
+  No climate simulation and no erosion. Elevation here is distance from
+  the coast with a curve applied, which produces a plausible island and
+  not a physical one -- unless the shape is `:plates`, when
+  `allgo.procedural.tectonics` decides the land and its ranges instead,
+  and the high ground stands where plates collide. Erosion is
+  `allgo.procedural.erosion`, and the two do not currently meet: erosion
+  carves a grid and this builds a graph."
   (:require [allgo.geometry.dual-mesh :as dm]
             [allgo.procedural.fractal :as fractal]
             [allgo.procedural.noise :as noise]
+            [allgo.procedural.tectonics :as tectonics]
             [allgo.random :as random]
             [clojure.math :as math]))
 
@@ -78,7 +81,17 @@
    ;; segments. On by default: a polygon map that looks polygonal is the
    ;; thing everyone wants to fix first, and it changes nothing but where
    ;; the ink goes. See `allgo.geometry.dual-mesh/noisy-edges`.
-   :noisy? true})
+   :noisy? true
+   ;; For `:shape :plates`: how many, how much of the map is continental
+   ;; crust, and how much of a planet the map spans, in radians -- 0.8 is
+   ;; some five thousand kilometers of the Earth, a range a couple of
+   ;; cells wide at the default point count. The crust is not all land:
+   ;; its shelves are under water and the map is pulled down to sea at
+   ;; its edges, so 0.7 of crust comes to about a quarter of the cells
+   ;; dry, between the radial shape and the noise one.
+   :plates 7
+   :continental 0.7
+   :plate-scale 0.8})
 
 ;; ---------------------------------------------------------------------------
 ;; Island shapes
@@ -151,6 +164,60 @@
   "The shapes by name, so a demo can offer them without knowing the vars."
   {:radial radial-shape
    :noise noise-shape})
+
+;; ---------------------------------------------------------------------------
+;; Plates
+
+(defn- assign-plates
+  "Water and the shape of the land from plate tectonics, in place of a
+  shape and distance from the sea.
+
+  The cells become `allgo.procedural.tectonics`'s graph, moving by drift
+  as a flat map's plates must, and their ground decides both which
+  corners are under water and which of the dry ones stand higher than
+  which -- so the ranges stand where plates collide and a rift fills
+  with a lake. A corner takes the mean of the cells it touches, pulled
+  down toward the edges so the map still ends in sea, which the ocean's
+  flood fill starts from.
+
+  It does not set the final heights. `redistribute-elevation` reshapes
+  those as it does for the other shapes, keeping the order and setting
+  the distribution the rivers and biomes downstream are tuned for: what
+  the plates decide is where the high ground is, not how much of it
+  there is. The plates themselves go on the island as `:plates`, in
+  center ids, for whoever wants to draw them.
+
+  `:plate-scale` is how much of a planet the map shows, in radians, and
+  so how wide a range or a rift comes out across it."
+  [{:keys [centers corners bounds] :as island}
+   {:keys [seed plates continental plate-scale lake-threshold]}]
+  (let [to-unit (normalize bounds)
+        n (count centers)
+        world (tectonics/on-graph
+               {:points (mapv #(to-unit (:point %)) centers)
+                :neighbors (mapv :neighbors centers)
+                ;; the map is about sqrt(n) cells across
+                :spacing (/ (double plate-scale) (math/sqrt n))}
+               {:seed seed :plates plates :continental continental :flat? true})
+        e (:elevation world)
+        raw (fn [{:keys [touches point border?]}]
+              (if (or border? (empty? touches))
+                -1.0
+                (let [[x y] (to-unit point)
+                      edge (max (abs (double x)) (abs (double y)))]
+                  (- (/ (reduce + (map e touches)) (count touches))
+                     (* 0.8 (math/pow edge 6.0))))))
+        corners (mapv (fn [v]
+                        (let [h (raw v)]
+                          (assoc v :elevation h :water? (or (:border? v) (neg? (double h))))))
+                      corners)
+        centers (mapv (fn [c]
+                        (let [cs (:corners c)
+                              wet (count (filter #(:water? (corners %)) cs))]
+                          (assoc c :water? (>= (/ (double wet) (max 1 (count cs)))
+                                               (double lake-threshold)))))
+                      centers)]
+    (assoc island :centers centers :corners corners :plates world)))
 
 ;; ---------------------------------------------------------------------------
 ;; Water, ocean and coast
@@ -605,13 +672,16 @@
    (let [{:keys [points bounds relax shape seed rng lake-threshold river-attempts
                  noisy?]
           :as opts} (merge defaults opts)
-         shape-fn (if (fn? shape)
-                    shape
-                    ((get shapes shape noise-shape) (assoc opts :seed seed)))]
+         plates? (= shape :plates)
+         shape-fn (when-not plates?
+                    (if (fn? shape)
+                      shape
+                      ((get shapes shape noise-shape) (assoc opts :seed seed))))]
      (-> (dm/relaxed (scatter points bounds rng) bounds relax)
-         (assign-water shape-fn bounds lake-threshold)
+         (cond-> plates? (assign-plates opts)
+                 (not plates?) (assign-water shape-fn bounds lake-threshold))
          assign-ocean
-         assign-corner-elevation
+         (cond-> (not plates?) assign-corner-elevation)
          redistribute-elevation
          assign-center-elevation
          assign-downslope

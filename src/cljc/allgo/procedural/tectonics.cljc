@@ -76,8 +76,14 @@
 
 (defn- sub [a b] (mapv - a b))
 
+(defn- dot-any
+  "`dot` for vectors of any length: the plates work on a flat map's points
+  as well as the sphere's."
+  ^double [a b]
+  (reduce + (map * a b)))
+
 (defn- unit [v]
-  (let [l (math/sqrt (dot v v))]
+  (let [l (math/sqrt (dot-any v v))]
     (mapv #(/ (double %) l) v)))
 
 (defn- random-unit [rng]
@@ -156,12 +162,14 @@
 
 (defn- plate-motions
   "Each plate's crust and motion: `{:continental? :pole :spin}`, the plate
-  turning about the unit vector `:pole` at `:spin` radians per unit time.
+  turning about the unit vector `:pole` at `:spin` radians per unit time;
+  or on a flat map `{:continental? :velocity}`, the plate drifting, at up
+  to a unit a unit time.
 
   Continents are taken in a random order until they cover `share` of the
   surface, so the land fraction is about what was asked whatever sizes
   the plates came out."
-  [plate k share rng]
+  [plate k share rng flat?]
   (let [area (frequencies plate)
         n (count plate)
         order (random/shuffle rng (range k))
@@ -170,15 +178,23 @@
                         chosen
                         (recur more (+ covered (long (area p 0))) (conj chosen p))))]
     (mapv (fn [p]
-            {:continental? (contains? continental p)
-             :pole (random-unit rng)
-             :spin (random/uniform rng -1.0 1.0)})
+            (if flat?
+              (let [a (random/uniform rng 0.0 (* 2.0 math/PI))
+                    s (random/uniform rng 0.0 1.0)]
+                {:continental? (contains? continental p)
+                 :velocity [(* s (math/cos a)) (* s (math/sin a))]})
+              {:continental? (contains? continental p)
+               :pole (random-unit rng)
+               :spin (random/uniform rng -1.0 1.0)}))
           (range k))))
 
 (defn- velocity
-  "How fast the plate is carrying the point `x` of the unit sphere."
-  [{:keys [pole spin]} x]
-  (mapv #(* (double spin) (double %)) (cross pole x)))
+  "How fast the plate is carrying the point `x`: turning it about the
+  plate's pole on the sphere, or carrying it along on a flat map."
+  [{:keys [pole spin] :as motion} x]
+  (if pole
+    (mapv #(* (double spin) (double %)) (cross pole x))
+    (:velocity motion)))
 
 (defn- crust
   "Whether each cell's crust is continental.
@@ -195,9 +211,10 @@
   (let [field (-> (fractal/fbm (noise/gradient-basis {:seed (+ 31 (long seed))})
                                {:octaves 4.0 :H 0.9})
                   (noise/scaled 1.6))
+        ;; a flat map's points sample the field on a plane through it
         score (mapv (fn [[x y z] p]
                       (+ (if (:continental? (motions p)) 0.5 -0.5)
-                         (* 1.2 (noise/sample field (double x) (double y) (double z)))))
+                         (* 1.2 (noise/sample field (double x) (double y) (double (or z 0.5))))))
                     points plate)
         n (count score)
         cut (nth (vec (sort score)) (min (dec n) (long (* n (- 1.0 (double share))))))]
@@ -219,8 +236,8 @@
   [a b va vb]
   (let [d (unit (sub b a))
         r (sub va vb)
-        closing (dot r d)
-        speed (math/sqrt (dot r r))]
+        closing (dot-any r d)
+        speed (math/sqrt (dot-any r r))]
     (cond
       (< speed 1e-12) [:transform 0.0]
       (> closing (* 0.5 speed)) [:converging closing]
@@ -365,6 +382,30 @@
 ;; ---------------------------------------------------------------------------
 ;; Assembling
 
+(defn on-graph
+  "Plates over any graph of cells, and the ground they make.
+
+  `graph` is `{:points :neighbors :spacing}`: each cell's position --
+  unit vectors on the sphere, or points of a flat map, which should run
+  about -1 to 1 -- its adjacent cells, and the distance one step between
+  cells stands for, in radians of a planet the size of the Earth's, which
+  is what the features' widths are measured in. `:flat?` moves the plates
+  by drifting rather than turning, as a map that is not a sphere needs.
+
+  Returns `:plate`, `:motions`, `:continental`, `:boundaries` and
+  `:elevation`, as `plates` describes."
+  [graph {:keys [seed continental flat?] k :plates}]
+  (let [rng (random/rng seed)
+        plate (grow-plates (:neighbors graph) k rng)
+        motions (plate-motions plate k continental rng flat?)
+        crust (crust graph plate motions continental seed)
+        boundaries (find-boundaries graph plate motions)]
+    {:plate plate
+     :motions motions
+     :continental crust
+     :boundaries boundaries
+     :elevation (elevations graph plate crust boundaries)}))
+
 (defn plates
   "A planet's plates and the ground they make.
 
@@ -383,19 +424,9 @@
   continental crust under water, so somewhat less than that stands dry."
   ([] (plates {}))
   ([opts]
-   (let [{:keys [resolution seed continental] k :plates} (merge defaults opts)
-         rng (random/rng seed)
-         mesh (cells resolution)
-         plate (grow-plates (:neighbors mesh) k rng)
-         motions (plate-motions plate k continental rng)
-         crust (crust mesh plate motions continental seed)
-         boundaries (find-boundaries mesh plate motions)]
-     (assoc mesh
-            :plate plate
-            :motions motions
-            :continental crust
-            :boundaries boundaries
-            :elevation (elevations mesh plate crust boundaries)))))
+   (let [opts (merge defaults opts)
+         mesh (cells (:resolution opts))]
+     (merge mesh (on-graph mesh opts)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Asking about any direction

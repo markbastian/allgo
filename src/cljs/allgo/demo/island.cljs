@@ -17,7 +17,10 @@
                 differs from the sea by connectivity alone, and this is
                 the view that shows it.
     `elevation` distance from the coast, with the curve applied. It is
-                a dome, because that is what distance from the coast is.
+                a dome, because that is what distance from the coast is
+                -- except with the `plates` shape, where the land and
+                its ranges come from `allgo.procedural.tectonics`
+                instead, and the high ground stands where plates meet.
     `moisture`  distance from fresh water. Dry interiors and green
                 valleys, with nothing modeling either.
     `territory` who holds what, from `allgo.procedural.settlement`. Worth
@@ -71,6 +74,7 @@
        :rivers true
        :roads true
        :outlines true
+       :boundaries true
        :noisy true})
 
 (defn- rgb [[r g b]] (str "rgb(" r "," g "," b ")"))
@@ -204,6 +208,25 @@
                 :when (pos? flow)]
           (set! (.-lineWidth ctx) (min 4.0 (+ 0.9 (* 0.8 (js/Math.sqrt flow)))))
           (stroke-path (edge-path e))))
+      ;; With the plates shape, where the plates meet: red where they
+      ;; converge, violet where they part -- not blue, which is the
+      ;; rivers -- yellow where they slide past.
+      ;; A boundary runs between two cells, so it is the edge they share.
+      (when-let [{:keys [boundaries]} (and (.-boundaries controls) (:plates m))]
+        (let [edge-of (into {} (for [e edges
+                                     :let [[a b] (:centers e)]
+                                     :when (and a b)]
+                                 [#{a b} e]))]
+          (set! (.-lineWidth ctx) 2.2)
+          (set! (.-lineCap ctx) "round")
+          (doseq [{:keys [a b kind]} boundaries
+                  :let [e (edge-of #{a b})]
+                  :when e]
+            (set! (.-strokeStyle ctx) (case kind
+                                        :converging "rgb(230,60,40)"
+                                        :diverging "rgb(170,90,255)"
+                                        "rgb(240,200,40)"))
+            (stroke-path (edge-path e)))))
       ;; Territory borders, where two towns' claims meet.
       (when (= view "territory")
         (set! (.-strokeStyle ctx) "rgba(16,16,26,0.9)")
@@ -326,7 +349,7 @@
           (-> (.add controls "view"
                     #js ["biome" "water" "elevation" "moisture" "territory" "mesh"])
               (.onChange render!))
-          (-> (.add controls "shape" #js ["noise" "radial"]) (.onFinishChange generate!))
+          (-> (.add controls "shape" #js ["noise" "radial" "plates"]) (.onFinishChange generate!))
           (-> (.add controls "seed" 1 60 1) (.onFinishChange generate!))
           (-> (.add controls "points" 200 3000 100) (.onFinishChange generate!))
           (-> (.add controls "relax" 0 3 1) (.onFinishChange generate!))
@@ -336,6 +359,7 @@
           (-> (.add controls "rivers") (.onChange render!))
           (-> (.add controls "roads") (.onChange render!))
           (-> (.add controls "outlines") (.onChange render!))
+          (-> (.add controls "boundaries") (.name "plate boundaries") (.onChange render!))
           (.add #js {:regenerate generate!} "regenerate")))
       {:start (fn [] (resize!) (render!))
        :stop (fn [])})))
