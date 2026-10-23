@@ -14,9 +14,14 @@
 
   These are the circumstances for the Earth as a whole: where an eclipse
   is visible needs the Besselian elements, which Meeus leaves out.
+  `shadow` and `obscuration` answer it at an instant instead, from the
+  true positions of the Sun and Moon: where the shadow's axis meets the
+  ground, and how much of the Sun is hidden from any point.
 
   Times are MJD (TT)."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.geodesy :as geo]
+            [allgo.geometry.vec3 :as v3]
             [allgo.numerics.polynomial :as poly]
             [clojure.math :as math]))
 
@@ -121,3 +126,74 @@
   [from to]
   (keep #(lunar (+ 2000.0 (/ % 12.3685)))
         (range (syzygy from 0.5) (inc (syzygy to 0.5)))))
+
+;; The Moon's shadow on the Earth, from the true positions rather than the
+;; series above: what the demo draws, and where on the ground an eclipse is.
+
+(def ^:private sun-radius 695700.0)
+(def ^:private moon-radius 1737.4)
+
+(defn- disk-overlap
+  "The fraction of a disk of radius `a` hidden by one of radius `b` whose
+  center is `d` from its own: the lens they share over the first's area."
+  [a b d]
+  (cond
+    (>= d (+ a b)) 0.0
+    (<= d (abs (- a b))) (min 1.0 (/ (* b b) (* a a)))
+    :else (let [ca (math/acos (/ (+ (* d d) (* a a) (- (* b b))) (* 2.0 d a)))
+                cb (math/acos (/ (+ (* d d) (* b b) (- (* a a))) (* 2.0 d b)))
+                lens (- (+ (* a a ca) (* b b cb))
+                        (* 0.5 (math/sqrt (* (+ (- d) a b) (+ d a (- b)) (+ d (- a) b) (+ d a b)))))]
+            (/ lens (* math/PI a a)))))
+
+(defn obscuration
+  "How much of the Sun the Moon hides from `p`: the fraction of its disk's
+  area, 0 to 1, both disks taken as evenly bright. `moon`, `sun` and `p`
+  are positions in km in any one frame. Whether the Sun is up at `p` is
+  another question: this is the two disks alone."
+  [moon sun p]
+  (let [m (v3/sub moon p) s (v3/sub sun p)]
+    (disk-overlap (math/asin (/ sun-radius (v3/length s)))
+                  (math/asin (/ moon-radius (v3/length m)))
+                  (v3/angle m s))))
+
+(defn shadow
+  "Where the Moon's shadow falls, from the geocentric Moon and Sun in km
+  in the Earth-fixed frame (z through the north pole, x through
+  Greenwich).
+
+  The shadow's axis runs from the Sun through the Moon. `:gamma` is its
+  least distance from the Earth's center in equatorial radii, positive
+  when it passes north of it, and `:u` the umbral cone's radius there in
+  the same units, negative when the cone has not yet closed -- the
+  quantities `solar` gets from its series -- and `:penumbra` the
+  penumbral cone's, which touches the Earth somewhere while |gamma| is
+  less than 1 + `:penumbra`, the flattening aside. When the axis meets the
+  ellipsoid, `:lat` and `:lon` (geodetic, radians) are where it first
+  does, and `:radius` the shadow's radius there across the axis, km:
+  `:kind` :total for the umbra, :annular for the antumbra beyond the
+  cone's vertex. Nil when the shadow points away from the Earth -- the
+  Moon on the far side of it from the Sun."
+  [moon sun]
+  (let [d (v3/normalize (v3/sub moon sun))
+        slope (/ (- sun-radius moon-radius) (v3/distance moon sun))
+        cone (fn [t] (- moon-radius (* t slope)))
+        t0 (- (v3/dot moon d))
+        closest (v3/add-scaled moon d t0)
+        a geo/a-earth
+        ;; the ellipsoid is a sphere once z is stretched by a/b
+        squash (fn [[x y z]] [x y (* z (/ a geo/b-earth))])
+        m' (squash moon) d' (squash d)
+        A (v3/dot d' d') B (* 2.0 (v3/dot m' d')) C (- (v3/dot m' m') (* a a))
+        disc (- (* B B) (* 4.0 A C))
+        axis {:gamma (* (if (neg? (closest 2)) -1.0 1.0) (/ (v3/length closest) a))
+              :u (/ (- (cone t0)) a)
+              :penumbra (/ (+ moon-radius (* t0 (/ (+ sun-radius moon-radius) (v3/distance moon sun)))) a)}]
+    (cond
+      (not (pos? t0)) nil
+      (neg? disc) axis
+      :else
+      (let [t (/ (- (- B) (math/sqrt disc)) (* 2.0 A))
+            [lat lon] (geo/cartesian->geodetic (v3/add-scaled moon d t))
+            r (cone t)]
+        (assoc axis :lat lat :lon lon :radius (abs r) :kind (if (pos? r) :total :annular))))))

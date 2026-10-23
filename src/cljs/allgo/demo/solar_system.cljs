@@ -23,10 +23,12 @@
   rings' across the hemisphere the Sun is not over. The Events folder jumps to the next or
   previous of any phenomenon `allgo.astro.almanac` knows -- phases,
   eclipses, seasons, oppositions, a moon's shadow on Jupiter -- and looks
-  at the body it concerns; a Moon in the Earth's shadow goes copper. The readout says what an almanac
-  would of the body in focus: a planet's distance, phase, magnitude, size
-  and elongation, the Sun's axis and Carrington rotation, the Moon's phase
-  and libration, the equation of time; and, in the overview, the date in
+  at the body it concerns; a Moon in the Earth's shadow goes copper, and
+  the Moon's shadow darkens the Earth, traced from the true Moon and Sun.
+  The readout says what an almanac would of the body in focus: a
+  planet's distance, phase, magnitude, size and elongation, the Sun's axis
+  and Carrington rotation, the Moon's phase and libration, the equation
+  of time and where an eclipse of the Sun is central; and, in the overview, the date in
   the Julian, Jewish and Islamic calendars.
 
   The view can also be the sky from a place on the Earth
@@ -76,6 +78,7 @@
   (:require [allgo.astro.almanac :as almanac]
             [allgo.astro.calendar :as cal]
             [allgo.astro.constants :as c]
+            [allgo.astro.eclipse :as ecl]
             [allgo.astro.ephemeris :as eph]
             [allgo.astro.frames :as frames]
             [allgo.astro.illumination :as illum]
@@ -380,13 +383,20 @@
     (.set (.-position o) (* sky-radius x) (* sky-radius y) (* sky-radius z))
     o))
 
+(defn- earth-time
+  "The time to turn the Earth by: its rotation keeps UT, which is TT less
+  delta T (Meeus's, chapter 10) -- a minute now, hours in antiquity."
+  [mjd]
+  (- mjd (/ (atime/delta-t (atime/decimal-year mjd)) 86400.0)))
+
 (defn- orient!
-  "Turns `mesh` to face the way `body` does at `mjd`. The mesh is built
-  with its pole along y and its prime meridian along x -- the body-fixed
-  frame carried into three.js's axes by the same `y-up` as everything
-  else -- so the rotation it needs is the model's, conjugated by `y-up`."
+  "Turns `mesh` to face the way `body` does at `mjd` -- the Earth by UT,
+  as `earth-time` gives it. The mesh is built with its pole along y and
+  its prime meridian along x -- the body-fixed frame carried into
+  three.js's axes by the same `y-up` as everything else -- so the
+  rotation it needs is the model's, conjugated by `y-up`."
   [^js mesh body mjd]
-  (let [r (rot/body->icrf body mjd)
+  (let [r (rot/body->icrf body (if (= body :earth) (earth-time mjd) mjd))
         cols (mapv (fn [j] (to-view (mapv #(nth % j) r))) (range 3))
         ;; body x, y, z axes in view coordinates; local x = X, y = Z, z = -Y
         [bx by bz] cols
@@ -544,6 +554,69 @@
     (set! (.. uniforms -occluderCount -value) (min max-occluders (count spheres)))
     (set! (.. uniforms -sunSize -value) sun-size)))
 
+(defn- eclipsed!
+  "Teaches the Earth's material the Moon's shadow, and returns the
+  uniforms to feed it: `earthCenter` and `earthScale`, where the Earth is
+  drawn and how large, and `moonAt` and `sunAt`, the true geocentric
+  Moon and Sun in the Earth's equatorial radii along the view's axes.
+
+  The Moon is drawn far from where it is -- magnified and pushed out --
+  so the shadow is not traced from the drawn one as Jupiter's moons'
+  are. Each fragment of the Earth is taken back to its true place
+  instead, and asks how much of the Sun the true Moon hides from there:
+  the overlap of the two disks, as `eclipse/obscuration` works it out.
+  That is an umbra a hundred km or so across inside a penumbra half the
+  Earth wide, from geometry alone."
+  [^js material]
+  (let [uniforms #js {:earthCenter #js {:value (THREE/Vector3.)}
+                      :earthScale #js {:value 1.0}
+                      :moonAt #js {:value (THREE/Vector3. 0 0 1e6)}
+                      :sunAt #js {:value (THREE/Vector3. 0 0 -1e6)}}]
+    (set! (.-onBeforeCompile material)
+          (fn [^js shader]
+            (js/Object.assign (.-uniforms shader) uniforms)
+            (set! (.-vertexShader shader)
+                  (-> (.-vertexShader shader)
+                      (.replace "#include <common>" "#include <common>\nvarying vec3 vEarthWorld;")
+                      (.replace "#include <project_vertex>"
+                                "#include <project_vertex>\nvEarthWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;")))
+            (set! (.-fragmentShader shader)
+                  (-> (.-fragmentShader shader)
+                      (.replace "#include <common>"
+                                (str "#include <common>\n"
+                                     "varying vec3 vEarthWorld;\n"
+                                     "uniform vec3 earthCenter;\n"
+                                     "uniform float earthScale;\n"
+                                     "uniform vec3 moonAt;\n"
+                                     "uniform vec3 sunAt;\n"
+                                     ;; the Sun's and Moon's radii in the Earth's
+                                     "const float sunRadius = " (/ 695700.0 6378.137) ";\n"
+                                     "const float moonRadius = " (/ 1737.4 6378.137) ";\n"
+                                     "float hidden() {\n"
+                                     "  vec3 p = (vEarthWorld - earthCenter) / earthScale;\n"
+                                     "  vec3 m = moonAt - p;\n"
+                                     "  vec3 s = sunAt - p;\n"
+                                     "  float a = sunRadius / length(s);\n"
+                                     "  float b = moonRadius / length(m);\n"
+                                     "  vec3 mu = normalize(m), su = normalize(s);\n"
+                                     ;; small angles, where acos would lose them
+                                     "  float d = atan(length(cross(mu, su)), dot(mu, su));\n"
+                                     "  if (d >= a + b) return 0.0;\n"
+                                     "  if (d <= abs(a - b)) return min(1.0, (b * b) / (a * a));\n"
+                                     "  float ca = acos(clamp((d * d + a * a - b * b) / (2.0 * d * a), -1.0, 1.0));\n"
+                                     "  float cb = acos(clamp((d * d + b * b - a * a) / (2.0 * d * b), -1.0, 1.0));\n"
+                                     "  float k = max(0.0, (-d + a + b) * (d + a - b) * (d - a + b) * (d + a + b));\n"
+                                     "  return (a * a * ca + b * b * cb - 0.5 * sqrt(k)) / (PI * a * a);\n"
+                                     "}\n"))
+                      (.replace "#include <lights_fragment_end>"
+                                (str "#include <lights_fragment_end>\n"
+                                     "float sunLight = 1.0 - hidden();\n"
+                                     "reflectedLight.directDiffuse *= sunLight;\n"
+                                     "reflectedLight.directSpecular *= sunLight;\n"))))))
+    (set! (.-customProgramCacheKey material) (fn [] "eclipsed"))
+    (set! (.-needsUpdate material) true)
+    uniforms))
+
 (defn- circle-points
   "A circle of radius `r` about the origin in the plane whose pole is the
   unit vector `n` (view coordinates)."
@@ -590,6 +663,23 @@
         cover (fn [r] (max 0.0 (min 1.0 (/ (- (+ r sm) d) (* 2.0 sm)))))]
     [(cover (* 1.02 (- (+ pm ps) ss))) (cover (* 1.02 (+ pm ps ss)))]))
 
+(defn- moon-shadow
+  "A line for the Earth's readout while the Moon's shadow is on it: where
+  the umbra or antumbra is, or that the eclipse is partial. `moon` gives
+  the geocentric Moon and `sun` is the geocentric Sun, km, EME2000, and
+  the Earth is turned as it is drawn."
+  [mjd moon sun]
+  (let [r (rot/body->icrf :earth (earth-time mjd))
+        fixed (fn [v] (mapv (fn [j] (reduce + (map #(* (get-in r [% j]) (v %)) (range 3)))) (range 3)))
+        {:keys [gamma penumbra lat lon radius kind]} (ecl/shadow (fixed (moon)) (fixed sun))]
+    (cond
+      lat (str "\nthe Moon's " (if (= kind :total) "umbra" "antumbra") " at "
+               (.toFixed (abs (/ lat c/degrees)) 1) "°" (if (neg? lat) "S" "N") " "
+               (.toFixed (abs (/ lon c/degrees)) 1) "°" (if (neg? lon) "W" "E") ", "
+               (.toFixed (* 2.0 radius) 0) " km across: a"
+               (if (= kind :total) " total" "n annular") " eclipse of the Sun")
+      (and gamma (< (abs gamma) (+ 1.0 penumbra))) "\nthe Moon's penumbra on the Earth: a partial eclipse of the Sun")))
+
 (defn- calendars
   "The date in the other calendars Meeus reckons: Julian, the Jewish year,
   the Islamic date, and this year's Easter."
@@ -627,7 +717,8 @@
                    secs (long (math/round (* 60.0 (abs minutes))))]
                (str "equation of time " (if (neg? minutes) "-" "+")
                     (quot secs 60) "m" (.padStart (str (mod secs 60)) 2 "0") "s"
-                    " (a sundial is " (if (neg? minutes) "slow" "fast") ")"))
+                    " (a sundial is " (if (neg? minutes) "slow" "fast") ")"
+                    (moon-shadow mjd (:moon (ephemeris mjd true)) (mapv - earth))))
       :moon (let [{:keys [k chi]} (lunar/phase mjd)
                   {:keys [l b]} (lunar/libration mjd)
                   age (- mjd (almanac/previous-event :new-moon mjd))]
@@ -695,6 +786,8 @@
         rings    (ring)
         ;; the planet's shadow on them, and its moons'
         ring-shadow (shadowed! (.-material rings) {:planet? true})
+        ;; and the Moon's on the Earth, from the true geometry
+        earth-eclipse (eclipsed! (.-material (meshes :earth)))
         ;; The Sun is a point of light at the center, and since the radial
         ;; scale keeps every direction from the Sun true, it lights each
         ;; planet from the side it really does. (The Moon, pushed out from
@@ -986,7 +1079,8 @@
                   ;; heliocentric place is legitimate only because both are in
                   ;; the same frame, which is the whole point.
                   (let [[ex ey ez] (place earth)
-                        [mx my mz] (to-view (moon))
+                        moon-km (moon)
+                        [mx my mz] (to-view moon-km)
                         k (* (.-moonZoom controls) (/ view-radius outer-au) (/ 1.0 c/AU))
                         precise (precise?)]
                     (.set (.-position (meshes :moon)) (+ ex (* k mx)) (+ ey (* k my)) (+ ez (* k mz)))
@@ -994,12 +1088,22 @@
                     ;; goes copper in the umbra, lit only by sunsets. Not
                     ;; traced like Jupiter's -- the Moon is drawn far from
                     ;; true scale -- but worked out from the true geometry.
-                    (let [[umbra penumbra] (earth-shadow (moon) (mapv - earth))
+                    (let [[umbra penumbra] (earth-shadow moon-km (mapv - earth))
                           ^js mat (.-material (meshes :moon))
                           base (if (.-map mat) 1.0 0.81)
                           dim (* base (- 1.0 (* 0.45 penumbra)))
                           mix (fn [a b] (+ (* a (- 1.0 umbra)) (* b umbra)))]
                       (.setRGB (.-color mat) (mix dim (* base 0.42)) (mix dim (* base 0.17)) (mix dim (* base 0.10))))
+                    ;; and the Moon's shadow on the Earth, traced from the
+                    ;; true Moon and Sun (see `eclipsed!`)
+                    (let [^js em (meshes :earth)
+                          per-re (/ 1.0 6378.137)
+                          [mx' my' mz'] (to-view moon-km)
+                          [sx sy sz] (to-view (mapv - earth))]
+                      (.copy (.. earth-eclipse -earthCenter -value) (.-position em))
+                      (set! (.. earth-eclipse -earthScale -value) (.. em -scale -x))
+                      (.set (.. earth-eclipse -moonAt -value) (* mx' per-re) (* my' per-re) (* mz' per-re))
+                      (.set (.. earth-eclipse -sunAt -value) (* sx per-re) (* sy per-re) (* sz per-re)))
                     ;; and its orbit, drawn at the same magnification: a
                     ;; month ahead, sampled afresh only when the Moon has
                     ;; moved on by a sample or the source has changed --
