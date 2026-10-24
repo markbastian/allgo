@@ -1,6 +1,11 @@
 (ns allgo.demo.ragdoll
   "A figure with joints, dropped on the floor.
 
+  It is drawn as a crash test dummy, and only drawn so: each part the
+  physics collides is still a box, and the dummy's capsules, rounded
+  blocks and targets sit inside them, but for the balls at the joints
+  and the hands and feet at the ends.
+
   Everything under this demo is `allgo.physics.articulated`, which
   describes a jointed body by its joint angles rather than by a body per
   limb and constraints to hold them together. The difference is not
@@ -105,7 +110,8 @@
             [allgo.physics.world :as pw]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
-            ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))
+            ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]
+            ["three/examples/jsm/geometries/RoundedBoxGeometry.js" :refer [RoundedBoxGeometry]]))
 
 (def ^:private identity-q [0.0 0.0 0.0 1.0])
 
@@ -231,20 +237,93 @@
           :pos [0.0 height 0.0]
           :vel [0.0 spin 0.0 0.0 0.0 0.0]}})
 
-(defn- material [kind]
-  (case kind
-    :head (THREE/MeshStandardMaterial. #js {:color 0xd8b08a :roughness 0.7})
-    :torso (THREE/MeshStandardMaterial. #js {:color 0x4f6b9c :roughness 0.75})
-    :limb (THREE/MeshStandardMaterial. #js {:color 0x8a9bbd :roughness 0.75})
-    :brick (THREE/MeshStandardMaterial. #js {:color 0xb98d5f :roughness 0.85})
-    (THREE/MeshStandardMaterial. #js {:color 0x2b3040 :roughness 0.9})))
+;; ---------------------------------------------------------------------------
+;; Looks: a crash test dummy
+;;
+;; Only what is drawn. Each part is still the box the physics collides,
+;; and what is drawn for it stays inside that box, but for the balls at
+;; the joints and the hands and feet at the ends.
 
-(defn- part-kind [link]
-  (case (long link)
-    -1 :torso
-    0 :torso
-    1 :head
-    :limb))
+(defn- target-texture
+  "The quartered disc a crash test dummy wears to be tracked on film."
+  []
+  (let [c (js/document.createElement "canvas")
+        ctx (.getContext c "2d")
+        h 64.0 r 58.0]
+    (set! (.-width c) 128) (set! (.-height c) 128)
+    (dotimes [i 4]
+      (.beginPath ctx)
+      (.moveTo ctx h h)
+      (.arc ctx h h r (* i 0.5 js/Math.PI) (* (inc i) 0.5 js/Math.PI))
+      (.closePath ctx)
+      (set! (.-fillStyle ctx) (if (even? i) "#17171a" "#f2c018"))
+      (.fill ctx))
+    (.beginPath ctx)
+    (.arc ctx h h r 0 (* 2 js/Math.PI))
+    (set! (.-lineWidth ctx) 6)
+    (set! (.-strokeStyle ctx) "#17171a")
+    (.stroke ctx)
+    (THREE/CanvasTexture. c)))
+
+(def ^:private materials
+  (delay
+    {:yellow (THREE/MeshStandardMaterial. #js {:color 0xf2c018 :roughness 0.5})
+     :black (THREE/MeshStandardMaterial. #js {:color 0x17171a :roughness 0.6})
+     :hand (THREE/MeshStandardMaterial. #js {:color 0x3b3f48 :roughness 0.7})
+     :target (THREE/MeshStandardMaterial. #js {:map (target-texture) :transparent true :roughness 0.5
+                                               :polygonOffset true :polygonOffsetFactor -2})
+     :brick (THREE/MeshStandardMaterial. #js {:color 0xb98d5f :roughness 0.85})}))
+
+(def ^:private reaching-up
+  "The links whose joint is at the bottom of their box: the spine and the
+  neck. The rest hang from theirs."
+  #{0 1})
+
+(defn- dummy-part
+  "What is drawn for `link`, whose collision box is `body`: a group in the
+  box's own frame, placed where the box is."
+  [link body]
+  (let [{:keys [yellow black hand target]} @materials
+        [sx sy sz] (:size body)
+        g (THREE/Group.)
+        add (fn [geo mat x y z]
+              (let [m (THREE/Mesh. geo mat)]
+                (.set (.-position m) x y z)
+                (.add g m)
+                m))
+        ;; the joint's end of the box, and the far end
+        jy (if (reaching-up link) (* -0.5 sy) (* 0.5 sy))
+        joint! (fn [r] (add (THREE/SphereGeometry. r 16 12) black 0 jy 0))
+        ;; a target on the face at `x` (either side), at height `y`
+        target! (fn [size x y]
+                  (let [m (add (THREE/PlaneGeometry. size size) target x y 0)]
+                    (set! (.. m -rotation -y) (if (pos? x) (* 0.5 js/Math.PI) (* -0.5 js/Math.PI)))))]
+    (case (long link)
+      ;; the pelvis: a belt, and a target on each hip
+      -1 (do (add (RoundedBoxGeometry. sx sy sz 3 0.04) yellow 0 0 0)
+             (add (THREE/BoxGeometry. (* 1.02 sx) 0.035 (* 1.02 sz)) black 0 (- (* 0.5 sy) 0.04) 0)
+             (doseq [x [(* 0.5 sx) (* -0.5 sx)]] (target! 0.09 (+ x (* (js/Math.sign x) 0.002)) -0.01)))
+      ;; the chest: ribbed, a target on each side, the waist a ball
+      0 (do (add (RoundedBoxGeometry. sx sy sz 3 0.05) yellow 0 0 0)
+            (doseq [y [0.02 0.07 0.12]]
+              (add (THREE/BoxGeometry. (* 0.7 sx) 0.012 0.004) black 0 y (- (+ (* 0.5 sz) 0.002))))
+            (doseq [x [(* 0.5 sx) (* -0.5 sx)]] (target! 0.09 (+ x (* (js/Math.sign x) 0.002)) (* 0.22 sy)))
+            (joint! 0.075))
+      ;; the head: round-edged, a target on each side, the neck a ball
+      1 (do (add (RoundedBoxGeometry. (* 0.95 sx) sy (* 0.95 sz) 4 0.07) yellow 0 0 0)
+            (doseq [x [(* 0.475 sx) (* -0.475 sx)]] (target! 0.11 (+ x (* (js/Math.sign x) 0.002)) 0.01))
+            (joint! 0.05))
+      ;; a limb: a capsule with a ball at its joint, and a hand or a foot
+      (let [w (min sx sz)
+            r (* 0.45 w)]
+        (add (THREE/CapsuleGeometry. r (max 0.0 (- sy (* 2 r))) 6 12) yellow 0 0 0)
+        (joint! (* 0.55 w))
+        (case (long link)
+          (3 5) (add (THREE/SphereGeometry. (* 0.6 sx) 14 10) hand 0 (- jy) 0)
+          (7 9) (add (RoundedBoxGeometry. (* 1.15 sx) 0.07 (* 1.9 sz) 2 0.02) black
+                     0 (+ (- jy) 0.035) (* -0.45 sz))
+          nil)))
+    g))
 
 (defn init! [^js container]
   (let [scene (THREE/Scene.)
@@ -304,13 +383,14 @@
                   (set! (.-visible prop) (boolean (.-obstacle controls)))
                   (.set (.-position prop) x y z)
                   (.set (.-quaternion prop) qx qy qz qw)))
-              (mesh-for [body kind]
+              (brick-mesh [body]
                 (let [[sx sy sz] (:size body)]
-                  (THREE/Mesh. (THREE/BoxGeometry. sx sy sz) (material kind))))
+                  (THREE/Mesh. (THREE/BoxGeometry. sx sy sz) (:brick @materials))))
               (rebuild! []
                 (doseq [[_ ^js m] (:meshes @world)]
                   (.remove scene m)
-                  (.dispose (.-geometry m)))
+                  ;; the materials are shared and stay
+                  (.traverse m (fn [^js o] (when-let [geo (.-geometry o)] (.dispose geo)))))
                 (let [model (figure (boolean (.-limits controls)))
                       st (start-state model (.-height controls) (.-spin controls))
                       bodies (into (obstacles) (wall (.-brickRows controls)))
@@ -318,10 +398,10 @@
                       meshes (into (into {}
                                          (for [{:keys [link body]}
                                                (ab/collision-bodies model (:q st) (:base st))]
-                                           [[:link link] (mesh-for body (part-kind link))]))
+                                           [[:link link] (dummy-part link body)]))
                                    (for [[i body] (map-indexed vector bodies)
                                          :when (not (rigid/static? body))]
-                                     [[:rigid i] (mesh-for body :brick)]))]
+                                     [[:rigid i] (brick-mesh body)]))]
                   (doseq [[_ ^js m] meshes] (.add scene m))
                   (reset! world {:scene sc :meshes meshes})
                   (reset! paused? true)
