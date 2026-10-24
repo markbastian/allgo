@@ -2239,8 +2239,9 @@
   closed the whole of what had built up at once -- a head flicked round
   at three radians a second every eight steps, in a pile that never
   slept."
-  [model ls ai q dt bias-factor max-push slop]
+  [model ls ai q dt bias-factor max-push slop ^doubles u margin]
   (let [dt (double dt) bias-factor (double bias-factor) max-push (double max-push) slop (double slop)
+        margin (double margin)
         parts (chain model)
         root? (some? (base model))
         base-off (if root? 6 0)
@@ -2253,18 +2254,18 @@
                    nd (.-ndof l)
                    offset (.-offset l)
                    x (nth q j nil)
-                   ;; each `[depth w which]`: how far past the limit, the
-                   ;; generalized impulse direction that comes back, and
-                   ;; which of the joint's limits it is, for a caller to
-                   ;; know it again next step
-                   violated
+                   ;; each `[depth w which]`: how far past the limit --
+                   ;; negative, how far short of it -- the generalized
+                   ;; impulse direction that comes back, and which of the
+                   ;; joint's limits it is, for a caller to know it again
+                   ;; next step
+                   candidates
                    (case (kind-of link)
                      (:revolute :prismatic)
                      (when-let [[lo hi] (:limit link)]
                        (let [xv (double x)]
-                         (cond (< xv (double lo)) [[(- (double lo) xv) (a/f64 [1.0]) :lo]]
-                               (> xv (double hi)) [[(- xv (double hi)) (a/f64 [-1.0]) :hi]]
-                               :else nil)))
+                         [[(- (double lo) xv) (a/f64 [1.0]) :lo]
+                          [(- xv (double hi)) (a/f64 [-1.0]) :hi]]))
                      :spherical
                      (let [rest-dir (v/normalize (or (:limit-axis link) (:com link)))
                            rot (if (and (sequential? x) (= 4 (count x)))
@@ -2284,7 +2285,7 @@
                            proj (v/dot [(nth rot 0) (nth rot 1) (nth rot 2)] rest-dir)
                            twist (* 2.0 (math/atan2 proj (double (nth rot 3))))]
                        (cond-> []
-                         (and cone (> swing (double cone)))
+                         cone
                          (into (let [n (v/cross bone rest-dir)
                                      len (v/length n)]
                                  (when (> len 1e-9)
@@ -2297,7 +2298,7 @@
                          ;; (v . a)^2 + w^2 is zero and there is no twist to
                          ;; speak of -- any turn about the bone is as good as
                          ;; any other.
-                         (and twist-max (> (abs twist) (double twist-max))
+                         (and twist-max
                               (> (+ (* proj proj) (* (double (nth rot 3)) (double (nth rot 3)))) 1e-12))
                          ;; Along the twist's own rate, d twist / d omega,
                          ;; from twist = 2 atan2(p, w) with p = v . a and
@@ -2324,7 +2325,20 @@
                                   (a/f64 [(* sgn jx) (* sgn jy) (* sgn jz)])
                                   :twist]))))
                      nil)]
-               (for [[depth ^doubles w which] violated]
+               ;; Kept past the limit, or short of it by less than it
+               ;; can close this step: `margin`, and how fast the joint
+               ;; is turning toward it, from `u`. A limit met only once
+               ;; it was passed let a joint at thirty radians a second
+               ;; half a radian past before anything held it; met ahead,
+               ;; as a contact is, it closes no faster than the gap.
+               (for [[depth ^doubles w which] candidates
+                     :let [closing (if u
+                                     (max 0.0 (- (double (loop [k 0 acc 0.0]
+                                                           (if (== k (alength w))
+                                                             acc
+                                                             (recur (inc k) (+ acc (* (aget w k) (aget u (+ base-off (long offset) k))))))))))
+                                     0.0)]
+                     :when (> (double depth) (- (+ margin (* closing dt))))]
                  (let [delta (joint-delta model ls ai j w)
                        g (let [o (a/f64 nd-total)]
                            (dotimes [k nd]
@@ -2333,7 +2347,11 @@
                        wgt (dot-n g delta)]
                    {:g g :delta delta :link j :which which
                     :m (if (> wgt 1e-12) (/ 1.0 wgt) 0.0)
-                    :bias (min max-push (/ (* bias-factor (max 0.0 (- (double depth) slop))) dt))})))))
+                    ;; past it, pushed out beyond the slop; short of it,
+                    ;; allowed to close the gap and no more
+                    :bias (if (pos? (double depth))
+                            (min max-push (/ (* bias-factor (max 0.0 (- (double depth) slop))) dt))
+                            (/ (double depth) dt))})))))
           (range (count parts)))))
 
 (defn limit-constraints
@@ -2348,9 +2366,9 @@
   rows `solve-constraints` builds for itself, given to a caller that has
   a sweep of its own -- `allgo.physics.world`, which has other bodies to
   solve in the same pass. `config` is `configuration`'s."
-  [model {:keys [ls ai q]} dt {:keys [bias-factor max-push-speed limit-slop]
-                               :or {bias-factor 0.2 max-push-speed 3.0 limit-slop 0.0}}]
-  (limit-rows model ls ai q dt bias-factor max-push-speed limit-slop))
+  [model {:keys [ls ai q]} dt {:keys [bias-factor max-push-speed limit-slop u limit-margin]
+                               :or {bias-factor 0.2 max-push-speed 3.0 limit-slop 0.0 limit-margin 0.0}}]
+  (limit-rows model ls ai q dt bias-factor max-push-speed limit-slop u limit-margin))
 
 (defn solve-constraints
   "`state` with its velocities corrected so that neither the contacts nor
@@ -2409,7 +2427,7 @@
                                                            (double slop))))
                                             dt)))))
                    cs)
-        limits (limit-rows model ls ai q dt bias-factor max-push-speed 0.0)
+        limits (limit-rows model ls ai q dt bias-factor max-push-speed 0.0 nil 0.0)
         k (count prep)
         nl (count limits)]
     (if (and (zero? k) (zero? nl))

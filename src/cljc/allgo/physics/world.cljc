@@ -115,9 +115,19 @@
    ;; kicks it: a heap of twenty ragdolls never slept, and with 0.02 all
    ;; twenty sleep in ten seconds. None by default: the motorcycle's
    ;; rider, held in its pose by muscles near its limits, was flung forty
-   ;; meters with it. Under the convex solve it is not used: a heap ran
-   ;; away with it (NOTES, "Why ragdolls did not sleep").
+   ;; meters with it.
    :limit-slop 0.0
+   ;; How far short of a joint limit, in radians, it is already a row,
+   ;; beside how far the joint will turn toward it this step: a limit met
+   ;; ahead, as a contact is, closes no faster than the gap. Met only once
+   ;; passed, joints in a heap of twenty ragdolls went 0.6 rad past as
+   ;; they landed; met within reach of this step's own turning, 0.55,
+   ;; since a contact's push in the solve turns a joint the step began
+   ;; with no row for; every limit a row every step, 0.37 -- and the rest
+   ;; is a turn of half a radian in a step, which a row linear in the
+   ;; velocity follows only so far. Settled, all three hold to a few
+   ;; thousandths. Every limit, then: twenty rows a ragdoll.
+   :limit-margin ##Inf
    :bias-factor 0.2
    ;; Soft contacts, as `allgo.physics.solver` has them: an overlap is a
    ;; damped spring of `contact-hertz` and damping ratio `contact-damping`
@@ -548,10 +558,10 @@
   that model's generalized velocity."
   [{:keys [models] :as opts} configs dt]
   (into []
-        (for [[mi {:keys [model]}] (map-indexed vector models)
+        (for [[mi {:keys [model pose]}] (map-indexed vector models)
               :when (and (ab/limited? model) (not (:sleeping? (nth models mi))))
               row (ab/limit-constraints model (nth configs mi) dt
-                                        (cond-> opts (= :convex (:solver opts)) (assoc :limit-slop 0.0)))]
+                                        (assoc opts :u (a/f64 (ab/velocity model pose))))]
           (assoc row :mi mi :key [mi (:link row) (:which row)]))))
 
 (defn- body-arrays

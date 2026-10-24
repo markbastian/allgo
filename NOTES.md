@@ -817,6 +817,24 @@ tried in the order every pair once was, so again the same to the bit:
 sweep are under 2% of a step now; each dummy's own limbs against each
 other are most of what detection is left with.
 
+**Limits met ahead** (2026-10-24). The convex solve's joints in a heap
+were far past their limits -- a hip 0.45 rad -- and, with `:limit-slop`,
+ran away; it looked like the convex solve's. Measured beside the
+sequential impulse it was not: as twenty dummies landed, the worst
+limit was 0.55 rad past under the sequential impulse and 0.60 under the
+convex solve, and both held to a few thousandths once settled. A limit
+was a row only once passed, so a joint turning at thirty radians a
+second was half a radian past before anything held it. Now a limit is a
+row ahead of time, as a contact is, asking only that the gap close no
+faster than it can (`limit-ahead-test`): with the rows the joint's own
+turning would reach this step, 0.55; with every limit a row every step
+-- twenty a ragdoll, a sixth more time -- 0.37 and 0.47, the default.
+What is left is a joint turning half a radian in a step, which a row
+linear in the velocity follows only so far. The runaway went with the
+twist row's fix, the rows met ahead, and a Newton solve that does not
+converge now giving way to projected Gauss-Seidel, which holds its
+answer bounded; the slop is no longer kept from the convex solve.
+
 Twenty dummies awake under the sequential impulse, later (2026-10-24):
 96 ms a step under Node, then 57. `q/rotate` built five vectors a call
 through `vec3`, and now none, in the same arithmetic; `world` built

@@ -687,6 +687,24 @@
       (is (zero? (bias -0.01 0.02)) "within the slop: held")
       (is (< (abs (- (bias -0.05 0.02) (* 0.2 0.03 60.0))) 1e-9) "past it: the overlap less the slop"))))
 
+(deftest limit-ahead-test
+  (testing "a limit is met before it is reached, as a contact is, and lets the joint close the gap and no further"
+    ;; Met only once passed, joints in a heap of ragdolls landing went
+    ;; half a radian past theirs.
+    (let [model [(assoc (limb -1 :revolute 0.6 2.0) :limit [-1.0 1.0])]
+          dt (/ 1.0 60.0)
+          rows (fn [q qd margin]
+                 (ab/limit-constraints model (ab/configuration model [q] nil) dt
+                                       {:u (double-array [qd]) :limit-margin margin}))]
+      ;; a tenth of a radian short of the top, turning toward it
+      (is (empty? (rows 0.9 1.0 0.0)) "too slow to get there this step: no row")
+      (let [[r :as rs] (rows 0.9 12.0 0.0)]
+        (is (= 1 (count rs)) "fast enough to get there: a row")
+        (is (= [0 :hi] [(:link r) (:which r)]))
+        (is (< (abs (- (double (:bias r)) (/ -0.1 dt))) 1e-9) "closing at most the gap this step"))
+      (is (= 1 (count (rows 0.9 0.0 0.2))) "within the margin, whatever it is doing")
+      (is (= 2 (count (rows 0.0 0.0 ##Inf))) "and with no limit to the margin, both its limits always"))))
+
 (deftest hinge-limit-test
   (testing "a hinge stops at its limit instead of going round"
     (let [free [(limb -1 :revolute 0.6 2.0)]
