@@ -113,3 +113,27 @@
           (doseq [factors [kept heavy]]
             (is (close? (vec (:v fresh)) (vec (:v (cvx/solve (problem 1.0 speed) nil {:factors factors})))
                         1e-9))))))))
+
+(deftest fallback-test
+  (testing "a Newton solve that runs out of iterations gives way to projected Gauss-Seidel, and says so"
+    ;; Stopped short, a Newton step is lower in cost than where it began
+    ;; and can be nothing like the minimum; the fallback is slower to it
+    ;; but bounded every step. Given no iterations at all, it is what
+    ;; answers, and on problems this small it answers as Newton does.
+    (let [eye (vec (for [r (range 6) c (range 6)] (if (= r c) 1.0 0.0)))
+          row (fn [d] [nil (into d [0.0 0.0 0.0])])
+          [b i] (cvx/add-block (cvx/builder) 6 eye eye [0.3 -2.0 0.0 0.0 0.0 0.0])
+          falling (cvx/build (cvx/add-constraint b cvx/contact -1 i
+                                                 [(row [0.0 1.0 0.0]) (row [1.0 0.0 0.0]) (row [0.0 0.0 1.0])]
+                                                 1e-6 1e-6 0.0 0.5))
+          x [1.0 0.0 0.0 0.0 0.0 0.0] -x (mapv - x)
+          [b0 p] (cvx/add-block (cvx/builder) 6 eye eye [1.0 0.0 0.0 0.0 0.0 0.0])
+          [b0 q] (cvx/add-block b0 6 eye eye [-1.0 0.0 0.0 0.0 0.0 0.0])
+          pinned (cvx/build (cvx/add-constraint b0 cvx/bilateral p q [[x -x]] 1e-6 0.0 0.0 0.0))]
+      (doseq [problem [falling pinned]]
+        (let [newton (cvx/solve problem nil {})
+              fallback (cvx/solve problem nil {:max-iterations 0})]
+          (is (nil? (:fallback newton)))
+          (is (= :not-converged (:fallback fallback)))
+          (is (close? (vec (:v newton)) (vec (:v fallback)) 1e-4))
+          (is (close? (vec (:impulses newton)) (vec (:impulses fallback)) 1e-3)))))))

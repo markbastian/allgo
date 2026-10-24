@@ -621,7 +621,8 @@
       (let [gnorm (loop [i 0 s 0.0] (if (== i nd) s (recur (inc i) (max s (abs (aget grad i))))))]
         ;; `grad` holds minus the gradient from here
         (if (or (>= it (long max-iterations)) (<= gnorm (double tolerance)) (zero? nd))
-          {:v v :impulses gam :iterations it :cost cost :factor fac}
+          {:v v :impulses gam :iterations it :cost cost :factor fac
+           :converged (or (<= gnorm (double tolerance)) (zero? nd))}
           (let [cg (when (and fac (not (:worn? fac)) (>= nd (long cg-from)))
                      (conjugate-gradients! problem gms fac grad dir cg-tolerance max-cg ws))
                 fac (cond
@@ -638,7 +639,9 @@
                 (dotimes [i nd] (aset v i (aget trial i)))
                 (let [cost' (evaluate! problem v gam gms scratch)]
                   (if (< step 1e-12)
-                    {:v v :impulses gam :iterations (inc it) :cost cost' :factor fac}
+                    ;; a step too small to move anything: as near the
+                    ;; minimum as the arithmetic gets
+                    {:v v :impulses gam :iterations (inc it) :cost cost' :factor fac :converged true}
                     (recur (inc it) cost' fac)))))))))))
 
 (defn- islands
@@ -722,6 +725,110 @@
      :kind kind' :krow krow' :ka ka' :kb kb' :va va' :vb vb' :vals vals'
      :rn rn' :rt rt' :vhat vhat' :mu mu'}))
 
+(defn- gauss-seidel
+  "The same problem by projected Gauss-Seidel, `sweeps` times over every
+  constraint: each row's impulse moved toward what it asks for -- its
+  velocity plus its regularization's give, `J v + R g`, at `vhat` along a
+  normal or a limit and nothing along a tangent -- and then put back
+  where it may be: a push never a pull, friction inside its cone, a pin
+  anywhere. What `newton` falls back on when it does not converge: slower
+  to the minimum and never all the way there, but every step it takes
+  is bounded, where a Newton step stopped short is not.
+
+  Each row's `M^-1 J'` against its blocks is worked out once, beside its
+  numbers in `vals`."
+  [{:keys [^long nd ^long nk ^ints kind ^ints krow ^ints ka ^ints kb ^ints boff ^ints bsize ^ints moff
+           ^doubles minv ^doubles vstar ^ints va ^ints vb ^doubles vals
+           ^doubles rn ^doubles rt ^doubles vhat ^doubles mu ^long nr]
+    :as problem}
+   sweeps]
+  (let [v (a/f64 nd)
+        gam (a/f64 (* 3 nk))
+        dvals (a/f64 (alength vals))
+        w (a/f64 nr)
+        size (fn ^long [^long q] (if (neg? q) 0 (aget bsize q)))]
+    (dotimes [i nd] (aset v i (aget vstar i)))
+    ;; M^-1 J' a row at a time, and J M^-1 J' for its diagonal
+    (dotimes [k nk]
+      (let [r0 (aget krow k) a (aget ka k) b (aget kb k)]
+        (dotimes [i (rows-of kind k)]
+          (let [r (+ r0 i)]
+            (dotimes [side 2]
+              (let [q (if (zero? side) a b)]
+                (when-not (neg? q)
+                  (let [n (size q) m (aget moff q)
+                        s (if (zero? side) (aget va r) (aget vb r))]
+                    (dotimes [row n]
+                      (aset dvals (+ s row)
+                            (double (loop [c 0 acc 0.0]
+                                      (if (== c n) acc
+                                          (recur (inc c) (+ acc (* (aget minv (+ m (* row n) c)) (aget vals (+ s c))))))))))
+                    (aset w r (+ (aget w r)
+                                 (double (loop [c 0 acc 0.0]
+                                           (if (== c n) acc
+                                               (recur (inc c) (+ acc (* (aget vals (+ s c)) (aget dvals (+ s c))))))))))))))))))
+    (let [speed (fn ^double [^long k ^long r]
+                  (let [a (aget ka k) b (aget kb k)]
+                    (+ (if (neg? a) 0.0
+                           (let [o (aget boff a) s (aget va r)]
+                             (loop [j 0 acc 0.0] (if (== j (aget bsize a)) acc (recur (inc j) (+ acc (* (aget vals (+ s j)) (aget v (+ o j)))))))))
+                       (if (neg? b) 0.0
+                           (let [o (aget boff b) s (aget vb r)]
+                             (loop [j 0 acc 0.0] (if (== j (aget bsize b)) acc (recur (inc j) (+ acc (* (aget vals (+ s j)) (aget v (+ o j))))))))))))
+          push! (fn [^long k ^long r ^double dg]
+                  (let [a (aget ka k) b (aget kb k)]
+                    (when-not (neg? a)
+                      (let [o (aget boff a) s (aget va r)]
+                        (dotimes [j (aget bsize a)] (aset v (+ o j) (+ (aget v (+ o j)) (* dg (aget dvals (+ s j))))))))
+                    (when-not (neg? b)
+                      (let [o (aget boff b) s (aget vb r)]
+                        (dotimes [j (aget bsize b)] (aset v (+ o j) (+ (aget v (+ o j)) (* dg (aget dvals (+ s j))))))))))
+          ;; the impulse row `r` of constraint `k` would have, unprojected
+          ;; no primitive hints: a fn taking them is limited to four
+          step (fn [k r reg target g]
+                 (let [k (long k) r (long r) reg (double reg) target (double target) g (double g)
+                       wr (aget w r)]
+                   (if (> (+ wr reg) 1e-12)
+                     (- g (/ (- (+ (speed k r) (* reg g)) target) (+ wr reg)))
+                     g)))]
+      (dotimes [_ (long sweeps)]
+        (dotimes [k nk]
+          (let [r0 (aget krow k) k3 (* 3 k) kd (aget kind k)]
+            (if (zero? kd)
+              ;; a contact: the normal, then the tangents inside its cone
+              (let [gn (aget gam k3)
+                    gn' (max 0.0 (double (step k r0 (aget rn k) (aget vhat k) gn)))
+                    _ (when-not (== gn' gn) (push! k r0 (- gn' gn)) (aset gam k3 gn'))
+                    g1 (aget gam (+ k3 1)) g2 (aget gam (+ k3 2))
+                    t1 (double (step k (+ r0 1) (aget rt k) 0.0 g1))
+                    t2 (double (step k (+ r0 2) (aget rt k) 0.0 g2))
+                    lim (* (aget mu k) gn')
+                    len (math/sqrt (+ (* t1 t1) (* t2 t2)))
+                    sc (if (> len lim) (if (> len 0.0) (/ lim len) 0.0) 1.0)
+                    t1 (* t1 sc) t2 (* t2 sc)]
+                (push! k (+ r0 1) (- t1 g1)) (aset gam (+ k3 1) t1)
+                (push! k (+ r0 2) (- t2 g2)) (aset gam (+ k3 2) t2))
+              (let [g (aget gam k3)
+                    g' (double (step k r0 (aget rn k) (aget vhat k) g))
+                    g' (if (== kd unilateral) (max 0.0 g') g')]
+                (push! k r0 (- g' g)) (aset gam k3 g')))))))
+    {:v v :impulses gam :iterations (long sweeps) :cost (cost problem v)}))
+
+(defn- solve-island
+  "`newton` on one island, and `gauss-seidel` in its place when Newton
+  does not converge -- runs out of iterations, or finds its matrix not
+  positive definite. A Newton solve stopped short is lower in cost than
+  where it began and can be nothing like the minimum: twenty ragdolls in
+  a heap, stopped at thirty iterations, had joints turning at hundreds of
+  radians a second and flew apart."
+  [problem v0 opts]
+  (let [r (newton problem v0 opts)]
+    (if (and (:converged r) (not (:failed r)))
+      r
+      (assoc (gauss-seidel problem (or (:fallback-sweeps opts) 50))
+             :fallback (or (:failed r) :not-converged)
+             :factor (:factor r)))))
+
 (defn solve
   "The velocities that minimize the step's cost, and the impulses that
   produce them.
@@ -764,8 +871,8 @@
    (let [parts (islands nb nk ka kb)]
      (if (and (== 1 (count parts)) (== nb (count (first (first parts)))))
        (let [blocks (first (first parts))
-             r (newton problem v0 (assoc opts :factor (get (:factors opts) blocks)))]
-         (-> r (dissoc :factor) (assoc :factors (if-let [f (:factor r)] {blocks f} {}))))
+             r (solve-island problem v0 (assoc opts :factor (get (:factors opts) blocks)))]
+         (-> r (dissoc :factor :converged) (assoc :factors (if-let [f (:factor r)] {blocks f} {}))))
        (let [v (a/f64 nd) gam (a/f64 (* 3 nk))
              ^doubles v-init (or v0 vstar)]
          ;; anything nothing touches goes where it was going
@@ -779,8 +886,8 @@
                                    (let [q (aget bl i) o (aget boff q) po (aget poff i)]
                                      (dotimes [j (aget bsize q)] (aset g (+ po j) (aget v-init (+ o j))))))
                                  g)
-                         {:keys [^doubles impulses iterations cost failed factor] ^doubles pv :v}
-                         (newton p guess (assoc opts :factor (get (:factors opts) blocks)))]
+                         {:keys [^doubles impulses iterations cost failed factor fallback] ^doubles pv :v}
+                         (solve-island p guess (assoc opts :factor (get (:factors opts) blocks)))]
                      (dotimes [i (alength bl)]
                        (let [q (aget bl i) o (aget boff q) po (aget poff i)]
                          (dotimes [j (aget bsize q)] (aset v (+ o j) (aget pv (+ po j))))))
@@ -791,7 +898,8 @@
                                  (update :iterations max iterations)
                                  (update :cost + cost))
                        factor (assoc-in [:factors blocks] factor)
-                       failed (assoc :failed failed))))
+                       failed (assoc :failed failed)
+                       fallback (assoc :fallback fallback))))
                  {:v v :impulses gam :iterations 0 :cost 0.0 :factors {}}
                  parts))))))
 
