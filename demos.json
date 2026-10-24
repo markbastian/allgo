@@ -98,6 +98,16 @@
    "href": "play/?demo=textures"
   },
   {
+   "id": "volumes",
+   "group": "Procedural Generation",
+   "label": "Clouds, Steam & Fire",
+   "blurb": "Hypertexture and gases, ray marched through solid noise",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=volumes"
+  },
+  {
    "id": "hex",
    "group": "Geometry",
    "label": "Hex Grids",
