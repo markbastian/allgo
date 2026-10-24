@@ -312,6 +312,61 @@
           fastest (apply max (for [s states b (drop 2 (:bodies s))] (v/length (:vel b))))]
       (is (< fastest 5.0) (str "a brick left at " fastest " m/s")))))
 
+(def ^:private dummy
+  "The ragdoll demo's figure: a free pelvis, ten box limbs on ball joints
+  and hinges with the demo's cones, twists and ranges, and each joint
+  damped a little, with the armature that damping wants."
+  (let [deg #(Math/toRadians (double %))
+        damp (fn [l] (assoc l :damping 0.2 :armature (/ 0.2 60.0)))
+        bone (fn [dir parent joint axis origin size m]
+               (let [[_ sy _] size]
+                 (damp (cond-> {:parent parent :joint joint :origin {:rot nil :pos origin}
+                                :mass m :com [0.0 (* 0.5 dir (double sy)) 0.0]
+                                :inertia (box-inertia size m) :shape :box :size size}
+                         axis (assoc :axis axis)))))
+        ball (fn [l cone twist] (assoc l :cone (deg cone) :twist (deg twist)))
+        hinge (fn [l lo hi] (assoc l :limit [(deg lo) (deg hi)]))]
+    {:base {:mass 12.0 :com [0.0 0.0 0.0] :inertia (box-inertia [0.28 0.20 0.18] 12.0)
+            :shape :box :size [0.28 0.20 0.18] :shape-pose {:rot idq :pos [0.0 0.0 0.0]}}
+     :links
+     [(ball (bone 1.0 -1 :spherical nil [0.0 0.10 0.0] [0.34 0.42 0.20] 25.0) 25 35)
+      (ball (bone 1.0 0 :spherical nil [0.0 0.42 0.0] [0.20 0.22 0.20] 5.0) 40 60)
+      (ball (bone -1.0 0 :spherical nil [0.23 0.38 0.0] [0.10 0.28 0.10] 2.5) 85 70)
+      (hinge (bone -1.0 2 :revolute [1.0 0.0 0.0] [0.0 -0.28 0.0] [0.09 0.26 0.09] 1.8) 0 150)
+      (ball (bone -1.0 0 :spherical nil [-0.23 0.38 0.0] [0.10 0.28 0.10] 2.5) 85 70)
+      (hinge (bone -1.0 4 :revolute [1.0 0.0 0.0] [0.0 -0.28 0.0] [0.09 0.26 0.09] 1.8) 0 150)
+      (ball (bone -1.0 -1 :spherical nil [0.09 -0.10 0.0] [0.14 0.40 0.14] 8.0) 60 35)
+      (hinge (bone -1.0 6 :revolute [1.0 0.0 0.0] [0.0 -0.40 0.0] [0.12 0.38 0.12] 3.5) -150 0)
+      (ball (bone -1.0 -1 :spherical nil [-0.09 -0.10 0.0] [0.14 0.40 0.14] 8.0) 60 35)
+      (hinge (bone -1.0 8 :revolute [1.0 0.0 0.0] [0.0 -0.40 0.0] [0.12 0.38 0.12] 3.5) -150 0)]}))
+
+(defn- heap
+  "Ten dummies dropped in rows of five, as the demo drops them, under the
+  sequential impulse."
+  [opts]
+  (w/world [floor]
+           (vec (for [i (range 10)
+                      :let [col (mod i 5) row (quot i 5)]]
+                  {:model dummy
+                   :pose {:q (mapv (fn [l] (if (= :spherical (:joint l)) idq 0.0)) (:links dummy))
+                          :qd (vec (repeat (ab/dof dummy) 0.0))
+                          :base {:rot (q/mul (q/from-axis-angle [0.0 1.0 0.0] (* 0.7 i))
+                                             (q/from-axis-angle [0.0 0.0 1.0] 0.15))
+                                 :pos [(* 0.75 (- col 2)) (+ 1.8 (* 0.35 row)) (* 0.75 (- row 1))]
+                                 :vel [0.0 2.0 0.0 0.0 0.0 0.0]}}}))
+           (merge {:gravity g :friction 0.7 :solver :sequential-impulse} opts)))
+
+(deftest heap-sleeps-test
+  (testing "a heap of ragdolls goes to sleep, given its limits' slop"
+    ;; A limb resting on its limit with none is pushed just inside, falls
+    ;; back past and is pushed again; one pressed past it against its own
+    ;; chest by the heap fights the chest for good. Three degrees of slop
+    ;; and ten of them sleep in eleven seconds; with a hundredth of a
+    ;; radian, in thirty.
+    (let [after (run (heap {:limit-slop 0.05}) 1200 (/ 1.0 60.0))]
+      (is (every? :sleeping? (:models after))
+          (str (count (filter :sleeping? (:models after))) " of 10 asleep")))))
+
 (deftest limit-warm-start-test
   (testing "a limit pushed against remembers what it pushed with, for the next step"
     ;; Held at the bottom of [0.3, 0.6] by its own weight: two kilograms

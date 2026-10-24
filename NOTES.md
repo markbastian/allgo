@@ -862,7 +862,12 @@ its limit and its forearm against its own chest, the limit pushing out
 and the chest pushing back, and the two fought for good. It defaults to
 none: the motorcycle's rider, held near its limits by muscles, was
 flung forty meters with it, and under the convex solve a heap ran away.
-The ragdoll demo asks for 0.02.
+The ragdoll demo asks for 0.05, three degrees, and that answers the
+elbow too: the slop as deep as a jammed limb sits, its limit holds it
+there without pushing, and nothing is left to fight. Ten dummies on a
+bare floor slept in eleven seconds at 0.05 and thirty at 0.02; across a
+handful of other heaps -- still, spun, fifteen of them, dropped from
+three meters -- every one slept in five to eleven (`heap-sleeps-test`).
 
 **Newton in a heap** (2026-10-24). Twenty dummies under the convex solve
 take twenty Newton steps on average and up to sixty-odd, and it is not
