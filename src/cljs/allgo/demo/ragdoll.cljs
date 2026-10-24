@@ -224,18 +224,33 @@
        :spin 2.0
        :shoveForce 120
        :brickRows 4
+       :dummies 1
        :start (fn [])
        :reset (fn [])
        :shove (fn [])})
 
 (defn- start-state
-  "The figure standing upright, `height` above the floor, given a turn."
-  [model ^double height ^double spin]
-  {:q (mapv (fn [l] (if (= :spherical (:joint l)) identity-q 0.0)) (ab/chain model))
-   :qd (vec (repeat (ab/dof model) 0.0))
-   :base {:rot (q/from-axis-angle [0.0 0.0 1.0] 0.15)
-          :pos [0.0 height 0.0]
-          :vel [0.0 spin 0.0 0.0 0.0 0.0]}})
+  "The figure standing upright, `height` above the floor at `x`, `z`,
+  facing `yaw` about the vertical, given a turn."
+  ([model height spin] (start-state model height spin 0.0 0.0 0.0))
+  ([model height spin x z yaw]
+   {:q (mapv (fn [l] (if (= :spherical (:joint l)) identity-q 0.0)) (ab/chain model))
+    :qd (vec (repeat (ab/dof model) 0.0))
+    :base {:rot (q/mul (q/from-axis-angle [0.0 1.0 0.0] yaw) (q/from-axis-angle [0.0 0.0 1.0] 0.15))
+           :pos [x height z]
+           :vel [0.0 spin 0.0 0.0 0.0 0.0]}}))
+
+(defn- drop-points
+  "Where `n` dummies start: the first where one always has, the rest in
+  rows of five, three quarters of a meter apart -- clear of each other
+  at the start -- each row a little higher than the last and each dummy
+  turned a little from its neighbor."
+  [n height]
+  (for [i (range n)
+        :let [col (mod i 5) row (quot i 5)]]
+    (if (zero? i)
+      [0.0 height 0.0 0.0]
+      [(* 0.75 (- col 2)) (+ height (* 0.35 row)) (* 0.75 (- row 1)) (* 0.7 i)])))
 
 ;; ---------------------------------------------------------------------------
 ;; Looks: a crash test dummy
@@ -367,11 +382,10 @@
                   (.set (.-position m) x y z)
                   (.set (.-quaternion m) qx qy qz qw)))
               (sync-meshes! []
-                (let [{:keys [scene meshes]} @world
-                      {:keys [model pose]} (first (:models scene))]
-                  (doseq [{:keys [link body]} (ab/collision-bodies
-                                               model (:q pose) (:base pose))]
-                    (when-let [^js m (get meshes [:link link])]
+                (let [{:keys [scene meshes]} @world]
+                  (doseq [[mi {:keys [model pose]}] (map-indexed vector (:models scene))
+                          {:keys [link body]} (ab/collision-bodies model (:q pose) (:base pose))]
+                    (when-let [^js m (get meshes [:link mi link])]
                       (place! m body)))
                   (doseq [[i body] (map-indexed vector (:bodies scene))]
                     (when-let [^js m (get meshes [:rigid i])]
@@ -392,13 +406,19 @@
                   ;; the materials are shared and stay
                   (.traverse m (fn [^js o] (when-let [geo (.-geometry o)] (.dispose geo)))))
                 (let [model (figure (boolean (.-limits controls)))
-                      st (start-state model (.-height controls) (.-spin controls))
+                      spin (double (.-spin controls))
+                      models (vec (for [[i [x h z yaw]] (map-indexed vector (drop-points (long (.-dummies controls))
+                                                                                         (double (.-height controls))))]
+                                    {:model model
+                                     :pose (start-state model h (if (zero? i) spin (* spin (- 1.0 (* 0.15 (mod i 4)))))
+                                                        x z yaw)}))
                       bodies (into (obstacles) (wall (.-brickRows controls)))
-                      sc (pw/world bodies [{:model model :pose st}] (opts))
+                      sc (pw/world bodies models (opts))
                       meshes (into (into {}
-                                         (for [{:keys [link body]}
-                                               (ab/collision-bodies model (:q st) (:base st))]
-                                           [[:link link] (dummy-part link body)]))
+                                         (for [[mi {:keys [pose]}] (map-indexed vector models)
+                                               {:keys [link body]}
+                                               (ab/collision-bodies model (:q pose) (:base pose))]
+                                           [[:link mi link] (dummy-part link body)]))
                                    (for [[i body] (map-indexed vector bodies)
                                          :when (not (rigid/static? body))]
                                      [[:rigid i] (brick-mesh body)]))]
@@ -410,24 +430,26 @@
               (shove! []
                 ;; A push on the torso, from wherever the camera is, so
                 ;; it always shoves the figure away from the viewer.
-                (let [{:keys [model pose]} (first (:models (:scene @world)))
-                      dir (let [p (.-position camera)]
+                (let [dir (let [p (.-position camera)]
                             [(- (.-x p)) 0.15 (- (.-z p))])
                       len (js/Math.hypot (nth dir 0) (nth dir 1) (nth dir 2))
-                      unit (mapv #(/ (double %) len) dir)
-                      ;; At the chest rather than at the shoulder joint,
-                      ;; so it topples the figure instead of spinning it
-                      ;; about its own neck.
-                      chest (ab/frame-of model (:q pose) (:base pose) 0)
-                      where (v/add (:pos chest) (q/rotate (:rot chest) [0.0 0.25 0.0]))]
-                  ;; Woken first: a figure that has come to rest is
-                  ;; asleep, and would ignore the push.
+                      unit (mapv #(/ (double %) len) dir)]
                   (reset! paused? false)
+                  ;; Every dummy, each woken first: a figure that has come
+                  ;; to rest is asleep, and would ignore the push.
                   (swap! world update :scene
                          (fn [sc]
-                           (update-in (pw/wake sc [:link 0 -1]) [:models 0 :pose]
-                                      #(ab/apply-impulse model % 0 where unit
-                                                         (.-shoveForce controls)))))))
+                           (reduce (fn [sc mi]
+                                     (let [{:keys [model pose]} (nth (:models sc) mi)
+                                           ;; At the chest rather than at the shoulder
+                                           ;; joint, so it topples the figure instead
+                                           ;; of spinning it about its own neck.
+                                           chest (ab/frame-of model (:q pose) (:base pose) 0)
+                                           where (v/add (:pos chest) (q/rotate (:rot chest) [0.0 0.25 0.0]))]
+                                       (update-in (pw/wake sc [:link mi -1]) [:models mi :pose]
+                                                  #(ab/apply-impulse model % 0 where unit
+                                                                     (.-shoveForce controls)))))
+                                   sc (range (count (:models sc))))))))
               (opts []
                 {:gravity [0.0 -9.81 0.0]
                  :friction (.-friction controls)
@@ -476,6 +498,15 @@
             (-> (.add controls "tilt" 0 40 1) (.onFinishChange rebuild!))
             (-> (.add controls "brickRows" 0 8 1) (.name "brick rows")
                 (.onFinishChange rebuild!))
+            (-> (.add controls "dummies" 1 20 1)
+                (.onFinishChange (fn [_]
+                                   ;; framed for the crowd, or for one as it was,
+                                   ;; only when the count changes: a reset keeps
+                                   ;; wherever the camera has been turned to
+                                   (if (> (long (.-dummies controls)) 1)
+                                     (do (.set (.-position camera) 5.5 4.2 7.0) (.set (.-target orbit) 0.0 1.2 0.0))
+                                     (do (.set (.-position camera) 3.4 1.9 3.8) (.set (.-target orbit) 0.0 0.7 0.0)))
+                                   (rebuild!))))
             (-> (.add controls "friction" 0.0 1.5 0.05))
             (-> (.add controls "restitution" 0.0 0.6 0.05))
             (-> (.add controls "solver" #js ["convex" "sequential-impulse"]))

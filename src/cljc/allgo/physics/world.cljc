@@ -214,11 +214,30 @@
     :torus (+ (double major) (double minor))
     (* 0.5 (math/sqrt (reduce + (map #(* (double %) (double %)) size))))))
 
+(defn- balls
+  "Each of `bodies`' bounding ball, four numbers a body -- center and
+  `reach` -- for `near?`: worked out once a step, not once a pair. Twenty
+  ragdolls are two hundred parts and twenty thousand pairs, and asked
+  pair by pair, of maps and vectors, it was half a step in a browser."
+  ^doubles [bodies]
+  (let [out (a/f64 (* 4 (count bodies)))]
+    (doseq [[i b] (map-indexed vector bodies)]
+      (let [[x y z] (:pos b) i4 (* 4 (long i))]
+        (aset out i4 (double x)) (aset out (+ i4 1) (double y)) (aset out (+ i4 2) (double z))
+        (aset out (+ i4 3) (reach b))))
+    out))
+
 (defn- near?
-  "Whether two bodies are close enough for a contact to be worth asking
-  about -- their bounding balls, with the speculative margin to spare."
-  [a b]
-  (< (v/distance (:pos a) (:pos b)) (+ (reach a) (reach b) 0.1)))
+  "Whether bodies `i` of `as` and `j` of `bs`, as `balls` has them, are
+  close enough for a contact to be worth asking about -- their bounding
+  balls, with the speculative margin to spare. `v/distance`'s arithmetic."
+  [^doubles as i ^doubles bs j]
+  (let [i4 (* 4 (long i)) j4 (* 4 (long j))
+        dx (- (aget as i4) (aget bs j4))
+        dy (- (aget as (+ i4 1)) (aget bs (+ j4 1)))
+        dz (- (aget as (+ i4 2)) (aget bs (+ j4 2)))]
+    (< (math/sqrt (+ (* dx dx) (* dy dy) (* dz dz)))
+       (+ (aget as (+ i4 3)) (aget bs (+ j4 3)) 0.1))))
 
 (defn contacts
   "Every contact in the scene: rigid against rigid, rigid against a
@@ -236,7 +255,12 @@
   pose want -- a rider's knees tucked in against a tank."
   [{:keys [bodies models self-collide? collide-models?]
     :or {self-collide? true collide-models? true} :as w} configs]
-  (let [parts (model-bodies models configs)]
+  (let [parts (model-bodies models configs)
+        part-balls (balls (map :body parts))
+        body-balls (balls bodies)
+        ;; each part's model, by index: the parts come model by model
+        ^ints owner (a/i32 (map (comp second :side) parts))
+        np (count parts)]
     (-> []
         ;; Rigid against rigid.
         (into (map (fn [c] {:a [:rigid (:a c)] :b [:rigid (:b c)]
@@ -246,12 +270,12 @@
                             :id (:id c)}))
               (contact/all bodies))
         ;; Every model's parts against every rigid body.
-        (into (for [{:keys [side body]} parts
+        (into (for [[pi {:keys [side body]}] (map-indexed vector parts)
                     [bi rb] (map-indexed vector bodies)
                     ;; A course is dozens of boxes and a part is near
                     ;; two or three of them; the rest are ruled out by
                     ;; their bounding balls before any exact test.
-                    :when (near? body rb)
+                    :when (near? part-balls pi body-balls bi)
                     ;; two bodies asleep, or asleep and static, have
                     ;; nothing to say to each other
                     :when (or (awake? w side) (awake? w [:rigid bi]))
@@ -262,10 +286,14 @@
         ;; models share nothing, so neither's response depends on the
         ;; other's.
         (into (when collide-models?
-                (for [{side-a :side body-a :body} parts
-                      {side-b :side body-b :body} parts
-                      :when (< (long (second side-a)) (long (second side-b)))
-                      :when (near? body-a body-b)
+                ;; every later part of a later model: the parts come
+                ;; model by model, so this is each pair of models once
+                (for [i (range np)
+                      j (range (inc i) np)
+                      :when (not (== (aget owner i) (aget owner j)))
+                      :when (near? part-balls i part-balls j)
+                      :let [{side-a :side body-a :body} (nth parts i)
+                            {side-b :side body-b :body} (nth parts j)]
                       :when (or (awake? w side-a) (awake? w side-b))
                       c (pair-contacts side-a body-a side-b body-b)]
                   c)))

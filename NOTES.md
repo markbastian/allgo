@@ -799,6 +799,18 @@ three by three inverted the same way; and the tire's deepest point asked
 with the arithmetic of what it replaced in the same order, so the
 results are the same to the last bit on the JVM.
 
+Twenty crash test dummies at once (the ragdoll demo's `dummies`) were
+60-100 ms a frame in Chrome, under either solver, and the solvers were
+not most of it: two hundred and twenty parts are twenty-four thousand
+pairs between models, and each pair's bounding-ball test worked out
+both balls' radii from their maps and vectors, the pairs filtered from
+every ordered combination; and each dummy's own fifty-five pairs worked
+out both parts' world boxes per pair. Each ball and box is now worked
+out once a step, the pairs walked once, in the same order, and twenty
+dummies are 21-45 ms a frame, convex the quicker once they land.
+Under Node: 158 and 176 ms a step (sequential impulse, convex) became
+80 and 93.
+
 ## Tried and not kept
 
 - **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's

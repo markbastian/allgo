@@ -2153,13 +2153,13 @@
             (range 3)))))
 
 (defn- apart?
-  "Whether two bodies' world-axis boxes miss each other."
-  [a b]
-  (let [ea (world-extent a) eb (world-extent b)]
-    (boolean (some (fn [k]
-                     (> (abs (- (double (nth (:pos a) k)) (double (nth (:pos b) k))))
-                        (+ (double (nth ea k)) (double (nth eb k)))))
-                   (range 3)))))
+  "Whether two bodies' world-axis boxes miss each other, given each one's
+  `world-extent`."
+  [a ea b eb]
+  (boolean (some (fn [k]
+                   (> (abs (- (double (nth (:pos a) k)) (double (nth (:pos b) k))))
+                      (+ (double (nth ea k)) (double (nth eb k)))))
+                 (range 3))))
 
 (defn- collidable?
   "Whether two of a model's own parts are allowed to touch.
@@ -2194,15 +2194,17 @@
   Normals point the way the *first* link of each pair has to be pushed."
   [model q-vec root-state frames]
   (let [parts (chain model)
-        bodies (collision-bodies model q-vec root-state frames)]
+        bodies (vec (collision-bodies model q-vec root-state frames))
+        ;; once a body, not once a pair: eleven parts are fifty-five pairs
+        extents (mapv (comp world-extent :body) bodies)
+        n (count bodies)]
     (into []
-          (for [[x y] (map vector (range) bodies)
-                [x' y'] (map vector (range) bodies)
-                :when (< (long x) (long x'))
-                :let [{la :link ba :body} y
-                      {lb :link bb :body} y']
+          (for [x (range n)
+                x' (range (inc x) n)
+                :let [{la :link ba :body} (nth bodies x)
+                      {lb :link bb :body} (nth bodies x')]
                 :when (collidable? parts la lb)
-                :when (not (apart? ba bb))
+                :when (not (apart? ba (nth extents x) bb (nth extents x')))
                 c (contact/between 0 1 ba bb)]
             {:link la :other lb
              :point (:point c)
