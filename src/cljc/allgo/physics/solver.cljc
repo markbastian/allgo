@@ -1795,7 +1795,10 @@
                 ;; a rebound only for a material that has one, so that
                 ;; otherwise a gap is closed this step and no further
                 bounce (when (and (pos? e) (< va (- threshold))) (* (- e) va))]
-            (aset rn c (/ (* beta beta wn) (* 4.0 math/PI math/PI)))
+            (aset rn c (+ (/ (* beta beta wn) (* 4.0 math/PI math/PI))
+                          ;; softer when deep, so a wedge cannot throw
+                          ;; what it holds (`convex/deep-give`)
+                          (* (convex/deep-give over va dt) wn)))
             (aset rt c (* 1e-3 wn))
             (aset vhat c (if bounce (max push (double bounce)) push))
             (aset mu c friction))))

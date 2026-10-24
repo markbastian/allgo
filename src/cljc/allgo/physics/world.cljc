@@ -901,7 +901,8 @@
                                     push (if (pos? over) (min (double max-push-speed) (/ over (* tau dt))) (/ over dt))
                                     va (double (speed-of normal vel omega us))
                                     vhat (if (and (pos? e) (< va -0.5)) (max push (* (- e) va)) push)]
-                                (add! convex/contact rows (regularize wn) (* 1e-3 (max wn 1e-9)) vhat friction)
+                                (add! convex/contact rows (+ (double (regularize wn)) (* (convex/deep-give over va dt) (max wn 1e-9)))
+                                      (* 1e-3 (max wn 1e-9)) vhat friction)
                                 (dec (count (:kind @builder))))))))
         limit-at (vec (for [{:keys [mi g m bias]} limits]
                         (let [row [(block! [:model mi]) -1 (vec g) nil]]

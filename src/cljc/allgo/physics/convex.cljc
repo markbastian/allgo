@@ -818,6 +818,35 @@
           (dotimes [i n] (aset out (+ (* i n) j) (aget col i))))
         out))))
 
+(defn deep-give
+  "How much a contact `over` meters past the slop gives, as a multiple of
+  its inverse effective mass added to its regularization: none to a
+  centimeter, all of it by two -- unless it is arriving: closing, at
+  `approach` meters a second, by more in a step of `dt` than it is deep.
+
+  A wedge. Two contacts nearly opposed -- a brick between a floor and a
+  slab tilted eighteen degrees over it -- each ask to be pushed apart at
+  up to `max-push-speed`, and the only velocity that satisfies both is
+  sideways, at that over the sine of half the angle between them: nine
+  degrees, and the brick left at twenty-four meters a second; a
+  shallower wedge went to NaN. Held near rigid, as the convex solve
+  holds every contact, nothing bounds that. Given its own inverse mass of
+  regularization, a push can change its body's velocity by at most
+  about half what it asks for, and any number of them, opposed or not,
+  by no more than they ask between them. A resting stack is millimeters
+  deep and never reaches it.
+
+  A contact arriving is an impact, not a wedge, and is held as rigid as
+  ever: given way, it let a ball at 120 m/s through a wall. The test is
+  against the depth, not a speed: a brick a quarter of a meter inside a
+  slab finds its shortest way out flipping from step to step, so that
+  last step's push reads as two meters a second into the slab, and a
+  speed alone held it rigid and threw it at twenty."
+  ^double [over approach dt]
+  (if (> (* (- (double approach)) (double dt)) (double over))
+    0.0
+    (min 1.0 (max 0.0 (/ (- (double over) 0.01) 0.01)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Building a problem
 

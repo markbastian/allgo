@@ -294,6 +294,24 @@
           angle (double (first (:q (:pose (first (:models end))))))]
       (is (< -0.32 angle 0.32) (str "at " angle)))))
 
+(deftest wedge-test
+  (testing "bricks started deep inside a tilted slab are pushed out, not thrown"
+    ;; Each brick is wedged between the floor and a slab tilted over it,
+    ;; whose normals are 162 degrees apart: asked to separate from both
+    ;; at the push speed, the only answer held rigid is sideways at six
+    ;; times it -- sixteen meters a second, and deeper, NaN.
+    (let [slab (rigid/box {:pos [0.0 0.25 0.0] :size [1.6 0.5 1.6]
+                           :rot (q/from-axis-angle [0.0 0.0 1.0] (Math/toRadians 18.0))})
+          ;; four courses of four, the wall the ragdoll demo once stood
+          ;; where its slab was
+          bricks (for [r (range 4) c (range 4) :let [o (if (odd? r) 0.11 0.0)]]
+                   (rigid/box {:pos [(+ (* (- c 1.5) 0.22) o 0.55) (+ 0.055 (* 0.11 r)) 0.0]
+                               :size [0.22 0.11 0.14] :density 500.0}))
+          states (take 120 (iterate #(w/step % (/ 1.0 60.0))
+                                    (w/world (into [floor slab] bricks) [] {:gravity g :solver :convex})))
+          fastest (apply max (for [s states b (drop 2 (:bodies s))] (v/length (:vel b))))]
+      (is (< fastest 5.0) (str "a brick left at " fastest " m/s")))))
+
 (deftest limit-warm-start-test
   (testing "a limit pushed against remembers what it pushed with, for the next step"
     ;; Held at the bottom of [0.3, 0.6] by its own weight: two kilograms

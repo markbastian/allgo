@@ -868,6 +868,29 @@ velocities part way are metres a second from the answer. Tried:
 
 What is left is the active set found one constraint at a time.
 
+**A wedge** (2026-10-24). Two contacts nearly opposed -- a brick between
+the floor and a slab tilted eighteen degrees over it, 162 degrees apart
+-- each ask to be pushed apart at up to `max-push-speed`, and held near
+rigid, as the convex solve holds every contact, the only velocity that
+satisfies both is sideways at that over the sine of nine degrees: the
+ragdoll demo's wall, started inside its slab, threw bricks at sixteen
+meters a second, and deeper went to NaN. The sequential impulse never
+showed it, its iterations running out first. `convex/deep-give` softens
+a contact past a centimeter of overlap, by up to its own inverse
+effective mass added to its regularization by two centimeters: a push
+can then change its body's velocity by about half what it asks, and
+pushes in any number, opposed or not, by no more than they ask between
+them. Sixteen meters a second became 3.5, the NaN 2.5 (`wedge-test`).
+A resting stack is millimeters deep and never reaches it.
+
+The first cut softened every deep contact, and a ball at 120 m/s went
+through a wall: an impact is deep before it is solved. The second spared
+contacts closing faster than a meter a second, and threw a brick at
+twenty: a quarter of a meter inside a slab, the shortest way out flips
+from step to step, and last step's push reads as closing. What tells
+them apart is the depth: an impact closes by more in a step than it is
+deep, and a stuck body does not.
+
 ## Tried and not kept
 
 - **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's
