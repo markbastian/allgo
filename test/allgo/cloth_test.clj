@@ -178,6 +178,20 @@
         (is (> (apply max (ys body)) (- (+ 0.55 r) 0.02))
             "and the top of the sheet is resting on the top of the ball")))
 
+    (testing "and comes to rest there, held by friction rather than creeping off for good"
+      ;; Friction that undid a fixed share of each slide, however hard the
+      ;; cloth pressed, had no static part: fifteen seconds on, the sheet
+      ;; was still sliding at 0.04 m/s, rms.
+      (let [mesh (tri/grid 20 20 0.08 1.25)
+            body (x/add-constraint (x/cloth mesh {:bend-compliance 0.05})
+                                   (x/sphere-constraint center r 0.35))
+            ^doubles v (:vel body)]
+        (dotimes [_ 900] (x/step! body {:gravity [0.0 -9.8 0.0]
+                                        :substeps 12 :damping 0.4 :floor 0.0}))
+        (is (< (Math/sqrt (/ (areduce v i s 0.0 (+ s (* (aget v i) (aget v i))))
+                             (quot (alength v) 3)))
+               0.01))))
+
     (testing "more friction holds more of the sheet on"
       (is (< (on-ball (drop-sheet 0.0)) (on-ball (drop-sheet 0.35)))))
 

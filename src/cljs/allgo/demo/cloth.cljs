@@ -17,7 +17,8 @@
   which drags the two pinned edges together until the sheet has nowhere to
   go but into itself. Without it the folds pass straight through one
   another; with it they stack."
-  (:require [allgo.demo.fps :as fps]
+  (:require [allgo.demo.clock :as clock]
+            [allgo.demo.fps :as fps]
             [allgo.geometry.tri-mesh :as tri]
             [allgo.physics.xpbd :as xpbd]
             ["lil-gui" :default GUI]
@@ -71,8 +72,17 @@
         thickness (* 0.7 (/ sheet-size n))
         body  (cond-> body
                 (.-obstacle controls)
+                ;; Against the ball grown by half the cloth's thickness.
+                ;; The particles are the middle of the cloth, and held
+                ;; on the ball's own surface they sat in it: the flat
+                ;; triangles between them cut a few millimeters into the
+                ;; ball, and where they did not, cloth and ball drew at
+                ;; the same depth and flickered between each other. Half
+                ;; the thickness is more than a triangle sags at any
+                ;; resolution here.
                 (xpbd/add-constraint
-                 (xpbd/sphere-constraint ball-center ball-radius (.-friction controls)))
+                 (xpbd/sphere-constraint ball-center (+ ball-radius (* 0.5 thickness))
+                                         (.-friction controls)))
                 (.-selfCollision controls)
                 ;; Detected once a frame, resolved every substep. Needs the
                 ;; speed limit too, or a fast fold crosses its own thickness
@@ -114,6 +124,7 @@
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         running? (atom false)
         tick-fps! (fps/meter! container)
+        steps-due (clock/fixed-steps (/ 1.0 60.0))
         state    (atom {})]
     (set! (.-background scene) (THREE/Color. 0x05070d))
     (.add scene (THREE/AmbientLight. 0x8899bb 0.75))
@@ -166,14 +177,17 @@
                     (js/requestAnimationFrame tick)
                     (let [t0   (js/performance.now)
                           body (:body @state)]
-                      (when (.-squeeze controls) (squeeze!))
-                      (xpbd/step! body {:gravity  [0.0 (- (.-gravity controls)) 0.0]
-                                        :substeps (.-substeps controls)
-                                        :damping  (.-damping controls)
-                                        :max-velocity (when (.-selfCollision controls)
-                                                        (xpbd/speed-limit (:thickness @state)
-                                                                          (/ 1.0 60.0)))
-                                        :floor    0.0})
+                      ;; As many sixtieths of a second as have passed, so
+                      ;; the sheet falls at the same speed at any refresh rate.
+                      (dotimes [_ (steps-due)]
+                        (when (.-squeeze controls) (squeeze!))
+                        (xpbd/step! body {:gravity  [0.0 (- (.-gravity controls)) 0.0]
+                                          :substeps (.-substeps controls)
+                                          :damping  (.-damping controls)
+                                          :max-velocity (when (.-selfCollision controls)
+                                                          (xpbd/speed-limit (:thickness @state)
+                                                                            (/ 1.0 60.0)))
+                                          :floor    0.0}))
                       (refresh! @state)
                       (.update orbit)
                       (.render renderer scene camera)

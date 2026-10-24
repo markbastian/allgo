@@ -310,24 +310,32 @@
                     px (+ cx (* dx s))
                     py (+ cy (* dy s))
                     pz (+ cz (* dz s))
-                    ;; Friction, the position-based way: of the distance
-                    ;; traveled while in contact, undo some of the part
-                    ;; running along the surface, leaving the normal part
-                    ;; alone -- that part is the contact. Without it a sheet
-                    ;; dropped on a ball slides off and pools on the floor,
-                    ;; which is correct for a frictionless ball and useless
-                    ;; as a drape.
+                    ;; Friction, the position-based way, as Coulomb has it:
+                    ;; of the distance traveled along the surface this
+                    ;; substep, undo up to mu times how far the particle
+                    ;; was pushed out -- the push is the normal impulse,
+                    ;; in units of distance. Less than that and it is all
+                    ;; undone, which is static friction: what lets a drape
+                    ;; come to rest. Undoing a fixed share of the slide
+                    ;; instead, however hard the particle pressed, left it
+                    ;; creeping for good. Without any, a sheet dropped on a
+                    ;; ball slides off and pools on the floor, which is
+                    ;; correct for a frictionless ball and useless as a
+                    ;; drape.
                     nx (/ dx d) ny (/ dy d) nz (/ dz d)
                     mx (- px (aget prev b))
                     my (- py (aget prev (+ b 1)))
                     mz (- pz (aget prev (+ b 2)))
                     along (+ (* mx nx) (* my ny) (* mz nz))
-                    tx (* mu (- mx (* along nx)))
-                    ty (* mu (- my (* along ny)))
-                    tz (* mu (- mz (* along nz)))]
-                (aset pos b (- px tx))
-                (aset pos (+ b 1) (- py ty))
-                (aset pos (+ b 2) (- pz tz))))))))))
+                    tx (- mx (* along nx))
+                    ty (- my (* along ny))
+                    tz (- mz (* along nz))
+                    slide (math/sqrt (+ (* tx tx) (* ty ty) (* tz tz)))
+                    grip (* mu (- r d))
+                    k (if (<= slide grip) 1.0 (/ grip slide))]
+                (aset pos b (- px (* k tx)))
+                (aset pos (+ b 1) (- py (* k ty)))
+                (aset pos (+ b 2) (- pz (* k tz)))))))))))
 
 (defn sphere-constraint
   "Keeps every particle outside a sphere.
@@ -337,10 +345,12 @@
   any speed passes straight through: the solver takes ten steps between
   checks, and the obstacle is only a few steps thick.
 
-  `friction` from 0 to 1 is how much of the sliding along the surface is
-  undone each step. At 0 a sheet dropped on a ball slides off and pools on
-  the floor, which is right and dull; a little friction is what makes it
-  drape."
+  `friction` is Coulomb's coefficient, static and sliding alike: a
+  particle pressed into the sphere holds still while the pull along the
+  surface is less than `friction` times the press, and slides against
+  that much once it is more. At 0 a sheet dropped on a ball slides off and
+  pools on the floor, which is right and dull; a little friction is what
+  makes it drape, and come to rest."
   ([center radius] (sphere-constraint center radius 0.0))
   ([[cx cy cz] radius friction]
    (->SphereCollision (double cx) (double cy) (double cz) (double radius)
