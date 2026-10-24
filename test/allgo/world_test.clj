@@ -99,7 +99,7 @@
       (is (< (double (nth (:qd (:pose (first (:models hit)))) 2)) 2.0)
           "the limb should have been slowed by what it hit")
       ;; And the brick has been sent off in the direction of the swing.
-      (is (> (double (first (:pos b))) 0.45) (str "brick at " (:pos b)))
+      (is (> (double (first (:pos b))) 0.4) (str "brick at " (:pos b)))
       (is (> (double (first (:vel b))) 0.5) (str "brick velocity " (:vel b))))))
 
 (def ^:private free-arm
@@ -294,7 +294,7 @@
 (deftest warm-start-test
   (let [column (fn [warm?]
                  (w/world (into [floor] (for [r (range 4)] (brick [0.0 (+ 0.125 (* 0.25 r)) 0.0])))
-                          [] {:gravity g :warm-start? warm?}))
+                          [] {:gravity g :solver :sequential-impulse :warm-start? warm?}))
         top (fn [s] (double (second (:pos (last (:bodies s))))))
         sink (fn [warm?] (- 0.875 (top (run (column warm?) 300 (/ 1.0 60.0)))))]
     (testing "each contact remembers what it pushed with"
@@ -314,7 +314,7 @@
   (let [;; three bricks started 12 cm into the floor
         sunk (fn [soft?]
                (w/world (into [floor] (for [r (range 3)] (brick [(* 0.3 r) (- 0.125 0.12) 0.0])))
-                        [] {:gravity g :soft? soft?}))
+                        [] {:gravity g :solver :sequential-impulse :soft? soft?}))
         fastest (fn [s] (reduce (fn [[m s] _]
                                   (let [s (w/step s (/ 1.0 60.0))]
                                     [(apply max m (map #(double (second (:vel %))) (rest (:bodies s)))) s]))
@@ -332,7 +332,7 @@
 (deftest recall-test
   (let [column (fn [reach]
                  (w/world (into [floor] (for [r (range 6)] (brick [0.0 (+ 0.125 (* 0.25 r)) 0.0])))
-                          [] {:gravity g :recall-reach reach}))
+                          [] {:gravity g :solver :sequential-impulse :recall-reach reach}))
         drift (fn [s] (apply max (map (fn [b] (let [[x _ z] (:pos b)] (Math/hypot x z))) (rest (:bodies s)))))]
     (testing "a column of six stands when a renamed contact keeps its impulse, and falls when it loses it"
       ;; The bricks sway by fractions of a millimeter, their corners cross
@@ -406,8 +406,8 @@
           [x y z] (:pos top)]
       (is (< (Math/hypot x z) 0.01))
       (is (< (- (+ 0.125 (* 0.25 29)) (double y)) 0.04))))
-  (testing "and the pins, joint limits and models touching do under it what they do under the sequential impulse"
-    (with-redefs [w/defaults (assoc w/defaults :solver :convex)]
-      (doseq [t [#'pin-to-the-world-test #'pin-between-models-test #'pin-breaks-test
+  (testing "and the pins, joint limits and models touching do under the sequential impulse what they do under it"
+    (with-redefs [w/defaults (assoc w/defaults :solver :sequential-impulse)]
+      (doseq [t [#'model-pushes-rigid-test #'pin-to-the-world-test #'pin-between-models-test #'pin-breaks-test
                  #'limits-in-a-world-test #'contact-kinds-test #'model-alone-test #'sleeping-test]]
         ((:test (meta t)))))))

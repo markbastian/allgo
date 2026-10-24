@@ -204,6 +204,7 @@
        :selfCollide true
        :friction 0.7
        :restitution 0.0
+       :solver "convex"
        :iterations 8
        :substeps 1
        :spin 2.0
@@ -337,6 +338,7 @@
                 {:gravity [0.0 -9.81 0.0]
                  :friction (.-friction controls)
                  :restitution (.-restitution controls)
+                 :solver (keyword (.-solver controls))
                  :iterations (long (.-iterations controls))
                  :self-collide? (boolean (.-selfCollide controls))})
               (on-resize []
@@ -379,6 +381,9 @@
                 (.onFinishChange rebuild!))
             (-> (.add controls "friction" 0.0 1.5 0.05))
             (-> (.add controls "restitution" 0.0 0.6 0.05))
+            (-> (.add controls "solver" #js ["convex" "sequential-impulse"]))
+            ;; Sweeps of the sequential impulse; the convex solve runs
+            ;; Newton to convergence and ignores it.
             (-> (.add controls "iterations" 2 20 1))
             (-> (.add controls "substeps" 1 4 1))))
         {:start (fn [] (when-not @running?

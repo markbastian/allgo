@@ -694,7 +694,9 @@ two-sided ones. What came of it:
   linearly. Softer limits, ten to a thousand times, cut it by a few
   percent; so does letting the line search go past the full step.
 - A bike and rider is 1.3 ms a 1/240 s step against 1.0.
-- It is opt-in, for the motorcycle. Thrown off at 8 m/s, the rider's
+- It is `world`'s default (2026-10-23), and the motorcycle alone stays
+  on the sequential impulse it was tuned under (`motorcycle/world-defaults`),
+  for two reasons. Thrown off at 8 m/s, the rider's
   leg stays tangled with the frame under the sequential impulse, eleven
   millimeters deep, and pushing that out kicks the bike over in three
   seconds and *speeds it up* 0.2 m/s. Under the convex solve the rider

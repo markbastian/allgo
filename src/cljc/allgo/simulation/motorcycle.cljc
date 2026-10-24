@@ -398,8 +398,15 @@
 
 (def world-defaults
   "Tires grip better than bricks, and a bike wants more iterations than a
-  pile of them: two contacts carry the whole machine."
+  pile of them: two contacts carry the whole machine.
+
+  The bike stays on the sequential impulse rather than `world`'s convex
+  default, which it was not tuned under: at full lever from 15 m/s the
+  convex solve stoppies it to vertical (the sequential impulse holds it
+  down to 1.1 of full lever), and a riderless bike rides on to capsize
+  at eight seconds rather than three (NOTES)."
   {:gravity [0.0 -9.81 0.0]
+   :solver :sequential-impulse
    :friction 1.1
    :restitution 0.0
    :iterations 12

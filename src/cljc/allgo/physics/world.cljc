@@ -45,15 +45,15 @@
 
   ## What this is not
 
-  It is a sequential impulse solver and only that. There is no
-  substepping and no XPBD; contacts are rigid with a Baumgarte push
-  unless `:soft?` asks for springs. `:solver :convex` instead solves
-  every contact, pin and joint limit at once by Newton's method
-  (`allgo.physics.convex`, `solve-convex!`): a column of thirty cubes
-  stands where the sequential impulse holds six. It is not the default:
-  the motorcycle was tuned under the sequential impulse, and its tires,
-  gripping as nearly rigidly as the convex solve makes them, keep a
-  riderless bike upright that the rider tests expect to fall. Bodies and models sleep, by islands,
+  There is no substepping and no XPBD. By default (`:solver :convex`)
+  every contact, pin and joint limit is solved at once by Newton's
+  method (`allgo.physics.convex`, `solve-convex!`): a column of thirty
+  cubes stands where the sequential impulse holds six.
+  `:solver :sequential-impulse` sweeps them instead, rigid with a
+  Baumgarte push unless `:soft?` asks for springs; it is cheaper (the
+  ragdoll scene 1.4 ms a step against 2.4), and it is what the
+  motorcycle was tuned under and stays on (`motorcycle/world-defaults`).
+  Bodies and models sleep, by islands,
   as `allgo.physics.solver`'s do (see Sleeping, below). `allgo.physics.solver`
   has all of those and is still the thing to reach for when the scene is
   only bricks; this one is for a scene that mixes kinds, and it says so
@@ -91,6 +91,9 @@
 (def defaults
   {:gravity [0.0 -9.81 0.0]
    :self-collide? true
+   ;; `:convex` solves every contact, pin and limit at once by Newton's
+   ;; method; `:sequential-impulse` sweeps them `iterations` times.
+   :solver :convex
    :iterations 8
    :warm-start? true
    ;; A contact whose key is new takes the impulse of last step's nearest
