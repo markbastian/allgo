@@ -5,9 +5,11 @@
   Ebert et al., *Texturing & Modeling: A Procedural Approach*. Peachey's
   chapter 2 for the method and for brick, the book's first example, bumps
   and all; Worley's chapters 3 and 4 for building materials out of layers
-  and out of cells; Musgrave's chapter 15 for marble, clouds and the other
-  fractal solid textures. The rest -- the metals, wood, granite -- are the
-  same parts put together the same way.
+  and out of cells; Musgrave's chapter 15, \"Fractal Solid Textures\", for
+  marble, clouds and cirrus, water, an earth, a gas giant's bands, random
+  fBm coloring and the impressionist filter that paints any of the others.
+  The rest -- the metals, wood, granite -- are the same parts put together
+  the same way.
 
   What every one of them is:
 
@@ -86,6 +88,12 @@
   [seed octaves]
   (let [f (fractal/fbm (noise/gradient-basis {:seed seed}) {:octaves octaves})]
     (fn ^double [x y z] (+ 0.5 (* 0.7 (double (f (double x) (double y) (double z))))))))
+
+(defn- cells
+  "The nearest two distances and the nearest point's value, as a
+  function, at `density` points a unit cell."
+  [seed density]
+  (cellular/nearest {:seed seed :density density :n 2}))
 
 ;; ---------------------------------------------------------------------------
 ;; Chapter 2: brick
@@ -216,14 +224,134 @@
              c (s/smoothstep (- 1.0 cover) (- 1.25 cover) d)]
          (texel (mixc [0.26 0.48 0.82] [0.97 0.97 0.98] c) 0.0 0.0))))))
 
+(defn cirrus
+  "High wisps: clouds whose noise is read through a distortion, then
+  pulled out along x.
+
+  Musgrave's distortion: look up a random vector at the point, move the
+  point along it, and evaluate there. The same fBm becomes uneven --
+  stretched in one place, crowded in the next -- which is how cirrus
+  looks, combed out by the wind aloft."
+  ([] (cirrus {}))
+  ([{:keys [seed cover distortion] :or {seed 0 cover 0.5 distortion 1.2}}]
+   (let [f (fractal/fbm (noise/distorted (noise/gradient-basis {:seed seed})
+                                         (noise/vector-basis {:seed (+ seed 1)})
+                                         distortion)
+                        {:octaves 7})
+         cover (double cover)]
+     (fn [x y z]
+       (let [x (double x) y (double y) z (double z)
+             d (+ 0.5 (* 0.8 (double (f (* 0.25 x) (* 2.5 y) (* 2.5 z)))))
+             c (s/smoothstep (- 1.1 cover) (- 1.45 cover) d)]
+         (texel (mixc [0.22 0.45 0.80] [0.98 0.98 1.0] (* c c)) 0.0 0.0))))))
+
+(defn gas-giant
+  "Belts and zones: color by latitude, stirred.
+
+  Musgrave's global circulation, as on Jupiter: the color is a function
+  of height up the axis alone, so the planet is banded, and turbulence
+  added to that height before it is read is the weather -- the bands
+  wave, shear and eddy where they meet. `:bands` is how many there are a
+  unit up the axis."
+  ([] (gas-giant {}))
+  ([{:keys [seed bands stir] :or {seed 0 bands 2.2 stir 0.12}}]
+   (let [turb (fractal/fbm (noise/distorted (noise/gradient-basis {:seed seed})
+                                            (noise/vector-basis {:seed (+ seed 1)})
+                                            0.6)
+                           {:octaves 6})
+         bands (double bands) stir (double stir)
+         ramp (color-map [[0.80 0.72 0.60] [0.80 0.72 0.60] [0.93 0.88 0.78]
+                          [0.70 0.48 0.32] [0.88 0.80 0.66] [0.55 0.38 0.28]
+                          [0.92 0.86 0.74] [0.75 0.58 0.42] [0.75 0.58 0.42]])]
+     (fn [x y z]
+       (let [x (double x) y (double y) z (double z)
+             h (+ y (* stir (double (turb (* 1.5 x) (* 5.0 y) (* 1.5 z)))))]
+         (texel (ramp (s/sawtooth 1.0 (* bands h))) 0.0 0.1))))))
+
+(defn water
+  "Open water: deep color, and waves that only the light reveals.
+
+  The color hardly varies; all of it is in the height, an fBm of waves
+  longer one way than the other, and the shine. Under `shade` the
+  highlight breaks up across the slopes as sunlight does on a sea."
+  ([] (water {}))
+  ([{:keys [seed] :or {seed 0}}]
+   (let [waves (fractal/fbm (noise/gradient-basis {:seed seed}) {:octaves 6 :H 0.6})]
+     (fn [x y z]
+       (let [x (double x) y (double y) z (double z)
+             h (double (waves (* 1.5 x) (* 4.0 y) (* 4.0 z)))]
+         (texel (mixc [0.04 0.20 0.34] [0.10 0.40 0.50] (+ 0.5 h)) (* 0.8 h) 0.8))))))
+
+(defn earth
+  "A world: fBm as altitude, the sea at a level, land colored by height,
+  and ice toward the poles.
+
+  The texture Musgrave grows into whole planets. Below `:sea-level` it is
+  ocean, darker the deeper, flat and glossy; above it, a ramp from beach
+  through green and brown to rock and snow. Ice comes in where `|y|`
+  passes `:ice-line`, raggedly, and lower on high ground -- the poles are
+  along y. `allgo.procedural.planet` is the same idea at full size."
+  ([] (earth {}))
+  ([{:keys [seed sea-level ice-line] :or {seed 0 sea-level 0.52 ice-line 1.25}}]
+   (let [alt (fbm seed 8)
+         sea (double sea-level) ice-line (double ice-line)
+         land (color-map [[0.76 0.70 0.50] [0.76 0.70 0.50] [0.30 0.52 0.22]
+                          [0.20 0.40 0.16] [0.45 0.40 0.25] [0.50 0.45 0.40]
+                          [0.95 0.95 0.97] [0.95 0.95 0.97]])]
+     (fn [x y z]
+       (let [x (double x) y (double y) z (double z)
+             a (alt (* 0.8 x) (* 0.8 y) (* 0.8 z))
+             up (/ (- a sea) (- 1.0 sea))
+             ice (s/smoothstep 0.0 0.08 (- (abs y) (- ice-line (* 0.5 (max 0.0 up)) (* 0.3 (- a 0.5)))))]
+         (if (neg? up)
+           (texel (mixc (mixc [0.02 0.08 0.28] [0.10 0.35 0.55] (s/smoothstep -0.5 0.0 up))
+                        [0.92 0.95 0.98] ice)
+                  0.0 (s/mix 0.6 0.1 ice))
+           (texel (mixc (land (* 1.15 up)) [0.94 0.95 0.98] ice) (* 2.0 up) 0.05)))))))
+
+(defn random-coloring
+  "Three fBms, one a channel: color itself made fractal.
+
+  Musgrave's random fBm coloring. Each channel wanders independently, so
+  hues drift into one another at every scale, the way they do in a
+  stained cloth or an oil slick, with nothing about it that suggests a
+  palette was chosen."
+  ([] (random-coloring {}))
+  ([{:keys [seed] :or {seed 0}}]
+   (let [[r g b] (map #(fbm (+ seed %) 6) [0 11 23])]
+     (fn [x y z]
+       (let [c (fn [f] (s/smoothstep 0.15 0.85 (f x y z)))]
+         (texel [(c r) (c g) (c b)] 0.0 0.2))))))
+
+(defn impressionist
+  "Any texture, painted: each dab of paint takes its color from somewhere
+  a little way off.
+
+  Musgrave's impressionistic filter, which perturbs where an image is
+  read by a random vector. Here the vector is held constant over each of
+  Worley's cells, so the picture breaks into dabs, each a patch of the
+  original moved by its own stroke, and the dabs keep the original's
+  colors while losing its outlines. `:dab` is a dab's size and `:smear`
+  how far it moves."
+  ([texture] (impressionist texture {}))
+  ([texture {:keys [seed dab smear] :or {seed 0 dab 0.18 smear 0.8}}]
+   (let [k (/ 1.0 (double dab))
+         near (cells seed 1.0)
+         wobble (noise/vector-basis {:seed (+ seed 1)})
+         smear (* (double smear) (double dab))]
+     (fn [x y z]
+       (let [x (double x) y (double y) z (double z)
+             {[d1 d2] :distances [px py pz] :point} (near (* k x) (* k y) (* k z))
+             [dx dy dz] (wobble px py pz)
+             [r g b _ shine] (texture (+ x (* smear (double dx)))
+                                      (+ y (* smear (double dy)))
+                                      (+ z (* smear (double dz))))]
+         ;; Dabs are a little raised, as thick paint is, toward their
+         ;; middles and less at their edges.
+         (texel [r g b] (* 0.15 (s/smoothstep 0.0 0.3 (- (double d2) (double d1)))) (* 0.5 (double shine))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Chapter 4: cells
-
-(defn- cells
-  "The nearest two distances and the nearest point's value, as a
-  function, at `density` points a unit cell."
-  [seed density]
-  (cellular/nearest {:seed seed :density density :n 2}))
 
 (defn flagstone
   "Paving: irregular flat stones in a bed of mortar.
@@ -411,6 +539,13 @@
    {:name "wood" :make wood :scale 1.5 :source "chapter 2"}
    {:name "granite" :make granite :scale 1.0 :source "chapter 2"}
    {:name "clouds" :make clouds :scale 2.0 :source "chapter 15"}
+   {:name "cirrus" :make cirrus :scale 2.0 :source "chapter 15"}
+   {:name "gas giant" :make gas-giant :scale 3.0 :source "chapter 15"}
+   {:name "water" :make water :scale 2.0 :source "chapter 15"}
+   {:name "earth" :make earth :scale 3.0 :source "chapter 15"}
+   {:name "random coloring" :make random-coloring :scale 2.0 :source "chapter 15"}
+   {:name "impressionist" :make #(impressionist (earth %) %) :scale 3.0
+    :source "chapter 15"}
    {:name "flagstone" :make flagstone :scale 3.0 :source "chapter 4"}
    {:name "cobblestone" :make cobblestone :scale 3.0 :source "chapter 4"}
    {:name "cracked mud" :make cracked-mud :scale 2.0 :source "chapter 4"}

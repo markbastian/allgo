@@ -77,7 +77,7 @@
                     (or (tx/sphere-pixel tex (- (* 2 u) 1) (- 1 (* 2 v)) (* 0.5 scale)
                                          (/ 2 size) opts)
                         background)
-                    (tx/plane-pixel tex (* scale u) (* scale (- 1 v)) (/ scale size) opts)))))]
+                    (tx/plane-pixel tex (* scale (- u 0.5)) (* scale (- 0.5 v)) (/ scale size) opts)))))]
     (if (= "gallery" (.-texture controls))
       (let [{:keys [size cols ox]} (layout w h (count tx/catalog))
             fs (mapv #(one % 1) tx/catalog)]

@@ -22,7 +22,7 @@ that compose freely, rather than a set of finished effects:
 | `allgo.procedural.shaping`    | 2       | `step`, `smoothstep`, `bias`, `gain`, `spline` -- the vocabulary |
 | `allgo.procedural.noise`      | 2, 12   | Value, gradient and 4D gradient noise, sparse convolution, warps |
 | `allgo.procedural.cellular`   | 4       | Worley's F1, F2, F2-F1 and the metrics that reshape the cells    |
-| `allgo.procedural.texture`    | 2-4, 15 | Brick, marble, wood, stone and metal, and bump-mapped lighting   |
+| `allgo.procedural.texture`    | 2-4, 15 | Brick, stone, metal; clouds, water, earth, gas giants; bump maps |
 | `allgo.procedural.fractal`    | 14, 16  | fBm, turbulence, and the three multifractals                     |
 | `allgo.procedural.qaeb`       | 17      | Error-bounded ray marching of a surface that is only a function  |
 | `allgo.procedural.atmosphere` | 18      | Exponential density, Rayleigh and Mie scattering, aerial haze    |

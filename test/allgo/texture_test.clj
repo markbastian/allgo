@@ -84,3 +84,26 @@
     (let [tex (tx/cobblestone {})]
       (is (close? (tx/plane-pixel tex 0.0 0.0 0.01 {})
                   (tx/sphere-pixel (fn [x y z] (tex x y (- z 1.0))) 0.0 0.0 1.0 0.01 {}))))))
+
+(deftest solid-textures-test
+  (testing "a gas giant unstirred is banded: its color depends on height up the axis alone"
+    (let [tex (tx/gas-giant {:stir 0.0})]
+      (doseq [y [-0.7 0.1 0.45]]
+        (is (= (tex 0.3 y -1.2) (tex -2.0 y 0.8))))))
+
+  (testing "earth's sea is flat, and its poles are ice"
+    (let [tex (tx/earth {})
+          hs (for [i (range 40) j (range 40)
+                   :let [[r _ b h] (tex (* 0.07 i) (* 0.05 j) 0.3)]
+                   :when (> b (+ r 0.2))]
+               h)]
+      (is (seq hs) "there is sea")
+      (is (every? zero? hs))
+      (doseq [x [-1.0 0.0 2.0]]
+        (is (every? #(> % 0.85) (take 3 (tex x 3.0 0.0))) "white at the pole"))))
+
+  (testing "the impressionist filter, unsmeared, is the picture it paints"
+    (let [src (tx/marble {})
+          tex (tx/impressionist src {:smear 0.0})]
+      (doseq [[x y z] (points 30)]
+        (is (= (take 3 (src x y z)) (take 3 (tex x y z))))))))
