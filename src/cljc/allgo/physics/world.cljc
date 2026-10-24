@@ -86,6 +86,7 @@
             [allgo.physics.contact :as contact]
             [allgo.physics.convex :as convex]
             [allgo.physics.rigid :as rigid]
+            [allgo.spatial.sweep :as sweep]
             [clojure.math :as math]))
 
 (def defaults
@@ -260,7 +261,36 @@
         body-balls (balls bodies)
         ;; each part's model, by index: the parts come model by model
         ^ints owner (a/i32 (map (comp second :side) parts))
-        np (count parts)]
+        np (count parts)
+        ;; The broad phase, over the parts and then the loose bodies: each
+        ;; a box around its bounding ball, padded by half the margin
+        ;; `near?` allows, so every pair `near?` would pass overlaps here
+        ;; and the exact test below sees no fewer. Every pair of parts was
+        ;; a quarter of a step for twenty ragdolls, and grew as their
+        ;; square. Rigid against rigid is `contact/all`'s, and stays there.
+        [part-body part-part]
+        (let [nb (count bodies)
+              n (+ np nb)
+              mins (a/f64 (* 3 n)) maxs (a/f64 (* 3 n))
+              fill! (fn [^doubles bs i o]
+                      (let [i4 (* 4 (long i)) o3 (* 3 (long o))
+                            r (+ (aget bs (+ i4 3)) 0.05)]
+                        (dotimes [k 3]
+                          (aset mins (+ o3 k) (- (aget bs (+ i4 k)) r))
+                          (aset maxs (+ o3 k) (+ (aget bs (+ i4 k)) r)))))]
+          (dotimes [i np] (fill! part-balls i i))
+          (dotimes [i nb] (fill! body-balls i (+ np i)))
+          (reduce (fn [[pb pp] [i j]]
+                    (let [i (long i) j (long j)]
+                      (cond (>= i np) [pb pp]
+                            (>= j np) [(conj pb [i (- j np)]) pp]
+                            :else [pb (conj pp [i j])])))
+                  [[] []]
+                  (sweep/overlapping-pairs (sweep/sweep (max 1 n)) mins maxs n)))
+        ;; in the order the pairs were once tried all against all, so the
+        ;; contacts, and the answers, come out as they always did
+        part-body (sort part-body)
+        part-part (sort part-part)]
     (-> []
         ;; Rigid against rigid.
         (into (map (fn [c] {:a [:rigid (:a c)] :b [:rigid (:b c)]
@@ -270,8 +300,9 @@
                             :id (:id c)}))
               (contact/all bodies))
         ;; Every model's parts against every rigid body.
-        (into (for [[pi {:keys [side body]}] (map-indexed vector parts)
-                    [bi rb] (map-indexed vector bodies)
+        (into (for [[pi bi] part-body
+                    :let [{:keys [side body]} (nth parts pi)
+                          rb (nth bodies bi)]
                     ;; A course is dozens of boxes and a part is near
                     ;; two or three of them; the rest are ruled out by
                     ;; their bounding balls before any exact test.
@@ -288,8 +319,7 @@
         (into (when collide-models?
                 ;; every later part of a later model: the parts come
                 ;; model by model, so this is each pair of models once
-                (for [i (range np)
-                      j (range (inc i) np)
+                (for [[i j] part-part
                       :when (not (== (aget owner i) (aget owner j)))
                       :when (near? part-balls i part-balls j)
                       :let [{side-a :side body-a :body} (nth parts i)

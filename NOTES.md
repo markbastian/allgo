@@ -809,7 +809,13 @@ out both parts' world boxes per pair. Each ball and box is now worked
 out once a step, the pairs walked once, in the same order, and twenty
 dummies are 21-45 ms a frame, convex the quicker once they land.
 Under Node: 158 and 176 ms a step (sequential impulse, convex) became
-80 and 93.
+80 and 93. Then a broad phase for the parts, swept with
+`allgo.spatial.sweep` -- a box around each bounding ball, padded so
+that it passes every pair the ball test would -- and the candidates
+tried in the order every pair once was, so again the same to the bit:
+74 and 62, and forty dummies 94 and 112. The ball tests, boxes and
+sweep are under 2% of a step now; each dummy's own limbs against each
+other are most of what detection is left with.
 
 ## Tried and not kept
 
