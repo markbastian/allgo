@@ -358,7 +358,11 @@
                 (for [[mi {:keys [model pose sleeping?]}] (map-indexed vector models)
                       :when (not sleeping?)
                       c (ab/self-contacts model (:q pose) (:base pose)
-                                          (:frames (nth configs mi)))]
+                                          (:frames (nth configs mi))
+                                          ;; the parts already placed above
+                                          (keep (fn [{[_ m link] :side body :body}]
+                                                  (when (== (long m) mi) {:link link :body body}))
+                                                parts))]
                   {:a [:link mi (:link c)] :b [:link mi (:other c)]
                    :point (:point c) :normal (:normal c) :depth (:depth c)
                    :id (:id c)}))))))

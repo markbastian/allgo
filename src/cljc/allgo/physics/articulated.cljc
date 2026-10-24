@@ -2056,13 +2056,10 @@
   (when-let [kind (:shape part)]
     (let [{srot :rot spos :pos} (shape-pose part)
           rot (q/mul (:rot frame) (or srot q/identity-q))
-          pos (v/add (:pos frame) (q/rotate (:rot frame) (or spos v/zero)))
-          common {:pos pos :rot rot :density 1.0}]
-      (case kind
-        :box (rigid/box (assoc common :size (:size part)))
-        :ball (rigid/ball (assoc common :radius (:radius part)))
-        :torus (rigid/torus (assoc common :major (:major part) :minor (:minor part)))
-        :capsule (rigid/capsule (assoc common :radius (:radius part) :length (:length part)))))))
+          pos (v/add (:pos frame) (q/rotate (:rot frame) (or spos v/zero)))]
+      ;; only the shape where it is: a part's mass is the link's
+      (rigid/collider (assoc (select-keys part [:size :radius :length :major :minor])
+                             :shape kind :pos pos :rot rot)))))
 
 (defn collision-bodies
   "Every shaped part of the model, as `[{:link i :body b} ...]`.
@@ -2193,27 +2190,30 @@
   exact test is asked.
 
   Normals point the way the *first* link of each pair has to be pushed."
-  [model q-vec root-state frames]
-  (let [parts (chain model)
-        bodies (vec (collision-bodies model q-vec root-state frames))
+  ([model q-vec root-state frames]
+   (self-contacts model q-vec root-state frames (collision-bodies model q-vec root-state frames)))
+  ;; `bodies` as `collision-bodies` gives them, for a caller that has them
+  ([model _q-vec _root-state _frames bodies]
+   (let [parts (chain model)
+         bodies (vec bodies)
         ;; once a body, not once a pair: eleven parts are fifty-five pairs
-        extents (mapv (comp world-extent :body) bodies)
-        frames (mapv (fn [{b :body}] (when (= :box (:shape b)) (contact/frame b))) bodies)
-        n (count bodies)]
-    (into []
-          (for [x (range n)
-                x' (range (inc x) n)
-                :let [{la :link ba :body} (nth bodies x)
-                      {lb :link bb :body} (nth bodies x')]
-                :when (collidable? parts la lb)
-                :when (not (apart? ba (nth extents x) bb (nth extents x')))
+         extents (mapv (comp world-extent :body) bodies)
+         frames (mapv (fn [{b :body}] (when (= :box (:shape b)) (contact/frame b))) bodies)
+         n (count bodies)]
+     (into []
+           (for [x (range n)
+                 x' (range (inc x) n)
+                 :let [{la :link ba :body} (nth bodies x)
+                       {lb :link bb :body} (nth bodies x')]
+                 :when (collidable? parts la lb)
+                 :when (not (apart? ba (nth extents x) bb (nth extents x')))
                 ;; `contact/between`'s margin for two bodies standing still
-                c (contact/between* 0 1 ba bb (nth frames x) (nth frames x') contact/speculative)]
-            {:link la :other lb
-             :point (:point c)
-             :normal (v/negate (:normal c))
-             :depth (:depth c)
-             :id (:id c)}))))
+                 c (contact/between* 0 1 ba bb (nth frames x) (nth frames x') contact/speculative)]
+             {:link la :other lb
+              :point (:point c)
+              :normal (v/negate (:normal c))
+              :depth (:depth c)
+              :id (:id c)})))))
 
 (defn- limit-rows
   "The joint limits currently being pushed against, as one-sided

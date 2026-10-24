@@ -148,6 +148,27 @@
            :shape :torus :major big :minor r
            :size [(* 2.0 (+ big r)) (* 2.0 (+ big r)) (* 2.0 r)])))
 
+(defn collider
+  "A shape where it is, as a contact test reads it and no more: `:shape`
+  with its own numbers -- a box's `:size`, a ball's `:radius`, a
+  capsule's `:radius` and `:length`, a torus's `:major` and `:minor` --
+  its `:pos`, and `:rot` and `:inv-rot` as `body` makes them. Massless
+  and still. An articulated model's parts are placed afresh every step,
+  and made as `box` and the rest make bodies, with a mass and an inertia
+  nothing reads, they were a tenth of a heap of ragdolls' step in a
+  browser."
+  [{:keys [shape pos rot size radius length major minor]}]
+  (let [rot (q/normalize (or rot q/identity-q))
+        b {:shape shape :pos (vec pos) :rot rot :inv-rot (q/inverse rot)
+           :vel v/zero :omega v/zero :mass 0.0 :inv-mass 0.0}]
+    (case shape
+      :box (assoc b :size (mapv double size))
+      :ball (let [r (double radius)] (assoc b :radius r :size [(* 2 r) (* 2 r) (* 2 r)]))
+      :capsule (let [r (double radius) l (double length)]
+                 (assoc b :radius r :length l :size [(* 2.0 r) (+ l (* 2.0 r)) (* 2.0 r)]))
+      :torus (let [big (double major) r (double minor)]
+               (assoc b :major big :minor r :size [(* 2.0 (+ big r)) (* 2.0 (+ big r)) (* 2.0 r)])))))
+
 (defn static?
   "A body nothing can move."
   [{:keys [inv-mass]}]

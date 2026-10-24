@@ -826,7 +826,13 @@ seq; and a contact side on a model asked `articulated/response-at` for
 `M^-1 g`, a walk of the tree that allocates as it goes, where the
 model's inverse mass matrix -- twenty-five by twenty-five, built once a
 step -- answers each row in one product. That last is the same numbers
-but for rounding; the rest are the same to the bit.
+but for rounding; the rest are the same to the bit. Then 53: a model's
+parts are placed every step as `rigid/collider`s, a shape and where it
+is, rather than as bodies with a mass and inertia nothing read; and
+`self-contacts` takes them from `world`, which had already placed them,
+rather than placing them again. Left is the articulated core --
+configuration, articulated inertias, forward dynamics -- which makes
+many small arrays a model a step.
 
 **Why ragdolls did not sleep** (2026-10-24). A heap of twenty never
 slept under either solver, and following the fastest joints found three
