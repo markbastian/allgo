@@ -296,7 +296,10 @@
 
 (def ^:private materials
   (delay
-    {:yellow (THREE/MeshStandardMaterial. #js {:color 0xf2c018 :roughness 0.5})
+    {;; a dummy's body, one color a dummy: the first the yellow they
+     ;; are known for, and a crowd mixed
+     :bodies (mapv #(THREE/MeshStandardMaterial. #js {:color % :roughness 0.5})
+                   [0xf2c018 0xd63a2f 0x3fa34d 0x2f6fd6 0xf08a24 0x8e4cc7])
      :black (THREE/MeshStandardMaterial. #js {:color 0x17171a :roughness 0.6})
      :hand (THREE/MeshStandardMaterial. #js {:color 0x3b3f48 :roughness 0.7})
      :target (THREE/MeshStandardMaterial. #js {:map (target-texture) :transparent true :roughness 0.5
@@ -309,10 +312,11 @@
   #{0 1})
 
 (defn- dummy-part
-  "What is drawn for `link`, whose collision box is `body`: a group in the
-  box's own frame, placed where the box is."
-  [link body]
-  (let [{:keys [yellow black hand target]} @materials
+  "What is drawn for `link` of dummy `mi`, whose collision box is `body`: a
+  group in the box's own frame, placed where the box is."
+  [mi link body]
+  (let [{:keys [bodies black hand target]} @materials
+        skin (nth bodies (mod (long mi) (count bodies)))
         [sx sy sz] (:size body)
         g (THREE/Group.)
         add (fn [geo mat x y z]
@@ -329,23 +333,23 @@
                     (set! (.. m -rotation -y) (if (pos? x) (* 0.5 js/Math.PI) (* -0.5 js/Math.PI)))))]
     (case (long link)
       ;; the pelvis: a belt, and a target on each hip
-      -1 (do (add (RoundedBoxGeometry. sx sy sz 3 0.04) yellow 0 0 0)
+      -1 (do (add (RoundedBoxGeometry. sx sy sz 3 0.04) skin 0 0 0)
              (add (THREE/BoxGeometry. (* 1.02 sx) 0.035 (* 1.02 sz)) black 0 (- (* 0.5 sy) 0.04) 0)
              (doseq [x [(* 0.5 sx) (* -0.5 sx)]] (target! 0.09 (+ x (* (js/Math.sign x) 0.002)) -0.01)))
       ;; the chest: ribbed, a target on each side, the waist a ball
-      0 (do (add (RoundedBoxGeometry. sx sy sz 3 0.05) yellow 0 0 0)
+      0 (do (add (RoundedBoxGeometry. sx sy sz 3 0.05) skin 0 0 0)
             (doseq [y [0.02 0.07 0.12]]
               (add (THREE/BoxGeometry. (* 0.7 sx) 0.012 0.004) black 0 y (- (+ (* 0.5 sz) 0.002))))
             (doseq [x [(* 0.5 sx) (* -0.5 sx)]] (target! 0.09 (+ x (* (js/Math.sign x) 0.002)) (* 0.22 sy)))
             (joint! 0.075))
       ;; the head: round-edged, a target on each side, the neck a ball
-      1 (do (add (RoundedBoxGeometry. (* 0.95 sx) sy (* 0.95 sz) 4 0.07) yellow 0 0 0)
+      1 (do (add (RoundedBoxGeometry. (* 0.95 sx) sy (* 0.95 sz) 4 0.07) skin 0 0 0)
             (doseq [x [(* 0.475 sx) (* -0.475 sx)]] (target! 0.11 (+ x (* (js/Math.sign x) 0.002)) 0.01))
             (joint! 0.05))
       ;; a limb: a capsule with a ball at its joint, and a hand or a foot
       (let [w (min sx sz)
             r (* 0.45 w)]
-        (add (THREE/CapsuleGeometry. r (max 0.0 (- sy (* 2 r))) 6 12) yellow 0 0 0)
+        (add (THREE/CapsuleGeometry. r (max 0.0 (- sy (* 2 r))) 6 12) skin 0 0 0)
         (joint! (* 0.55 w))
         (case (long link)
           (3 5) (add (THREE/SphereGeometry. (* 0.6 sx) 14 10) hand 0 (- jy) 0)
@@ -432,7 +436,7 @@
                                          (for [[mi {:keys [pose]}] (map-indexed vector models)
                                                {:keys [link body]}
                                                (ab/collision-bodies model (:q pose) (:base pose))]
-                                           [[:link mi link] (dummy-part link body)]))
+                                           [[:link mi link] (dummy-part mi link body)]))
                                    (for [[i body] (map-indexed vector bodies)
                                          :when (not (rigid/static? body))]
                                      [[:rigid i] (brick-mesh body)]))]
