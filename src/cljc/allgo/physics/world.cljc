@@ -972,6 +972,26 @@
 ;; sleeping bodies, so there would be no other way to know that the brick
 ;; under the one struck was holding it up.
 
+(defn- with-damping
+  "`tau` with each joint's passive `:damping` taken off it, `-d qd` along
+  each of its axes: a link's own friction, not anybody's hand on the
+  controls, so a damped model still sleeps. A joint as light as a limb
+  turning about its own length wants `d dt` of `:armature` beside it to
+  be damped stably (see `allgo.physics.articulated`)."
+  [model qd tau]
+  (if-not (some :damping (ab/chain model))
+    tau
+    (let [tau (vec (or tau (repeat (ab/dof model) 0.0)))]
+      (loop [ls (seq (ab/chain model)) k 0 out (transient tau)]
+        (if-not ls
+          (persistent! out)
+          (let [l (first ls) nd (long (ab/joint-dof l)) d (double (or (:damping l) 0.0))]
+            (recur (next ls) (+ k nd)
+                   (if (zero? d)
+                     out
+                     (reduce (fn [o j] (assoc! o j (- (double (nth tau j)) (* d (double (nth qd j))))))
+                             out (range k (+ k nd)))))))))))
+
 (defn- driven? [{:keys [tau]}]
   (boolean (some #(not (zero? (double %))) tau)))
 
@@ -1180,7 +1200,8 @@
                          (let [root (ab/base model)
                                {:keys [qdd base-acc]}
                                (ab/forward-dynamics model (:q pose) (:qd pose)
-                                                    (or tau (vec (repeat (ab/dof model) 0.0)))
+                                                    (or (with-damping model (:qd pose) tau)
+                                                        (vec (repeat (ab/dof model) 0.0)))
                                                     (cond-> {:gravity gravity}
                                                       root (assoc :base (:base pose))))
                                accel (if root (vec (concat base-acc qdd)) (vec qdd))]

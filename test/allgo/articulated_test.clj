@@ -723,6 +723,34 @@
       (is (> (worst {}) 120.0) "a cone alone should leave twist free")
       (is (< (worst {:twist (Math/toRadians 45.0)}) 47.0)))))
 
+(deftest cone-and-twist-test
+  (testing "a ball joint past its cone and its twist is held on both, the twist along its own rate"
+    ;; Swung fifty degrees and twisted seventy: past a thirty degree cone
+    ;; and a forty-five degree twist. One row a joint, the cone first,
+    ;; left the twist unheld while the cone was; pushed along the bone,
+    ;; the twist row pushed a swung joint partly sideways, so the twist
+    ;; never came back and the push never stopped.
+    (let [link (merge (limb -1 :spherical 0.6 2.0)
+                      {:cone (Math/toRadians 30.0) :twist (Math/toRadians 45.0)})
+          model [link]
+          x (q/mul (q/from-axis-angle [0.0 0.0 1.0] (Math/toRadians 50.0))
+                   (q/from-axis-angle [1.0 0.0 0.0] (Math/toRadians 70.0)))
+          rows (ab/limit-constraints model (ab/configuration model [x] nil) (/ 1.0 240.0) {})
+          twist-rad #(Math/toRadians (twisted link %))]
+      (is (< 49.9 (swung link x) 50.1))
+      (is (< 69.9 (twisted link x) 70.1))
+      (is (= 2 (count rows)) "one for the cone, one for the twist")
+      ;; The twist row, the second, pushes the twist back down: along
+      ;; any angular velocity in the child's frame its rate is minus the
+      ;; twist's, by differences.
+      (let [^doubles g (:g (second rows))
+            h 1e-7]
+        (doseq [w [[0.3 -1.2 0.5] [1.0 0.0 0.0] [0.0 0.7 -0.4] [-0.6 0.2 0.9]]]
+          (let [x' (q/mul x (q/from-axis-angle (v/normalize w) (* h (v/length w))))
+                rate (/ (- (twist-rad x') (twist-rad x)) h)
+                along (+ (* (aget g 0) (nth w 0)) (* (aget g 1) (nth w 1)) (* (aget g 2) (nth w 2)))]
+            (is (< (abs (+ along rate)) 1e-5) (str w " " along " " rate))))))))
+
 (deftest limits-without-contacts-test
   (testing "limits hold with nothing to stand on"
     ;; They are solved in the same sweep as contacts, and for a while

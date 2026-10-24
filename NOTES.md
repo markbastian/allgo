@@ -817,6 +817,38 @@ tried in the order every pair once was, so again the same to the bit:
 sweep are under 2% of a step now; each dummy's own limbs against each
 other are most of what detection is left with.
 
+**Why ragdolls did not sleep** (2026-10-24). A heap of twenty never
+slept under either solver, and following the fastest joints found three
+things, the first two of them bugs:
+
+- A ball joint past both its cone and its twist was held on one, the
+  cone. A neck lying at its cone had its twist unheld until the swing
+  dipped back inside for a step, when the twist row closed all that had
+  built up at once: the head flicked round at three radians a second
+  every eight steps. Now both rows.
+- The twist row pushed along the bone, which is the twist's rate only
+  when the joint is not swung. Its true direction, from twist =
+  2 atan2(v . a, w) and q' = q (omega, 0) / 2, is
+  (w^2 a + w (a x v) + (v . a) v) / ((v . a)^2 + w^2), and checked by
+  differences it differs from the bone's axis by as much as its own
+  size -- once in sign. Held both ways along the wrong direction, the
+  twist never came back, the push never stopped, and the convex solve,
+  which holds every push exactly, took the heap to 1e89 radians a second
+  in sixty steps. Along its true rate, the heap stays bounded.
+- And a limb with nothing touching it swings for ever: a dummy whose
+  shin hung over the slab's edge never slept. `allgo.physics.world` now
+  takes a passive `:damping` on a link, its own friction rather than a
+  drive, so it does not keep the model awake as a `:tau` does; with
+  `d dt` of armature beside it, it is stable on a forearm. At 0.2 one
+  dummy sleeps in three seconds.
+
+A heap still does not sleep. What keeps it awake is kicks of one to
+three radians a second, at about the rate the sleep clock needs, and
+they come from single-point edge contacts between box limbs crossing at
+an angle, on the margin and flickering in and out from step to step.
+Neither damping to 0.5, thirty-two iterations, nor sleep speeds ten
+times as loose made a twenty-dummy heap sleep in thirty seconds.
+
 ## Tried and not kept
 
 - **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's

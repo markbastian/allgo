@@ -146,6 +146,10 @@
 (defn- ball [link cone twist] (assoc link :cone (deg cone) :twist (deg twist)))
 (defn- hinge [link lo hi] (assoc link :limit [(deg lo) (deg hi)]))
 
+(def ^:private joint-damping
+  "Each joint's friction, in newton meters a radian a second."
+  0.2)
+
 (defn- figure
   "Eleven boxes and ten joints, roughly a person.
 
@@ -153,9 +157,16 @@
   ragdoll rather than a mobile bolted to the ceiling. Masses are near
   enough a seventy kilogram adult; the exact numbers matter less than
   their ratios, and the ratios are what a constraint solver would
-  struggle with."
+  struggle with.
+
+  Every joint is damped a little, its own friction: undamped, a shin
+  hanging over the slab's edge swings for ever and the figure never
+  sleeps. The armature beside the damper, `d dt` at the demo's longest
+  step, is what lets a limb as light as a forearm turning about its own
+  length be damped without the damper overshooting."
   [limits?]
-  (let [b (fn [l] (if limits? l (dissoc l :cone :twist :limit)))]
+  (let [b (fn [l] (-> (if limits? l (dissoc l :cone :twist :limit))
+                      (assoc :damping joint-damping :armature (/ joint-damping 60.0))))]
     {:base {:mass 12.0 :com [0.0 0.0 0.0]
             :inertia (box-inertia [0.28 0.20 0.18] 12.0)
             :shape :box :size [0.28 0.20 0.18]

@@ -2229,7 +2229,13 @@
   ragdoll's shoulder needs a cone and does not care.
 
   Only violated limits are returned. A joint inside its range is not a
-  constraint and solving it as one costs a row for nothing."
+  constraint and solving it as one costs a row for nothing. A ball joint
+  past both its cone and its twist is two rows: one of them a step, the
+  cone first, was a neck that lay at its cone with its twist unheld
+  until the swing dipped back inside for a step, when the twist row
+  closed the whole of what had built up at once -- a head flicked round
+  at three radians a second every eight steps, in a pile that never
+  slept."
   [model ls ai q dt bias-factor max-push]
   (let [dt (double dt) bias-factor (double bias-factor) max-push (double max-push)
         parts (chain model)
@@ -2237,22 +2243,22 @@
         base-off (if root? 6 0)
         nd-total (+ base-off (total-dof ls))]
     (into []
-          (keep
+          (mapcat
            (fn [j]
              (let [link (nth parts j)
                    ^Link l (nth ls j)
                    nd (.-ndof l)
                    offset (.-offset l)
                    x (nth q j nil)
-                   ;; `depth` is how far past the limit, `w` the
-                   ;; generalized impulse direction that comes back.
-                   [depth ^doubles w]
+                   ;; each `[depth w]`: how far past the limit, and the
+                   ;; generalized impulse direction that comes back
+                   violated
                    (case (kind-of link)
                      (:revolute :prismatic)
                      (when-let [[lo hi] (:limit link)]
                        (let [xv (double x)]
-                         (cond (< xv (double lo)) [(- (double lo) xv) (a/f64 [1.0])]
-                               (> xv (double hi)) [(- xv (double hi)) (a/f64 [-1.0])]
+                         (cond (< xv (double lo)) [[(- (double lo) xv) (a/f64 [1.0])]]
+                               (> xv (double hi)) [[(- xv (double hi)) (a/f64 [-1.0])]]
                                :else nil)))
                      :spherical
                      (let [rest-dir (v/normalize (or (:limit-axis link) (:com link)))
@@ -2272,25 +2278,41 @@
                            ;; upright and still be facing backward.
                            proj (v/dot [(nth rot 0) (nth rot 1) (nth rot 2)] rest-dir)
                            twist (* 2.0 (math/atan2 proj (double (nth rot 3))))]
-                       (cond
+                       (cond-> []
                          (and cone (> swing (double cone)))
-                         (let [n (v/cross bone rest-dir)
-                               len (v/length n)]
-                           (when (> len 1e-9)
-                             (let [axis (q/rotate (q/conjugate rot) (v/scale n (/ 1.0 len)))]
-                               [(- swing (double cone))
-                                (a/f64 [(nth axis 0) (nth axis 1) (nth axis 2)])])))
+                         (into (let [n (v/cross bone rest-dir)
+                                     len (v/length n)]
+                                 (when (> len 1e-9)
+                                   (let [axis (q/rotate (q/conjugate rot) (v/scale n (/ 1.0 len)))]
+                                     [[(- swing (double cone))
+                                       (a/f64 [(nth axis 0) (nth axis 1) (nth axis 2)])]]))))
 
                          (and twist-max (> (abs twist) (double twist-max)))
-                         (let [sgn (if (pos? twist) -1.0 1.0)]
-                           [(- (abs twist) (double twist-max))
-                            (a/f64 [(* sgn (nth rest-dir 0))
-                                    (* sgn (nth rest-dir 1))
-                                    (* sgn (nth rest-dir 2))])])
-
-                         :else nil))
+                         ;; Along the twist's own rate, d twist / d omega,
+                         ;; from twist = 2 atan2(p, w) with p = v . a and
+                         ;; q' = q (omega, 0) / 2 in the child's frame:
+                         ;; (w^2 a + w (a x v) + p v) / (p^2 + w^2). That
+                         ;; is the bone's axis only when the joint is not
+                         ;; swung. Pushed along the bone regardless, a neck
+                         ;; swung forty degrees was pushed partly sideways,
+                         ;; its twist never came back inside, the push never
+                         ;; stopped, and the convex solve, which holds every
+                         ;; push exactly, took a pile of ragdolls to a
+                         ;; thousand radians a second.
+                         (conj (let [sgn (if (pos? twist) -1.0 1.0)
+                                     [vx vy vz w] (map double rot)
+                                     [ax ay az] (map double rest-dir)
+                                     p (+ (* vx ax) (* vy ay) (* vz az))
+                                     den (+ (* p p) (* w w))
+                                     ;; a x v
+                                     cx (- (* ay vz) (* az vy)) cy (- (* az vx) (* ax vz)) cz (- (* ax vy) (* ay vx))
+                                     jx (/ (+ (* w w ax) (* w cx) (* p vx)) den)
+                                     jy (/ (+ (* w w ay) (* w cy) (* p vy)) den)
+                                     jz (/ (+ (* w w az) (* w cz) (* p vz)) den)]
+                                 [(- (abs twist) (double twist-max))
+                                  (a/f64 [(* sgn jx) (* sgn jy) (* sgn jz)])]))))
                      nil)]
-               (when depth
+               (for [[depth ^doubles w] violated]
                  (let [delta (joint-delta model ls ai j w)
                        g (let [o (a/f64 nd-total)]
                            (dotimes [k nd]

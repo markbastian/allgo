@@ -253,6 +253,22 @@
         (is (< 0.56 (worst (fn [[a]] (double a))) 0.58) (str solver " and swinging as high as it started"))
         (is (< 0.56 (worst (fn [[a]] (- (double a)))) 0.58))))))
 
+(deftest damping-test
+  (testing "a joint's passive damping brings a swinging limb to rest, and lets it sleep"
+    ;; Nothing else touches the limb, so without damping it swings for
+    ;; ever: a ragdoll with a shin hanging over an edge never slept.
+    ;; Damping is the joint's own friction, not a drive, so it does not
+    ;; keep the model awake the way a `:tau` does.
+    (let [free (hanging 0.0)
+          damped [(assoc (first free) :damping 2.0 :armature (* 2.0 (/ 1.0 60.0)))]
+          after (fn [model] (first (:models (run (w/world [] [{:model model :pose {:q [0.0] :qd [3.0]}}] {:gravity g})
+                                                 600 (/ 1.0 60.0)))))
+          swinging (after free)
+          stilled (after damped)]
+      (is (> (abs (double (first (:qd (:pose swinging))))) 0.5) "undamped, it is still going")
+      (is (not (:sleeping? swinging)))
+      (is (:sleeping? stilled) "damped, it has stopped and gone to sleep"))))
+
 (deftest pin-breaks-test
   (testing "a pin asked to hold more than its break force lets go"
     (let [bx (rigid/box {:pos [0.0 2.0 0.0] :size [0.3 0.3 0.3] :density 1000.0})
