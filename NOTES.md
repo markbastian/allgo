@@ -12,7 +12,7 @@ namespaces, and the numbers behind them.
 
 ## Texturing & Modeling
 
-Seven namespaces under `allgo.procedural` follow Ebert, Musgrave, Peachey,
+Eight namespaces under `allgo.procedural` follow Ebert, Musgrave, Peachey,
 Perlin and Worley, *Texturing & Modeling: A Procedural Approach*, and are
 arranged the way chapter 20 argues they should be -- a small set of parts
 that compose freely, rather than a set of finished effects:
@@ -22,6 +22,7 @@ that compose freely, rather than a set of finished effects:
 | `allgo.procedural.shaping`    | 2       | `step`, `smoothstep`, `bias`, `gain`, `spline` -- the vocabulary |
 | `allgo.procedural.noise`      | 2, 12   | Value, gradient and 4D gradient noise, sparse convolution, warps |
 | `allgo.procedural.cellular`   | 4       | Worley's F1, F2, F2-F1 and the metrics that reshape the cells    |
+| `allgo.procedural.texture`    | 2-4, 15 | Brick, marble, wood, stone and metal, and bump-mapped lighting   |
 | `allgo.procedural.fractal`    | 14, 16  | fBm, turbulence, and the three multifractals                     |
 | `allgo.procedural.qaeb`       | 17      | Error-bounded ray marching of a surface that is only a function  |
 | `allgo.procedural.atmosphere` | 18      | Exponential density, Rayleigh and Mie scattering, aerial haze    |

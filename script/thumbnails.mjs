@@ -34,7 +34,8 @@ const OUT = "resources/public/thumbs";
 // is too soon: the ones that build something up over time.
 const SETTLE = { fire: 12000, dla: 15000, erosion: 12000, flip: 9000,
                  "sphere-fluid": 10000, island: 9000, planet: 12000,
-                 "boids-voronoi-3d": 8000, "orbit-determination": 8000 };
+                 "boids-voronoi-3d": 8000, "orbit-determination": 8000,
+                 textures: 15000 };
 const DEFAULT_SETTLE = 6000;
 
 // How far to zoom toward the middle, for the demos whose subject is small

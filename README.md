@@ -47,7 +47,7 @@ Where a namespace follows a book, it says so. The main ones:
   Montenbruck & Gill pieces where the two books overlap. NOTES has the
   map from chapters to namespaces.
 - **Ebert et al., *Texturing & Modeling: A Procedural Approach***:
-  seven namespaces under `allgo.procedural`, built as small parts that
+  eight namespaces under `allgo.procedural`, built as small parts that
   compose freely rather than as finished effects.
 - **Matthias Müller's [Ten Minute Physics](https://matthias-research.github.io/pages/tenMinutePhysics/)**:
   most of `allgo.physics` and `allgo.spatial`.
@@ -77,7 +77,7 @@ groups:
 
 | Group                 | Demos                                                                                          |
 |-----------------------|------------------------------------------------------------------------------------------------|
-| Procedural Generation | Cellular caves, dungeons, fractal terrain, hydraulic erosion, diffusion-limited aggregation, islands, planets |
+| Procedural Generation | Cellular caves, dungeons, fractal terrain, hydraulic erosion, diffusion-limited aggregation, islands, planets, textures |
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |

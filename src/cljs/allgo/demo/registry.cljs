@@ -41,6 +41,7 @@
             [allgo.demo.spatial-hash :as spatial-hash]
             [allgo.demo.sphere-fluid :as sphere-fluid]
             [allgo.demo.terrain-webgl :as terrain]
+            [allgo.demo.textures :as textures]
             [allgo.demo.three-body :as three-body]
             [allgo.demo.water :as water]))
 
@@ -71,6 +72,7 @@
    "island"   {:start island/start!   :stop island/stop!}
    "dla"      {:start dla/start!      :stop dla/stop!}
    "planet"   {:start planet/start!   :stop planet/stop!}
+   "textures" {:start textures/start! :stop textures/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}
