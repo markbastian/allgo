@@ -209,16 +209,25 @@
                                                        (:frames (nth configs mi)))]
           {:side [:link mi link] :body body})))
 
+(defn- box-frame
+  "A box's `contact/frame`, nil for any other shape, which needs none."
+  [b]
+  (when (= :box (:shape b)) (contact/frame b)))
+
 (defn- pair-contacts
   "Contacts between two bodies, with the normal pointing the way `a` has
-  to be pushed."
-  [side-a body-a side-b body-b]
+  to be pushed. `fa` and `fb` are their `box-frame`s, built once a step
+  for every pair a body is in rather than once a pair: as
+  `contact/between` built them, they were a sixth of a heap of ragdolls'
+  step in a browser."
+  [side-a body-a fa side-b body-b fb]
   (mapv (fn [c] {:a side-a :b side-b
                  :point (:point c)
                  :normal (v/negate (:normal c))
                  :depth (:depth c)
                  :id (:id c)})
-        (contact/between 0 1 body-a body-b)))
+        ;; `contact/between`'s margin for two bodies standing still
+        (contact/between* 0 1 body-a body-b fa fb contact/speculative)))
 
 (defn- reach
   "How far a body's shape extends from its center, at most: the radius of
@@ -304,7 +313,10 @@
         ;; in the order the pairs were once tried all against all, so the
         ;; contacts, and the answers, come out as they always did
         part-body (sort part-body)
-        part-part (sort part-part)]
+        part-part (sort part-part)
+        ;; each frame once, and only if a pair asks for it
+        part-frames (mapv (fn [{:keys [body]}] (delay (box-frame body))) parts)
+        body-frames (mapv (fn [b] (delay (box-frame b))) bodies)]
     (-> []
         ;; Rigid against rigid.
         (into (map (fn [c] {:a [:rigid (:a c)] :b [:rigid (:b c)]
@@ -324,7 +336,7 @@
                     ;; two bodies asleep, or asleep and static, have
                     ;; nothing to say to each other
                     :when (or (awake? w side) (awake? w [:rigid bi]))
-                    c (pair-contacts side body [:rigid bi] rb)]
+                    c (pair-contacts side body @(nth part-frames pi) [:rigid bi] rb @(nth body-frames bi))]
                 c))
         ;; One model's parts against another's. Each side answers for its
         ;; own tree, exactly as it does against a rigid body: the two
@@ -339,7 +351,7 @@
                       :let [{side-a :side body-a :body} (nth parts i)
                             {side-b :side body-b :body} (nth parts j)]
                       :when (or (awake? w side-a) (awake? w side-b))
-                      c (pair-contacts side-a body-a side-b body-b)]
+                      c (pair-contacts side-a body-a @(nth part-frames i) side-b body-b @(nth part-frames j))]
                   c)))
         ;; And each model against itself, unless told not to.
         (into (when self-collide?
@@ -410,6 +422,26 @@
         {:kind :rigid :i i :r [rx ry rz] :dir dir :im im :p p
          :w (+ im (+ (* cx wx) (* cy wy) (* cz wz)))}))))
 
+(defn- with-response
+  "`side` with its row `g` and the velocity a unit push along it buys,
+  `M^-1 g`, from the model's inverse mass matrix `minv`, flat and dense;
+  and `:w`, `g . M^-1 g`, the inverse of the mass it meets.
+
+  What `articulated/response-at` answers by walking the tree, and the
+  same numbers but for rounding. A ragdoll is twenty-five numbers: its
+  inverse is a small dense matrix built once a step, and a product with
+  it per row costs less than a walk that allocates as it goes -- a fifth
+  of a heap of ragdolls' step in a browser."
+  [side ^doubles g ^doubles minv]
+  (let [n (alength g)
+        delta (a/f64 n)]
+    (dotimes [r n]
+      (let [o (* r n)]
+        (aset delta r (double (loop [c 0 acc 0.0]
+                                (if (== c n) acc (recur (inc c) (+ acc (* (aget minv (+ o c)) (aget g c))))))))))
+    (let [w (loop [k 0 acc 0.0] (if (== k n) acc (recur (inc k) (+ acc (* (aget g k) (aget delta k))))))]
+      (assoc side :force g :delta delta :w (if (> w 1e-12) w 0.0)))))
+
 (defn- prepare-side
   [{:keys [bodies models] :as w} configs side point dir]
   (cond
@@ -426,11 +458,12 @@
     :else
     (let [[_ mi li] side
           {:keys [model]} (nth models mi)
-          {:keys [force delta mass] :as _r} (let [r (ab/response-at model (nth configs mi)
-                                                                    li point dir)]
-                                              {:force (:g r) :delta (:delta r) :mass (:m r)})]
-      {:kind :link :mi mi :force force :delta delta
-       :w (if (pos? (double mass)) (/ 1.0 (double mass)) 0.0)})))
+          cfg (nth configs mi)]
+      (if-let [minv (some-> (:minv cfg) deref)]
+        (with-response {:kind :link :mi mi} (ab/force-at model cfg li point dir) minv)
+        (let [r (ab/response-at model cfg li point dir)]
+          {:kind :link :mi mi :force (:g r) :delta (:delta r)
+           :w (if (pos? (double (:m r))) (/ 1.0 (double (:m r))) 0.0)})))))
 
 (defn- prepare-pair
   "Both sides at once, for a contact between two parts of one model.
@@ -444,9 +477,11 @@
         {:keys [model]} (nth models mi)]
     (if (= :convex (:solver w))
       {:kind :pair :mi mi :force (ab/pair-force-at model (nth configs mi) ai bi point dir)}
-      (let [r (ab/pair-response-at model (nth configs mi) ai bi point dir)]
-        {:kind :pair :mi mi :force (:g r) :delta (:delta r)
-         :w (if (pos? (double (:m r))) (/ 1.0 (double (:m r))) 0.0)}))))
+      (if-let [minv (some-> (:minv (nth configs mi)) deref)]
+        (with-response {:kind :pair :mi mi} (ab/pair-force-at model (nth configs mi) ai bi point dir) minv)
+        (let [r (ab/pair-response-at model (nth configs mi) ai bi point dir)]
+          {:kind :pair :mi mi :force (:g r) :delta (:delta r)
+           :w (if (pos? (double (:m r))) (/ 1.0 (double (:m r))) 0.0)})))))
 
 ;; ---------------------------------------------------------------------------
 ;; The sweep
@@ -1206,7 +1241,12 @@
         ;; Where everything is does not change until the end of the step,
         ;; so neither do the joints' frames or the contacts.
         configs (mapv (fn [{:keys [model pose]}]
-                        (ab/configuration model (:q pose) (:base pose)))
+                        (let [cfg (ab/configuration model (:q pose) (:base pose))]
+                          ;; the inverse mass matrix, for the contacts'
+                          ;; responses, made only if one asks
+                          (assoc cfg :minv (delay (convex/spd-inverse
+                                                   (ab/generalized-mass-matrix model (:q pose) (:ls cfg))
+                                                   (ab/generalized-dof model))))))
                       (:models w))
         ;; Waking comes first, so that whatever is woken is solved in the
         ;; same step that reached it. Nothing found contacts among the

@@ -25,10 +25,17 @@
      there `float-array`, `int-array` and `double-array` build different
      primitive arrays, and it is their type hints that keep `aget` and
      `aset` unboxed."
+     ;; A vector is filled in place, and an array -- a plain one or a
+     ;; typed one -- copied by the constructor itself: `into-array` walks
+     ;; either as a seq, and a tenth of a heap of ragdolls' step in a
+     ;; browser was arrays being made that way.
      ([ctor n-or-coll]
-      (if (number? n-or-coll)
-        (new ctor n-or-coll)
-        (new ctor (into-array n-or-coll))))
+      (cond
+        (number? n-or-coll) (new ctor n-or-coll)
+        (vector? n-or-coll) (reduce-kv (fn [^js a i x] (aset a i x) a)
+                                       (new ctor (count n-or-coll)) n-or-coll)
+        (or (array? n-or-coll) (js/ArrayBuffer.isView n-or-coll)) (new ctor n-or-coll)
+        :else (new ctor (into-array n-or-coll))))
      ([ctor n fill]
       (.fill (new ctor n) fill))))
 

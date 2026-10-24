@@ -817,6 +817,17 @@ tried in the order every pair once was, so again the same to the bit:
 sweep are under 2% of a step now; each dummy's own limbs against each
 other are most of what detection is left with.
 
+Twenty dummies awake under the sequential impulse, later (2026-10-24):
+96 ms a step under Node, then 57. `q/rotate` built five vectors a call
+through `vec3`, and now none, in the same arithmetic; `world` built
+both boxes' frames for every pair, and now each once a step;
+`allgo.array`'s typed arrays came from a vector or an array by way of a
+seq; and a contact side on a model asked `articulated/response-at` for
+`M^-1 g`, a walk of the tree that allocates as it goes, where the
+model's inverse mass matrix -- twenty-five by twenty-five, built once a
+step -- answers each row in one product. That last is the same numbers
+but for rounding; the rest are the same to the bit.
+
 **Why ragdolls did not sleep** (2026-10-24). A heap of twenty never
 slept under either solver, and following the fastest joints found three
 things, the first two of them bugs:

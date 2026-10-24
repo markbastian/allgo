@@ -2198,6 +2198,7 @@
         bodies (vec (collision-bodies model q-vec root-state frames))
         ;; once a body, not once a pair: eleven parts are fifty-five pairs
         extents (mapv (comp world-extent :body) bodies)
+        frames (mapv (fn [{b :body}] (when (= :box (:shape b)) (contact/frame b))) bodies)
         n (count bodies)]
     (into []
           (for [x (range n)
@@ -2206,7 +2207,8 @@
                       {lb :link bb :body} (nth bodies x')]
                 :when (collidable? parts la lb)
                 :when (not (apart? ba (nth extents x) bb (nth extents x')))
-                c (contact/between 0 1 ba bb)]
+                ;; `contact/between`'s margin for two bodies standing still
+                c (contact/between* 0 1 ba bb (nth frames x) (nth frames x') contact/speculative)]
             {:link la :other lb
              :point (:point c)
              :normal (v/negate (:normal c))

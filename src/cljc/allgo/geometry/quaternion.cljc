@@ -56,10 +56,19 @@
   The long way is `q * (v, 0) * q'`, two quaternion products. This is the
   same thing rearranged into two cross products, which is the form worth
   having because it runs on every vertex of everything."
-  [[qx qy qz qw] v]
-  (let [u [qx qy qz]
-        t (v/scale (v/cross u v) 2.0)]
-    (v/add v (v/scale t qw) (v/cross u t))))
+  ;; t = 2 (u x v), then v + qw t + u x t, u being q's vector part. In
+  ;; primitives, the arithmetic of the `vec3` version it replaced in its
+  ;; order: that built five vectors a call, and in a browser, where
+  ;; reading one is a generic `nth`, it was a sixth of a ragdoll step.
+  [[qx qy qz qw] [vx vy vz]]
+  (let [qx (double qx) qy (double qy) qz (double qz) qw (double qw)
+        vx (double vx) vy (double vy) vz (double vz)
+        tx (* (- (* qy vz) (* qz vy)) 2.0)
+        ty (* (- (* qz vx) (* qx vz)) 2.0)
+        tz (* (- (* qx vy) (* qy vx)) 2.0)]
+    [(+ (+ vx (* tx qw)) (- (* qy tz) (* qz ty)))
+     (+ (+ vy (* ty qw)) (- (* qz tx) (* qx tz)))
+     (+ (+ vz (* tz qw)) (- (* qx ty) (* qy tx)))]))
 
 (defn from-axis-angle
   "A rotation of `angle` radians about `axis`."
