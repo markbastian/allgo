@@ -25,7 +25,7 @@ set of finished effects:
 | `allgo.procedural.cellular`   | 4       | Worley's F1, F2, F2-F1 and the metrics that reshape the cells    |
 | `allgo.procedural.texture`    | 2-4, 15 | Brick, stone, metal; clouds, water, earth, gas giants; bump maps |
 | `allgo.procedural.antialias`  | Worley  | Box-filtered patterns, octave clamping, and three supersamplers  |
-| `allgo.procedural.volume`     | 6-8, 12 | Hypertexture, fire, steam, cumulus, and a ray marcher with shadow |
+| `allgo.procedural.volume`     | 6-8, 12 | Fire, steam, cumulus, cirrus, stratus; hypertexture; a ray marcher |
 | `allgo.procedural.instancing` | Hart    | Recursive, parameterized instancing: trees, forests, fractals    |
 | `allgo.procedural.lsystem`    | Hart    | L-systems: rewriting, and a turtle with tropism                  |
 | `allgo.procedural.fractal`    | 14, 16  | fBm, turbulence, and the three multifractals                     |

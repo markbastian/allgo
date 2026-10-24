@@ -7,8 +7,9 @@
   from 1 inside to 0 outside, with noise added before it is sharpened, so
   that the boundary itself becomes the texture. Ebert's chapters 6 to 8
   for gases: steam and smoke as turbulence shaped by where the gas can
-  be, and clouds as his two levels, implicit blobs for the shape and
-  turbulence for everything smaller.
+  be, and clouds -- cumulus, cirrus and stratus -- as his two levels, a
+  coarse shape (blobs, streaks or a layer) and turbulence for everything
+  smaller.
 
   A volume here is a map:
 
@@ -214,13 +215,118 @@
       :albedo [0.96 0.96 0.98]
       :surface 0.0})))
 
+(defn cirrus
+  "Mares' tails: a few thin streaks high up, combed out by the wind.
+
+  Ebert's two levels again, drawn out flat. The shape is a handful of
+  long, thin implicit streaks lying along the wind, each bending as it
+  goes and hooked down at its end, where its ice falls out of it. The
+  detail is turbulence stretched along the wind -- slow along it, fast
+  across it and up and down -- so that what is inside a streak is
+  fibers rather than billows. And it is thin: little density and little
+  extinction, so the sky shows through and the sun lights all of it
+  nearly alike, which is why cirrus is white and flat where cumulus is
+  modeled in light and shade. `:wind` is the direction the streaks run,
+  in radians about the vertical; `:time` blows the fibers along them."
+  ([] (cirrus {}))
+  ([{:keys [seed streaks wind time] :or {seed 0 streaks 6 wind -0.5 time 0.0}}]
+   (let [rng (random/rng seed 43 0 0)
+         streaks (vec (for [_ (range streaks)]
+                        {:angle (random/uniform rng -0.25 0.25)
+                         :offset (random/uniform rng -0.7 0.7)
+                         :along (random/uniform rng -0.2 0.2)
+                         :height (random/uniform rng -0.05 0.25)
+                         :length (random/uniform rng 0.5 0.8)
+                         :bend (random/uniform rng -0.25 0.25)
+                         :hook (random/uniform rng 0.08 0.18)
+                         :width (random/uniform rng 0.07 0.12)}))
+         t (turbulence (+ seed 3) 5)
+         warp (noise/vector-basis {:seed (+ seed 4)})
+         wind (double wind) time (double time)
+         cw (math/cos wind) sw (math/sin wind)]
+     {:density (fn [x y z]
+                 (let [x (double x) y (double y) z (double z)
+                       ;; Along the wind, and across it.
+                       a (+ (* cw x) (* sw z))
+                       c (- (* cw z) (* sw x))
+                       [wx wy _] (warp (* 1.5 x) (* 1.5 y) (* 1.5 z))
+                       c (+ c (* 0.06 (double wx)))
+                       y (+ y (* 0.02 (double wy)))
+                       field (reduce
+                              (fn [^double acc {:keys [angle offset along height length bend hook width]}]
+                                (let [angle (double angle)
+                                      ca (math/cos angle) sa (math/sin angle)
+                                      ;; s along the streak, -1 to 1; n across it.
+                                      s (/ (- (+ (* ca a) (* sa c)) (double along)) (double length))
+                                      n (- (- (* ca c) (* sa a)) (double offset) (* (double bend) s s))
+                                      ;; The fall streak: the downwind end sags.
+                                      dy (+ (- y (double height)) (* (double hook) (s/smoothstep 0.1 1.0 s)))
+                                      w (double width)
+                                      th (* 0.35 w)]
+                                  (+ acc (wyvill (+ (* s s) (/ (* n n) (* w w)) (/ (* dy dy) (* th th)))))))
+                              0.0 streaks)]
+                   (if (< field 0.02)
+                     0.0
+                     (let [fibers (t (* 1.2 (- a time)) (* 14.0 y) (* 14.0 c))]
+                       (* (s/smoothstep 0.02 0.4 field)
+                          (s/smoothstep 0.3 0.8 fibers)
+                          (- 1.0 (s/smoothstep 0.8 0.95 (len x y z))))))))
+      :extinction 5.0
+      :albedo [0.97 0.97 1.0]
+      :surface 0.0})))
+
+(defn stratus
+  "An overcast: a sheet of cloud, flat underneath, rolling on top, and
+  broken here and there into patches.
+
+  Ebert's stratus is the cloud with the least shape -- a layer, so the
+  macrostructure is a plane and no blobs, and everything else is noise.
+  Low-frequency fBm across the sheet decides where there is cloud
+  (`:cover`, roughly the fraction of the sky it covers) and how thick it
+  is there, so that it thins to nothing at a gap rather than ending in a
+  wall; turbulence gives the top its rolls and the whole its mottling.
+  Lit from above through itself, the sheet is pale on top and gray
+  underneath, as an overcast is. `:time` drifts it."
+  ([] (stratus {}))
+  ([{:keys [seed cover time] :or {seed 0 cover 0.8 time 0.0}}]
+   (let [patch (fractal/fbm (noise/gradient-basis {:seed (+ seed 5)}) {:octaves 5})
+         t (turbulence (+ seed 7) 4)
+         ;; fBm here spreads about zero with a deviation near a quarter,
+         ;; so this is the level about `cover` of the sheet lies above.
+         edge (- (* -0.8 (- (double cover) 0.5)) 0.13)
+         time (double time)
+         base -0.1
+         thickness 0.11]
+     {:density (fn [x y z]
+                 (let [x (double x) y (double y) z (double z)
+                       r (len x 0.0 z)]
+                   (if (or (> r 0.97) (< y (- base 0.03)) (> y (+ base thickness 0.05)))
+                     0.0
+                     (let [px (- x (* 0.15 time))
+                           p (double (patch (* 1.4 px) 0.0 (* 1.4 z)))
+                           ;; Ragged at the rim instead of a hard circle.
+                           p (- p (* 0.8 (s/smoothstep 0.7 0.97 r)))
+                           cover (s/smoothstep edge (+ edge 0.2) p)]
+                       (if (<= cover 0.0)
+                         0.0
+                         (let [e (t (* 9.0 px) (* 9.0 y) (* 9.0 z))
+                               top (+ base (* thickness cover (+ 0.8 (* 0.3 e))))]
+                           (* (s/smoothstep (- base 0.03) (+ base 0.02) y)
+                              (- 1.0 (s/smoothstep (- top 0.06) top y))
+                              (+ 0.65 (* 0.35 e)))))))))
+      :extinction 18.0
+      :albedo [0.9 0.91 0.93]
+      :surface 0.0})))
+
 (def catalog
   "Every volume here, by name."
   [{:name "noisy sphere" :make noisy-sphere :source "chapter 12"}
    {:name "eroded cube" :make eroded-cube :source "chapter 12"}
    {:name "fireball" :make fireball :source "chapter 12"}
    {:name "steam" :make steam :source "chapters 5, 6"}
-   {:name "cumulus" :make cumulus :source "chapter 8"}])
+   {:name "cumulus" :make cumulus :source "chapter 8"}
+   {:name "cirrus" :make cirrus :source "chapter 8"}
+   {:name "stratus" :make stratus :source "chapter 8"}])
 
 ;; ---------------------------------------------------------------------------
 ;; Rendering

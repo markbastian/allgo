@@ -1,6 +1,7 @@
 (ns allgo.demo.volumes
-  "Canvas demo for `allgo.procedural.volume`: hypertexture, fire, steam
-  and cloud, each a density in space, seen by marching rays through it.
+  "Canvas demo for `allgo.procedural.volume`: hypertexture, fire, steam,
+  cumulus, cirrus and stratus, each a density in space, seen by marching
+  rays through it.
 
   Drag to walk around it. `steps` is how many samples a ray takes through
   the volume and `shadows` how many it takes toward the sun from each:

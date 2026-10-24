@@ -58,6 +58,45 @@
             bottom (vol/march cloud (vol/camera-ray 0.0 0.0 3.0 0.8 0.0 -0.06) {:light [0.0 1.0 0.0] :ambient 0.1})]
         (is (> (first top) (first bottom)))))))
 
+(deftest layer-clouds-test
+  (let [grid (for [i (range 41) j (range 41)] [(- (* 0.05 i) 1.0) (- (* 0.05 j) 1.0)])]
+    (testing "cirrus is thin: the sky shows through even the thickest of it, and not through cumulus"
+      ;; Black gas over a white sky: what comes through is the transmittance.
+      (let [thickest (fn [v] (let [v (assoc v :albedo [0.0 0.0 0.0])]
+                               (apply min (for [u (range -0.5 0.51 0.05) w (range -0.3 0.31 0.05)]
+                                            (first (vol/march v (vol/camera-ray 0.52 0.26 3.0 0.8 u w)
+                                                              {:background [1.0 1.0 1.0]}))))))]
+        (is (< (thickest (vol/cirrus)) 0.9))
+        (is (> (thickest (vol/cirrus)) 0.15))
+        (is (< (thickest (vol/cumulus)) 0.02))))
+
+    (testing "cirrus is fibers along the wind: density changes faster across it than along it"
+      (let [{:keys [density]} (vol/cirrus {:wind 0.0})
+            pts (for [[x z] grid y [0.0 0.1 0.2] :when (> (density x y z) 0.05)] [x y z])
+            change (fn [[dx dz]] (reduce + (for [[x y z] pts]
+                                             (abs (- (density (+ x dx) y (+ z dz)) (density x y z))))))]
+        (is (> (count pts) 20))
+        ;; Wind 0 blows along x.
+        (is (> (change [0.0 0.01]) (* 2.0 (change [0.01 0.0]))))))
+
+    (testing "stratus is a layer with a flat base: nothing below it, and something just above"
+      (let [{:keys [density]} (vol/stratus)
+            at (fn [y] (count (filter (fn [[x z]] (> (density x y z) 0.05)) grid)))]
+        (is (zero? (at -0.15)))
+        (is (> (at -0.05) 200))
+        (is (zero? (at 0.2)))))
+
+    (testing "stratus covers more of the sky as `:cover` grows"
+      (let [covered (fn [c] (let [{:keys [density]} (vol/stratus {:cover c})]
+                              (count (filter (fn [[x z]] (> (density x -0.05 z) 0.05)) grid))))]
+        (is (< (covered 0.3) (covered 0.6) (covered 0.9)))))
+
+    (testing "an overcast is darker underneath than on top"
+      (let [cloud (vol/stratus)
+            lum (fn [el] (first (vol/march cloud (vol/camera-ray 0.3 el 3.0 0.8 0.0 0.0)
+                                           {:light [0.0 1.0 0.0] :ambient 0.1})))]
+        (is (> (lum 1.2) (* 1.5 (lum -1.2))))))))
+
 (deftest camera-test
   (testing "the middle of the picture looks at the origin, from wherever the camera is"
     (doseq [[az el] [[0.0 0.0] [0.7 0.3] [-2.0 -0.5]]]
