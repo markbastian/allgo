@@ -2250,15 +2250,17 @@
                    nd (.-ndof l)
                    offset (.-offset l)
                    x (nth q j nil)
-                   ;; each `[depth w]`: how far past the limit, and the
-                   ;; generalized impulse direction that comes back
+                   ;; each `[depth w which]`: how far past the limit, the
+                   ;; generalized impulse direction that comes back, and
+                   ;; which of the joint's limits it is, for a caller to
+                   ;; know it again next step
                    violated
                    (case (kind-of link)
                      (:revolute :prismatic)
                      (when-let [[lo hi] (:limit link)]
                        (let [xv (double x)]
-                         (cond (< xv (double lo)) [[(- (double lo) xv) (a/f64 [1.0])]]
-                               (> xv (double hi)) [[(- xv (double hi)) (a/f64 [-1.0])]]
+                         (cond (< xv (double lo)) [[(- (double lo) xv) (a/f64 [1.0]) :lo]]
+                               (> xv (double hi)) [[(- xv (double hi)) (a/f64 [-1.0]) :hi]]
                                :else nil)))
                      :spherical
                      (let [rest-dir (v/normalize (or (:limit-axis link) (:com link)))
@@ -2285,7 +2287,8 @@
                                  (when (> len 1e-9)
                                    (let [axis (q/rotate (q/conjugate rot) (v/scale n (/ 1.0 len)))]
                                      [[(- swing (double cone))
-                                       (a/f64 [(nth axis 0) (nth axis 1) (nth axis 2)])]]))))
+                                       (a/f64 [(nth axis 0) (nth axis 1) (nth axis 2)])
+                                       :cone]]))))
 
                          (and twist-max (> (abs twist) (double twist-max)))
                          ;; Along the twist's own rate, d twist / d omega,
@@ -2310,16 +2313,17 @@
                                      jy (/ (+ (* w w ay) (* w cy) (* p vy)) den)
                                      jz (/ (+ (* w w az) (* w cz) (* p vz)) den)]
                                  [(- (abs twist) (double twist-max))
-                                  (a/f64 [(* sgn jx) (* sgn jy) (* sgn jz)])]))))
+                                  (a/f64 [(* sgn jx) (* sgn jy) (* sgn jz)])
+                                  :twist]))))
                      nil)]
-               (for [[depth ^doubles w] violated]
+               (for [[depth ^doubles w which] violated]
                  (let [delta (joint-delta model ls ai j w)
                        g (let [o (a/f64 nd-total)]
                            (dotimes [k nd]
                              (aset o (+ base-off (long offset) k) (aget w k)))
                            o)
                        wgt (dot-n g delta)]
-                   {:g g :delta delta
+                   {:g g :delta delta :link j :which which
                     :m (if (> wgt 1e-12) (/ 1.0 wgt) 0.0)
                     :bias (min max-push (/ (* bias-factor (double depth)) dt))})))))
           (range (count parts)))))
@@ -2328,9 +2332,11 @@
   "The joint limits a model is currently past, as one-sided rows a
   contact solver can take alongside its contacts.
 
-  Each is `{:g :delta :m :bias}`: the generalized direction to push the
-  joint back along, the velocity a unit push along it buys, the
-  effective mass, and how fast the overlap should be closed. The same
+  Each is `{:g :delta :m :bias :link :which}`: the generalized direction
+  to push the joint back along, the velocity a unit push along it buys,
+  the effective mass, how fast the overlap should be closed, and which
+  limit it is -- the link, and `:lo` or `:hi` of a hinge, `:cone` or
+  `:twist` of a ball joint -- so that a solver can warm start it. The same
   rows `solve-constraints` builds for itself, given to a caller that has
   a sweep of its own -- `allgo.physics.world`, which has other bodies to
   solve in the same pass. `config` is `configuration`'s."

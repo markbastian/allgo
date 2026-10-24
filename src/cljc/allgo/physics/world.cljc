@@ -63,8 +63,12 @@
 
   Each contact remembers the impulse it ended a step with, keyed as
   `allgo.physics.solver` keys them, and starts the next step from it;
-  so does each pin. A joint limit does not: its rows carry nothing that
-  says which limit they are, and they are few.
+  so does each pin, and each joint limit, by its model, link and which
+  limit it is (`allgo.physics.articulated/limit-constraints`). The
+  limits were left out once, for being few; in a heap of ragdolls they
+  carry much of the weight, and without them the contacts' impulses
+  alone drove every limb hard into its limits -- a warm start that cost
+  more than none, and was never taken.
 
   A contact the keys do not recognize takes the impulse of last step's
   nearest unclaimed point on the same pair, within `:recall-reach`
@@ -498,7 +502,7 @@
         (for [[mi {:keys [model]}] (map-indexed vector models)
               :when (and (ab/limited? model) (not (:sleeping? (nth models mi))))
               row (ab/limit-constraints model (nth configs mi) dt opts)]
-          (assoc row :mi mi))))
+          (assoc row :mi mi :key [mi (:link row) (:which row)]))))
 
 (defn- body-arrays
   "Velocities out of the bodies and into two flat arrays."
@@ -659,7 +663,7 @@
   axes. Both are applied before the first iteration and the sweep
   corrects from there. Returns what each contact and each pin carried
   over the step, as `{:contacts :pins}` in the same shapes."
-  [prepared limits pins ^doubles vel ^doubles omega us opts warm pin-warm]
+  [prepared limits pins ^doubles vel ^doubles omega us opts warm pin-warm limit-warm]
   (let [{:keys [iterations friction restitution]} opts
         k (count prepared)
         nl (count limits)
@@ -680,6 +684,14 @@
               (when-not (zero? p)
                 (apply-to! (nth dirs t) vel omega us p)
                 (aset acc (+ (* 3 i) t) p)))))))
+    (dotimes [i nl]
+      (when-let [was (nth limit-warm i)]
+        (let [p (double was)]
+          (when (pos? p)
+            (let [^doubles d (:delta (nth limits i))
+                  ^doubles u (nth us (:mi (nth limits i)))]
+              (dotimes [j (alength d)] (aset u j (+ (aget u j) (* p (aget d j)))))
+              (aset lacc i p))))))
     (dotimes [i np]
       (when-let [was (nth pin-warm i)]
         (let [rows (:rows (nth pins i))]
@@ -750,7 +762,8 @@
                      (range k))
      :pins (mapv (fn [i] [(aget pacc (* 3 i)) (aget pacc (+ (* 3 i) 1))
                           (aget pacc (+ (* 3 i) 2))])
-                 (range np))}))
+                 (range np))
+     :limits (mapv (fn [i] (aget lacc i)) (range nl))}))
 
 ;; ---------------------------------------------------------------------------
 ;; Every constraint at once
@@ -801,7 +814,7 @@
   as `solve!` does, and the Newton factors as `:convex-factors`: given
   back next step while the blocks are the same bodies, they precondition
   its Newton steps."
-  [w configs cs prepared limits pins ^doubles vel ^doubles omega us dt warm pin-warm]
+  [w configs cs prepared limits pins ^doubles vel ^doubles omega us dt warm pin-warm limit-warm]
   (let [dt (double dt)
         {:keys [bodies models friction restitution max-push-speed]} w
         beta (double (or (:convex-beta w) 0.1))
@@ -890,10 +903,11 @@
                                     vhat (if (and (pos? e) (< va -0.5)) (max push (* (- e) va)) push)]
                                 (add! convex/contact rows (regularize wn) (* 1e-3 (max wn 1e-9)) vhat friction)
                                 (dec (count (:kind @builder))))))))
-        _ (doseq [{:keys [mi g m bias]} limits]
-            (let [row [(block! [:model mi]) -1 (vec g) nil]]
-              (when (live? row)
-                (add! convex/unilateral [row] (regularize (if (pos? (double m)) (/ 1.0 (double m)) 0.0)) 0.0 bias 0.0))))
+        limit-at (vec (for [{:keys [mi g m bias]} limits]
+                        (let [row [(block! [:model mi]) -1 (vec g) nil]]
+                          (when (live? row)
+                            (add! convex/unilateral [row] (regularize (if (pos? (double m)) (/ 1.0 (double m)) 0.0)) 0.0 bias 0.0)
+                            (dec (count (:kind @builder)))))))
         pin-at (vec (for [{:keys [rows bias]} pins]
                       (vec (for [r (range 3)]
                              (let [row (nth rows r) built (row-of row) wr (double (row-w row))]
@@ -909,6 +923,11 @@
                         (doseq [[ks was] (map vector pin-at pin-warm) :when was
                                 [r k] (map-indexed vector ks) :when k]
                           (aset g (* 3 (long k)) (double (nth was r))))
+                        ;; and the joint limits': without them the contacts'
+                        ;; impulses drove every limb hard into its limits,
+                        ;; and a heap's warm start cost more than none
+                        (doseq [[k was] (map vector limit-at limit-warm) :when (and k was)]
+                          (aset g (* 3 (long k)) (double was)))
                         g)
         warm-v (convex/pushed problem last-impulses)
         v0 (when (and (:warm-start? w) (< (double (convex/cost problem warm-v))
@@ -935,6 +954,7 @@
                                [0.0 0.0 0.0]))
                      contact-at)
      :pins (mapv (fn [ks] (mapv (fn [k] (if k (aget impulses (* 3 (long k))) 0.0)) ks)) pin-at)
+     :limits (mapv (fn [k] (if k (aget impulses (* 3 (long k))) 0.0)) limit-at)
      :convex-factors {:blocks placed :factors factors}}))
 
 ;; ---------------------------------------------------------------------------
@@ -1230,11 +1250,12 @@
                                 (recall cs ks remembered (:contact-points w) reach)
                                 (mapv #(get remembered %) ks))
                               (mapv (constantly nil) ks))
-                       pin-warm (mapv #(when warm? (:impulse %)) (:pins w))]
+                       pin-warm (mapv #(when warm? (:impulse %)) (:pins w))
+                       limit-warm (mapv #(when warm? (get (:limit-impulses w) (:key %))) limits)]
                    (if (= :convex (:solver w))
-                     (solve-convex! w configs cs prepared limits pins vel omega us dt warm pin-warm)
-                     (solve! prepared limits pins vel omega us w warm pin-warm)))
-                 {:contacts [] :pins []})
+                     (solve-convex! w configs cs prepared limits pins vel omega us dt warm pin-warm limit-warm)
+                     (solve! prepared limits pins vel omega us w warm pin-warm limit-warm)))
+                 {:contacts [] :pins [] :limits []})
         carried (mapv (fn [[x y z]]
                         (math/sqrt (+ (* (double x) (double x)) (* (double y) (double y))
                                       (* (double z) (double z)))))
@@ -1273,6 +1294,9 @@
     (cond->
      (assoc w
             :pin-impulses carried
+            ;; each limit pushed against this step, by model, link and
+            ;; which, for the next step to start from
+            :limit-impulses (zipmap (map :key limits) (:limits solved))
             :convex-factors (:convex-factors solved)
             :contact-impulses (into (sleepers w remembered) (zipmap ks (:contacts solved)))
             :contact-points (into (sleepers w (:contact-points w)) (zipmap ks (map :point cs)))

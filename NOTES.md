@@ -849,6 +849,25 @@ an angle, on the margin and flickering in and out from step to step.
 Neither damping to 0.5, thirty-two iterations, nor sleep speeds ten
 times as loose made a twenty-dummy heap sleep in thirty seconds.
 
+**Newton in a heap** (2026-10-24). Twenty dummies under the convex solve
+take twenty Newton steps on average and up to sixty-odd, and it is not
+polish: the gradient sits at one to fifty for most of them and falls to
+1e-11 in the last, once the right constraints are active, and the
+velocities part way are metres a second from the answer. Tried:
+
+- The warm start was never taken. A heap's joint limits carry much of
+  its weight and were not warm started, so last step's contact impulses
+  alone drove the limbs into their limits, at a cost five to a hundred
+  and fifty times that of starting from nothing. Keyed by model, link
+  and which limit, and warm started in both solvers: taken 181 times in
+  300, and a step 104 ms to 82. The iterations hardly moved, 22 to 20.
+- Softer contacts, `beta` 0.3: 18 steps, 72 ms -- but `beta` 0.1 is what
+  stands a tall column, and 1.0 was slower again. Not taken.
+- Softer friction, the tangents' regularization the normal's: worse, 27
+  steps; ten times it blew up. Stiff friction is not what churns.
+
+What is left is the active set found one constraint at a time.
+
 ## Tried and not kept
 
 - **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's

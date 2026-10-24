@@ -294,6 +294,21 @@
           angle (double (first (:q (:pose (first (:models end))))))]
       (is (< -0.32 angle 0.32) (str "at " angle)))))
 
+(deftest limit-warm-start-test
+  (testing "a limit pushed against remembers what it pushed with, for the next step"
+    ;; Held at the bottom of [0.3, 0.6] by its own weight: two kilograms
+    ;; at half a meter, so 2 g 0.5 sin 0.3 newton meters, a sixtieth of a
+    ;; second of it each step.
+    (doseq [solver [:convex :sequential-impulse]]
+      (let [limb (assoc-in (hanging 0.0) [0 :limit] [0.3 0.6])
+            end (run (w/world [] [{:model limb :pose {:q [0.35] :qd [0.0]}}]
+                              {:gravity g :solver solver :allow-sleep? false})
+                     240 (/ 1.0 60.0))
+            held (get (:limit-impulses end) [0 0 :lo])
+            weight (* 2.0 9.81 0.5 (Math/sin 0.3) (/ 1.0 60.0))]
+        (is (some? held) (str solver " remembered " (:limit-impulses end)))
+        (is (< (abs (- (double held) weight)) (* 0.1 weight)) (str solver " " held " " weight))))))
+
 (defn- free-box
   "A loose box as an articulated model: a free root with nothing hung off
   it, so it collides as a model rather than as a rigid body."
