@@ -35,7 +35,7 @@ const OUT = "resources/public/thumbs";
 const SETTLE = { fire: 12000, dla: 15000, erosion: 12000, flip: 9000,
                  "sphere-fluid": 10000, island: 9000, planet: 12000,
                  "boids-voronoi-3d": 8000, "orbit-determination": 8000,
-                 textures: 15000, volumes: 25000 };
+                 textures: 15000, volumes: 25000, genetic: 15000, antialias: 12000 };
 const DEFAULT_SETTLE = 6000;
 
 // How far to zoom toward the middle, for the demos whose subject is small
@@ -43,7 +43,7 @@ const DEFAULT_SETTLE = 6000;
 // page drew them in. 2 keeps the middle half, and so on.
 const ZOOM = { "soft-body": 2.2, skinning: 2.2, cloth: 1.7, joints: 1.8,
                rigid: 1.6, "human-arm": 1.4, kepler: 1.8, hex: 1.4,
-               bricks: 1.9, "three-body": 1.5 };
+               bricks: 1.9, "three-body": 1.5, geometry: 1.7 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

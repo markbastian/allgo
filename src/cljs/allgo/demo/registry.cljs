@@ -6,7 +6,8 @@
   window on the player page, `play/?demo=<id>`; the gallery that links
   there is `index.html`, and needs none of this -- it is plain HTML that
   loads without the bundle."
-  (:require [allgo.demo.arm :as arm]
+  (:require [allgo.demo.antialias :as antialias]
+            [allgo.demo.arm :as arm]
             [allgo.demo.boids-3d :as boids-3d]
             [allgo.demo.boids-viewer :as boids-2d]
             [allgo.demo.boids-voronoi :as boids-voronoi]
@@ -23,6 +24,8 @@
             [allgo.demo.fire :as fire]
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
+            [allgo.demo.genetic :as genetic]
+            [allgo.demo.geometry :as geometry]
             [allgo.demo.hex :as hex]
             [allgo.demo.human-arm :as human-arm]
             [allgo.demo.island :as island]
@@ -75,6 +78,9 @@
    "planet"   {:start planet/start!   :stop planet/stop!}
    "textures" {:start textures/start! :stop textures/stop!}
    "volumes"  {:start volumes/start!  :stop volumes/stop!}
+   "geometry" {:start geometry/start! :stop geometry/stop!}
+   "genetic"  {:start genetic/start!  :stop genetic/stop!}
+   "antialias" {:start antialias/start! :stop antialias/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}

@@ -108,6 +108,36 @@
    "href": "play/?demo=volumes"
   },
   {
+   "id": "geometry",
+   "group": "Procedural Generation",
+   "label": "Trees, Plants & Fractals",
+   "blurb": "Recursive instancing and L-systems, expanded to what the camera can see",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=geometry"
+  },
+  {
+   "id": "genetic",
+   "group": "Procedural Generation",
+   "label": "Genetic Textures",
+   "blurb": "Breed textures from random expressions by choosing the ones you like",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=genetic"
+  },
+  {
+   "id": "antialias",
+   "group": "Procedural Generation",
+   "label": "Antialiasing Textures",
+   "blurb": "Point sampling against filtering and supersampling, side by side to the horizon",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=antialias"
+  },
+  {
    "id": "hex",
    "group": "Geometry",
    "label": "Hex Grids",

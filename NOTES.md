@@ -12,10 +12,11 @@ namespaces, and the numbers behind them.
 
 ## Texturing & Modeling
 
-Nine namespaces under `allgo.procedural` follow Ebert, Musgrave, Peachey,
-Perlin and Worley, *Texturing & Modeling: A Procedural Approach*, and are
-arranged the way chapter 20 argues they should be -- a small set of parts
-that compose freely, rather than a set of finished effects:
+Thirteen namespaces under `allgo.procedural` follow Ebert, Hart,
+Musgrave, Peachey, Perlin and Worley, *Texturing & Modeling: A
+Procedural Approach*, and are arranged the way chapter 20 argues they
+should be -- a small set of parts that compose freely, rather than a
+set of finished effects:
 
 | Namespace                     | Chapter | What it is                                                       |
 |-------------------------------|---------|------------------------------------------------------------------|
@@ -23,10 +24,14 @@ that compose freely, rather than a set of finished effects:
 | `allgo.procedural.noise`      | 2, 12   | Value, gradient and 4D gradient noise, sparse convolution, warps |
 | `allgo.procedural.cellular`   | 4       | Worley's F1, F2, F2-F1 and the metrics that reshape the cells    |
 | `allgo.procedural.texture`    | 2-4, 15 | Brick, stone, metal; clouds, water, earth, gas giants; bump maps |
+| `allgo.procedural.antialias`  | Worley  | Box-filtered patterns, octave clamping, and three supersamplers  |
 | `allgo.procedural.volume`     | 6-8, 12 | Hypertexture, fire, steam, cumulus, and a ray marcher with shadow |
+| `allgo.procedural.instancing` | Hart    | Recursive, parameterized instancing: trees, forests, fractals    |
+| `allgo.procedural.lsystem`    | Hart    | L-systems: rewriting, and a turtle with tropism                  |
 | `allgo.procedural.fractal`    | 14, 16  | fBm, turbulence, and the three multifractals                     |
 | `allgo.procedural.qaeb`       | 17      | Error-bounded ray marching of a surface that is only a function  |
 | `allgo.procedural.atmosphere` | 18      | Exponential density, Rayleigh and Mie scattering, aerial haze    |
+| `allgo.procedural.genetic`    | 19      | Textures as expression trees, bred by mutation and crossover     |
 | `allgo.procedural.planet`     | 20      | The lot, assembled into a world                                  |
 
 The contract between them is one line: a *basis* is a function of `[x y z]`
@@ -54,6 +59,28 @@ can hold -- which is both cleaner and, at a typical resolution, about
 three times faster. The detail that no longer fits in the geometry goes
 where it can be seen instead: `noise/gradient-basis` takes a `:period`,
 so a tile of fine relief can be baked and read per pixel without a seam.
+
+Geometry is decided the same way. Hart's "Procedural Synthesis of
+Geometry" (its number in the third edition is not checked here, hence
+the author in the table, as for Worley's "Advanced Antialiasing") describes a model as rules that place copies of
+each other, and `instancing/expand` measures each copy before expanding
+it, keeping a proxy -- a crown for a bough, a cube for a sponge -- for
+anything smaller than the cutoff. It expands the largest copies first,
+so when its budget of primitives runs out what is left undone is the
+finest level, everywhere; depth first spent the whole budget of a
+Menger sponge on one corner and drew the rest as eight big cubes. And
+because every random choice is drawn from the instance's own seed, a
+branch is the same branch at any detail, which the tests check.
+
+The antialiasing demo is the argument for integrating where possible.
+On the checkerboard at its defaults, the analytic filter costs one
+sample a pixel and leaves the horizon a smooth gray; jittered 4x4
+supersampling costs sixteen and leaves it noisy; adaptive sampling cost
+28 a pixel there and still drew moiré at the horizon, because when all
+five of its first samples land on squares of one color it believes the
+pixel is flat. Its corners are not shared between pixels, which a real
+renderer would do, and which would bring that count down -- but not fix
+the moiré.
 
 ## Perlin noise and fBm
 
