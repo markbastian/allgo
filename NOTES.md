@@ -749,6 +749,17 @@ two-sided ones. What came of it:
 
 ## Tried and not kept
 
+- **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's
+  hardest solve, traced, is still falling at its thirty-step cap, and
+  nearly every step exactly one constraint changes state -- a limit on
+  or off, a contact sliding or separating: the exact line search lands
+  on a kink and the next direction is computed as if the row there were
+  off. Two remedies, neither kept. Smoothing a unilateral row's push
+  over `rn y` = 1e-6 to 1e-2 either side of zero: 7.2 mean steps became
+  6.0 at best with the same tail to thirty, and at 1e-3 the scene went
+  to NaN. Counting a row within that band as on in the Newton matrix
+  only, the gradient exact: worse at every width, 7.3 to 14.2.
+
 - **Three items measured and not built** (2026-10-23).
   - *XPBD in `allgo.physics.world`.* It was wanted for stacking, and
     the convex solve, now the default, stands thirty cubes where the

@@ -19,7 +19,7 @@
 
   Here there is no such number to report. A joint angle cannot be
   violated because there is nowhere for the violation to live. Watch the
-  shoulders under `drop` from a height: the arms swing, and the point
+  shoulders as it falls from a height: the arms swing, and the point
   where the arm meets the body does not move at all.
 
   ## What to look at
@@ -184,13 +184,18 @@
 (defn- wall
   "A running-bond wall of loose bricks, `rows` high, for the figure to
   land in. Small and light: the point is that they move when a ragdoll
-  hits them, not that they stand up to one."
+  hits them, not that they stand up to one.
+
+  Beside the slab's low edge, clear of it: it used to stand where the
+  slab is, its bricks started up to 31 cm inside it, and the convex
+  solve threw them out at 16 m/s -- a brick wedged between the slab and
+  the floor is pushed from both sides at once."
   [rows]
   (let [[bw bh _] brick-size]
     (vec (for [r (range (long rows))
                c (range 4)
                :let [offset (if (odd? r) (* 0.5 (double bw)) 0.0)]]
-           (rigid/box {:pos [(+ (* (- c 1.5) (double bw)) offset 0.55)
+           (rigid/box {:pos [(+ (* (- c 1.5) (double bw)) offset -1.45)
                              (+ (* 0.5 (double bh)) (* r (double bh)))
                              0.0]
                        :size brick-size
@@ -204,13 +209,16 @@
        :selfCollide true
        :friction 0.7
        :restitution 0.0
-       :solver "convex"
+       ;; Convex is a choice, not the default, until it is fast in a
+       ;; browser: 35-45 ms a frame here against 2.5 on the JVM.
+       :solver "sequential-impulse"
        :iterations 8
        :substeps 1
        :spin 2.0
        :shoveForce 120
        :brickRows 4
-       :drop (fn [])
+       :start (fn [])
+       :reset (fn [])
        :shove (fn [])})
 
 (defn- start-state
@@ -242,6 +250,9 @@
         camera (THREE/PerspectiveCamera. 50 1 0.1 200)
         renderer (THREE/WebGLRenderer. #js {:antialias true})
         running? (atom false)
+        ;; Held where it starts, in the air, until `start`; `reset` puts
+        ;; it back there.
+        paused? (atom true)
         tick-fps! (fps/meter! container)
         ;; `:pose` rather than `:state`, so that destructuring it cannot
         ;; shadow the atom holding it. It did, and `swap!` was called on
@@ -312,6 +323,7 @@
                                      [[:rigid i] (mesh-for body :brick)]))]
                   (doseq [[_ ^js m] meshes] (.add scene m))
                   (reset! world {:scene sc :meshes meshes})
+                  (reset! paused? true)
                   (sync-prop!)
                   (sync-meshes!)))
               (shove! []
@@ -329,6 +341,7 @@
                       where (v/add (:pos chest) (q/rotate (:rot chest) [0.0 0.25 0.0]))]
                   ;; Woken first: a figure that has come to rest is
                   ;; asleep, and would ignore the push.
+                  (reset! paused? false)
                   (swap! world update :scene
                          (fn [sc]
                            (update-in (pw/wake sc [:link 0 -1]) [:models 0 :pose]
@@ -354,13 +367,15 @@
                         n (max 1 (long (.-substeps controls)))
                         h (/ 1.0 (* 60.0 n))
                         o (opts)]
-                    (dotimes [_ n]
-                      (swap! world update :scene #(pw/step (merge % o) h)))
+                    (when-not @paused?
+                      (dotimes [_ n]
+                        (swap! world update :scene #(pw/step (merge % o) h))))
                     (sync-meshes!)
                     (.update orbit)
                     (.render renderer scene camera)
                     (tick-fps! (- (js/performance.now) t0)))))]
-        (set! (.-drop controls) rebuild!)
+        (set! (.-start controls) #(reset! paused? false))
+        (set! (.-reset controls) rebuild!)
         (set! (.-shove controls) shove!)
         (.observe (js/ResizeObserver. (fn [& _] (on-resize))) container)
         (rebuild!)
@@ -368,7 +383,8 @@
           (doto gui
             (-> (.add controls "height" 0.4 4.0 0.1) (.onFinishChange rebuild!))
             (-> (.add controls "spin" -6.0 6.0 0.5) (.onFinishChange rebuild!))
-            (.add controls "drop")
+            (.add controls "start")
+            (.add controls "reset")
             (.add controls "shove")
             (-> (.add controls "shoveForce" 20 400 10) (.name "shove force"))
             (-> (.add controls "limits") (.name "joint limits") (.onChange rebuild!))
@@ -381,7 +397,7 @@
                 (.onFinishChange rebuild!))
             (-> (.add controls "friction" 0.0 1.5 0.05))
             (-> (.add controls "restitution" 0.0 0.6 0.05))
-            (-> (.add controls "solver" #js ["convex" "sequential-impulse"]))
+            (-> (.add controls "solver" #js ["sequential-impulse" "convex"]))
             ;; Sweeps of the sequential impulse; the convex solve runs
             ;; Newton to convergence and ignores it.
             (-> (.add controls "iterations" 2 20 1))

@@ -694,13 +694,13 @@
                       (aset kb' i (int (if (neg? b) -1 (aget at b))))
                       (aset rn' i (aget rn k)) (aset rt' i (aget rt k))
                       (aset vhat' i (aget vhat k)) (aset mu' i (aget mu k))
-                      (recur (inc i) (+ r n) (+ v (* n (+ (size a) (size b))))))))
+                      (recur (inc i) (+ r n) (+ v (* n (+ (long (size a)) (long (size b)))))))))
         nr (long nr)
         ^ints va' (a/i32 nr) ^ints vb' (a/i32 nr)
         vals' (a/f64 (long nv))]
     (loop [i 0 s 0]
       (when (< i nk)
-        (let [k (aget kl i) r0 (aget krow k) na (size (aget ka k)) nb (size (aget kb k))
+        (let [k (aget kl i) r0 (aget krow k) na (long (size (aget ka k))) nb (long (size (aget kb k)))
               s (long (loop [j 0 s s]
                         (if (= j (rows-of kind k))
                           s
