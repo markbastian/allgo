@@ -215,10 +215,11 @@
        :selfCollide true
        :friction 0.7
        :restitution 0.0
-       ;; In Chrome, a release build: at most 13 ms a frame as the
-       ;; figure lands, against the sequential impulse's 8, and both 2
-       ;; once it sleeps.
-       :solver "convex"
+       ;; The sequential impulse: a heap of twenty dummies is 15 ms a
+       ;; step on the JVM under it and 109 under the convex solve, which
+       ;; earns that on tall stacks and buys nothing visible in a pile of
+       ;; ragdolls. One dummy is quick under either.
+       :solver "sequential-impulse"
        :iterations 8
        :substeps 1
        :spin 2.0
@@ -241,14 +242,16 @@
            :vel [0.0 spin 0.0 0.0 0.0 0.0]}}))
 
 (defn- drop-points
-  "Where `n` dummies start: the first where one always has, the rest in
-  rows of five, three quarters of a meter apart -- clear of each other
-  at the start -- each row a little higher than the last and each dummy
-  turned a little from its neighbor."
+  "Where `n` dummies start: one where one always has, or more in rows of
+  five, three quarters of a meter apart -- clear of each other at the
+  start -- each row a little higher than the last and each dummy turned
+  a little from its neighbor. All of them in the rows: the first kept
+  in the middle once stood inside the eighth, which started a third of
+  a meter higher in the same place."
   [n height]
   (for [i (range n)
         :let [col (mod i 5) row (quot i 5)]]
-    (if (zero? i)
+    (if (== 1 (long n))
       [0.0 height 0.0 0.0]
       [(* 0.75 (- col 2)) (+ height (* 0.35 row)) (* 0.75 (- row 1)) (* 0.7 i)])))
 
@@ -498,7 +501,7 @@
             (-> (.add controls "tilt" 0 40 1) (.onFinishChange rebuild!))
             (-> (.add controls "brickRows" 0 8 1) (.name "brick rows")
                 (.onFinishChange rebuild!))
-            (-> (.add controls "dummies" 1 20 1)
+            (-> (.add controls "dummies" 1 40 1)
                 (.onFinishChange (fn [_]
                                    ;; framed for the crowd, or for one as it was,
                                    ;; only when the count changes: a reset keeps
@@ -509,7 +512,7 @@
                                    (rebuild!))))
             (-> (.add controls "friction" 0.0 1.5 0.05))
             (-> (.add controls "restitution" 0.0 0.6 0.05))
-            (-> (.add controls "solver" #js ["convex" "sequential-impulse"]))
+            (-> (.add controls "solver" #js ["sequential-impulse" "convex"]))
             ;; Sweeps of the sequential impulse; the convex solve runs
             ;; Newton to convergence and ignores it.
             (-> (.add controls "iterations" 2 20 1))

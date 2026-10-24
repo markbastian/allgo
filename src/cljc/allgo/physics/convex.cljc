@@ -584,10 +584,16 @@
   replaced at the next direction: past about a dozen iterations a
   factor is the cheaper of the two. An island smaller than `cg-from`
   rows is factored afresh every direction, which there costs less than
-  the iterations would."
+  the iterations would.
+
+  At most `max-iterations`, a hundred as MuJoCo has it. Thirty was the
+  limit once, and twenty ragdolls landing in a pile take up to sixty:
+  stopped short, a step's answer is lower in cost than where it began
+  and nothing like the minimum -- joints turning at hundreds of radians
+  a second -- and the pile flew apart in a second and a half."
   [{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^doubles mass ^doubles vstar] :as problem}
    v0 {:keys [max-iterations tolerance factor max-cg refactor-after cg-tolerance cg-from]
-       :or {max-iterations 30 tolerance 1e-10 max-cg 15 refactor-after 8 cg-tolerance 1e-8 cg-from 100}}]
+       :or {max-iterations 100 tolerance 1e-10 max-cg 15 refactor-after 8 cg-tolerance 1e-8 cg-from 100}}]
   (let [v (a/f64 nd)
         ^doubles v-init (or v0 vstar)
         _ (dotimes [i nd] (aset v i (aget v-init i)))
