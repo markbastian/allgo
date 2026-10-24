@@ -1815,8 +1815,13 @@
                (convex/pushed problem g))
         v0 (when (and (:warm-start? w) (< (convex/cost problem warm) (convex/cost problem (:vstar problem))))
              warm)
-        {:keys [^doubles v ^doubles impulses]} (convex/solve problem v0 (select-keys w [:max-iterations]))
         ^ints offset (:offset problem)
+        ;; last step's factors, while every body has the block it had
+        blocks (vec offset)
+        kept (:convex-factors w)
+        {:keys [^doubles v ^doubles impulses factors]}
+        (convex/solve problem v0 (cond-> (select-keys w [:max-iterations])
+                                   (= blocks (:blocks kept)) (assoc :factors (:factors kept))))
         ^doubles vel (:vel arrays) ^doubles omega (:omega arrays)]
     (dotimes [i (alength offset)]
       (let [o (aget offset i)]
@@ -1830,7 +1835,8 @@
       (aset p2 c (aget impulses (+ (* 3 c) 2))))
     (assoc w
            :bodies (-> bodies (write-back arrays) (advance dt) (settle contacts dt w))
-           :contacts (contact-state cs))))
+           :contacts (contact-state cs)
+           :convex-factors {:blocks blocks :factors factors})))
 
 (defn step
   "One step of the world, by whichever `:solver` it carries."

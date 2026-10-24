@@ -701,7 +701,9 @@
   convex solver asks; a joint limit is a one-sided row asking for its
   bias, a pin three two-sided ones. Writes the velocities back into
   `vel`, `omega` and `us`, and returns what each contact and pin carried,
-  as `solve!` does."
+  as `solve!` does, and the Newton factors as `:convex-factors`: given
+  back next step while the blocks are the same bodies, they precondition
+  its Newton steps."
   [w configs cs prepared limits pins ^doubles vel ^doubles omega us dt warm pin-warm]
   (let [dt (double dt)
         {:keys [bodies models friction restitution max-push-speed]} w
@@ -793,10 +795,13 @@
         v0 (when (and (:warm-start? w) (< (double (convex/cost problem warm-v))
                                           (double (convex/cost problem (:vstar problem)))))
              warm-v)
-        {:keys [^doubles v ^doubles impulses]} (convex/solve problem v0)
+        placed @blocks
+        kept (:convex-factors w)
+        {:keys [^doubles v ^doubles impulses factors]}
+        (convex/solve problem v0 (if (= placed (:blocks kept)) {:factors (:factors kept)} {}))
         ^ints boff (:boff problem)]
     ;; the velocities back where the rest of the step reads them
-    (doseq [[[kind i] b] @blocks :when (>= (long b) 0)]
+    (doseq [[[kind i] b] placed :when (>= (long b) 0)]
       (let [o (aget boff b)]
         (case kind
           :rigid (let [i3 (* 3 (long i))]
@@ -810,7 +815,8 @@
                                  [(aget impulses k3) (aget impulses (+ k3 1)) (aget impulses (+ k3 2))])
                                [0.0 0.0 0.0]))
                      contact-at)
-     :pins (mapv (fn [ks] (mapv (fn [k] (if k (aget impulses (* 3 (long k))) 0.0)) ks)) pin-at)}))
+     :pins (mapv (fn [ks] (mapv (fn [k] (if k (aget impulses (* 3 (long k))) 0.0)) ks)) pin-at)
+     :convex-factors {:blocks placed :factors factors}}))
 
 ;; ---------------------------------------------------------------------------
 ;; A step
@@ -1127,6 +1133,7 @@
     (cond->
      (assoc w
             :pin-impulses carried
+            :convex-factors (:convex-factors solved)
             :contact-impulses (into (sleepers w remembered) (zipmap ks (:contacts solved)))
             :contact-points (into (sleepers w (:contact-points w)) (zipmap ks (map :point cs)))
             ;; Positions last, from whatever the sweep left behind.

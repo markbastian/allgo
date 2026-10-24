@@ -347,18 +347,21 @@
 (defn- substitute!
   "Solves `L L' x = b` with `factor!`'s `L`, overwriting `b`."
   [^doubles h {:keys [^ints first ^ints start]} nd ^doubles b]
+  ;; as in `factor!`, row `i` + k is its column k
   (let [nd (long nd)]
     (dotimes [i nd]
-      (let [s (loop [k (aget first i) s (aget b i)]
-                (if (= k i) s (recur (inc k) (- s (* (aget h (at first start i k)) (aget b k))))))]
-        (aset b i (/ s (aget h (at first start i i))))))
+      (let [ri (- (aget start i) (aget first i))
+            s (loop [k (aget first i) s (aget b i)]
+                (if (= k i) s (recur (inc k) (- s (* (aget h (+ ri k)) (aget b k))))))]
+        (aset b i (/ s (aget h (+ ri i))))))
     (loop [i (dec nd)]
       (when (>= i 0)
-        (let [x (/ (aget b i) (aget h (at first start i i)))]
+        (let [ri (- (aget start i) (aget first i))
+              x (/ (aget b i) (aget h (+ ri i)))]
           (aset b i x)
           (loop [k (aget first i)]
             (when (< k i)
-              (aset b k (- (aget b k) (* (aget h (at first start i k)) x)))
+              (aset b k (- (aget b k) (* (aget h (+ ri k)) x)))
               (recur (inc k))))
           (recur (dec i)))))
     b))
@@ -414,6 +417,84 @@
                                                                        (aget w (+ (* i stride) s)))))))]
                                   (add-at! h first start (+ pn r) (+ qn s) x)))))))))))))))))
   h)
+
+;; Last step's factor, kept
+;;
+;; Factoring is most of a step on a big island: on a 16x16 wall, 4 ms a
+;; factor of 1,536 rows, averaging 75 stored a row, and about two a step.
+;; But the matrix is indexed by blocks, not constraints, and from one
+;; step to the next it hardly changes: a sticking contact's G is the
+;; constant R^-1 inside the cone, and the bodies move by microns. So the
+;; last factor taken, kept across steps, is a preconditioner for the
+;; next matrix, and conjugate gradients with it reaches 1e-8 in three to
+;; eight iterations -- each a product with M + J' G J, never formed, and
+;; a substitution -- on a factor eleven steps old. Any positive definite
+;; factor gives the right direction; a stale one only takes more
+;; iterations, and past `max-cg` of them the matrix is factored afresh.
+
+(defn- hessian-mul!
+  "`out` = (M + J' G J) `x`, without forming it: `jx` (a row each) and
+  `t` (three a constraint) are scratch."
+  [{:keys [^long nk ^ints kind ^ints krow ^doubles mass] :as problem}
+   ^doubles gms ^doubles x ^doubles jx ^doubles t ^doubles out]
+  (row-velocities! problem x jx)
+  (dotimes [k nk]
+    (let [nr (rows-of kind k) r0 (aget krow k) k3 (* 3 k) k9 (* 9 k)]
+      (dotimes [i nr]
+        (aset t (+ k3 i)
+              (double (loop [j 0 s 0.0]
+                        (if (= j nr)
+                          s
+                          (recur (inc j) (+ s (* (aget gms (+ k9 (* 3 i) j)) (aget jx (+ r0 j))))))))))))
+  (block-mul! problem mass x out)
+  (add-jt-gamma! problem t out)
+  out)
+
+(defn- precondition!
+  "`out` = (L L')^-1 `x` with `factor`'s L, renumbered into its envelope's
+  order and back through `y`."
+  [{:keys [^long nb ^ints boff ^ints bsize]} {:keys [env ^doubles h]} ^doubles x ^doubles y ^doubles out]
+  (let [^ints noff (:noff env) nd (alength x)]
+    (dotimes [b nb]
+      (let [o (aget boff b) p (aget noff b)]
+        (dotimes [j (aget bsize b)] (aset y (+ p j) (aget x (+ o j))))))
+    (substitute! h env nd y)
+    (dotimes [b nb]
+      (let [o (aget boff b) p (aget noff b)]
+        (dotimes [j (aget bsize b)] (aset out (+ o j) (aget y (+ p j))))))
+    out))
+
+(defn- dot ^double [^doubles a ^doubles b]
+  (loop [i 0 s 0.0] (if (= i (alength a)) s (recur (inc i) (+ s (* (aget a i) (aget b i)))))))
+
+(defn- conjugate-gradients!
+  "Solves (M + J' G J) `x` = `b` into `x`, preconditioned by `factor`, to
+  a residual `tolerance` of `b`'s: the iterations it took, or nil if
+  `max-cg` were not enough. `ws` is scratch, from `cg-scratch`."
+  [problem gms factor ^doubles b ^doubles x tolerance max-cg
+   {:keys [^doubles r ^doubles z ^doubles d ^doubles hd ^doubles y ^doubles jx ^doubles t]}]
+  (let [nd (alength b)
+        goal (* (double tolerance) (math/sqrt (dot b b)))]
+    (dotimes [i nd] (aset x i 0.0) (aset r i (aget b i)))
+    (precondition! problem factor r y z)
+    (dotimes [i nd] (aset d i (aget z i)))
+    (loop [it 0 rz (dot r z)]
+      (cond
+        (<= (math/sqrt (dot r r)) goal) it
+        (>= it (long max-cg)) nil
+        :else (let [_ (hessian-mul! problem gms d jx t hd)
+                    a (/ rz (dot d hd))]
+                (dotimes [i nd]
+                  (aset x i (+ (aget x i) (* a (aget d i))))
+                  (aset r i (- (aget r i) (* a (aget hd i)))))
+                (precondition! problem factor r y z)
+                (let [rz' (dot r z) beta (/ rz' rz)]
+                  (dotimes [i nd] (aset d i (+ (aget z i) (* beta (aget d i)))))
+                  (recur (inc it) rz')))))))
+
+(defn- cg-scratch [{:keys [^long nd ^long nr ^long nk]}]
+  {:r (a/f64 nd) :z (a/f64 nd) :d (a/f64 nd) :hd (a/f64 nd) :y (a/f64 nd)
+   :jx (a/f64 nr) :t (a/f64 (* 3 nk))})
 
 ;; ---------------------------------------------------------------------------
 ;; Solving
@@ -498,55 +579,61 @@
 
 (defn- newton
   "`solve` on one island: Newton steps from `v0` (or `vstar`) until the
-  gradient vanishes."
-  [{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^doubles mass ^doubles vstar ^ints bsize] :as problem}
-   v0 {:keys [max-iterations tolerance] :or {max-iterations 30 tolerance 1e-10}}]
+  gradient vanishes. Each direction is by conjugate gradients on
+  `factor` (last step's, kept) while that converges in `max-cg`, else
+  by a factor taken afresh, which is kept in its place and returned as
+  `:factor`. One that took more than `refactor-after` is worn, and is
+  replaced at the next direction: past about a dozen iterations a
+  factor is the cheaper of the two."
+  [{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^doubles mass ^doubles vstar] :as problem}
+   v0 {:keys [max-iterations tolerance factor max-cg refactor-after cg-tolerance]
+       :or {max-iterations 30 tolerance 1e-10 max-cg 15 refactor-after 8 cg-tolerance 1e-8}}]
   (let [v (a/f64 nd)
         ^doubles v-init (or v0 vstar)
         _ (dotimes [i nd] (aset v i (aget v-init i)))
         gam (a/f64 (* 3 nk))
         gms (a/f64 (* 9 nk))
-        {:keys [^ints perm adj]} (ordering nb nk ka kb)
-        env (envelope problem perm adj)
-        ^ints noff (:noff env)
-        ^ints boff (:boff problem)
-        h (a/f64 (long (:size env)))
+        ;; the ordering only when a factor is taken here
+        env (delay (let [{:keys [perm adj]} (ordering nb nk ka kb)] (envelope problem perm adj)))
+        fresh! (fn []
+                 (let [env @env h (a/f64 (long (:size env)))]
+                   (hessian! problem gms env h)
+                   (when (factor! h env nd) {:env env :h h :nd nd})))
         grad (a/f64 nd)
         scratch (a/f64 nd)
         trial (a/f64 nd)
         trial-gam (a/f64 (* 3 nk))
-        pdir (a/f64 nd)
-        dir (a/f64 nd)]
-    (loop [it 0 cost (evaluate! problem v gam gms scratch)]
+        dir (a/f64 nd)
+        ws (cg-scratch problem)]
+    (loop [it 0 cost (evaluate! problem v gam gms scratch)
+           fac (when (= nd (:nd factor)) factor)]
        ;; the gradient, M (v - v*) - J' g
       (dotimes [i nd] (aset trial i (- (aget v i) (aget vstar i))))
       (block-mul! problem mass trial grad)
       (dotimes [i nd] (aset grad i (- (aget grad i))))
       (add-jt-gamma! problem gam grad)
-      (dotimes [i nd] (aset grad i (- (aget grad i))))
       (let [gnorm (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (aget grad i))))))]
+        ;; `grad` holds minus the gradient from here
         (if (or (>= it (long max-iterations)) (<= gnorm (double tolerance)) (zero? nd))
-          {:v v :impulses gam :iterations it :cost cost}
-          (do
-            (hessian! problem gms env h)
-            (if-not (factor! h env nd)
+          {:v v :impulses gam :iterations it :cost cost :factor fac}
+          (let [cg (when (and fac (not (:worn? fac)))
+                     (conjugate-gradients! problem gms fac grad dir cg-tolerance max-cg ws))
+                fac (cond
+                      (nil? cg) (when-let [f (fresh!)]
+                                  (precondition! problem f grad (:y ws) dir)
+                                  f)
+                      (> (long cg) (long refactor-after)) (assoc fac :worn? true)
+                      :else fac)]
+            (if-not fac
               {:v v :impulses gam :iterations it :cost cost :failed :not-positive-definite}
-              (let [;; renumbered into the envelope's order and back
-                    _ (dotimes [b nb]
-                        (let [o (aget boff b) p (aget noff b)]
-                          (dotimes [j (aget bsize b)] (aset pdir (+ p j) (- (aget grad (+ o j)))))))
-                    _ (substitute! h env nd pdir)
-                    _ (dotimes [b nb]
-                        (let [o (aget boff b) p (aget noff b)]
-                          (dotimes [j (aget bsize b)] (aset dir (+ o j) (aget pdir (+ p j))))))
-                    slope (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget grad i) (aget dir i))))))
+              (let [slope (- (dot grad dir))
                     alpha (line-search problem v dir slope trial trial-gam scratch)
                     step (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (* (double alpha) (aget dir i)))))))]
                 (dotimes [i nd] (aset v i (aget trial i)))
                 (let [cost' (evaluate! problem v gam gms scratch)]
                   (if (< step 1e-12)
-                    {:v v :impulses gam :iterations (inc it) :cost cost'}
-                    (recur (inc it) cost')))))))))))
+                    {:v v :impulses gam :iterations (inc it) :cost cost' :factor fac}
+                    (recur (inc it) cost' fac)))))))))))
 
 (defn- islands
   "The blocks constraints join, directly or through others: each
@@ -638,8 +725,14 @@
     :mu                each contact's friction coefficient
 
   and `v0` a first guess, or nil to start from `vstar`. Returns `{:v
-  :impulses :iterations :cost}`, the impulses three a constraint and the
-  iterations those of the island that took most.
+  :impulses :iterations :cost :factors}`, the impulses three a constraint
+  and the iterations those of the island that took most.
+
+  `:factors` is each island's Newton factor, by its blocks. Given back
+  as `opts`' `:factors` next step it preconditions the Newton steps
+  there (see the comment above `hessian-mul!`), so a caller keeps it only
+  while its blocks still mean the same bodies; a stale one costs time,
+  never the answer.
 
   Each island -- blocks joined, however indirectly, by constraints -- is
   solved by itself. The cost is a sum over islands, so this is the same
@@ -653,7 +746,9 @@
   ([{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^ints boff ^ints bsize ^doubles vstar] :as problem} v0 opts]
    (let [parts (islands nb nk ka kb)]
      (if (and (= 1 (count parts)) (= nb (count (first (first parts)))))
-       (newton problem v0 opts)
+       (let [blocks (first (first parts))
+             r (newton problem v0 (assoc opts :factor (get (:factors opts) blocks)))]
+         (-> r (dissoc :factor) (assoc :factors (if-let [f (:factor r)] {blocks f} {}))))
        (let [v (a/f64 nd) gam (a/f64 (* 3 nk))
              ^doubles v-init (or v0 vstar)]
          ;; anything nothing touches goes where it was going
@@ -666,7 +761,8 @@
                                    (dotimes [j (aget bsize q)]
                                      (aset g (+ (aget poff i) j) (aget v-init (+ (aget boff q) j)))))
                                  g)
-                         {:keys [^doubles impulses iterations cost failed] ^doubles pv :v} (newton p guess opts)]
+                         {:keys [^doubles impulses iterations cost failed factor] ^doubles pv :v}
+                         (newton p guess (assoc opts :factor (get (:factors opts) blocks)))]
                      (doseq [[i q] (map-indexed vector blocks)]
                        (dotimes [j (aget bsize q)]
                          (aset v (+ (aget boff q) j) (aget pv (+ (aget poff i) j)))))
@@ -676,8 +772,9 @@
                      (cond-> (-> acc
                                  (update :iterations max iterations)
                                  (update :cost + cost))
+                       factor (assoc-in [:factors blocks] factor)
                        failed (assoc :failed failed))))
-                 {:v v :impulses gam :iterations 0 :cost 0.0}
+                 {:v v :impulses gam :iterations 0 :cost 0.0 :factors {}}
                  parts))))))
 
 (defn spd-inverse

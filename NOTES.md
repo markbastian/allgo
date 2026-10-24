@@ -627,6 +627,24 @@ On the 16x16 wall it steps in about 16 ms, against 6.4 / 13.8 / 12.8
 for sequential impulse / TGS / XPBD, and it passes every test in
 `solver-test` the other three do.
 
+- **Last step's factor, kept** (2026-10-23). The factor was then most
+  of a step: 4 ms each (1,536 rows averaging 75 stored), assembled in
+  another 2, and two a step settled, three settling. The matrix is
+  indexed by bodies, not contacts, and a sticking contact's G is the
+  constant R^-1 inside the cone, so from one step to the next it barely
+  changes: kept, last step's factor preconditions conjugate gradients
+  on the next matrix, which reaches 1e-8 in three to eight iterations
+  of 0.5 ms (a product with M + J'GJ unformed, and a substitution) on a
+  factor eleven steps old. Left alone the count creeps to sixteen, past
+  the dozen where a factor is cheaper, so one that took more than eight
+  is replaced at the next direction, and one that fails fifteen at
+  once. The wall, freshly settled: 17.1 ms a step settled becomes 11.7
+  to 12.4, and 30.4 settling becomes 25.9; the ragdoll scene, whose
+  islands are small, is unchanged at 2.5. Looser inner tolerances,
+  1e-6 to 1e-3, only bought more Newton steps and were slower.
+  `solve` returns the factors by island and takes them back; the
+  callers keep them while every body has the block it had.
+
 Its two numbers were chosen on columns, so they were then tried on
 everything else the bricks demo asks (JVM, settled first, friction
 0.55):

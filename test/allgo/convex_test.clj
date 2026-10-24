@@ -89,4 +89,27 @@
           b (cvx/solve (cvx/build (pinned (cvx/builder))))]
       (is (close? (vec (:v whole)) (concat (:v a) [0.0 -1.0 0.0 0.0 0.0 0.0] (:v b)) 1e-12))
       (is (close? (vec (:impulses whole)) (concat (:impulses a) (:impulses b)) 1e-12))
-      (is (= (:iterations whole) (max (:iterations a) (:iterations b)))))))
+      (is (= (:iterations whole) (max (:iterations a) (:iterations b))))))
+  (testing "a factor kept from another step preconditions the Newton steps, and the answer is the same"
+    ;; the same blocks and constraints each time, going different
+    ;; speeds, and once weighing ten times as much
+    (let [eye (vec (for [r (range 6) c (range 6)] (if (= r c) 1.0 0.0)))
+          x [1.0 0.0 0.0 0.0 0.0 0.0] -x (mapv - x)
+          row (fn [d] [nil (into d [0.0 0.0 0.0])])
+          problem (fn [m speed]
+                    (let [mass (mapv #(* m %) eye) minv (mapv #(/ % m) eye)
+                          [b i] (cvx/add-block (cvx/builder) 6 mass minv [0.3 (- speed) 0.0 0.0 0.0 0.0])
+                          b (cvx/add-constraint b cvx/contact -1 i
+                                                [(row [0.0 1.0 0.0]) (row [1.0 0.0 0.0]) (row [0.0 0.0 1.0])]
+                                                1e-6 1e-6 0.0 0.5)
+                          [b p] (cvx/add-block b 6 mass minv [speed 0.5 0.0 0.0 0.0 0.0])
+                          [b q] (cvx/add-block b 6 eye eye [-1.0 0.0 0.0 0.0 0.2 0.0])]
+                      (cvx/build (cvx/add-constraint b cvx/bilateral p q [[x -x]] 1e-6 0.0 0.0 0.0))))
+          kept (:factors (cvx/solve (problem 1.0 2.0)))
+          heavy (:factors (cvx/solve (problem 10.0 2.0)))]
+      (is (= 2 (count kept)) "one an island")
+      (doseq [speed [2.0 2.5 4.0]]
+        (let [fresh (cvx/solve (problem 1.0 speed))]
+          (doseq [factors [kept heavy]]
+            (is (close? (vec (:v fresh)) (vec (:v (cvx/solve (problem 1.0 speed) nil {:factors factors})))
+                        1e-9))))))))
