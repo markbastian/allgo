@@ -68,4 +68,25 @@
                                (aget ^doubles (:v (cvx/solve (cvx/build (cvx/add-constraint b cvx/unilateral i -1 [[x nil]]
                                                                                             1e-6 0.0 0.0 0.0)))) 0)))]
         (is (< (abs (limited -1.0)) 1e-4) "pushed back to the limit")
-        (is (= 1.0 (limited 1.0)) "and left alone moving away from it")))))
+        (is (= 1.0 (limited 1.0)) "and left alone moving away from it"))))
+  (testing "islands are solved apart, and the answer is each one's alone"
+    ;; a body falling onto a contact, a pinned pair, and one nothing
+    ;; touches -- together, and each by itself
+    (let [eye (vec (for [r (range 6) c (range 6)] (if (= r c) 1.0 0.0)))
+          heavy (mapv #(* 3.0 %) eye) light (mapv #(/ % 3.0) eye)
+          x [1.0 0.0 0.0 0.0 0.0 0.0] -x (mapv - x)
+          row (fn [d] [nil (into d [0.0 0.0 0.0])])
+          falling (fn [b] (let [[b i] (cvx/add-block b 6 eye eye [0.3 -2.0 0.0 0.0 0.0 0.0])]
+                            (cvx/add-constraint b cvx/contact -1 i
+                                                [(row [0.0 1.0 0.0]) (row [1.0 0.0 0.0]) (row [0.0 0.0 1.0])]
+                                                1e-6 1e-6 0.0 0.5)))
+          pinned (fn [b] (let [[b p] (cvx/add-block b 6 heavy light [1.0 0.5 0.0 0.0 0.0 0.0])
+                               [b q] (cvx/add-block b 6 eye eye [-1.0 0.0 0.0 0.0 0.2 0.0])]
+                           (cvx/add-constraint b cvx/bilateral p q [[x -x]] 1e-6 0.0 0.0 0.0)))
+          alone (fn [b] (first (cvx/add-block b 6 eye eye [0.0 -1.0 0.0 0.0 0.0 0.0])))
+          whole (cvx/solve (cvx/build (-> (cvx/builder) falling alone pinned)))
+          a (cvx/solve (cvx/build (falling (cvx/builder))))
+          b (cvx/solve (cvx/build (pinned (cvx/builder))))]
+      (is (close? (vec (:v whole)) (concat (:v a) [0.0 -1.0 0.0 0.0 0.0 0.0] (:v b)) 1e-12))
+      (is (close? (vec (:impulses whole)) (concat (:impulses a) (:impulses b)) 1e-12))
+      (is (= (:iterations whole) (max (:iterations a) (:iterations b)))))))

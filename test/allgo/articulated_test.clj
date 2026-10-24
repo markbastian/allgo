@@ -621,6 +621,34 @@
       (is (< (v/distance (:linear m0) (:linear m1)) 1e-2))
       (is (< (v/distance (:angular m0) (:angular m1)) 1e-2)))))
 
+(deftest generalized-mass-matrix-test
+  (testing "the composite rigid body algorithm builds what inverse dynamics does"
+    ;; Bolted to the world, with armature, against the matrix built a
+    ;; column at a time out of inverse dynamics.
+    (let [model (mapv #(assoc % :armature (* 0.05 (inc (long %2)))) (chain 4 0.8 1.7) (range))
+          q [0.37 0.74 1.11 1.48]
+          slow (ab/mass-matrix model q)
+          fast (vec (ab/generalized-mass-matrix model q))]
+      (is (every? #(< (abs (double %)) 1e-12) (map - fast (flatten slow))))))
+
+  (testing "and on a free root, it is the inverse of the inverse"
+    ;; There inverse dynamics has no base to give, and the check is the
+    ;; articulated body algorithm's columns instead -- ball joints, a
+    ;; hinge and an offset base included.
+    (let [model {:base {:mass 3.0 :com [0.1 0.0 0.0]
+                        :inertia [[0.4 0.0 0.0] [0.0 0.6 0.0] [0.0 0.0 0.9]]}
+                 :links [(limb -1 :spherical 0.7 1.2)
+                         (assoc (limb 0 :revolute 0.6 0.9) :armature 0.02)
+                         (limb 1 :spherical 0.5 0.6)
+                         (limb -1 :revolute 0.4 0.5)]}
+          qv [(q/from-axis-angle [0.3 0.5 0.8] 0.4) 0.37
+              (q/from-axis-angle [0.9 0.1 0.2] -0.6) -0.8]
+          n (ab/generalized-dof model)
+          h (vec (ab/generalized-mass-matrix model qv))
+          prod (lin/mat-mul (ab/inverse-mass-matrix model qv) (mapv vec (partition n h)))]
+      (is (= 14 n))
+      (is (every? #(< (abs (double %)) 1e-10) (flatten (lin/mat-sub prod (lin/eye n))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Joint limits
 

@@ -693,7 +693,7 @@
 
   The blocks are whatever the rows touch that is awake: a loose body's
   six numbers, or a model's whole generalized velocity with its mass
-  matrix, the inverse of `articulated/inverse-mass-matrix`. Contacts are
+  matrix, `articulated/generalized-mass-matrix`. Contacts are
   regularized and asked to push out an overlap as `allgo.physics.solver`'s
   convex solver asks; a joint limit is a one-sided row asking for its
   bias, a pin three two-sided ones. Writes the velocities back into
@@ -730,10 +730,10 @@
                                                       (mapv #(aget omega (+ i3 %)) (range 3)))])))
                            :model (let [{:keys [model pose sleeping?]} (nth models i)]
                                     (when-not sleeping?
-                                      (let [minv (vec (apply concat (ab/inverse-mass-matrix model (:q pose) (:ls (nth configs i)))))
+                                      (let [mass (ab/generalized-mass-matrix model (:q pose) (:ls (nth configs i)))
                                             ^doubles u (nth us i)
                                             n (alength u)]
-                                        [n (vec (convex/spd-inverse minv n)) minv (vec u)]))))]
+                                        [n (vec mass) (vec (convex/spd-inverse mass n)) (vec u)]))))]
                      (if-not n
                        (do (vswap! blocks assoc key -1) -1)
                        (let [[b' idx] (convex/add-block @builder n mass minv vstar)]

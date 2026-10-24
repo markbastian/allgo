@@ -176,36 +176,44 @@
                         (if (= c n) acc (recur (inc c) (+ acc (* (aget mats (+ m (* r n) c)) (aget x (+ o c))))))))))))
   out)
 
+(defn- impulses!
+  "Every constraint's impulse at row velocities `vc`, into `gam` (three
+  a constraint) and, when `gms` is given, its `G` into `gms` (nine).
+  Returns the constraints' share of the cost."
+  ^double [{:keys [^long nk ^ints kind ^ints krow ^doubles rn ^doubles rt ^doubles vhat ^doubles mu]}
+           ^doubles vc ^doubles gam gms]
+  (let [y (a/f64 3) g (a/f64 3) gm (a/f64 9)]
+    (loop [k 0 total 0.0]
+      (if (= k nk)
+        total
+        (let [kd (aget kind k) r0 (aget krow k)
+              cost (if (zero? kd)
+                     (let [vn (aget vc r0) v1 (aget vc (+ r0 1)) v2 (aget vc (+ r0 2))]
+                       (aset y 0 (/ (- (aget vhat k) vn) (aget rn k)))
+                       (aset y 1 (/ (- v1) (aget rt k)))
+                       (aset y 2 (/ (- v2) (aget rt k)))
+                       (project! (aget mu k) (aget rn k) (aget rt k) y g gm))
+                     (let [vn (aget vc r0)]
+                       (aset y 0 (/ (- (aget vhat k) vn) (aget rn k)))
+                       (one-row! (= kd unilateral) (aget rn k) y g gm)))
+              k3 (* 3 k)]
+          (aset gam k3 (aget g 0)) (aset gam (+ k3 1) (aget g 1)) (aset gam (+ k3 2) (aget g 2))
+          (when gms
+            (let [^doubles gms gms k9 (* 9 k)]
+              (dotimes [i 9] (aset gms (+ k9 i) (aget gm i)))))
+          (recur (inc k) (+ total (double cost))))))))
+
 (defn- evaluate!
   "The cost at `v`, each constraint's impulse into `gam` (three a
   constraint) and, when `gms` is given, its `G` into `gms` (nine)."
-  [{:keys [^long nd ^long nk ^ints kind ^ints krow ^doubles mass ^doubles vstar
-           ^doubles rn ^doubles rt ^doubles vhat ^doubles mu ^long nr] :as problem}
+  [{:keys [^long nd ^doubles mass ^doubles vstar ^long nr] :as problem}
    ^doubles v ^doubles gam gms ^doubles scratch]
-  (let [dv (a/f64 nd) y (a/f64 3) g (a/f64 3) gm (a/f64 9)
+  (let [dv (a/f64 nd)
         ^doubles vc (row-velocities! problem v (a/f64 nr))]
     (dotimes [i nd] (aset dv i (- (aget v i) (aget vstar i))))
     (block-mul! problem mass dv scratch)
     (let [kinetic (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget dv i) (aget scratch i))))))]
-      (loop [k 0 total (* 0.5 kinetic)]
-        (if (= k nk)
-          total
-          (let [kd (aget kind k) r0 (aget krow k)
-                cost (if (zero? kd)
-                       (let [vn (aget vc r0) v1 (aget vc (+ r0 1)) v2 (aget vc (+ r0 2))]
-                         (aset y 0 (/ (- (aget vhat k) vn) (aget rn k)))
-                         (aset y 1 (/ (- v1) (aget rt k)))
-                         (aset y 2 (/ (- v2) (aget rt k)))
-                         (project! (aget mu k) (aget rn k) (aget rt k) y g gm))
-                       (let [vn (aget vc r0)]
-                         (aset y 0 (/ (- (aget vhat k) vn) (aget rn k)))
-                         (one-row! (= kd unilateral) (aget rn k) y g gm)))
-                k3 (* 3 k)]
-            (aset gam k3 (aget g 0)) (aset gam (+ k3 1) (aget g 1)) (aset gam (+ k3 2) (aget g 2))
-            (when gms
-              (let [^doubles gms gms k9 (* 9 k)]
-                (dotimes [i 9] (aset gms (+ k9 i) (aget gm i)))))
-            (recur (inc k) (+ total (double cost)))))))))
+      (+ (* 0.5 kinetic) (impulses! problem vc gam gms)))))
 
 (defn- add-jt-gamma!
   "`out` += J' `gam`."
@@ -437,19 +445,25 @@
   at first, takes short steps whenever contacts change between sticking
   and sliding along the way, and a ragdoll on a pile of bricks needed
   thirty Newton steps a frame for it. Leaves `trial` at the point
-  chosen."
+  chosen.
+
+  Every row's velocity is linear along the line, so each trial is the
+  constraints' projections alone: the rows are multiplied out once, not
+  once a trial."
   [{:keys [^long nd ^long nr ^long nk ^ints kind ^doubles mass ^doubles vstar] :as problem}
    ^doubles v ^doubles dir slope ^doubles trial ^doubles trial-gam ^doubles scratch]
-  (let [^doubles md (block-mul! problem mass dir (a/f64 nd))
+  (let [^doubles md (block-mul! problem mass dir scratch)
         ^doubles jd (row-velocities! problem dir (a/f64 nr))
+        ^doubles vc0 (row-velocities! problem v (a/f64 nr))
+        vc (a/f64 nr)
         ^ints krow (:krow problem)
         ;; the slope at `v + a dir`: dir . M (v + a dir - v*) - (J dir) . g
         dv0 (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (- (aget v i) (aget vstar i)) (aget md i))))))
         dd (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget dir i) (aget md i))))))
         slope-at (fn [alpha]
                    (let [alpha (double alpha)]
-                     (dotimes [i nd] (aset trial i (+ (aget v i) (* alpha (aget dir i)))))
-                     (evaluate! problem trial trial-gam nil scratch)
+                     (dotimes [i nr] (aset vc i (+ (aget vc0 i) (* alpha (aget jd i)))))
+                     (impulses! problem vc trial-gam nil)
                      (- (+ dv0 (* alpha dd))
                         (loop [k 0 s 0.0]
                           (if (= k nk)
@@ -461,18 +475,148 @@
                                               s2
                                               (recur (inc i) (+ s2 (* (aget jd (+ r0 i)) (aget trial-gam (+ k3 i)))))))))))))))
         slope (double slope)
-        s1 (double (slope-at 1.0))]
-    (if (<= s1 0.0)
-      1.0
-      (loop [lo 0.0 slo slope hi 1.0 shi s1 n 0]
-        (let [a (/ (- (* lo shi) (* hi slo)) (- shi slo))
-              a (if (and (> a lo) (< a hi)) a (* 0.5 (+ lo hi)))
-              s (double (slope-at a))]
-          (if (or (<= (abs s) (* 1e-6 (abs slope))) (>= n 40) (< (- hi lo) 1e-12))
-            a
-            (if (neg? s)
-              (recur a s hi (* 0.5 shi) (inc n))
-              (recur lo (* 0.5 slo) a s (inc n)))))))))
+        ;; past the full step while the cost is still falling there
+        [lo slo hi shi] (loop [lo 0.0 slo slope hi 1.0]
+                          (let [s (double (slope-at hi))]
+                            (if (and (neg? s) (< hi 64.0))
+                              (recur hi s (* 2.0 hi))
+                              [lo slo hi s])))
+        alpha (if (<= (double shi) 0.0)
+                hi
+                (loop [lo (double lo) slo (double slo) hi (double hi) shi (double shi) n 0]
+                  (let [a (/ (- (* lo shi) (* hi slo)) (- shi slo))
+                        a (if (and (> a lo) (< a hi)) a (* 0.5 (+ lo hi)))
+                        s (double (slope-at a))]
+                    (if (or (<= (abs s) (* 1e-6 (abs slope))) (>= n 40) (< (- hi lo) 1e-12))
+                      a
+                      (if (neg? s)
+                        (recur a s hi (* 0.5 shi) (inc n))
+                        (recur lo (* 0.5 slo) a s (inc n)))))))
+        alpha (double alpha)]
+    (dotimes [i nd] (aset trial i (+ (aget v i) (* alpha (aget dir i)))))
+    alpha))
+
+(defn- newton
+  "`solve` on one island: Newton steps from `v0` (or `vstar`) until the
+  gradient vanishes."
+  [{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^doubles mass ^doubles vstar ^ints bsize] :as problem}
+   v0 {:keys [max-iterations tolerance] :or {max-iterations 30 tolerance 1e-10}}]
+  (let [v (a/f64 nd)
+        ^doubles v-init (or v0 vstar)
+        _ (dotimes [i nd] (aset v i (aget v-init i)))
+        gam (a/f64 (* 3 nk))
+        gms (a/f64 (* 9 nk))
+        {:keys [^ints perm adj]} (ordering nb nk ka kb)
+        env (envelope problem perm adj)
+        ^ints noff (:noff env)
+        ^ints boff (:boff problem)
+        h (a/f64 (long (:size env)))
+        grad (a/f64 nd)
+        scratch (a/f64 nd)
+        trial (a/f64 nd)
+        trial-gam (a/f64 (* 3 nk))
+        pdir (a/f64 nd)
+        dir (a/f64 nd)]
+    (loop [it 0 cost (evaluate! problem v gam gms scratch)]
+       ;; the gradient, M (v - v*) - J' g
+      (dotimes [i nd] (aset trial i (- (aget v i) (aget vstar i))))
+      (block-mul! problem mass trial grad)
+      (dotimes [i nd] (aset grad i (- (aget grad i))))
+      (add-jt-gamma! problem gam grad)
+      (dotimes [i nd] (aset grad i (- (aget grad i))))
+      (let [gnorm (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (aget grad i))))))]
+        (if (or (>= it (long max-iterations)) (<= gnorm (double tolerance)) (zero? nd))
+          {:v v :impulses gam :iterations it :cost cost}
+          (do
+            (hessian! problem gms env h)
+            (if-not (factor! h env nd)
+              {:v v :impulses gam :iterations it :cost cost :failed :not-positive-definite}
+              (let [;; renumbered into the envelope's order and back
+                    _ (dotimes [b nb]
+                        (let [o (aget boff b) p (aget noff b)]
+                          (dotimes [j (aget bsize b)] (aset pdir (+ p j) (- (aget grad (+ o j)))))))
+                    _ (substitute! h env nd pdir)
+                    _ (dotimes [b nb]
+                        (let [o (aget boff b) p (aget noff b)]
+                          (dotimes [j (aget bsize b)] (aset dir (+ o j) (aget pdir (+ p j))))))
+                    slope (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget grad i) (aget dir i))))))
+                    alpha (line-search problem v dir slope trial trial-gam scratch)
+                    step (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (* (double alpha) (aget dir i)))))))]
+                (dotimes [i nd] (aset v i (aget trial i)))
+                (let [cost' (evaluate! problem v gam gms scratch)]
+                  (if (< step 1e-12)
+                    {:v v :impulses gam :iterations (inc it) :cost cost'}
+                    (recur (inc it) cost')))))))))))
+
+(defn- islands
+  "The blocks constraints join, directly or through others: each
+  island's blocks and constraints, in their own order. A block nothing
+  touches is in none."
+  [nb nk ^ints ka ^ints kb]
+  (let [nb (long nb)
+        ^ints root (a/i32 (range nb))
+        find (fn [b] (loop [b (long b)]
+                       (let [p (aget root b)]
+                         (if (= p b) b (do (aset root b (aget root p)) (recur p))))))]
+    (dotimes [k (long nk)]
+      (let [a (aget ka k) b (aget kb k)]
+        (when (and (>= a 0) (>= b 0))
+          (aset root (long (find a)) (int (find b))))))
+    (let [key (fn [k] (find (if (neg? (aget ka k)) (aget kb k) (aget ka k))))
+          ks (group-by key (range nk))]
+      (vec (for [[r cs] ks]
+             [(vec (filter #(= r (find %)) (range nb))) cs])))))
+
+(defn- part
+  "The island of `blocks` and constraints `ks` as a problem of its own."
+  [{:keys [^ints bsize ^ints boff ^ints moff ^doubles mass ^doubles minv ^doubles vstar
+           ^ints kind ^ints krow ^ints ka ^ints kb ^ints va ^ints vb ^doubles vals
+           ^doubles rn ^doubles rt ^doubles vhat ^doubles mu]} blocks ks]
+  (let [nb (count blocks) nk (count ks)
+        size (fn [q] (if (neg? (long q)) 0 (aget bsize q)))
+        copy! (fn [^doubles from f ^doubles to t n]
+                (dotimes [i (long n)] (aset to (+ (long t) i) (aget from (+ (long f) i)))))
+        ;; old block -> new
+        at (zipmap blocks (range))
+        ^ints bsize' (a/i32 (map #(aget bsize (long %)) blocks))
+        ^ints boff' (a/i32 (butlast (reductions + 0 (seq bsize'))))
+        ^ints moff' (a/i32 (butlast (reductions + 0 (map #(* (long %) (long %)) (seq bsize')))))
+        nd (reduce + (seq bsize'))
+        nm (reduce + (map #(* (long %) (long %)) (seq bsize')))
+        mass' (a/f64 nm) minv' (a/f64 nm) vstar' (a/f64 nd)
+        _ (doseq [[i q] (map-indexed vector blocks)]
+            (let [n (aget bsize (long q))]
+              (copy! mass (aget moff (long q)) mass' (aget moff' i) (* n n))
+              (copy! minv (aget moff (long q)) minv' (aget moff' i) (* n n))
+              (copy! vstar (aget boff (long q)) vstar' (aget boff' i) n)))
+        kind' (a/i32 (map #(aget kind (long %)) ks))
+        nrows (map #(rows-of kind %) ks)
+        ^ints krow' (a/i32 (butlast (reductions + 0 nrows)))
+        nr (reduce + nrows)
+        ka' (a/i32 (map #(get at (aget ka (long %)) -1) ks))
+        kb' (a/i32 (map #(get at (aget kb (long %)) -1) ks))
+        ^ints va' (a/i32 nr) ^ints vb' (a/i32 nr)
+        nv (reduce + (map (fn [k n] (* (long n) (+ (long (size (aget ka (long k)))) (long (size (aget kb (long k)))))))
+                          ks nrows))
+        vals' (a/f64 nv)
+        pick (fn [^doubles x] (a/f64 (map #(aget x (long %)) ks)))]
+    (loop [ks (seq ks) i 0 s 0]
+      (when ks
+        (let [k (long (first ks)) r0 (aget krow k) na (long (size (aget ka k))) nb (long (size (aget kb k)))
+              s (long (loop [j 0 s (long s)]
+                        (if (= j (rows-of kind k))
+                          s
+                          (let [r (+ r0 j) r' (+ (aget krow' i) j)]
+                            (aset va' r' (int s))
+                            (copy! vals (aget va r) vals' s na)
+                            (aset vb' r' (int (+ s na)))
+                            (copy! vals (aget vb r) vals' (+ s na) nb)
+                            (recur (inc j) (+ s na nb))))))]
+          (recur (next ks) (inc i) s))))
+    {:nb nb :nd nd :nk nk :nr nr
+     :bsize bsize' :boff boff' :moff moff' :mass mass' :minv minv' :vstar vstar'
+     :kind kind' :krow krow' :ka ka' :kb kb' :va va' :vb vb' :vals vals'
+     :rn (pick rn) :rt (pick rt) :vhat (pick vhat) :mu (pick mu)}))
 
 (defn solve
   "The velocities that minimize the step's cost, and the impulses that
@@ -494,57 +638,47 @@
     :mu                each contact's friction coefficient
 
   and `v0` a first guess, or nil to start from `vstar`. Returns `{:v
-  :impulses :iterations :cost}`, the impulses three a constraint."
+  :impulses :iterations :cost}`, the impulses three a constraint and the
+  iterations those of the island that took most.
+
+  Each island -- blocks joined, however indirectly, by constraints -- is
+  solved by itself. The cost is a sum over islands, so this is the same
+  minimum, but a Newton step's line search is one length for the whole
+  direction: solved together, a ragdoll struggling through its contacts
+  shortened and lengthened the steps of bricks it was not touching, and
+  they lifted off the floor and came back for twenty steps before the
+  ragdoll was done. Apart, the bricks take one or two."
   ([problem] (solve problem nil {}))
   ([problem v0] (solve problem v0 {}))
-  ([{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^doubles mass ^doubles vstar ^ints bsize] :as problem}
-    v0 {:keys [max-iterations tolerance] :or {max-iterations 30 tolerance 1e-10}}]
-   (let [v (a/f64 nd)
-         ^doubles v-init (or v0 vstar)
-         _ (dotimes [i nd] (aset v i (aget v-init i)))
-         gam (a/f64 (* 3 nk))
-         gms (a/f64 (* 9 nk))
-         {:keys [^ints perm adj]} (ordering nb nk ka kb)
-         env (envelope problem perm adj)
-         ^ints noff (:noff env)
-         ^ints boff (:boff problem)
-         h (a/f64 (long (:size env)))
-         grad (a/f64 nd)
-         scratch (a/f64 nd)
-         trial (a/f64 nd)
-         trial-gam (a/f64 (* 3 nk))
-         pdir (a/f64 nd)
-         dir (a/f64 nd)]
-     (loop [it 0 cost (evaluate! problem v gam gms scratch)]
-       ;; the gradient, M (v - v*) - J' g
-       (dotimes [i nd] (aset trial i (- (aget v i) (aget vstar i))))
-       (block-mul! problem mass trial grad)
-       (dotimes [i nd] (aset grad i (- (aget grad i))))
-       (add-jt-gamma! problem gam grad)
-       (dotimes [i nd] (aset grad i (- (aget grad i))))
-       (let [gnorm (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (aget grad i))))))]
-         (if (or (>= it (long max-iterations)) (<= gnorm (double tolerance)) (zero? nd))
-           {:v v :impulses gam :iterations it :cost cost}
-           (do
-             (hessian! problem gms env h)
-             (if-not (factor! h env nd)
-               {:v v :impulses gam :iterations it :cost cost :failed :not-positive-definite}
-               (let [;; renumbered into the envelope's order and back
-                     _ (dotimes [b nb]
-                         (let [o (aget boff b) p (aget noff b)]
-                           (dotimes [j (aget bsize b)] (aset pdir (+ p j) (- (aget grad (+ o j)))))))
-                     _ (substitute! h env nd pdir)
-                     _ (dotimes [b nb]
-                         (let [o (aget boff b) p (aget noff b)]
-                           (dotimes [j (aget bsize b)] (aset dir (+ o j) (aget pdir (+ p j))))))
-                     slope (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget grad i) (aget dir i))))))
-                     alpha (line-search problem v dir slope trial trial-gam scratch)
-                     step (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (* (double alpha) (aget dir i)))))))]
-                 (dotimes [i nd] (aset v i (aget trial i)))
-                 (let [cost' (evaluate! problem v gam gms scratch)]
-                   (if (< step 1e-12)
-                     {:v v :impulses gam :iterations (inc it) :cost cost'}
-                     (recur (inc it) cost'))))))))))))
+  ([{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^ints boff ^ints bsize ^doubles vstar] :as problem} v0 opts]
+   (let [parts (islands nb nk ka kb)]
+     (if (and (= 1 (count parts)) (= nb (count (first (first parts)))))
+       (newton problem v0 opts)
+       (let [v (a/f64 nd) gam (a/f64 (* 3 nk))
+             ^doubles v-init (or v0 vstar)]
+         ;; anything nothing touches goes where it was going
+         (dotimes [i nd] (aset v i (aget vstar i)))
+         (reduce (fn [acc [blocks ks]]
+                   (let [p (part problem blocks ks)
+                         ^ints poff (:boff p)
+                         guess (let [g (a/f64 (:nd p))]
+                                 (doseq [[i q] (map-indexed vector blocks)]
+                                   (dotimes [j (aget bsize q)]
+                                     (aset g (+ (aget poff i) j) (aget v-init (+ (aget boff q) j)))))
+                                 g)
+                         {:keys [^doubles impulses iterations cost failed] ^doubles pv :v} (newton p guess opts)]
+                     (doseq [[i q] (map-indexed vector blocks)]
+                       (dotimes [j (aget bsize q)]
+                         (aset v (+ (aget boff q) j) (aget pv (+ (aget poff i) j)))))
+                     (doseq [[i k] (map-indexed vector ks)]
+                       (dotimes [t 3]
+                         (aset gam (+ (* 3 (long k)) t) (aget impulses (+ (* 3 (long i)) t)))))
+                     (cond-> (-> acc
+                                 (update :iterations max iterations)
+                                 (update :cost + cost))
+                       failed (assoc :failed failed))))
+                 {:v v :impulses gam :iterations 0 :cost 0.0}
+                 parts))))))
 
 (defn spd-inverse
   "The inverse of the symmetric positive definite `n`x`n` matrix `m`

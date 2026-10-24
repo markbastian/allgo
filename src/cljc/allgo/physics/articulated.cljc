@@ -1500,6 +1500,70 @@
                     (if root (vec (concat base-acc qdd)) (vec qdd))))]
      (lin/transpose (mapv column (range n))))))
 
+(defn generalized-mass-matrix
+  "`H`, the generalized inertia -- the base's six first for a free root,
+  then the joints' -- flat and row-major, by the composite rigid body
+  algorithm.
+
+  What `inverse-mass-matrix` inverts, made directly. Each joint sees the
+  whole subtree beyond it as one rigid body, so its column is that
+  composite inertia pushed along its own axes and read off by every
+  joint between it and the root; O(n^2) where the inverse, a column of
+  the articulated body algorithm at a time, is O(n^2) with a much larger
+  constant -- a fiftieth of the time on a ragdoll. It is what a solver
+  that wants the matrix itself (`allgo.physics.convex`) asks for."
+  (^doubles [model q-vec] (generalized-mass-matrix model q-vec (links model q-vec)))
+  (^doubles [model _q-vec ls]
+   (let [root (base model)
+         b0 (if root 6 0)
+         n (long (generalized-dof model))
+         nl (count ls)
+         h (a/f64 (* n n))
+         put! (fn [^long r ^long c x]
+                (let [x (double x)]
+                  (aset h (+ (* r n) c) x)
+                  (aset h (+ (* c n) r) x)))
+         ;; Inward: each link's composite inertia, its own plus its
+         ;; subtree's carried up through each joint's transform.
+         ^objects ic (object-array (map (fn [i] (copy36 (.-inertia ^Link (nth ls i)))) (range nl)))
+         ic0 (when root (spatial-inertia-flat (:mass root) (:com root) (:inertia root)))]
+     (doseq [i (reverse (range nl))]
+       (let [^Link l (nth ls i)
+             up (mm6 (.-xt l) (mm6 (aget ic i) (.-xup l)))]
+         (if (neg? (.-parent l))
+           (when ic0 (add36! ic0 up))
+           (add36! (aget ic (.-parent l)) up))))
+     (when ic0
+       ;; the root's six, symmetric by construction but averaged as
+       ;; `root-solve` does
+       (dotimes [r 6]
+         (dotimes [c 6]
+           (aset h (+ (* r n) c) (* 0.5 (+ (aget ^doubles ic0 (+ (* 6 r) c))
+                                           (aget ^doubles ic0 (+ (* 6 c) r))))))))
+     ;; Outward from each joint: the force its axes need to move the
+     ;; composite beyond it, read along every joint on the way to the root.
+     (dotimes [i nl]
+       (let [^Link l (nth ls i)
+             nd (.-ndof l)
+             ^doubles s (.-s l)]
+         (dotimes [k nd]
+           (let [ri (+ b0 (.-offset l) k)
+                 f (mv6 (aget ic i) (let [sk (a/f64 6)] (dotimes [m 6] (aset sk m (aget s (+ (* 6 k) m)))) sk))
+                 ^doubles own (s-dot s nd f)]
+             (dotimes [kk (inc k)]
+               (put! ri (+ b0 (.-offset l) kk) (aget own kk)))
+             (aset h (+ (* ri n) ri) (+ (aget h (+ (* ri n) ri)) (.-armature l)))
+             (loop [^Link j l f f]
+               (let [f (mv6 (.-xt j) f) p (.-parent j)]
+                 (if (neg? p)
+                   (when root (dotimes [m 6] (put! ri m (aget f m))))
+                   (let [^Link pj (nth ls p)
+                         ^doubles share (s-dot (.-s pj) (.-ndof pj) f)]
+                     (dotimes [kk (.-ndof pj)]
+                       (put! ri (+ b0 (.-offset pj) kk) (aget share kk)))
+                     (recur pj f)))))))))
+     h)))
+
 (defn- point-force
   "A unit force at world point `p` along `dir`, as a spatial force in the
   coordinates of the body whose `frame` is given."

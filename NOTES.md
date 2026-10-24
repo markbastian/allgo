@@ -659,11 +659,12 @@ takes it over a few steps.
 **With articulated bodies and joints** (`allgo.physics.world`,
 `:solver :convex`). The problem is now in blocks: six numbers for a
 loose body, a model's whole generalized velocity for a model, each with
-its dense mass matrix -- the inverse of
-`articulated/inverse-mass-matrix`, whose product with a contact's
-generalized force row matches the response `world` already used to
-every digit. Three kinds of constraint: contacts with their cone, joint
-limits as one-sided rows, pins as two-sided ones. What came of it:
+its dense mass matrix -- `articulated/generalized-mass-matrix`, the
+composite rigid body algorithm, which agrees with the inverse of
+`articulated/inverse-mass-matrix` to 1e-13 at a fiftieth of the cost
+(64 us against 2.3 ms on the ragdoll). Three kinds of constraint:
+contacts with their cone, joint limits as one-sided rows, pins as
+two-sided ones. What came of it:
 
 - A column of thirty cubes stands in `world`, which the sequential
   impulse holds at six. The convex solve has its own slop, 1 mm: a
@@ -671,22 +672,39 @@ limits as one-sided rows, pins as two-sided ones. What came of it:
   push past the slop balances it, so every contact in a stack ends the
   whole slop deep, and at the impulse solve's 5 mm a column of thirty
   stood fifteen centimeters short.
-- The ragdoll scene settles completely, figure and bricks asleep, in 4
-  ms a step against the sequential impulse's 1.4. Inverting the
-  model's mass matrix through persistent vectors was 16 ms of an early
-  21; on arrays it is under 2. Newton takes ten to thirty iterations
-  there, where bricks take one to three: the Hessian checks against
-  finite differences to rounding, so it is stiff contacts on light limbs
-  changing between sticking and sliding from one iterate to the next,
-  and an exact line search (SAP's) did not shorten it. Capping it at
-  eight changed nothing anyone could see.
-- It is opt-in. Under it the motorcycle's rider tests fail one way that
-  matters: thrown off at 8 m/s, the sequential impulse lets the bail's
-  sideways push lean the bike over and it falls in three seconds; the
-  convex solve's tires, gripping as nearly rigidly as it makes them,
-  take the push without leaning, and the bike rolls on upright. The bike
-  was tuned under the sequential impulse, and whether this is the
-  truer answer is a question for its tuning, not settled here.
+- The ragdoll scene settles completely, figure and bricks asleep, in
+  2.4 ms a step against the sequential impulse's 1.4 (6.2 before the
+  three changes below).
+  - The mass matrix by the composite rigid body algorithm rather than
+    by inverting the articulated body algorithm's columns: 2.3 ms off.
+  - Islands solved apart. One Newton direction for the whole scene
+    has one step length, and a ragdoll working through its contacts
+    shortened and lengthened the steps of bricks it was not touching:
+    they came off the floor and back three or four times in a solve.
+  - The line search on row velocities. Along a line every row's
+    velocity is linear in the step, so a trial is the projections
+    alone; it was a full evaluation, 81 of 185 ms over two hundred
+    solves.
+
+  The ragdoll's own island still takes ten to thirty Newton steps, and
+  it is genuine: the velocities are meters a second from the answer
+  until the last few. A joint limit that is exactly at its kink at the
+  solution (touching, carrying nothing) flips on and off every
+  iteration, each step stops at the kink, and the rest converges
+  linearly. Softer limits, ten to a thousand times, cut it by a few
+  percent; so does letting the line search go past the full step.
+- A bike and rider is 1.3 ms a 1/240 s step against 1.0.
+- It is opt-in, for the motorcycle. Thrown off at 8 m/s, the rider's
+  leg stays tangled with the frame under the sequential impulse, eleven
+  millimeters deep, and pushing that out kicks the bike over in three
+  seconds and *speeds it up* 0.2 m/s. Under the convex solve the rider
+  is clear in 0.2 s, and the riderless bike does what a real one does:
+  steers into the lean, recovers, and capsizes slowly, over at eight
+  seconds. And a full-lever stop from 15 m/s is a knife edge -- at 1 g
+  this bike has 8% of its weight on the rear, and a stoppie runs away
+  once the rear is up. The sequential impulse flips it from 1.1 of full
+  lever, the convex solve from 1.0, so full lever is a stoppie to
+  vertical and back. Neither is obviously the wrong answer.
 
 ## Tried and not kept
 
