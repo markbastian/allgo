@@ -303,7 +303,7 @@
                   snx (* ux s) sny (* uy s) snz (* uz s)]
               (aset plane 0 snx) (aset plane 1 sny) (aset plane 2 snz)
               (aset plane 3 (+ (* snx (+ rpx (* ux sh))) (* sny (+ rpy (* uy sh))) (* snz (+ rpz (* uz sh)))))
-              (recur (inc t) (clip! src sids cnt dst dids plane t) dst dids src sids))))
+              (recur (inc t) (long (clip! src sids cnt dst dids plane t)) dst dids src sids))))
         cnt (long cnt)
         normal (if flip? (v/negate n) n)
         ^longs kept (long-array 8)]
@@ -515,7 +515,9 @@
                           ;; times 1.02 there made the edge the better fit, and a
                           ;; box settling flat onto the floor within the margin
                           ;; came back as one point on the floor's far edge.
-                          sc (cond face? o (pos? o) (* o 1.02) :else (* o 0.98))
+                          ;; `if`s, not a `cond`, whose last branch can be
+                          ;; nil and would box this and `kind` every axis
+                          sc (if face? o (if (pos? o) (* o 1.02) (* o 0.98)))
                           fmin (if face? (min fmin o) fmin)
                           ;; What the candidate has to beat. A face of b
                           ;; takes over from a face of a only by the bias. An
@@ -531,7 +533,7 @@
                                     :else (< sc score))]
                       (if better?
                         (recur (inc t)
-                               (cond (< t 3) 1 face? 2 :else 3)
+                               (if (< t 3) 1 (if face? 2 3))
                                (if face? (rem t 3) ei) ej
                                sc nx ny nz o fmin)
                         (recur (inc t) kind bi bj score bnx bny bnz bdepth fmin)))))))))
@@ -728,6 +730,31 @@
         d (if (rigid/inert? b) v/zero (v/scale (:vel b) dt))]
     [(mapv min lo (v/add lo d)) (mapv max hi (v/add hi d))]))
 
+(defn- aabb!
+  "`aabb`, into `mins` and `maxs` at body `i`, from the box's `frame`
+  when it has one: the same arithmetic in primitives, and the frame
+  `all` has already built rather than one more."
+  [^doubles mins ^doubles maxs i b fr dt]
+  (let [i3 (* 3 (long i)) dt (double dt)
+        [px py pz] (:pos b)
+        [rx ry rz] (if (= :ball (:shape b))
+                     (let [rr (double (:radius b))] [rr rr rr])
+                     (let [{:keys [half axes]} fr
+                           [hx hy hz] half
+                           [ax ay az] axes
+                           hx (double hx) hy (double hy) hz (double hz)
+                           reach (fn [k] (+ (* hx (abs (double (nth ax k))))
+                                            (* hy (abs (double (nth ay k))))
+                                            (* hz (abs (double (nth az k))))))]
+                       [(reach 0) (reach 1) (reach 2)]))
+        [vx vy vz] (when-not (rigid/inert? b) (:vel b))
+        put! (fn [k p r v]
+               (let [p (double p) r (double r)
+                     lo (- p r) hi (+ p r) d (if v (* (double v) dt) 0.0)]
+                 (aset mins (+ i3 (long k)) (min lo (+ lo d)))
+                 (aset maxs (+ i3 (long k)) (max hi (+ hi d)))))]
+    (put! 0 px rx vx) (put! 1 py ry vy) (put! 2 pz rz vz)))
+
 (defn near?
   "Whether two bodies' world boxes come within `gap` of each other.
 
@@ -801,11 +828,7 @@
          mins (a/f64 (* 3 n))
          maxs (a/f64 (* 3 n))
          frames (mapv #(when (= :box (:shape %)) (frame %)) bodies)]
-     (dotimes [i n]
-       (let [[lo hi] (aabb (nth bodies i) dt)]
-         (dotimes [k 3]
-           (aset ^doubles mins (+ (* 3 i) k) (double (nth lo k)))
-           (aset ^doubles maxs (+ (* 3 i) k) (double (nth hi k))))))
+     (dotimes [i n] (aabb! mins maxs i (nth bodies i) (nth frames i) dt))
      (into []
            (comp (mapcat (fn [[i j]]
                            (let [a (nth bodies i) b (nth bodies j)]

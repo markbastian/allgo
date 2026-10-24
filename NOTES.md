@@ -658,6 +658,13 @@ for sequential impulse / TGS / XPBD, and it passes every test in
   0.4 to 0.9 ms a step on the wall with it. What is left of the convex
   step is conjugate gradients (2.7 ms, at about a nanosecond a
   multiply-add), detection (1.7) and building the problem (1.0).
+- **Detection's boxes** (2026-10-23). `contact/all` built every box's
+  `frame` and then `aabb` built it again, in vectors: 0.38 ms of 1.60
+  on the wall. From the frame already built, into the arrays in
+  primitives, it is 0.09, and the contacts are the same to the last bit.
+  Two loops in `box-box` that boxed their best axis every iteration
+  (a `cond` whose last branch can be nil) were unboxed as well and
+  measured as nothing: the JIT had been removing it.
 
 Its two numbers were chosen on columns, so they were then tried on
 everything else the bricks demo asks (JVM, settled first, friction
@@ -741,6 +748,17 @@ two-sided ones. What came of it:
   vertical and back. Neither is obviously the wrong answer.
 
 ## Tried and not kept
+
+- **Skipping the narrow phase for pairs that have not moved** (2026-10-23,
+  measured and not built). On the settled 16x16 wall it is about 1.0 ms
+  of a 9.8 ms convex step or a 6 ms sequential impulse one, so that is
+  the most it could save -- and only where a scene is awake and still,
+  which sleeping already covers: a settled pile is not asked about at
+  all, and one settling or moving moves every pair every step. It would
+  also cost exactness: contacts reused within a tolerance drift by up to
+  it, and 0.1 mm of depth is 6 mm/s of push in the convex solve. What
+  is left of the narrow phase is spread thin -- vector lookups, the
+  clipping -- with no one place for a skip to remove.
 
 - **Manifold reduction to four points.** Standard practice — Box2D and
   Bullet both cap — and it works as advertised: a settled 9x8 wall went
