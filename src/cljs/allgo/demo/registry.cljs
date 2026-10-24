@@ -43,6 +43,7 @@
             [allgo.demo.terrain-webgl :as terrain]
             [allgo.demo.textures :as textures]
             [allgo.demo.three-body :as three-body]
+            [allgo.demo.volumes :as volumes]
             [allgo.demo.water :as water]))
 
 (def lifecycles
@@ -73,6 +74,7 @@
    "dla"      {:start dla/start!      :stop dla/stop!}
    "planet"   {:start planet/start!   :stop planet/stop!}
    "textures" {:start textures/start! :stop textures/stop!}
+   "volumes"  {:start volumes/start!  :stop volumes/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}

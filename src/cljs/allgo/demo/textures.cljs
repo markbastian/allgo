@@ -16,6 +16,7 @@
   enough to watch, so the picture is drawn coarse first and sharpened over
   a few frames."
   (:require [allgo.demo.fps :as fps]
+            [allgo.demo.progressive :as progressive]
             [allgo.procedural.texture :as tx]
             ["lil-gui" :default GUI]))
 
@@ -106,36 +107,6 @@
           (set! (.-fillStyle ctx) "#e8ecf4")
           (.fillText ctx name x y))))))
 
-(defn- work!
-  "Samples blocks until the frame's budget is spent; true when the
-  picture is finished."
-  [{:keys [^js img sample w h] :as job}]
-  (let [data (.-data img)
-        t0 (js/performance.now)]
-    (loop []
-      (let [{:keys [level row]} @(:at job)]
-        (cond
-          (>= level (count blocks)) true
-          (> (- (js/performance.now) t0) budget-ms) false
-          :else
-          (let [b (nth blocks level)]
-            (loop [x 0]
-              (when (< x w)
-                (let [[r g bl] (sample (+ x (/ b 2)) (+ row (/ b 2)))
-                      r (* 255 r) g (* 255 g) bl (* 255 bl)]
-                  (dotimes [dy (min b (- h row))]
-                    (dotimes [dx (min b (- w x))]
-                      (let [p (* 4 (+ x dx (* w (+ row dy))))]
-                        (aset data p r)
-                        (aset data (+ p 1) g)
-                        (aset data (+ p 2) bl)
-                        (aset data (+ p 3) 255)))))
-                (recur (+ x b))))
-            (reset! (:at job) (if (>= (+ row b) h)
-                                {:level (inc level) :row 0}
-                                {:level level :row (+ row b)}))
-            (recur)))))))
-
 (defn init! [^js container]
   (let [canvas (js/document.createElement "canvas")
         ctx (.getContext canvas "2d")
@@ -147,11 +118,7 @@
     (letfn [(restart! []
               (let [w (.-width canvas) h (.-height canvas)]
                 (when (and (pos? w) (pos? h))
-                  (reset! state {:img (.createImageData ctx w h)
-                                 :sample (sampler w h)
-                                 :w w :h h
-                                 :at (atom {:level 0 :row 0})
-                                 :done? false}))))
+                  (reset! state (progressive/job ctx w h (sampler w h) blocks)))))
             (resize! []
               (let [w (.-clientWidth container) h (.-clientHeight container)]
                 (when (and (pos? w) (pos? h)
@@ -162,13 +129,12 @@
             (tick []
               (when @running?
                 (js/requestAnimationFrame tick)
-                (when-let [{:keys [img w h done?] :as job} @state]
-                  (when-not done?
-                    (let [t0 (js/performance.now)
-                          finished? (work! job)]
+                (when-let [{:keys [^js img w h] :as job} @state]
+                  (when-not (progressive/done? job)
+                    (let [t0 (js/performance.now)]
+                      (progressive/work! job budget-ms)
                       (.putImageData ctx img 0 0)
                       (draw-labels! ctx w h)
-                      (when finished? (swap! state assoc :done? true))
                       (tick-fps! (- (js/performance.now) t0)))))))]
       (let [gui (GUI. #js {:container container})
             picker (.add gui controls "texture" (clj->js (into ["gallery"] names)))]
