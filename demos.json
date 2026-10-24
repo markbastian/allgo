@@ -93,7 +93,7 @@
    "id": "textures",
    "group": "Procedural Generation",
    "label": "Procedural Textures",
-   "blurb": "Brick, marble, wood, stone and metal, as functions of space",
+   "blurb": "Brick, stone, metal, water, worlds -- as functions of space",
    "badges": [],
    "href": "play/?demo=textures"
   },
