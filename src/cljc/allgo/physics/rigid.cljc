@@ -103,6 +103,31 @@
     (assoc (body (assoc opts :mass mass :inertia (when (pos? mass) [i i i])))
            :shape :ball :radius r :size [(* 2 r) (* 2 r) (* 2 r)])))
 
+(defn capsule
+  "A solid capsule: a segment `length` long along the body's own y axis,
+  swept by a ball of `radius` -- a cylinder with a hemisphere on each
+  end. What a limb is, near enough, and the reason for having it: two
+  box limbs crossing meet edge to edge, a single point that comes and
+  goes from step to step, where two capsules slide.
+
+  `:size` is the box it fits in, which is what the broad phase asks for."
+  [{:keys [radius length density] :as opts}]
+  (let [r (double radius)
+        l (double length)
+        d (double (or density 0.0))
+        cyl (* d math/PI r r l)
+        ball (* d (/ 4.0 3.0) math/PI r r r)
+        mass (+ cyl ball)
+        ;; about the axis, and across it through the center: the two
+        ;; hemispheres a whole ball, each half's center 3r/8 past its end
+        axial (+ (* 0.5 cyl r r) (* 0.4 ball r r))
+        across (+ (* cyl (+ (/ (* l l) 12.0) (/ (* r r) 4.0)))
+                  (* ball (+ (* 0.4 r r) (/ (* l l) 4.0) (* 0.375 l r))))]
+    (assoc (body (assoc opts :mass mass
+                        :inertia (when (pos? mass) [across axial across])))
+           :shape :capsule :radius r :length l
+           :size [(* 2.0 r) (+ l (* 2.0 r)) (* 2.0 r)])))
+
 (defn torus
   "A solid torus: a tube of radius `minor` swept round a circle of radius
   `major`, about the body's own z axis. What a tire is, near enough, and

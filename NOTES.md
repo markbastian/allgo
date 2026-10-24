@@ -842,12 +842,27 @@ things, the first two of them bugs:
   `d dt` of armature beside it, it is stable on a forearm. At 0.2 one
   dummy sleeps in three seconds.
 
-A heap still does not sleep. What keeps it awake is kicks of one to
-three radians a second, at about the rate the sleep clock needs, and
-they come from single-point edge contacts between box limbs crossing at
-an angle, on the margin and flickering in and out from step to step.
-Neither damping to 0.5, thirty-two iterations, nor sleep speeds ten
-times as loose made a twenty-dummy heap sleep in thirty seconds.
+A heap still did not sleep, kicked at one to three radians a second.
+Single-point edge contacts between box limbs looked the likely cause,
+so capsules went in -- `rigid/capsule`, a segment swept by a ball, met
+as balls at its ends and at its nearest point to the other shape -- and
+did not help: twenty capsule dummies slept no better, a lone one took
+twelve seconds to where a box one takes three, since a capsule lying
+on the floor rolls, and a step cost more. Capsules stay, as a shape;
+the dummy's limbs stay boxes.
+
+Followed again, the kicks came with no contact changing at all: a limb
+resting on its joint limit was pushed just inside, the row went,
+gravity took it back past, and the row came back cold and kicked it.
+`:limit-slop` -- a limit's own slop, held and not pushed out, as a
+contact's is -- put the demo's twenty dummies to sleep in ten seconds
+and ten in five. It is not a cure. In a heap on a bare floor ten slept
+no better with it than without: one dummy lay with its elbow bent past
+its limit and its forearm against its own chest, the limit pushing out
+and the chest pushing back, and the two fought for good. It defaults to
+none: the motorcycle's rider, held near its limits by muscles, was
+flung forty meters with it, and under the convex solve a heap ran away.
+The ragdoll demo asks for 0.02.
 
 **Newton in a heap** (2026-10-24). Twenty dummies under the convex solve
 take twenty Newton steps on average and up to sixty-odd, and it is not

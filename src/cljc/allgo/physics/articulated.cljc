@@ -2061,7 +2061,8 @@
       (case kind
         :box (rigid/box (assoc common :size (:size part)))
         :ball (rigid/ball (assoc common :radius (:radius part)))
-        :torus (rigid/torus (assoc common :major (:major part) :minor (:minor part)))))))
+        :torus (rigid/torus (assoc common :major (:major part) :minor (:minor part)))
+        :capsule (rigid/capsule (assoc common :radius (:radius part) :length (:length part)))))))
 
 (defn collision-bodies
   "Every shaped part of the model, as `[{:link i :body b} ...]`.
@@ -2236,8 +2237,8 @@
   closed the whole of what had built up at once -- a head flicked round
   at three radians a second every eight steps, in a pile that never
   slept."
-  [model ls ai q dt bias-factor max-push]
-  (let [dt (double dt) bias-factor (double bias-factor) max-push (double max-push)
+  [model ls ai q dt bias-factor max-push slop]
+  (let [dt (double dt) bias-factor (double bias-factor) max-push (double max-push) slop (double slop)
         parts (chain model)
         root? (some? (base model))
         base-off (if root? 6 0)
@@ -2290,7 +2291,12 @@
                                        (a/f64 [(nth axis 0) (nth axis 1) (nth axis 2)])
                                        :cone]]))))
 
-                         (and twist-max (> (abs twist) (double twist-max)))
+                         ;; Not when the bone is turned right round, where
+                         ;; (v . a)^2 + w^2 is zero and there is no twist to
+                         ;; speak of -- any turn about the bone is as good as
+                         ;; any other.
+                         (and twist-max (> (abs twist) (double twist-max))
+                              (> (+ (* proj proj) (* (double (nth rot 3)) (double (nth rot 3)))) 1e-12))
                          ;; Along the twist's own rate, d twist / d omega,
                          ;; from twist = 2 atan2(p, w) with p = v . a and
                          ;; q' = q (omega, 0) / 2 in the child's frame:
@@ -2325,7 +2331,7 @@
                        wgt (dot-n g delta)]
                    {:g g :delta delta :link j :which which
                     :m (if (> wgt 1e-12) (/ 1.0 wgt) 0.0)
-                    :bias (min max-push (/ (* bias-factor (double depth)) dt))})))))
+                    :bias (min max-push (/ (* bias-factor (max 0.0 (- (double depth) slop))) dt))})))))
           (range (count parts)))))
 
 (defn limit-constraints
@@ -2340,9 +2346,9 @@
   rows `solve-constraints` builds for itself, given to a caller that has
   a sweep of its own -- `allgo.physics.world`, which has other bodies to
   solve in the same pass. `config` is `configuration`'s."
-  [model {:keys [ls ai q]} dt {:keys [bias-factor max-push-speed]
-                               :or {bias-factor 0.2 max-push-speed 3.0}}]
-  (limit-rows model ls ai q dt bias-factor max-push-speed))
+  [model {:keys [ls ai q]} dt {:keys [bias-factor max-push-speed limit-slop]
+                               :or {bias-factor 0.2 max-push-speed 3.0 limit-slop 0.0}}]
+  (limit-rows model ls ai q dt bias-factor max-push-speed limit-slop))
 
 (defn solve-constraints
   "`state` with its velocities corrected so that neither the contacts nor
@@ -2401,7 +2407,7 @@
                                                            (double slop))))
                                             dt)))))
                    cs)
-        limits (limit-rows model ls ai q dt bias-factor max-push-speed)
+        limits (limit-rows model ls ai q dt bias-factor max-push-speed 0.0)
         k (count prep)
         nl (count limits)]
     (if (and (zero? k) (zero? nl))

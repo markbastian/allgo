@@ -672,6 +672,21 @@
   [extra]
   [(merge (limb -1 :spherical 0.6 2.0) extra)])
 
+(deftest limit-slop-test
+  (testing "within its slop a limit holds the joint where it is, and past it pushes back"
+    ;; Held, not pushed: a limb resting on its limit is otherwise pushed
+    ;; just inside, falls back past, and is pushed again.
+    (let [model [(assoc (limb -1 :revolute 0.6 2.0) :limit [0.0 1.0])]
+          bias (fn [q slop]
+                 (let [rows (ab/limit-constraints model (ab/configuration model [q] nil) (/ 1.0 60.0)
+                                                  {:limit-slop slop})]
+                   (is (= 1 (count rows)))
+                   (is (= [0 :lo] [(:link (first rows)) (:which (first rows))]))
+                   (double (:bias (first rows)))))]
+      (is (pos? (bias -0.01 0.0)) "no slop: pushed back from a hundredth of a radian")
+      (is (zero? (bias -0.01 0.02)) "within the slop: held")
+      (is (< (abs (- (bias -0.05 0.02) (* 0.2 0.03 60.0))) 1e-9) "past it: the overlap less the slop"))))
+
 (deftest hinge-limit-test
   (testing "a hinge stops at its limit instead of going round"
     (let [free [(limb -1 :revolute 0.6 2.0)]

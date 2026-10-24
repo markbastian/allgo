@@ -108,6 +108,16 @@
    :friction 0.6
    :restitution 0.0
    :slop 0.005
+   ;; How far past a joint limit, in radians (or meters, for a slider),
+   ;; is held without being pushed back -- the limits' own slop. With
+   ;; none, a limb resting on its limit is pushed just inside, the row
+   ;; goes, gravity takes it back past, and the row comes back cold and
+   ;; kicks it: a heap of twenty ragdolls never slept, and with 0.02 all
+   ;; twenty sleep in ten seconds. None by default: the motorcycle's
+   ;; rider, held in its pose by muscles near its limits, was flung forty
+   ;; meters with it. Under the convex solve it is not used: a heap ran
+   ;; away with it (NOTES, "Why ragdolls did not sleep").
+   :limit-slop 0.0
    :bias-factor 0.2
    ;; Soft contacts, as `allgo.physics.solver` has them: an overlap is a
    ;; damped spring of `contact-hertz` and damping ratio `contact-damping`
@@ -501,7 +511,8 @@
   (into []
         (for [[mi {:keys [model]}] (map-indexed vector models)
               :when (and (ab/limited? model) (not (:sleeping? (nth models mi))))
-              row (ab/limit-constraints model (nth configs mi) dt opts)]
+              row (ab/limit-constraints model (nth configs mi) dt
+                                        (cond-> opts (= :convex (:solver opts)) (assoc :limit-slop 0.0)))]
           (assoc row :mi mi :key [mi (:link row) (:which row)]))))
 
 (defn- body-arrays

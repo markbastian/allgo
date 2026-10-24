@@ -470,6 +470,9 @@
                                    sc (range (count (:models sc))))))))
               (opts []
                 {:gravity [0.0 -9.81 0.0]
+                 ;; a limb resting on its limit held there, not kicked
+                 ;; off it every other step: what lets a heap sleep
+                 :limit-slop 0.02
                  :friction (.-friction controls)
                  :restitution (.-restitution controls)
                  :solver (keyword (.-solver controls))

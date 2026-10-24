@@ -704,6 +704,133 @@
     (torus-box-deepest ia ib a b margin)))
 
 ;; ---------------------------------------------------------------------------
+;; Capsules
+
+;; A capsule is a segment swept by a ball: `length` between the two
+;; centers, along the body's own y axis, and `radius`. Everything it
+;; meets is a ball test at some point of the segment -- its two ends, or
+;; the point the other shape comes nearest -- so a capsule lying along a
+;; floor rests on two points, one crossing an edge touches where it
+;; crosses, and as it rolls those points slide rather than jumping from
+;; one feature to another the way a box's edges and corners do.
+
+(defn- capsule-ends
+  "The two ends of `capsule`'s segment, in the world."
+  [{:keys [pos rot length]}]
+  (let [half (* 0.5 (double length))
+        axis (q/rotate rot [0.0 1.0 0.0])]
+    [(v/add-scaled pos axis (- half)) (v/add-scaled pos axis half)]))
+
+(defn- on-segment
+  "How far along `p`->`q`, 0 to 1, the point nearest `x` is."
+  ^double [p q x]
+  (let [d (v/sub q p)
+        dd (v/dot d d)]
+    (if (< dd eps) 0.0 (am/clamp (/ (v/dot (v/sub x p) d) dd) 0.0 1.0))))
+
+(defn- nearest-on-segments
+  "The nearest points of segments `p1`->`q1` and `p2`->`q2`, as `[x y]`."
+  [p1 q1 p2 q2]
+  (let [d1 (v/sub q1 p1)
+        d2 (v/sub q2 p2)
+        r (v/sub p1 p2)
+        a (v/dot d1 d1)
+        e (v/dot d2 d2)
+        f (v/dot d2 r)
+        c (v/dot d1 r)
+        b (v/dot d1 d2)
+        denom (- (* a e) (* b b))
+        s (if (> (abs denom) eps)
+            (am/clamp (/ (- (* b f) (* c e)) denom) 0.0 1.0)
+            0.0)
+        t (am/clamp (/ (+ (* b s) f) (max eps e)) 0.0 1.0)
+        s (am/clamp (/ (- (* b t) c) (max eps a)) 0.0 1.0)]
+    [(v/add-scaled p1 d1 s) (v/add-scaled p2 d2 t)]))
+
+(defn- two-apart
+  "The deepest of `cs`, and the deepest of the rest at least `apart` from
+  it: a resting capsule needs two points to lie still, and two that are
+  the same point are one."
+  [cs apart]
+  (let [cs (sort-by #(- (double (:depth %))) cs)]
+    (if-let [first-c (first cs)]
+      (if-let [second-c (first (filter #(> (v/distance (:point %) (:point first-c)) (double apart)) (rest cs)))]
+        [first-c second-c]
+        [first-c])
+      [])))
+
+(defn- ball-ball
+  "A ball of `ra` at `xa` against one of `rb` at `xb`, as `sphere-sphere`
+  has it, named `id`; nil if they are farther apart than `margin`."
+  [ia ib xa ra xb rb margin id]
+  (let [ra (double ra) rb (double rb)
+        d (v/sub xb xa)
+        dist (v/length d)]
+    (when (and (< dist (+ ra rb (double margin))) (>= dist eps))
+      (let [n (v/scale d (/ 1.0 dist))]
+        {:a ia :b ib
+         :point (v/add-scaled xa n (* 0.5 (+ dist (- ra rb))))
+         :normal n
+         :id id
+         :depth (- (+ ra rb) dist)}))))
+
+(defn capsule-ball
+  "Capsule `a` against ball `b`: the ball against the nearest point of
+  the segment."
+  [ia ib a b margin]
+  (let [[p q] (capsule-ends a)
+        x (v/add-scaled p (v/sub q p) (on-segment p q (:pos b)))]
+    (if-let [c (ball-ball ia ib x (:radius a) (:pos b) (:radius b) margin :capsule-ball)]
+      [c]
+      [])))
+
+(defn capsule-capsule
+  "Two capsules: their segments' nearest points, and each end against the
+  other segment, up to two of those that touch."
+  [ia ib a b margin]
+  (let [ra (double (:radius a)) rb (double (:radius b))
+        [pa qa] (capsule-ends a)
+        [pb qb] (capsule-ends b)
+        [xa xb] (nearest-on-segments pa qa pb qb)
+        end-on (fn [x p q] (v/add-scaled p (v/sub q p) (on-segment p q x)))
+        cs (keep identity
+                 [(ball-ball ia ib xa ra xb rb margin [:capsule :nearest])
+                  (ball-ball ia ib pa ra (end-on pa pb qb) rb margin [:capsule :a 0])
+                  (ball-ball ia ib qa ra (end-on qa pb qb) rb margin [:capsule :a 1])
+                  (ball-ball ia ib (end-on pb pa qa) ra pb rb margin [:capsule :b 0])
+                  (ball-ball ia ib (end-on qb pa qa) ra qb rb margin [:capsule :b 1])])]
+    (two-apart cs (min ra rb))))
+
+(defn- box-signed-distance
+  "How far `x` is outside box `b`, negative inside: what a ball at `x`
+  would be from touching it."
+  ^double [b x]
+  (let [[lx ly lz] (q/rotate (:inv-rot b) (v/sub x (:pos b)))
+        [hx hy hz] (half b)
+        lx (double lx) ly (double ly) lz (double lz)
+        hx (double hx) hy (double hy) hz (double hz)
+        dx (- (abs lx) hx) dy (- (abs ly) hy) dz (- (abs lz) hz)]
+    (if (and (<= dx 0.0) (<= dy 0.0) (<= dz 0.0))
+      (max dx dy dz)
+      (math/sqrt (+ (* (max dx 0.0) (max dx 0.0)) (* (max dy 0.0) (max dy 0.0)) (* (max dz 0.0) (max dz 0.0)))))))
+
+(defn capsule-box
+  "Capsule `a` against box `b`: balls at the segment's two ends, and at
+  the point of it nearest the box -- found by golden section, the
+  distance to a box being convex along a line -- up to two that touch."
+  [ia ib a b margin]
+  (let [r (double (:radius a))
+        [p q] (capsule-ends a)
+        d (v/sub q p)
+        at (fn [t] (v/add-scaled p d (double t)))
+        t (roots/maximize (fn [t] (- (box-signed-distance b (at t)))) 0.0 1.0 {:tol 1e-6 :max-iter 40})
+        ball (fn [x id] (mapv #(assoc % :id id) (sphere-box ia ib {:pos x :radius r} b margin)))
+        cs (concat (ball p [:capsule-box 0])
+                   (ball q [:capsule-box 1])
+                   (when (< 0.02 (double t) 0.98) (ball (at t) [:capsule-box :nearest])))]
+    (two-apart cs r)))
+
+;; ---------------------------------------------------------------------------
 ;; Dispatch
 
 (defn between*
@@ -724,8 +851,17 @@
       (and (= sa :box) (= sb :torus))
       (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
             (torus-box ib ia b a margin))
-      ;; A torus against a ball or another torus is not asked for yet:
-      ;; tires meet the road, and the road is made of boxes.
+      (and (= sa :capsule) (= sb :box)) (capsule-box ia ib a b margin)
+      (and (= sa :box) (= sb :capsule))
+      (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
+            (capsule-box ib ia b a margin))
+      (and (= sa :capsule) (= sb :capsule)) (capsule-capsule ia ib a b margin)
+      (and (= sa :capsule) (= sb :ball)) (capsule-ball ia ib a b margin)
+      (and (= sa :ball) (= sb :capsule))
+      (mapv (fn [c] (assoc c :a ia :b ib :normal (v/negate (:normal c))))
+            (capsule-ball ib ia b a margin))
+      ;; A torus against a ball, a capsule or another torus is not asked
+      ;; for yet: tires meet the road, and the road is made of boxes.
       :else [])))
 
 (defn between
@@ -867,7 +1003,8 @@
          broad (grow broad n)
          mins (a/f64 (* 3 n))
          maxs (a/f64 (* 3 n))
-         frames (mapv #(when (= :box (:shape %)) (frame %)) bodies)]
+         ;; a capsule's too: its broad-phase box is its `:size`'s
+         frames (mapv #(when (#{:box :capsule} (:shape %)) (frame %)) bodies)]
      (dotimes [i n] (aabb! mins maxs i (nth bodies i) (nth frames i) dt))
      (into []
            (comp (mapcat (fn [[i j]]

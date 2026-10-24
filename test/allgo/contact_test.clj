@@ -262,3 +262,42 @@
       (is (every? #(and (<= (abs (double (nth (:point %) 0))) 0.4501)
                         (<= (abs (double (nth (:point %) 2))) 0.2251))
                   cs)))))
+
+(deftest capsule-test
+  (let [floor (rigid/box {:pos [0.0 -0.5 0.0] :size [10.0 1.0 10.0]})
+        along-x (q/from-axis-angle [0.0 0.0 1.0] (/ Math/PI 2.0))
+        along-z (q/from-axis-angle [1.0 0.0 0.0] (/ Math/PI 2.0))
+        capsule (fn [pos rot] (rigid/capsule {:pos pos :rot rot :radius 0.05 :length 0.3 :density 1.0}))
+        depths (fn [cs] (mapv #(:depth %) cs))
+        close? (fn [a b] (< (abs (- (double a) (double b))) 1e-9))]
+    (testing "lying on a floor it rests on both ends, standing on one"
+      (let [cs (ct/between 0 1 (capsule [0.0 0.04 0.0] along-x) floor)]
+        (is (= 2 (count cs)))
+        (is (every? #(close? 0.01 %) (depths cs)))
+        (is (every? #(close? -1.0 (second (:normal %))) cs) "pushed up, the normal from the capsule to the floor")
+        (is (close? 0.3 (v/distance (:point (first cs)) (:point (second cs)))) "a length apart"))
+      (let [cs (ct/between 0 1 (capsule [0.0 0.19 0.0] q/identity-q) floor)]
+        (is (= 1 (count cs)))
+        (is (close? 0.01 (:depth (first cs))))))
+    (testing "the other way round, the normal turns round"
+      (is (every? #(close? 1.0 (second (:normal %)))
+                  (ct/between 0 1 floor (capsule [0.0 0.04 0.0] along-x)))))
+    (testing "two side by side touch along their length, two crossed at one point"
+      (let [cs (ct/between 0 1 (capsule [0.0 0.0 0.0] along-x) (capsule [0.0 0.09 0.0] along-x))]
+        (is (= 2 (count cs)))
+        (is (every? #(close? 0.01 %) (depths cs))))
+      (let [cs (ct/between 0 1 (capsule [0.0 0.0 0.0] along-x) (capsule [0.0 0.09 0.0] along-z))]
+        (is (= 1 (count cs)))
+        (is (close? 0.01 (:depth (first cs))))
+        (is (< (v/length (v/sub (:point (first cs)) [0.0 0.045 0.0])) 1e-9))))
+    (testing "a ball meets the nearest point of the segment"
+      (let [cs (ct/between 0 1 (capsule [0.0 0.0 0.0] along-x)
+                           (rigid/ball {:pos [0.1 0.09 0.0] :radius 0.05 :density 1.0}))]
+        (is (= 1 (count cs)))
+        (is (close? 0.01 (:depth (first cs))))
+        (is (< (v/length (v/sub (:point (first cs)) [0.1 0.045 0.0])) 1e-9))))
+    (testing "apart by more than the margin, nothing"
+      (is (empty? (ct/between 0 1 (capsule [0.0 1.0 0.0] along-x) floor))))
+    (testing "its mass is a cylinder's and a ball's"
+      (let [c (rigid/capsule {:radius 0.1 :length 0.4 :density 1000.0})]
+        (is (close? (* 1000.0 (+ (* Math/PI 0.01 0.4) (* (/ 4.0 3.0) Math/PI 0.001))) (:mass c)))))))
