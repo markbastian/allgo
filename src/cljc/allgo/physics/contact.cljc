@@ -625,12 +625,52 @@
   (let [big (double major)]
     (v/add pos (q/rotate rot [(* big (math/cos t)) (* big (math/sin t)) 0.0]))))
 
+(defn- turn!
+  "`q/rotate` on arrays: the vector in `p`'s first three turned by the
+  quaternion `q`, in place -- the same arithmetic in the same order."
+  [^doubles q ^doubles p]
+  (let [qx (aget q 0) qy (aget q 1) qz (aget q 2) qw (aget q 3)
+        vx (aget p 0) vy (aget p 1) vz (aget p 2)
+        tx (* (- (* qy vz) (* qz vy)) 2.0)
+        ty (* (- (* qz vx) (* qx vz)) 2.0)
+        tz (* (- (* qx vy) (* qy vx)) 2.0)]
+    (aset p 0 (+ (+ vx (* tx qw)) (- (* qy tz) (* qz ty))))
+    (aset p 1 (+ (+ vy (* ty qw)) (- (* qz tx) (* qx tz))))
+    (aset p 2 (+ (+ vz (* tz qw)) (- (* qx ty) (* qy tx))))
+    p))
+
 (defn- torus-box-deepest
   [ia ib a b margin]
   (let [r (double (:minor a))
+        big (double (:major a))
+        margin (double margin)
+        ;; How deep the ball at `t` goes: `sphere-box`'s depth, in its
+        ;; arithmetic and order, without building the contact. It is
+        ;; asked fifty times a tire a step, and as vectors and maps it was
+        ;; a fifth of a motorcycle step in a browser.
+        qa (a/f64 (:rot a)) qib (a/f64 (:inv-rot b)) qb (a/f64 (:rot b))
+        [pax pay paz] (:pos a) [pbx pby pbz] (:pos b) [hx hy hz] (half b)
+        pax (double pax) pay (double pay) paz (double paz)
+        pbx (double pbx) pby (double pby) pbz (double pbz)
+        hx (double hx) hy (double hy) hz (double hz)
+        p (a/f64 3)
         depth-at (fn ^double [^double t]
-                   (let [cs (sphere-box ia ib {:pos (ring-point a t) :radius r} b margin)]
-                     (if (seq cs) (double (:depth (first cs))) ##-Inf)))
+                   (aset p 0 (* big (math/cos t))) (aset p 1 (* big (math/sin t))) (aset p 2 0.0)
+                   (turn! qa p)
+                   (let [sx (+ pax (aget p 0)) sy (+ pay (aget p 1)) sz (+ paz (aget p 2))]
+                     (aset p 0 (- sx pbx)) (aset p 1 (- sy pby)) (aset p 2 (- sz pbz))
+                     (turn! qib p)
+                     (let [lx (aget p 0) ly (aget p 1) lz (aget p 2)
+                           cx (am/clamp lx (- hx) hx) cy (am/clamp ly (- hy) hy) cz (am/clamp lz (- hz) hz)]
+                       (if (and (== cx lx) (== cy ly) (== cz lz))
+                         (+ r (min (- hx (abs lx)) (min (- hy (abs ly)) (- hz (abs lz)))))
+                         (do (aset p 0 cx) (aset p 1 cy) (aset p 2 cz)
+                             (turn! qb p)
+                             (let [dx (- (+ (aget p 0) pbx) sx)
+                                   dy (- (+ (aget p 1) pby) sy)
+                                   dz (- (+ (aget p 2) pbz) sz)
+                                   dist (math/sqrt (+ (* dx dx) (* dy dy) (* dz dz)))]
+                               (if (or (>= dist (+ r margin)) (< dist eps)) ##-Inf (- r dist))))))))
         step (/ (* 2.0 math/PI) torus-samples)
         best (apply max-key #(depth-at (double %))
                     (map #(* step (double %)) (range torus-samples)))]

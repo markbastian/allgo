@@ -774,6 +774,31 @@ sleeps, so the demo starts on convex again. The 35-45 ms that had it
 start on the sequential impulse were a development build, and bricks
 that started inside the slab.
 
+The rest of physics, profiled the same way (Node, ms a step):
+
+                                 before   after
+    motorcycle and rider, 1/240     5.6     2.9
+    ragdoll, sequential impulse    17.4    10-14
+    10x10 wall, sequential impulse 11.4     9.6
+    10x10 wall, TGS                28      14
+    10x10 wall, XPBD               21      16
+
+`=` turned out not to be the rest of it. In a browser reading a vector
+is a generic `nth` and a keyword lookup on a map of more than eight
+keys a hashed search, and the hot paths did both per row per
+iteration: `inverse-inertia-world` built the body's rotation matrix by
+rotating three vectors, `warm-start!` assembled each impulse from
+vectors, XPBD's `anchor!` and `angular-mass` looked their arrays up in
+the arrays map per contact per substep, the world's sweep destructured
+three vectors per side per iteration, and its `prepare-rigid` ran two
+rotations and three products on vectors. The articulated root's six by
+six was factored, by `allgo.numerics.linear`'s seq-based Cholesky, once
+an impulse rather than once a configuration, and each spherical joint's
+three by three inverted the same way; and the tire's deepest point asked
+`sphere-box` for a whole contact fifty times. Each is now on arrays,
+with the arithmetic of what it replaced in the same order, so the
+results are the same to the last bit on the JVM.
+
 ## Tried and not kept
 
 - **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's

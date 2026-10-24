@@ -290,21 +290,53 @@
 ;; generalized force and the response to it, which came from one walk of
 ;; its tree.
 
+(defn- turn!
+  "`q/rotate` on arrays: `v` (at 3, in `p`) turned by the quaternion at
+  `qo` in `q`, into `p` at 3 -- the same arithmetic in the same order."
+  [^doubles q qo ^doubles p]
+  (let [o (long qo)
+        qx (aget q o) qy (aget q (+ o 1)) qz (aget q (+ o 2)) qw (aget q (+ o 3))
+        vx (aget p 3) vy (aget p 4) vz (aget p 5)
+        tx (* (- (* qy vz) (* qz vy)) 2.0)
+        ty (* (- (* qz vx) (* qx vz)) 2.0)
+        tz (* (- (* qx vy) (* qy vx)) 2.0)]
+    (aset p 3 (+ (+ vx (* tx qw)) (- (* qy tz) (* qz ty))))
+    (aset p 4 (+ (+ vy (* ty qw)) (- (* qz tx) (* qx tz))))
+    (aset p 5 (+ (+ vz (* tz qw)) (- (* qx ty) (* qy tx))))))
+
 (defn- prepare-rigid
   [bodies i point dir]
   (let [b (nth bodies i)]
     (if (rigid/inert? b)
       {:kind :static}
-      (let [r (v/sub point (:pos b))
+      ;; In primitives, with the arithmetic of `v/sub`, `v/cross`,
+      ;; `q/rotate`, `v/mul` and `v/dot` it replaced, in their order: as
+      ;; vectors this was a fifth of a sequential impulse step in a
+      ;; browser, where reading a vector is a generic `nth`.
+      (let [[px py pz] point [bx by bz] (:pos b) [dx dy dz] dir [ix iy iz] (:inv-inertia b)
+            dx (double dx) dy (double dy) dz (double dz)
+            rx (- (double px) (double bx)) ry (- (double py) (double by)) rz (- (double pz) (double bz))
+            cx (- (* ry dz) (* rz dy)) cy (- (* rz dx) (* rx dz)) cz (- (* rx dy) (* ry dx))
+            ;; q, the inverse rotation then the rotation; p, the working
+            ;; vector at 3 and r and dir around it once it is done
+            q (a/f64 (concat (:inv-rot b) (:rot b)))
+            p (a/f64 9)
+            _ (do (aset p 3 cx) (aset p 4 cy) (aset p 5 cz)
+                  (turn! q 0 p)
+                  (aset p 3 (* (double ix) (aget p 3)))
+                  (aset p 4 (* (double iy) (aget p 4)))
+                  (aset p 5 (* (double iz) (aget p 5)))
+                  (turn! q 4 p))
             ;; I^-1 (r x d), in the world, which is both the angular
-            ;; share of the effective mass and the spin an impulse adds.
-            iw (q/rotate (:rot b)
-                         (v/mul (:inv-inertia b)
-                                (q/rotate (:inv-rot b) (v/cross r dir))))]
-        {:kind :rigid :i i :r r :dir dir
-         :im (double (:inv-mass b))
-         :iw iw
-         :w (+ (double (:inv-mass b)) (v/dot (v/cross r dir) iw))}))))
+            ;; share of the effective mass and the spin an impulse adds
+            wx (aget p 3) wy (aget p 4) wz (aget p 5)
+            im (double (:inv-mass b))]
+        ;; packed for the sweep to read every iteration: r, dir, I^-1 (r x d)
+        (aset p 0 rx) (aset p 1 ry) (aset p 2 rz)
+        (aset p 3 dx) (aset p 4 dy) (aset p 5 dz)
+        (aset p 6 wx) (aset p 7 wy) (aset p 8 wz)
+        {:kind :rigid :i i :r [rx ry rz] :dir dir :im im :p p
+         :w (+ im (+ (* cx wx) (* cy wy) (* cz wz)))}))))
 
 (defn- prepare-side
   [{:keys [bodies models] :as w} configs side point dir]
@@ -445,17 +477,18 @@
   (case (:kind side)
     :static 0.0
     :rigid (let [i (long (:i side))
-                 [rx ry rz] (:r side)
-                 [dx dy dz] (:dir side)
+                 ^doubles p (:p side)
+                 rx (aget p 0) ry (aget p 1) rz (aget p 2)
+                 dx (aget p 3) dy (aget p 4) dz (aget p 5)
                  b (* 3 i)
                  wx (aget omega b) wy (aget omega (+ b 1)) wz (aget omega (+ b 2))]
-             (+ (* dx (+ (aget vel b) (- (* wy (double rz)) (* wz (double ry)))))
-                (* dy (+ (aget vel (+ b 1)) (- (* wz (double rx)) (* wx (double rz)))))
-                (* dz (+ (aget vel (+ b 2)) (- (* wx (double ry)) (* wy (double rx)))))))
+             (+ (* dx (+ (aget vel b) (- (* wy rz) (* wz ry))))
+                (* dy (+ (aget vel (+ b 1)) (- (* wz rx) (* wx rz))))
+                (* dz (+ (aget vel (+ b 2)) (- (* wx ry) (* wy rx))))))
     (:link :pair) (let [^doubles f (:force side)
                         ^doubles u (nth us (:mi side))]
                     (loop [k 0 acc 0.0]
-                      (if (= k (alength f))
+                      (if (== k (alength f))
                         acc
                         (recur (inc k) (+ acc (* (aget f k) (aget u k)))))))))
 
@@ -471,15 +504,14 @@
       :static nil
       :rigid (let [i (long (:i side))
                    b (* 3 i)
-                   [dx dy dz] (:dir side)
-                   [ix iy iz] (:iw side)
+                   ^doubles p (:p side)
                    im (double (:im side))]
-               (aset vel b (+ (aget vel b) (* s im (double dx))))
-               (aset vel (+ b 1) (+ (aget vel (+ b 1)) (* s im (double dy))))
-               (aset vel (+ b 2) (+ (aget vel (+ b 2)) (* s im (double dz))))
-               (aset omega b (+ (aget omega b) (* s (double ix))))
-               (aset omega (+ b 1) (+ (aget omega (+ b 1)) (* s (double iy))))
-               (aset omega (+ b 2) (+ (aget omega (+ b 2)) (* s (double iz)))))
+               (aset vel b (+ (aget vel b) (* s im (aget p 3))))
+               (aset vel (+ b 1) (+ (aget vel (+ b 1)) (* s im (aget p 4))))
+               (aset vel (+ b 2) (+ (aget vel (+ b 2)) (* s im (aget p 5))))
+               (aset omega b (+ (aget omega b) (* s (aget p 6))))
+               (aset omega (+ b 1) (+ (aget omega (+ b 1)) (* s (aget p 7))))
+               (aset omega (+ b 2) (+ (aget omega (+ b 2)) (* s (aget p 8)))))
       (:link :pair) (let [^doubles d (:delta side)
                           ^doubles u (nth us (:mi side))]
                       (dotimes [k (alength d)]
@@ -608,7 +640,7 @@
               ^doubles d (:delta (nth limits i))
               ^doubles u (nth us mi)
               vn (loop [j 0 acc 0.0]
-                   (if (= j (alength g)) acc (recur (inc j) (+ acc (* (aget g j) (aget u j))))))
+                   (if (== j (alength g)) acc (recur (inc j) (+ acc (* (aget g j) (aget u j))))))
               old (aget lacc i)
               nw (max 0.0 (+ old (* (double m) (- (double bias) vn))))
               dl (- nw old)]
@@ -679,7 +711,7 @@
         inertia (world (mapv #(/ 1.0 (double %)) inv-inertia))
         inverse (world (vec inv-inertia))
         six (fn [lin ang] (vec (for [i (range 6) j (range 6)]
-                                 (cond (and (< i 3) (< j 3)) (if (= i j) lin 0.0)
+                                 (cond (and (< i 3) (< j 3)) (if (== i j) lin 0.0)
                                        (and (>= i 3) (>= j 3)) (nth ang (+ (* 3 (- i 3)) (- j 3)))
                                        :else 0.0))))]
     [(six (/ 1.0 im) inertia) (six im inverse)]))
@@ -984,12 +1016,12 @@
       (let [^ints parent (a/i32 (range n))
             find (fn find [^long i]
                    (let [p (aget parent i)]
-                     (if (= p i) i (let [r (find p)] (aset parent i (int r)) r))))]
+                     (if (== p i) i (let [r (find p)] (aset parent i (int r)) r))))]
         (doseq [{:keys [a b]} (concat cs pins)]
           (let [x (node a) y (node b)]
             (when (and x y)
               (let [rx (find x) ry (find y)]
-                (when-not (= rx ry) (aset parent (int rx) (int ry)))))))
+                (when-not (== rx ry) (aset parent (int rx) (int ry)))))))
         (let [members (group-by find (filter #(node (if (< (long %) nb) [:rigid %] [:link (- (long %) nb) -1]))
                                              (range n)))
               sleepy (filter (fn [[_ ms]] (every? #(>= (clock %) wait) ms)) members)

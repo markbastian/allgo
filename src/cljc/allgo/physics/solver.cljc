@@ -183,7 +183,24 @@
   the world's, so this is needed once per body per step and then used by
   every contact on it."
   [^doubles out ^long i rot inv-inertia]
-  (let [[[m00 m01 m02] [m10 m11 m12] [m20 m21 m22]] (q/to-matrix rot)
+  ;; R as `q/to-matrix` makes it, each column the quaternion turning an
+  ;; axis as `q/rotate` does, in primitives: the same arithmetic in the
+  ;; same order, where three rotations of vectors were a tenth of a TGS
+  ;; step in a browser.
+  (let [[qx qy qz qw] rot
+        qx (double qx) qy (double qy) qz (double qz) qw (double qw)
+        m (a/f64 9)
+        _ (dotimes [j 3]
+            (let [vx (if (== j 0) 1.0 0.0) vy (if (== j 1) 1.0 0.0) vz (if (== j 2) 1.0 0.0)
+                  tx (* (- (* qy vz) (* qz vy)) 2.0)
+                  ty (* (- (* qz vx) (* qx vz)) 2.0)
+                  tz (* (- (* qx vy) (* qy vx)) 2.0)]
+              (aset m j (+ (+ vx (* tx qw)) (- (* qy tz) (* qz ty))))
+              (aset m (+ 3 j) (+ (+ vy (* ty qw)) (- (* qz tx) (* qx tz))))
+              (aset m (+ 6 j) (+ (+ vz (* tz qw)) (- (* qx ty) (* qy tx))))))
+        m00 (aget m 0) m01 (aget m 1) m02 (aget m 2)
+        m10 (aget m 3) m11 (aget m 4) m12 (aget m 5)
+        m20 (aget m 6) m21 (aget m 7) m22 (aget m 8)
         [ix iy iz] inv-inertia
         ix (double ix) iy (double iy) iz (double iz)
         b (* i 9)]
@@ -223,31 +240,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Impulses
-
-(defn- mul-inertia [^doubles ii ^long i [x y z]]
-  (let [b (* i 9)]
-    [(+ (* (aget ii b) x) (* (aget ii (+ b 1)) y) (* (aget ii (+ b 2)) z))
-     (+ (* (aget ii (+ b 3)) x) (* (aget ii (+ b 4)) y) (* (aget ii (+ b 5)) z))
-     (+ (* (aget ii (+ b 6)) x) (* (aget ii (+ b 7)) y) (* (aget ii (+ b 8)) z))]))
-
-(defn- apply-impulse!
-  "Adds impulse `p` at lever arm `r` to body `i`."
-  ;; No primitive hints on `i` or `sign`: a fn taking primitives is
-  ;; limited to four arguments, and array hints do not count.
-  [^doubles vel ^doubles omega ^doubles ii ^doubles inv-mass i r p sign]
-  (let [i (long i)
-        im (aget inv-mass i)]
-    (when (pos? im)
-      (let [s (double sign)
-            [px py pz] p
-            b3 (* i 3)]
-        (aset vel b3 (+ (aget vel b3) (* s px im)))
-        (aset vel (+ b3 1) (+ (aget vel (+ b3 1)) (* s py im)))
-        (aset vel (+ b3 2) (+ (aget vel (+ b3 2)) (* s pz im)))
-        (let [[dx dy dz] (mul-inertia ii i (v/cross r (v/scale p s)))]
-          (aset omega b3 (+ (aget omega b3) dx))
-          (aset omega (+ b3 1) (+ (aget omega (+ b3 1)) dy))
-          (aset omega (+ b3 2) (+ (aget omega (+ b3 2)) dz)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The world
@@ -314,9 +306,10 @@
   `rigid/inverse-mass`'s angular half: the lever arm crossed with the
   direction, taken into the body's frame, weighted by the inertia
   there. `scratch` is written over."
-  ^double [arrays ^long i ^doubles r-cross-n ^doubles scratch]
-  (let [^doubles inv-rot (:inv-rot arrays)
-        ^doubles inv-inertia (:inv-inertia arrays)
+  ;; The body's arrays rather than the map they are in: a lookup in that
+  ;; map per contact per substep is a hashed search in a browser.
+  [^doubles inv-rot ^doubles inv-inertia i ^doubles r-cross-n ^doubles scratch]
+  (let [i (long i)
         _ (qrot! inv-rot i r-cross-n scratch)
         b (* i 3)
         rx (aget scratch 0) ry (aget scratch 1) rz (aget scratch 2)]
@@ -362,9 +355,8 @@
   The point is kept in the body's frame, so this is `rigid/local->world`
   and is what recovers the contact geometry after the bodies have moved
   without running collision detection again."
-  [arrays ^long i ^doubles local ^doubles out]
-  (let [^doubles rot (:rot arrays)
-        ^doubles pos (:pos arrays)
+  [^doubles rot ^doubles pos i ^doubles local ^doubles out]
+  (let [i (long i)
         i3 (* i 3)]
     (qrot! rot i local out)
     (aset out 0 (+ (aget out 0) (aget pos i3)))
@@ -1000,14 +992,36 @@
         ^doubles ra-arr (:ra cs) ^doubles rb-arr (:rb cs)
         ^doubles pn (:pn cs) ^doubles p1 (:p1 cs) ^doubles p2 (:p2 cs)
         ^ints ia-arr (:a cs) ^ints ib-arr (:b cs)]
+    ;; In primitives, with the arithmetic of the vector version it
+    ;; replaced in its order: `n pn + (t1 p1 + t2 p2)`, then each side's
+    ;; `s p im` and `I^-1 (r x s p)`. As vectors it was a tenth of a TGS
+    ;; step in a browser, where reading one is a generic `nth`.
     (dotimes [k (long (:n cs))]
-      (let [ia (aget ia-arr k) ib (aget ib-arr k)
-            ra (vec3-at ra-arr k) rb (vec3-at rb-arr k)
-            p (v/add (v/scale (vec3-at normal k) (aget pn k))
-                     (v/add (v/scale (vec3-at t1 k) (aget p1 k))
-                            (v/scale (vec3-at t2 k) (aget p2 k))))]
-        (apply-impulse! vel omega ii inv-mass ia ra p -1.0)
-        (apply-impulse! vel omega ii inv-mass ib rb p 1.0)))))
+      (let [k3 (* 3 k)
+            px (+ (* (aget normal k3) (aget pn k)) (+ (* (aget t1 k3) (aget p1 k)) (* (aget t2 k3) (aget p2 k))))
+            py (+ (* (aget normal (+ k3 1)) (aget pn k))
+                  (+ (* (aget t1 (+ k3 1)) (aget p1 k)) (* (aget t2 (+ k3 1)) (aget p2 k))))
+            pz (+ (* (aget normal (+ k3 2)) (aget pn k))
+                  (+ (* (aget t1 (+ k3 2)) (aget p1 k)) (* (aget t2 (+ k3 2)) (aget p2 k))))]
+        (dotimes [side 2]
+          (let [i (long (if (zero? side) (aget ia-arr k) (aget ib-arr k)))
+                ^doubles r-arr (if (zero? side) ra-arr rb-arr)
+                im (aget ^doubles inv-mass i)]
+            (when (pos? im)
+              (let [s (if (zero? side) -1.0 1.0)
+                    b3 (* i 3) b (* i 9)
+                    rx (aget r-arr k3) ry (aget r-arr (+ k3 1)) rz (aget r-arr (+ k3 2))
+                    sx (* px s) sy (* py s) sz (* pz s)
+                    x (- (* ry sz) (* rz sy)) y (- (* rz sx) (* rx sz)) z (- (* rx sy) (* ry sx))]
+                (aset ^doubles vel b3 (+ (aget ^doubles vel b3) (* s px im)))
+                (aset ^doubles vel (+ b3 1) (+ (aget ^doubles vel (+ b3 1)) (* s py im)))
+                (aset ^doubles vel (+ b3 2) (+ (aget ^doubles vel (+ b3 2)) (* s pz im)))
+                (aset ^doubles omega b3 (+ (aget ^doubles omega b3)
+                                           (+ (* (aget ^doubles ii b) x) (* (aget ^doubles ii (+ b 1)) y) (* (aget ^doubles ii (+ b 2)) z))))
+                (aset ^doubles omega (+ b3 1) (+ (aget ^doubles omega (+ b3 1))
+                                                 (+ (* (aget ^doubles ii (+ b 3)) x) (* (aget ^doubles ii (+ b 4)) y) (* (aget ^doubles ii (+ b 5)) z))))
+                (aset ^doubles omega (+ b3 2) (+ (aget ^doubles omega (+ b3 2))
+                                                 (+ (* (aget ^doubles ii (+ b 6)) x) (* (aget ^doubles ii (+ b 7)) y) (* (aget ^doubles ii (+ b 8)) z))))))))))))
 
 (defn- record-approach!
   "How fast each contact's surfaces are closing, along its normal, as the
@@ -1066,6 +1080,7 @@
         ^doubles depth0 (:depth0 cs)
         ^doubles pos (:pos arrays)
         pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3) nl (a/f64 3)
+        ^doubles rot-arr (:rot arrays)
         ;; the fixed normal is read straight from its array, as it
         ;; always was: TGS calls this twice a substep and has no use for
         ;; the turning one
@@ -1073,8 +1088,8 @@
         live-normal! (when (:rotate? cs) (live-normal arrays cs))]
     (dotimes [k (long (:n cs))]
       (let [ia (aget ia-arr k) ib (aget ib-arr k)
-            _ (anchor! arrays ia (load3! ral k t0) pa)
-            _ (anchor! arrays ib (load3! rbl k t0) pb)
+            _ (anchor! rot-arr pos ia (load3! ral k t0) pa)
+            _ (anchor! rot-arr pos ib (load3! rbl k t0) pb)
             k3 (* k 3) ia3 (* ia 3) ib3 (* ib 3)]
         (aset ra-arr k3 (- (aget pa 0) (aget pos ia3)))
         (aset ra-arr (+ k3 1) (- (aget pa 1) (aget pos (+ ia3 1))))
@@ -1210,13 +1225,16 @@
         ;; contact. `pa` and `pb` have to survive the correction that
         ;; follows them; the rest are working room.
         pa (a/f64 3) pb (a/f64 3) t0 (a/f64 3) t1 (a/f64 3) t2 (a/f64 3) nl (a/f64 3)
+        ^doubles rot-arr (:rot arrays)
+        ^doubles inv-rot-arr (:inv-rot arrays)
+        ^doubles inv-inertia-arr (:inv-inertia arrays)
         live-normal! (live-normal arrays cs)]
     (dotimes [k (long (:n cs))]
       (let [ia (aget ia-arr k) ib (aget ib-arr k)
             ma (aget movable ia) mb (aget movable ib)]
         (when-not (and (zero? ma) (zero? mb))
-          (let [_ (anchor! arrays ia (load3! ral k t0) pa)
-                _ (anchor! arrays ib (load3! rbl k t0) pb)
+          (let [_ (anchor! rot-arr pos ia (load3! ral k t0) pa)
+                _ (anchor! rot-arr pos ib (load3! rbl k t0) pb)
                 _ (live-normal! k nl)
                 nx (aget nl 0) ny (aget nl 1) nz (aget nl 2)
                 pen (+ (aget depth0 k)
@@ -1250,13 +1268,13 @@
                          (do (aset t1 0 (- (* ay dz) (* az dy)))
                              (aset t1 1 (- (* az dx) (* ax dz)))
                              (aset t1 2 (- (* ax dy) (* ay dx)))
-                             (+ (aget inv-mass ia) (angular-mass arrays ia t1 t2))))
+                             (+ (aget inv-mass ia) (angular-mass inv-rot-arr inv-inertia-arr ia t1 t2))))
                     wb (if (zero? mb)
                          0.0
                          (do (aset t1 0 (- (* by dz) (* bz dy)))
                              (aset t1 1 (- (* bz dx) (* bx dz)))
                              (aset t1 2 (- (* bx dy) (* by dx)))
-                             (+ (aget inv-mass ib) (angular-mass arrays ib t1 t2))))
+                             (+ (aget inv-mass ib) (angular-mass inv-rot-arr inv-inertia-arr ib t1 t2))))
                     w (+ wa wb)]
                 (when (pos? w)
                   ;; `lambda` is `-c/w`, and the impulse is the direction

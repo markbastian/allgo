@@ -601,6 +601,51 @@
         (dotimes [i 6] (aset dst i (+ (aget dst i) (* r (aget s (+ b i)))))))))
   dst)
 
+(defn- cholesky!
+  "The Cholesky factor of the `n` by `n` in `a` (flat, row by row; only
+  its lower triangle is read), over it, or nil if it is not positive
+  definite. `allgo.numerics.linear/cholesky`'s arithmetic in its order,
+  on arrays: on vectors, as that has it, the joints' and the root's
+  factors were a third of a motorcycle step in a browser."
+  [^doubles a n]
+  (let [n (long n)]
+    (loop [i 0]
+      (if (== i n)
+        a
+        (when (loop [j 0]
+                (if (> j i)
+                  true
+                  (let [s (if (zero? j)
+                            0.0
+                            (loop [k 1 s (* (aget a (* n i)) (aget a (* n j)))]
+                              (if (== k j) s (recur (inc k) (+ s (* (aget a (+ (* n i) k)) (aget a (+ (* n j) k))))))))
+                        v (- (aget a (+ (* n i) j)) s)]
+                    (if (== i j)
+                      (when (> v 0.0) (aset a (+ (* n i) i) (math/sqrt v)) (recur (inc j)))
+                      (do (aset a (+ (* n i) j) (/ v (aget a (+ (* n j) j)))) (recur (inc j)))))))
+          (recur (inc i)))))))
+
+(defn- cholesky-solve
+  "`A^-1 b` through `cholesky!`'s factor `l` of the `n` by `n` `A`,
+  `allgo.numerics.linear/cholesky-solve`'s arithmetic in its order."
+  ^doubles [^doubles l n ^doubles b]
+  (let [n (long n) y (a/f64 n) x (a/f64 n)]
+    (dotimes [i n]
+      (let [s (if (zero? i)
+                0.0
+                (loop [k 1 s (* (aget l (* n i)) (aget y 0))]
+                  (if (== k i) s (recur (inc k) (+ s (* (aget l (+ (* n i) k)) (aget y k)))))))]
+        (aset y i (/ (- (aget b i) s) (aget l (+ (* n i) i))))))
+    (loop [i (dec n)]
+      (when (>= i 0)
+        (let [s (if (== i (dec n))
+                  0.0
+                  (loop [k (+ i 2) s (* (aget l (+ (* n (inc i)) i)) (aget x (inc i)))]
+                    (if (== k n) s (recur (inc k) (+ s (* (aget l (+ (* n k) i)) (aget x k)))))))]
+          (aset x i (/ (- (aget y i) s) (aget l (+ (* n i) i))))
+          (recur (dec i)))))
+    x))
+
 (defn- flat-d-inverse
   "The inverse of a joint's `D`, or nil where it has none.
 
@@ -610,9 +655,17 @@
   (case (long nd)
     0 nil
     1 (let [x (aget d 0)] (when (> (abs x) 1e-12) (a/f64 [(/ 1.0 x)])))
-    (let [rows (mapv (fn [r] (mapv (fn [c] (aget d (+ (* nd r) c))) (range nd))) (range nd))]
-      (when-let [inv (lin/inverse rows)]
-        (a/f64 (mapcat identity inv))))))
+    ;; `lin/inverse`'s arithmetic on arrays: the factor, then a column
+    ;; of the inverse solved for each column of the identity
+    (let [nd (long nd)]
+      (when-let [l (cholesky! (a/f64 (seq d)) nd)]
+        (let [out (a/f64 (* nd nd))]
+          (dotimes [c nd]
+            (let [e (a/f64 nd)]
+              (aset e c 1.0)
+              (let [^doubles x (cholesky-solve l nd e)]
+                (dotimes [r nd] (aset out (+ (* nd r) c) (aget x r))))))
+          out)))))
 
 (defn- minus-u-dinv-ut
   "`IA - U D^-1 U^T`, the inertia a joint presents once it has been
@@ -646,19 +699,26 @@
       (dotimes [i n] (aset dst i (+ (aget dst i) (* s (aget x i))))))
     dst))
 
-(defn- root-solve
-  "`IA0^-1 p` for the free root's six by six.
+(defn- root-factor
+  "The Cholesky factor of the free root's six by six, or nil if it is
+  not positive definite: once a configuration, where it was once an
+  impulse.
 
   Symmetric by construction and not quite by arithmetic, after a chain
   of congruences, so it is averaged with its own transpose before being
   factored. Cholesky wants it to be and it costs thirty-six additions."
-  [^doubles ia0 ^doubles p]
-  (let [rows (mapv (fn [r] (mapv (fn [c]
-                                   (* 0.5 (+ (aget ia0 (+ (* 6 r) c))
-                                             (aget ia0 (+ (* 6 c) r)))))
-                                 (range 6)))
-                   (range 6))]
-    (lin/cholesky-solve rows (mapv (fn [i] (aget p (long i))) (range 6)))))
+  [^doubles ia0]
+  (let [a (a/f64 36)]
+    (dotimes [r 6]
+      (dotimes [c 6]
+        (aset a (+ (* 6 r) c) (* 0.5 (+ (aget ia0 (+ (* 6 r) c)) (aget ia0 (+ (* 6 c) r)))))))
+    (cholesky! a 6)))
+
+(defn- root-solve
+  "`IA0^-1 p` for the free root's six by six, through `root-factor`'s
+  `l`: nil, as the factor is, when it is not positive definite."
+  [l ^doubles p]
+  (when l (cholesky-solve l 6 p)))
 
 (defn- small-solve
   "`D^-1 y` for the one by one or three by three a joint presents.
@@ -998,7 +1058,7 @@
             (let [^Node up-node (aget nodes (.-parent l))]
               (add36! (.-ia up-node) up))))
         (recur (dec i))))
-    {:links nodes :ia0 ia0}))
+    {:links nodes :ia0 ia0 :ia0-l (when ia0 (root-factor ia0))}))
 
 (defn forward-dynamics
   "The accelerations that torques `tau` produce, in O(n).
@@ -1119,7 +1179,7 @@
          solved (:links pass2)
          ;; The root, if it is free: force-free in the falling frame.
          a0 (if root
-              (a/f64 (mapv - (root-solve (:ia0 ai) (:pa0 pass2))))
+              (a/f64 (mapv - (root-solve (:ia0-l ai) (:pa0 pass2))))
               (let [o (a/f64 6)] (dotimes [k 6] (aset o k (- (aget a-grav k)))) o))
          ;; Pass three, outward: each joint's acceleration, then the link's.
          out (reduce
@@ -1654,7 +1714,7 @@
                 {:pa pa :pa0 pa0 :uu (vec (repeat n nil))}
                 path)
         dv0 (if root
-              (a/f64 (mapv - (root-solve (:ia0 ai) (:pa0 inward))))
+              (a/f64 (mapv - (root-solve (:ia0-l ai) (:pa0 inward))))
               (a/f64 6))
         outward (reduce
                  (fn [{:keys [dv] :as acc} j]
