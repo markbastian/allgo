@@ -655,42 +655,53 @@
              [(vec (filter #(= r (find %)) (range nb))) cs])))))
 
 (defn- part
-  "The island of `blocks` and constraints `ks` as a problem of its own."
-  [{:keys [^ints bsize ^ints boff ^ints moff ^doubles mass ^doubles minv ^doubles vstar
+  "The island of `blocks` and constraints `ks` as a problem of its own.
+  On arrays throughout: a wall of 255 bricks beside one alone is copied
+  here every step."
+  [{:keys [^long nb ^ints bsize ^ints boff ^ints moff ^doubles mass ^doubles minv ^doubles vstar
            ^ints kind ^ints krow ^ints ka ^ints kb ^ints va ^ints vb ^doubles vals
            ^doubles rn ^doubles rt ^doubles vhat ^doubles mu]} blocks ks]
-  (let [nb (count blocks) nk (count ks)
-        size (fn [q] (if (neg? (long q)) 0 (aget bsize q)))
+  (let [^ints bl (a/i32 blocks) ^ints kl (a/i32 ks)
+        nb' (alength bl) nk (alength kl)
         copy! (fn [^doubles from f ^doubles to t n]
-                (dotimes [i (long n)] (aset to (+ (long t) i) (aget from (+ (long f) i)))))
-        ;; old block -> new
-        at (zipmap blocks (range))
-        ^ints bsize' (a/i32 (map #(aget bsize (long %)) blocks))
-        ^ints boff' (a/i32 (butlast (reductions + 0 (seq bsize'))))
-        ^ints moff' (a/i32 (butlast (reductions + 0 (map #(* (long %) (long %)) (seq bsize')))))
-        nd (reduce + (seq bsize'))
-        nm (reduce + (map #(* (long %) (long %)) (seq bsize')))
-        mass' (a/f64 nm) minv' (a/f64 nm) vstar' (a/f64 nd)
-        _ (doseq [[i q] (map-indexed vector blocks)]
-            (let [n (aget bsize (long q))]
-              (copy! mass (aget moff (long q)) mass' (aget moff' i) (* n n))
-              (copy! minv (aget moff (long q)) minv' (aget moff' i) (* n n))
-              (copy! vstar (aget boff (long q)) vstar' (aget boff' i) n)))
-        kind' (a/i32 (map #(aget kind (long %)) ks))
-        nrows (map #(rows-of kind %) ks)
-        ^ints krow' (a/i32 (butlast (reductions + 0 nrows)))
-        nr (reduce + nrows)
-        ka' (a/i32 (map #(get at (aget ka (long %)) -1) ks))
-        kb' (a/i32 (map #(get at (aget kb (long %)) -1) ks))
+                (let [f (long f) t (long t)] (dotimes [i (long n)] (aset to (+ t i) (aget from (+ f i))))))
+        ;; old block -> new, -1 for none
+        ^ints at (a/i32 nb -1)
+        _ (dotimes [i nb'] (aset at (aget bl i) (int i)))
+        ^ints bsize' (a/i32 nb') ^ints boff' (a/i32 nb') ^ints moff' (a/i32 nb')
+        [nd nm] (loop [i 0 o 0 m 0]
+                  (if (= i nb')
+                    [o m]
+                    (let [n (aget bsize (aget bl i))]
+                      (aset bsize' i n) (aset boff' i (int o)) (aset moff' i (int m))
+                      (recur (inc i) (+ o n) (+ m (* n n))))))
+        nd (long nd)
+        mass' (a/f64 (long nm)) minv' (a/f64 (long nm)) vstar' (a/f64 nd)
+        _ (dotimes [i nb']
+            (let [q (aget bl i) n (aget bsize q)]
+              (copy! mass (aget moff q) mass' (aget moff' i) (* n n))
+              (copy! minv (aget moff q) minv' (aget moff' i) (* n n))
+              (copy! vstar (aget boff q) vstar' (aget boff' i) n)))
+        size (fn ^long [^long q] (if (neg? q) 0 (aget bsize q)))
+        ^ints kind' (a/i32 nk) ^ints krow' (a/i32 nk) ^ints ka' (a/i32 nk) ^ints kb' (a/i32 nk)
+        rn' (a/f64 nk) rt' (a/f64 nk) vhat' (a/f64 nk) mu' (a/f64 nk)
+        [nr nv] (loop [i 0 r 0 v 0]
+                  (if (= i nk)
+                    [r v]
+                    (let [k (aget kl i) n (rows-of kind k) a (aget ka k) b (aget kb k)]
+                      (aset kind' i (aget kind k)) (aset krow' i (int r))
+                      (aset ka' i (int (if (neg? a) -1 (aget at a))))
+                      (aset kb' i (int (if (neg? b) -1 (aget at b))))
+                      (aset rn' i (aget rn k)) (aset rt' i (aget rt k))
+                      (aset vhat' i (aget vhat k)) (aset mu' i (aget mu k))
+                      (recur (inc i) (+ r n) (+ v (* n (+ (size a) (size b))))))))
+        nr (long nr)
         ^ints va' (a/i32 nr) ^ints vb' (a/i32 nr)
-        nv (reduce + (map (fn [k n] (* (long n) (+ (long (size (aget ka (long k)))) (long (size (aget kb (long k)))))))
-                          ks nrows))
-        vals' (a/f64 nv)
-        pick (fn [^doubles x] (a/f64 (map #(aget x (long %)) ks)))]
-    (loop [ks (seq ks) i 0 s 0]
-      (when ks
-        (let [k (long (first ks)) r0 (aget krow k) na (long (size (aget ka k))) nb (long (size (aget kb k)))
-              s (long (loop [j 0 s (long s)]
+        vals' (a/f64 (long nv))]
+    (loop [i 0 s 0]
+      (when (< i nk)
+        (let [k (aget kl i) r0 (aget krow k) na (size (aget ka k)) nb (size (aget kb k))
+              s (long (loop [j 0 s s]
                         (if (= j (rows-of kind k))
                           s
                           (let [r (+ r0 j) r' (+ (aget krow' i) j)]
@@ -699,11 +710,11 @@
                             (aset vb' r' (int (+ s na)))
                             (copy! vals (aget vb r) vals' (+ s na) nb)
                             (recur (inc j) (+ s na nb))))))]
-          (recur (next ks) (inc i) s))))
-    {:nb nb :nd nd :nk nk :nr nr
+          (recur (inc i) s))))
+    {:nb nb' :nd nd :nk nk :nr nr
      :bsize bsize' :boff boff' :moff moff' :mass mass' :minv minv' :vstar vstar'
      :kind kind' :krow krow' :ka ka' :kb kb' :va va' :vb vb' :vals vals'
-     :rn (pick rn) :rt (pick rt) :vhat (pick vhat) :mu (pick mu)}))
+     :rn rn' :rt rt' :vhat vhat' :mu mu'}))
 
 (defn solve
   "The velocities that minimize the step's cost, and the impulses that
@@ -756,19 +767,20 @@
          (reduce (fn [acc [blocks ks]]
                    (let [p (part problem blocks ks)
                          ^ints poff (:boff p)
-                         guess (let [g (a/f64 (:nd p))]
-                                 (doseq [[i q] (map-indexed vector blocks)]
-                                   (dotimes [j (aget bsize q)]
-                                     (aset g (+ (aget poff i) j) (aget v-init (+ (aget boff q) j)))))
+                         ^ints bl (a/i32 blocks) ^ints kl (a/i32 ks)
+                         guess (let [g (a/f64 (long (:nd p)))]
+                                 (dotimes [i (alength bl)]
+                                   (let [q (aget bl i) o (aget boff q) po (aget poff i)]
+                                     (dotimes [j (aget bsize q)] (aset g (+ po j) (aget v-init (+ o j))))))
                                  g)
                          {:keys [^doubles impulses iterations cost failed factor] ^doubles pv :v}
                          (newton p guess (assoc opts :factor (get (:factors opts) blocks)))]
-                     (doseq [[i q] (map-indexed vector blocks)]
-                       (dotimes [j (aget bsize q)]
-                         (aset v (+ (aget boff q) j) (aget pv (+ (aget poff i) j)))))
-                     (doseq [[i k] (map-indexed vector ks)]
-                       (dotimes [t 3]
-                         (aset gam (+ (* 3 (long k)) t) (aget impulses (+ (* 3 (long i)) t)))))
+                     (dotimes [i (alength bl)]
+                       (let [q (aget bl i) o (aget boff q) po (aget poff i)]
+                         (dotimes [j (aget bsize q)] (aset v (+ o j) (aget pv (+ po j))))))
+                     (dotimes [i (alength kl)]
+                       (let [k3 (* 3 (aget kl i)) i3 (* 3 i)]
+                         (dotimes [t 3] (aset gam (+ k3 t) (aget impulses (+ i3 t))))))
                      (cond-> (-> acc
                                  (update :iterations max iterations)
                                  (update :cost + cost))

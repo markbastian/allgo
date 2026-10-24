@@ -199,17 +199,27 @@
     (aset out (+ b 8) (+ (* m20 m20 ix) (* m21 m21 iy) (* m22 m22 iz)))
     out))
 
-(defn- tangents
-  "Two directions perpendicular to `n` and to each other.
+(defn- tangents!
+  "Two directions perpendicular to `n` and to each other, into `t1` and
+  `t2` at `k3`.
 
   Friction acts in the contact plane, and the plane needs a basis. Which
-  basis does not matter as long as it is consistent within a step."
-  [[nx ny nz]]
-  (let [t (if (< (abs (double nx)) 0.57735)
-            [1.0 0.0 0.0]
-            [0.0 1.0 0.0])
-        t1 (v/normalize (v/cross [nx ny nz] t))]
-    [t1 (v/cross [nx ny nz] t1)]))
+  basis does not matter as long as it is consistent within a step: n
+  crossed with x, or with y when n is nearer x, normalized, then n
+  crossed with that. In primitives, the same arithmetic as `v/cross` and
+  `v/normalize` in the same order; as vectors it was a third of `prepare`."
+  [^doubles t1 ^doubles t2 ^long k3 [nx ny nz]]
+  (let [nx (double nx) ny (double ny) nz (double nz)
+        x? (< (abs nx) 0.57735)
+        ;; n x (1 0 0) = (0 nz -ny), n x (0 1 0) = (-nz 0 nx)
+        ax (if x? 0.0 (- nz)) ay (if x? nz 0.0) az (if x? (- ny) nx)
+        l (math/sqrt (+ (* ax ax) (* ay ay) (* az az)))
+        s (if (zero? l) 0.0 (/ 1.0 l))
+        ax (* ax s) ay (* ay s) az (* az s)]
+    (aset t1 k3 ax) (aset t1 (+ k3 1) ay) (aset t1 (+ k3 2) az)
+    (aset t2 k3 (- (* ny az) (* nz ay)))
+    (aset t2 (+ k3 1) (- (* nz ax) (* nx az)))
+    (aset t2 (+ k3 2) (- (* nx ay) (* ny ax)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Impulses
@@ -446,28 +456,27 @@
         ;; for an edge pair or a ball, which have no face -- and the normal
         ;; in that body's frame, so it can turn with the face.
         ^ints ref-arr (a/i32 n) nloc (a/f64 (* n 3))
-        t0 (a/f64 3) s0 (a/f64 3)]
+        t0 (a/f64 3) s0 (a/f64 3)
+        ;; the pair the last contact was on, and how many of its points
+        ;; came before this one: a pair's points mostly come back in the
+        ;; order they went, so last step's at the same place is tried
+        ;; before the rest
+        ^longs run (long-array [-1 0])]
     (dotimes [k n]
       (let [c (nth contacts k)
             ia (long (:a c)) ib (long (:b c))
             nrm (:normal c)
             [nx ny nz] nrm
             [qx qy qz] (:point c)
-            ;; One call, both directions. Friction needs a basis for the
-            ;; contact plane and `tangents` builds the whole of it.
-            [[ax ay az] [bx by bz]] (tangents nrm)
             k3 (* k 3) ia3 (* ia 3) ib3 (* ib 3)]
         (aset a-arr k (int ia))
         (aset b-arr k (int ib))
         (aset normal k3 (double nx))
         (aset normal (+ k3 1) (double ny))
         (aset normal (+ k3 2) (double nz))
-        (aset t1-arr k3 (double ax))
-        (aset t1-arr (+ k3 1) (double ay))
-        (aset t1-arr (+ k3 2) (double az))
-        (aset t2-arr k3 (double bx))
-        (aset t2-arr (+ k3 1) (double by))
-        (aset t2-arr (+ k3 2) (double bz))
+        ;; One call, both directions. Friction needs a basis for the
+        ;; contact plane and `tangents!` builds the whole of it.
+        (tangents! t1-arr t2-arr k3 nrm)
         (let [id (:id c)
               side (if (and (vector? id) (boolean? (first id))) (if (first id) 2 1) 0)]
           (aset ref-arr k (int side))
@@ -505,12 +514,18 @@
           (aset rbl (+ k3 1) (aget s0 1))
           (aset rbl (+ k3 2) (aget s0 2)))
         (aset ids k (:id c))
-        (when-let [j (when-let [[start cnt] (get old-index (pair-key ia ib))]
-                       (let [id (:id c) end (+ (long start) (long cnt))]
-                         (loop [j (long start)]
-                           (cond (= j end) nil
-                                 (= id (aget old-ids j)) j
-                                 :else (recur (inc j))))))]
+        (when-let [j (let [key (pair-key ia ib)
+                           at (if (= key (aget run 0)) (inc (aget run 1)) 0)]
+                       (aset run 0 key) (aset run 1 at)
+                       (when-let [[start cnt] (get old-index key)]
+                         (let [id (:id c) start (long start) end (+ start (long cnt))
+                               guess (+ start at)]
+                           (if (and (< guess end) (= id (aget old-ids guess)))
+                             guess
+                             (loop [j start]
+                               (cond (= j end) nil
+                                     (= id (aget old-ids j)) j
+                                     :else (recur (inc j))))))))]
           (aset pn k (aget old-pn j))
           ;; The tangential impulses come back too, now that the match is
           ;; exact. They were being dropped -- stored by `contact-state`
@@ -1738,17 +1753,21 @@
               (aset jac (+ r 9) (- (* rby dz) (* rbz dy)))
               (aset jac (+ r 10) (- (* rbz dx) (* rbx dz)))
               (aset jac (+ r 11) (- (* rbx dy) (* rby dx)))))
-          ;; the normal's effective inverse mass, as the impulse solvers have it
-          (let [w-of (fn [^long i ^long off j0]
-                       (if (neg? off)
-                         0.0
-                         (let [i9 (* 9 i)
-                               x (aget jac (+ base j0 3)) y (aget jac (+ base j0 4)) z (aget jac (+ base j0 5))]
-                           (+ (aget inv-mass i)
-                              (* x (+ (* (aget ii i9) x) (* (aget ii (+ i9 1)) y) (* (aget ii (+ i9 2)) z)))
-                              (* y (+ (* (aget ii (+ i9 3)) x) (* (aget ii (+ i9 4)) y) (* (aget ii (+ i9 5)) z)))
-                              (* z (+ (* (aget ii (+ i9 6)) x) (* (aget ii (+ i9 7)) y) (* (aget ii (+ i9 8)) z)))))))
-                wn (+ (double (w-of ia pa 0)) (double (w-of ib pb 6)))
+          ;; the normal's effective inverse mass, as the impulse solvers
+          ;; have it: each side that moves, its angular part at `j`
+          (let [wn (loop [s 0 acc 0.0]
+                     (if (= s 2)
+                       acc
+                       (let [i (if (zero? s) ia ib) off (if (zero? s) pa pb)]
+                         (recur (inc s)
+                                (if (neg? off)
+                                  acc
+                                  (let [i9 (* 9 i) j (+ base (if (zero? s) 3 9))
+                                        x (aget jac j) y (aget jac (+ j 1)) z (aget jac (+ j 2))]
+                                    (+ acc (aget inv-mass i)
+                                       (* x (+ (* (aget ii i9) x) (* (aget ii (+ i9 1)) y) (* (aget ii (+ i9 2)) z)))
+                                       (* y (+ (* (aget ii (+ i9 3)) x) (* (aget ii (+ i9 4)) y) (* (aget ii (+ i9 5)) z)))
+                                       (* z (+ (* (aget ii (+ i9 6)) x) (* (aget ii (+ i9 7)) y) (* (aget ii (+ i9 8)) z))))))))))
                 wn (max wn 1e-9)
                 over (- (aget depth c) slop)
                 push (if (pos? over)

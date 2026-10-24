@@ -644,6 +644,20 @@ for sequential impulse / TGS / XPBD, and it passes every test in
   1e-6 to 1e-3, only bought more Newton steps and were slower.
   `solve` returns the factors by island and takes them back; the
   callers keep them while every body has the block it had.
+- **And what was around the solve** (2026-10-23), the wall settled
+  after five seconds, 11.2 ms a step to 9.8. The wall is two islands --
+  255 bricks, and one touching only the floor -- so the big one is
+  copied into a problem of its own every step, and that copy was
+  sequences and a `zipmap`: 1.5 ms, now 0.6 on arrays. In `prepare`,
+  which every solver shares, `tangents` built its basis as vectors, a
+  third of the 1.6 ms; written into the arrays in primitives, with the
+  same arithmetic in the same order, it is bit-identical. And last
+  step's impulses are looked for first at the same place in the pair's
+  manifold, where they nearly always are, before the scan of vector ids.
+  `prepare` is 1.0 ms now, and sequential impulse, TGS and XPBD gain
+  0.4 to 0.9 ms a step on the wall with it. What is left of the convex
+  step is conjugate gradients (2.7 ms, at about a nanosecond a
+  multiply-add), detection (1.7) and building the problem (1.0).
 
 Its two numbers were chosen on columns, so they were then tried on
 everything else the bricks demo asks (JVM, settled first, friction
