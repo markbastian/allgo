@@ -219,6 +219,40 @@
       (is (< (abs (double (first (:qd (:pose (first (:models later))))))) 0.05)
           "the swing was stopped by the other model"))))
 
+(def ^:private four-bar
+  "A parallelogram as one model: two meter bars hinged half a meter
+  apart, and a coupler hinged to the left one's tip. Its far end pinned
+  to the right bar's tip closes the loop."
+  [{:parent -1 :joint :revolute :axis [0.0 0.0 1.0] :origin {:rot nil :pos [-0.25 0.0 0.0]}
+    :mass 2.0 :com [0.0 -0.5 0.0] :inertia (box-inertia [0.1 1.0 0.1] 2.0)}
+   {:parent 0 :joint :revolute :axis [0.0 0.0 1.0] :origin {:rot nil :pos [0.0 -1.0 0.0]}
+    :mass 1.0 :com [0.25 0.0 0.0] :inertia (box-inertia [0.5 0.1 0.1] 1.0)}
+   {:parent -1 :joint :revolute :axis [0.0 0.0 1.0] :origin {:rot nil :pos [0.25 0.0 0.0]}
+    :mass 2.0 :com [0.0 -0.5 0.0] :inertia (box-inertia [0.1 1.0 0.1] 2.0)}])
+
+(deftest loop-in-one-model-test
+  (testing "a pin between two links of one model closes a loop in it, and leaves it the freedom it has"
+    ;; A tree cannot describe a four-bar linkage; the pin is the fourth
+    ;; bar. What is left is one degree of freedom: the bars swing
+    ;; together, the coupler stays level, and the swing keeps its height.
+    (doseq [solver [:convex :sequential-impulse]]
+      (let [wd (w/world [] [{:model four-bar :pose {:q [0.0 0.0 0.0] :qd [2.0 -2.0 2.0]}}]
+                        {:gravity g :solver solver :self-collide? false
+                         :pins [{:a [:link 0 1] :pa [0.5 0.0 0.0] :b [:link 0 2] :pb [0.0 -1.0 0.0]}]})
+            gap (fn [s] (let [configs (mapv (fn [{:keys [model pose]}] (ab/configuration model (:q pose) nil))
+                                            (:models s))]
+                          (apply v/distance (w/pin-points s configs (first (:pins s))))))
+            states (take 960 (iterate #(w/step % (/ 1.0 240.0)) wd))
+            qs (map #(:q (:pose (first (:models %)))) states)
+            worst (fn [f] (apply max (map f qs)))]
+        (is (< (apply max (map gap states)) 1e-5) (str solver " stays joined"))
+        (is (< (worst (fn [[a b _]] (abs (+ (double a) (double b))))) 1e-5) (str solver " the coupler level"))
+        (is (< (worst (fn [[a _ c]] (abs (- (double a) (double c))))) 1e-5) (str solver " the bars together"))
+        ;; From 2 rad/s at the bottom a meter bar's swing tops out near
+        ;; 0.57 rad, on both sides, every time.
+        (is (< 0.56 (worst (fn [[a]] (double a))) 0.58) (str solver " and swinging as high as it started"))
+        (is (< 0.56 (worst (fn [[a]] (- (double a)))) 0.58))))))
+
 (deftest pin-breaks-test
   (testing "a pin asked to hold more than its break force lets go"
     (let [bx (rigid/box {:pos [0.0 2.0 0.0] :size [0.3 0.3 0.3] :density 1000.0})

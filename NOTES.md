@@ -749,6 +749,27 @@ two-sided ones. What came of it:
 
 ## Tried and not kept
 
+- **Three items measured and not built** (2026-10-23).
+  - *XPBD in `allgo.physics.world`.* It was wanted for stacking, and
+    the convex solve, now the default, stands thirty cubes where the
+    sequential impulse holds six. It is the weakest of the four in the
+    bricks comparison above, it needs the substeps that
+    `allgo.physics.world` tried and dropped (2026-10-22), and on
+    articulated models it would be a new integrator, constraints on
+    joint angles at the position level.
+  - *Manifold reduction with per-pair stiffness.* Under the convex
+    solve there is nothing to reduce: a 9x8 wall, a ten-cube column and
+    a thirty-box pile settle with every pair at four points or fewer.
+    Only the impulse solvers make more (TGS: 43 of 163 wall pairs at six
+    or eight), and there the reduction was a wash (below), and the
+    per-pair stiffness it was to come with is the load-scaled stiffness
+    below, worse than uniform at every setting.
+  - *SIMD and graph coloring* (Box2D v3). The demos run in a browser
+    from GitHub Pages: no SIMD short of WebAssembly, and a parallel
+    solve over colored batches needs workers sharing memory, which
+    needs cross-origin isolation headers Pages cannot send. It could
+    only ever speed up the JVM.
+
 - **Skipping the narrow phase for pairs that have not moved** (2026-10-23,
   measured and not built). On the settled 16x16 wall it is about 1.0 ms
   of a 9.8 ms convex step or a 6 ms sequential impulse one, so that is
@@ -1018,12 +1039,15 @@ adds nothing when there is nothing to add. And the exchange loses
 momentum only as fast as the integrator does, which is first order:
 halve the step and the loss halves.
 
-What it is not: sequential impulse only, with no substepping, no
-XPBD, no sleeping, and warm starting that lasts a step rather than
-crossing between them. `allgo.physics.solver` keeps all of those and
-is still the thing for a scene that is only bricks. Two articulated
-models touch each other through the same sweep and can be pinned
-together, which is how the motorcycle carries its rider.
+What it was not, at first: anything but sequential impulse, with no
+sleeping and warm starting that lasted a step. It has since gained
+sleeping, warm starting across steps, and the convex solve as its
+default (below); it still has no substepping and no XPBD.
+`allgo.physics.solver` is still the thing for a scene that is only
+bricks. Two articulated models touch each other through the same sweep
+and can be pinned together, which is how the motorcycle carries its
+rider -- and a pin between two links of one model closes a loop in it,
+a four-bar linkage as three links and a pin (`loop-in-one-model-test`).
 
 ## A rider who stays on, and a crash that stays in one piece
 

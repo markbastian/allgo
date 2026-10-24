@@ -36,7 +36,9 @@
   in the number of links.
 
   What it gives up is being able to come apart or close a loop: a tree of
-  joints is the whole of what it can describe.
+  joints is the whole of what it can describe. A loop is closed outside
+  it, by an `allgo.physics.world` pin between two of its links -- a
+  four-bar linkage is three links and a pin (`loop-in-one-model-test`).
 
   ## Hitting itself
 
