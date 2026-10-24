@@ -747,6 +747,33 @@ two-sided ones. What came of it:
   lever, the convex solve from 1.0, so full lever is a stoppie to
   vertical and back. Neither is obviously the wrong answer.
 
+**Convex in a browser** (2026-10-23). The ragdoll scene, run under Node
+from a `:simple` build and profiled with `--cpu-prof`, was 88 ms a step
+under the convex solve against the JVM's 2.5. Three things, in order:
+
+- **`=` on numbers.** In ClojureScript it is `cljs.core/=`, a generic
+  call through `-equiv`, where Clojure on primitive longs compiles it to
+  a comparison -- and every loop in `allgo.physics.convex` ended on one.
+  A fifth of the step. `==` is the numeric comparison in both: 88 ms
+  became 30.
+- **The Newton matrix's rows found once.** `hessian!` looked up each
+  entry's place in the envelope separately; a row's columns from a
+  block on are one run of it. Bit-identical, and 30 became 28.
+- **No response for a row the convex solve does not need.** A model's
+  side of a contact was prepared as the sequential impulse wants it,
+  with what an impulse does to every joint -- most of the cost of
+  `prepare`. The convex solve holds the mass matrix itself, so it now
+  asks only for the row, and the effective mass the regularization
+  scales by is `g' M^-1 g` from its own inverse: 23 ms. Islands under
+  a hundred rows are factored afresh every direction, which there is
+  cheaper than conjugate gradients on a kept factor: 20.
+
+In Chrome, from a release build, the demo is at most 13 ms a frame as
+the figure lands -- the sequential impulse 8 -- and both 2 once it
+sleeps, so the demo starts on convex again. The 35-45 ms that had it
+start on the sequential impulse were a development build, and bricks
+that started inside the slab.
+
 ## Tried and not kept
 
 - **Easing a joint limit's kink for Newton** (2026-10-23). The ragdoll's

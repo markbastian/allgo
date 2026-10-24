@@ -160,9 +160,9 @@
         (let [r (+ r0 i) sa (aget va r) sb (aget vb r)]
           (aset out r
                 (+ (double (loop [j 0 acc 0.0]
-                             (if (= j na) acc (recur (inc j) (+ acc (* (aget vals (+ sa j)) (aget v (+ oa j))))))))
+                             (if (== j na) acc (recur (inc j) (+ acc (* (aget vals (+ sa j)) (aget v (+ oa j))))))))
                    (double (loop [j 0 acc 0.0]
-                             (if (= j nb) acc (recur (inc j) (+ acc (* (aget vals (+ sb j)) (aget v (+ ob j))))))))))))))
+                             (if (== j nb) acc (recur (inc j) (+ acc (* (aget vals (+ sb j)) (aget v (+ ob j))))))))))))))
   out)
 
 (defn- block-mul!
@@ -173,7 +173,7 @@
       (dotimes [r n]
         (aset out (+ o r)
               (double (loop [c 0 acc 0.0]
-                        (if (= c n) acc (recur (inc c) (+ acc (* (aget mats (+ m (* r n) c)) (aget x (+ o c))))))))))))
+                        (if (== c n) acc (recur (inc c) (+ acc (* (aget mats (+ m (* r n) c)) (aget x (+ o c))))))))))))
   out)
 
 (defn- impulses!
@@ -184,7 +184,7 @@
            ^doubles vc ^doubles gam gms]
   (let [y (a/f64 3) g (a/f64 3) gm (a/f64 9)]
     (loop [k 0 total 0.0]
-      (if (= k nk)
+      (if (== k nk)
         total
         (let [kd (aget kind k) r0 (aget krow k)
               cost (if (zero? kd)
@@ -195,7 +195,7 @@
                        (project! (aget mu k) (aget rn k) (aget rt k) y g gm))
                      (let [vn (aget vc r0)]
                        (aset y 0 (/ (- (aget vhat k) vn) (aget rn k)))
-                       (one-row! (= kd unilateral) (aget rn k) y g gm)))
+                       (one-row! (== kd unilateral) (aget rn k) y g gm)))
               k3 (* 3 k)]
           (aset gam k3 (aget g 0)) (aset gam (+ k3 1) (aget g 1)) (aset gam (+ k3 2) (aget g 2))
           (when gms
@@ -212,7 +212,7 @@
         ^doubles vc (row-velocities! problem v (a/f64 nr))]
     (dotimes [i nd] (aset dv i (- (aget v i) (aget vstar i))))
     (block-mul! problem mass dv scratch)
-    (let [kinetic (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget dv i) (aget scratch i))))))]
+    (let [kinetic (loop [i 0 s 0.0] (if (== i nd) s (recur (inc i) (+ s (* (aget dv i) (aget scratch i))))))]
       (+ (* 0.5 kinetic) (impulses! problem vc gam gms)))))
 
 (defn- add-jt-gamma!
@@ -252,7 +252,7 @@
               (dotimes [b nb] (aset adj b (transient #{})))
               (dotimes [k (long nk)]
                 (let [a (aget ka k) b (aget kb k)]
-                  (when (and (>= a 0) (>= b 0) (not= a b))
+                  (when (and (>= a 0) (>= b 0) (not (== a b)))
                     (aset adj a (conj! (aget adj a) b))
                     (aset adj b (conj! (aget adj b) a)))))
               (mapv #(persistent! %) adj))
@@ -308,13 +308,6 @@
   ^long [^ints first-col ^ints start ^long i ^long j]
   (+ (aget start i) (- j (aget first-col i))))
 
-(defn- add-at!
-  "Adds `x` at row `i`, column `j` of the lower triangle, either order."
-  [^doubles h ^ints first-col ^ints start i j x]
-  (let [i (long i) j (long j)
-        idx (if (>= i j) (at first-col start i j) (at first-col start j i))]
-    (aset h idx (+ (aget h idx) (double x)))))
-
 (defn- factor!
   "Cholesky, in place, of the envelope-stored matrix in `h`: the lower
   factor overwrites it. Nothing outside the envelope fills in. False if
@@ -325,7 +318,7 @@
   (let [nd (long nd)
         row (fn ^long [^long i] (- (aget start i) (aget first i)))]
     (loop [i 0]
-      (if (= i nd)
+      (if (== i nd)
         true
         (let [fi (aget first i)
               ri (long (row i))
@@ -335,7 +328,7 @@
                       (let [rj (long (row j))
                             k0 (max fi (aget first j))
                             s (loop [k k0 s (aget h (+ ri j))]
-                                (if (= k j) s (recur (inc k) (- s (* (aget h (+ ri k)) (aget h (+ rj k)))))))]
+                                (if (== k j) s (recur (inc k) (- s (* (aget h (+ ri k)) (aget h (+ rj k)))))))]
                         (if (< j i)
                           (do (aset h (+ ri j) (/ s (aget h (+ rj j))))
                               (recur (inc j)))
@@ -352,7 +345,7 @@
     (dotimes [i nd]
       (let [ri (- (aget start i) (aget first i))
             s (loop [k (aget first i) s (aget b i)]
-                (if (= k i) s (recur (inc k) (- s (* (aget h (+ ri k)) (aget b k))))))]
+                (if (== k i) s (recur (inc k) (- s (* (aget h (+ ri k)) (aget b k))))))]
         (aset b i (/ s (aget h (+ ri i))))))
     (loop [i (dec nd)]
       (when (>= i 0)
@@ -382,7 +375,7 @@
   ;; Per constraint, for each block it joins, `w_i` = sum over j of
   ;; G_ij row_j against that block; then the block pair's entries are
   ;; sum over i of row_i against the first block times w_i.
-  (let [stride (long (loop [b 0 m 1] (if (= b nb) m (recur (inc b) (max m (aget bsize b))))))
+  (let [stride (long (loop [b 0 m 1] (if (== b nb) m (recur (inc b) (max m (aget bsize b))))))
         w (a/f64 (* 3 stride))]
     (dotimes [k nk]
       (let [nr (rows-of kind k) r0 (aget krow k) k9 (* 9 k)
@@ -397,7 +390,7 @@
                   (dotimes [s nq]
                     (aset w (+ (* i stride) s)
                           (double (loop [j 0 acc 0.0]
-                                    (if (= j nr) acc
+                                    (if (== j nr) acc
                                         (recur (inc j) (+ acc (* (aget gms (+ k9 (* 3 i) j))
                                                                  (aget vals (+ (aget ^ints voff (+ r0 j)) s)))))))))))
                 (dotimes [sp 2]
@@ -407,15 +400,20 @@
                             poff (if (zero? sp) va vb)
                             pn (aget noff p) qn (aget noff q)]
                         ;; the lower triangle only: block p at or below q
-                        (when (or (> pn qn) (and (= pn qn) true))
+                        (when (>= pn qn)
                           (dotimes [r np]
-                            (dotimes [s nq]
-                              (when (or (> pn qn) (>= r s))
+                            ;; a row's columns from block q on are one run
+                            ;; of the envelope, so its place is found once
+                            (let [row (+ pn r)
+                                  base (+ (- (aget start row) (aget first row)) qn)
+                                  ns (if (> pn qn) nq (inc r))]
+                              (dotimes [s ns]
                                 (let [x (loop [i 0 acc 0.0]
-                                          (if (= i nr) acc
+                                          (if (== i nr) acc
                                               (recur (inc i) (+ acc (* (aget vals (+ (aget ^ints poff (+ r0 i)) r))
-                                                                       (aget w (+ (* i stride) s)))))))]
-                                  (add-at! h first start (+ pn r) (+ qn s) x)))))))))))))))))
+                                                                       (aget w (+ (* i stride) s)))))))
+                                      idx (+ base s)]
+                                  (aset h idx (+ (aget h idx) x))))))))))))))))))
   h)
 
 ;; Last step's factor, kept
@@ -443,7 +441,7 @@
       (dotimes [i nr]
         (aset t (+ k3 i)
               (double (loop [j 0 s 0.0]
-                        (if (= j nr)
+                        (if (== j nr)
                           s
                           (recur (inc j) (+ s (* (aget gms (+ k9 (* 3 i) j)) (aget jx (+ r0 j))))))))))))
   (block-mul! problem mass x out)
@@ -465,7 +463,7 @@
     out))
 
 (defn- dot ^double [^doubles a ^doubles b]
-  (loop [i 0 s 0.0] (if (= i (alength a)) s (recur (inc i) (+ s (* (aget a i) (aget b i)))))))
+  (loop [i 0 s 0.0] (if (== i (alength a)) s (recur (inc i) (+ s (* (aget a i) (aget b i)))))))
 
 (defn- conjugate-gradients!
   "Solves (M + J' G J) `x` = `b` into `x`, preconditioned by `factor`, to
@@ -539,20 +537,20 @@
         vc (a/f64 nr)
         ^ints krow (:krow problem)
         ;; the slope at `v + a dir`: dir . M (v + a dir - v*) - (J dir) . g
-        dv0 (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (- (aget v i) (aget vstar i)) (aget md i))))))
-        dd (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (+ s (* (aget dir i) (aget md i))))))
+        dv0 (loop [i 0 s 0.0] (if (== i nd) s (recur (inc i) (+ s (* (- (aget v i) (aget vstar i)) (aget md i))))))
+        dd (loop [i 0 s 0.0] (if (== i nd) s (recur (inc i) (+ s (* (aget dir i) (aget md i))))))
         slope-at (fn [alpha]
                    (let [alpha (double alpha)]
                      (dotimes [i nr] (aset vc i (+ (aget vc0 i) (* alpha (aget jd i)))))
                      (impulses! problem vc trial-gam nil)
                      (- (+ dv0 (* alpha dd))
                         (loop [k 0 s 0.0]
-                          (if (= k nk)
+                          (if (== k nk)
                             s
                             (let [r0 (aget krow k) k3 (* 3 k)]
                               (recur (inc k)
                                      (+ s (loop [i 0 s2 0.0]
-                                            (if (= i (rows-of kind k))
+                                            (if (== i (rows-of kind k))
                                               s2
                                               (recur (inc i) (+ s2 (* (aget jd (+ r0 i)) (aget trial-gam (+ k3 i)))))))))))))))
         slope (double slope)
@@ -584,10 +582,12 @@
   by a factor taken afresh, which is kept in its place and returned as
   `:factor`. One that took more than `refactor-after` is worn, and is
   replaced at the next direction: past about a dozen iterations a
-  factor is the cheaper of the two."
+  factor is the cheaper of the two. An island smaller than `cg-from`
+  rows is factored afresh every direction, which there costs less than
+  the iterations would."
   [{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^doubles mass ^doubles vstar] :as problem}
-   v0 {:keys [max-iterations tolerance factor max-cg refactor-after cg-tolerance]
-       :or {max-iterations 30 tolerance 1e-10 max-cg 15 refactor-after 8 cg-tolerance 1e-8}}]
+   v0 {:keys [max-iterations tolerance factor max-cg refactor-after cg-tolerance cg-from]
+       :or {max-iterations 30 tolerance 1e-10 max-cg 15 refactor-after 8 cg-tolerance 1e-8 cg-from 100}}]
   (let [v (a/f64 nd)
         ^doubles v-init (or v0 vstar)
         _ (dotimes [i nd] (aset v i (aget v-init i)))
@@ -612,11 +612,11 @@
       (block-mul! problem mass trial grad)
       (dotimes [i nd] (aset grad i (- (aget grad i))))
       (add-jt-gamma! problem gam grad)
-      (let [gnorm (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (aget grad i))))))]
+      (let [gnorm (loop [i 0 s 0.0] (if (== i nd) s (recur (inc i) (max s (abs (aget grad i))))))]
         ;; `grad` holds minus the gradient from here
         (if (or (>= it (long max-iterations)) (<= gnorm (double tolerance)) (zero? nd))
           {:v v :impulses gam :iterations it :cost cost :factor fac}
-          (let [cg (when (and fac (not (:worn? fac)))
+          (let [cg (when (and fac (not (:worn? fac)) (>= nd (long cg-from)))
                      (conjugate-gradients! problem gms fac grad dir cg-tolerance max-cg ws))
                 fac (cond
                       (nil? cg) (when-let [f (fresh!)]
@@ -628,7 +628,7 @@
               {:v v :impulses gam :iterations it :cost cost :failed :not-positive-definite}
               (let [slope (- (dot grad dir))
                     alpha (line-search problem v dir slope trial trial-gam scratch)
-                    step (loop [i 0 s 0.0] (if (= i nd) s (recur (inc i) (max s (abs (* (double alpha) (aget dir i)))))))]
+                    step (loop [i 0 s 0.0] (if (== i nd) s (recur (inc i) (max s (abs (* (double alpha) (aget dir i)))))))]
                 (dotimes [i nd] (aset v i (aget trial i)))
                 (let [cost' (evaluate! problem v gam gms scratch)]
                   (if (< step 1e-12)
@@ -644,7 +644,7 @@
         ^ints root (a/i32 (range nb))
         find (fn [b] (loop [b (long b)]
                        (let [p (aget root b)]
-                         (if (= p b) b (do (aset root b (aget root p)) (recur p))))))]
+                         (if (== p b) b (do (aset root b (aget root p)) (recur p))))))]
     (dotimes [k (long nk)]
       (let [a (aget ka k) b (aget kb k)]
         (when (and (>= a 0) (>= b 0))
@@ -652,7 +652,7 @@
     (let [key (fn [k] (find (if (neg? (aget ka k)) (aget kb k) (aget ka k))))
           ks (group-by key (range nk))]
       (vec (for [[r cs] ks]
-             [(vec (filter #(= r (find %)) (range nb))) cs])))))
+             [(vec (filter #(== r (find %)) (range nb))) cs])))))
 
 (defn- part
   "The island of `blocks` and constraints `ks` as a problem of its own.
@@ -670,7 +670,7 @@
         _ (dotimes [i nb'] (aset at (aget bl i) (int i)))
         ^ints bsize' (a/i32 nb') ^ints boff' (a/i32 nb') ^ints moff' (a/i32 nb')
         [nd nm] (loop [i 0 o 0 m 0]
-                  (if (= i nb')
+                  (if (== i nb')
                     [o m]
                     (let [n (aget bsize (aget bl i))]
                       (aset bsize' i n) (aset boff' i (int o)) (aset moff' i (int m))
@@ -686,7 +686,7 @@
         ^ints kind' (a/i32 nk) ^ints krow' (a/i32 nk) ^ints ka' (a/i32 nk) ^ints kb' (a/i32 nk)
         rn' (a/f64 nk) rt' (a/f64 nk) vhat' (a/f64 nk) mu' (a/f64 nk)
         [nr nv] (loop [i 0 r 0 v 0]
-                  (if (= i nk)
+                  (if (== i nk)
                     [r v]
                     (let [k (aget kl i) n (rows-of kind k) a (aget ka k) b (aget kb k)]
                       (aset kind' i (aget kind k)) (aset krow' i (int r))
@@ -702,7 +702,7 @@
       (when (< i nk)
         (let [k (aget kl i) r0 (aget krow k) na (long (size (aget ka k))) nb (long (size (aget kb k)))
               s (long (loop [j 0 s s]
-                        (if (= j (rows-of kind k))
+                        (if (== j (rows-of kind k))
                           s
                           (let [r (+ r0 j) r' (+ (aget krow' i) j)]
                             (aset va' r' (int s))
@@ -756,7 +756,7 @@
   ([problem v0] (solve problem v0 {}))
   ([{:keys [^long nb ^long nd ^long nk ^ints ka ^ints kb ^ints boff ^ints bsize ^doubles vstar] :as problem} v0 opts]
    (let [parts (islands nb nk ka kb)]
-     (if (and (= 1 (count parts)) (= nb (count (first (first parts)))))
+     (if (and (== 1 (count parts)) (== nb (count (first (first parts)))))
        (let [blocks (first (first parts))
              r (newton problem v0 (assoc opts :factor (get (:factors opts) blocks)))]
          (-> r (dissoc :factor) (assoc :factors (if-let [f (:factor r)] {blocks f} {}))))
@@ -807,7 +807,7 @@
     (when (factor! packed env n)
       (let [out (a/f64 (* n n)) col (a/f64 n)]
         (dotimes [j n]
-          (dotimes [i n] (aset col i (if (= i j) 1.0 0.0)))
+          (dotimes [i n] (aset col i (if (== i j) 1.0 0.0)))
           (substitute! packed env n col)
           (dotimes [i n] (aset out (+ (* i n) j) (aget col i))))
         out))))
@@ -865,7 +865,7 @@
         nr (count rows)
         ;; each row's two stretches, laid end to end
         [va vb vals] (loop [r 0 va (transient []) vb (transient []) vals (transient [])]
-                       (if (= r nr)
+                       (if (== r nr)
                          [(persistent! va) (persistent! vb) (persistent! vals)]
                          (let [[ra rb] (nth rows r)
                                s (count vals)

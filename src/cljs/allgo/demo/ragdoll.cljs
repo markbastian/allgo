@@ -209,9 +209,10 @@
        :selfCollide true
        :friction 0.7
        :restitution 0.0
-       ;; Convex is a choice, not the default, until it is fast in a
-       ;; browser: 35-45 ms a frame here against 2.5 on the JVM.
-       :solver "sequential-impulse"
+       ;; In Chrome, a release build: at most 13 ms a frame as the
+       ;; figure lands, against the sequential impulse's 8, and both 2
+       ;; once it sleeps.
+       :solver "convex"
        :iterations 8
        :substeps 1
        :spin 2.0
@@ -397,7 +398,7 @@
                 (.onFinishChange rebuild!))
             (-> (.add controls "friction" 0.0 1.5 0.05))
             (-> (.add controls "restitution" 0.0 0.6 0.05))
-            (-> (.add controls "solver" #js ["sequential-impulse" "convex"]))
+            (-> (.add controls "solver" #js ["convex" "sequential-impulse"]))
             ;; Sweeps of the sequential impulse; the convex solve runs
             ;; Newton to convergence and ignores it.
             (-> (.add controls "iterations" 2 20 1))

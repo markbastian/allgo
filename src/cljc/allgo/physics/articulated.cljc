@@ -1814,6 +1814,22 @@
         w (dot-n g delta)]
     {:g g :delta delta :m (if (> w 1e-12) (/ 1.0 w) 0.0)}))
 
+(defn force-at
+  "`response-at`'s `:force` alone: the generalized force a unit impulse at
+  world point `p` on body `i` along `dir` makes. A solver that holds the
+  mass matrix itself needs only this, and the rest is most of the cost."
+  [model cfg i p dir]
+  (let [{:keys [ls frames q root]} cfg]
+    (generalized-force model ls i (point-force (frame-of model q root i frames) p (v/normalize dir)))))
+
+(defn pair-force-at
+  "`pair-response-at`'s `:force` alone."
+  [model cfg i j p dir]
+  (let [{:keys [ls frames q root]} cfg
+        dir (v/normalize dir)]
+    (pair-force model ls i (point-force (frame-of model q root i frames) p dir)
+                j (point-force (frame-of model q root j frames) p dir))))
+
 (defn configuration
   "Everything about where a model is that a step's worth of questions
   can share: each link's transform and inertia, what every joint weighs

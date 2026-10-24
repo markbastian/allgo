@@ -320,7 +320,9 @@
           coarse (drift (/ 1.0 240.0))
           fine (drift (/ 1.0 960.0))]
       (is (< coarse 1e-3) (str "coarse " coarse))
-      (is (< fine coarse) (str "coarse " coarse " fine " fine))))
+      ;; Or none at all: the convex solve's one exact Newton step on a
+      ;; single contact can leave the pair's total exact to the bit.
+      (is (<= fine coarse) (str "coarse " coarse " fine " fine))))
   (testing "told not to, they pass through each other"
     (let [end (collide (/ 1.0 240.0) {:collide-models? false})]
       (is (> (double (first (:pos (:base (:pose (first (:models end))))))) 1.0)))))

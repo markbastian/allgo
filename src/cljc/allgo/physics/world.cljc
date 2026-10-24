@@ -314,6 +314,11 @@
     (asleep? w side) {:kind :static}
     (rigid-side? side)
     (prepare-rigid bodies (second side) point dir)
+    ;; The convex solve holds each model's mass matrix itself and asks
+    ;; only for the row; the response is most of the cost of a side.
+    (= :convex (:solver w))
+    (let [[_ mi li] side]
+      {:kind :link :mi mi :force (ab/force-at (:model (nth models mi)) (nth configs mi) li point dir)})
     :else
     (let [[_ mi li] side
           {:keys [model]} (nth models mi)
@@ -329,13 +334,15 @@
   Asking each separately would be wrong, not merely slower: the two
   responses interact through everything the pair have in common, which
   is at least the root."
-  [{:keys [models]} configs a b point dir]
+  [{:keys [models] :as w} configs a b point dir]
   (let [[_ mi ai] a
         [_ _ bi] b
-        {:keys [model]} (nth models mi)
-        r (ab/pair-response-at model (nth configs mi) ai bi point dir)]
-    {:kind :pair :mi mi :force (:g r) :delta (:delta r)
-     :w (if (pos? (double (:m r))) (/ 1.0 (double (:m r))) 0.0)}))
+        {:keys [model]} (nth models mi)]
+    (if (= :convex (:solver w))
+      {:kind :pair :mi mi :force (ab/pair-force-at model (nth configs mi) ai bi point dir)}
+      (let [r (ab/pair-response-at model (nth configs mi) ai bi point dir)]
+        {:kind :pair :mi mi :force (:g r) :delta (:delta r)
+         :w (if (pos? (double (:m r))) (/ 1.0 (double (:m r))) 0.0)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; The sweep
@@ -383,7 +390,7 @@
     {:rows (mapv (fn [d]
                    (if pair?
                      (let [s (prepare-pair w configs a b mid d)]
-                       {:pair s :w (double (:w s))})
+                       {:pair s :w (double (or (:w s) 0.0))})
                      (let [sa (prepare-side w configs a pa d)
                            sb (prepare-side w configs b pb d)]
                        {:a sa :b sb :w (+ (double (or (:w sa) 0.0))
@@ -514,7 +521,7 @@
         along (fn [d]
                 (if pair?
                   (let [s (prepare-pair w configs (:a c) (:b c) (:point c) d)]
-                    {:pair s :w (double (:w s))})
+                    {:pair s :w (double (or (:w s) 0.0))})
                   (let [sa (prepare-side w configs (:a c) (:point c) d)
                         sb (prepare-side w configs (:b c) (:point c) d)]
                     {:a sa :b sb :w (+ (double (or (:w sa) 0.0))
@@ -721,6 +728,8 @@
         regularize (fn [wn] (/ (* beta beta (max (double wn) 1e-9)) (* 4.0 math/PI math/PI)))
         ;; blocks, made as the rows reach them
         blocks (volatile! {})
+        ;; each model's inverse mass matrix, flat, as its block was made
+        minvs (volatile! {})
         builder (volatile! (convex/builder))
         block! (fn [key]
                  (if-let [i (get @blocks key)]
@@ -737,8 +746,10 @@
                                     (when-not sleeping?
                                       (let [mass (ab/generalized-mass-matrix model (:q pose) (:ls (nth configs i)))
                                             ^doubles u (nth us i)
-                                            n (alength u)]
-                                        [n (vec mass) (vec (convex/spd-inverse mass n)) (vec u)]))))]
+                                            n (alength u)
+                                            minv (convex/spd-inverse mass n)]
+                                        (vswap! minvs assoc i minv)
+                                        [n (vec mass) (vec minv) (vec u)]))))]
                      (if-not n
                        (do (vswap! blocks assoc key -1) -1)
                        (let [[b' idx] (convex/add-block @builder n mass minv vstar)]
@@ -753,6 +764,24 @@
                    (let [[ka sa] (side-row (:a row)) [kb sb] (side-row (:b row))
                          ia (if ka (block! ka) -1) ib (if kb (block! kb) -1)]
                      [ia ib (when (>= (long ia) 0) sa) (when (>= (long ib) 0) (mapv - sb))])))
+        ;; a row's inverse effective mass, what its regularization is
+        ;; scaled by: a model side's is g' M^-1 g, from the matrix the
+        ;; block was made with, since its side was prepared without one
+        side-w (fn [side]
+                 (case (:kind side)
+                   (:link :pair)
+                   (let [mi (:mi side)]
+                     (if (neg? (long (block! [:model mi])))
+                       0.0
+                       (let [^doubles g (:force side) ^doubles m (get @minvs mi) n (alength g)
+                             ;; row r of M^-1 against g
+                             mg (fn [r] (let [o (* (long r) n)]
+                                          (loop [c 0 x 0.0]
+                                            (if (== c n) x (recur (inc c) (+ x (* (aget m (+ o c)) (aget g c))))))))]
+                         (loop [r 0 acc 0.0]
+                           (if (== r n) acc (recur (inc r) (+ acc (* (aget g r) (double (mg r))))))))))
+                   (double (or (:w side) 0.0))))
+        row-w (fn [row] (if-let [p (:pair row)] (side-w p) (+ (double (side-w (:a row))) (double (side-w (:b row))))))
         add! (fn [kind rows rn rt vhat mu]
                (let [[ka kb] (first rows)]
                  (vswap! builder convex/add-constraint kind ka kb
@@ -764,7 +793,7 @@
                           (let [rows (mapv row-of (:dirs row))
                                 normal (nth (:dirs row) 0)]
                             (when (live? (first rows))
-                              (let [wn (double (:w normal))
+                              (let [wn (double (row-w normal))
                                     over (- (double (:depth c)) slop)
                                     push (if (pos? over) (min (double max-push-speed) (/ over (* tau dt))) (/ over dt))
                                     va (double (speed-of normal vel omega us))
@@ -777,9 +806,9 @@
                 (add! convex/unilateral [row] (regularize (if (pos? (double m)) (/ 1.0 (double m)) 0.0)) 0.0 bias 0.0))))
         pin-at (vec (for [{:keys [rows bias]} pins]
                       (vec (for [r (range 3)]
-                             (let [row (nth rows r) built (row-of row)]
-                               (when (and (live? built) (> (double (:w row)) 1e-12))
-                                 (add! convex/bilateral [built] (regularize (:w row)) 0.0 (nth bias r) 0.0)
+                             (let [row (nth rows r) built (row-of row) wr (double (row-w row))]
+                               (when (and (live? built) (> wr 1e-12))
+                                 (add! convex/bilateral [built] (regularize wr) 0.0 (nth bias r) 0.0)
                                  (dec (count (:kind @builder)))))))))
         problem (convex/build @builder)
         nk (long (:nk problem))
