@@ -101,7 +101,7 @@
    "id": "volumes",
    "group": "Procedural Generation",
    "label": "Clouds, Steam & Fire",
-   "blurb": "Hypertexture and gases, ray marched through solid noise",
+   "blurb": "Hypertexture and gases, ray marched through solid noise, and played as a loop",
    "badges": [
     "Interactive"
    ],
