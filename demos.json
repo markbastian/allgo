@@ -138,6 +138,26 @@
    "href": "play/?demo=antialias"
   },
   {
+   "id": "surflets",
+   "group": "Procedural Generation",
+   "label": "Noise as Surflets",
+   "blurb": "Gradient noise taken apart into one small wave per lattice point, and edited by hand",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=surflets"
+  },
+  {
+   "id": "gesture",
+   "group": "Procedural Generation",
+   "label": "Procedural Gesture",
+   "blurb": "A figure with no keyframes, moved by rhythm and noise, its actions layered and blended",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=gesture"
+  },
+  {
    "id": "hex",
    "group": "Geometry",
    "label": "Hex Grids",
