@@ -26,6 +26,7 @@
             [allgo.demo.fluid :as fluid]
             [allgo.demo.genetic :as genetic]
             [allgo.demo.geometry :as geometry]
+            [allgo.demo.gesture :as gesture]
             [allgo.demo.hex :as hex]
             [allgo.demo.human-arm :as human-arm]
             [allgo.demo.island :as island]
@@ -43,6 +44,7 @@
             [allgo.demo.solar-system :as solar]
             [allgo.demo.spatial-hash :as spatial-hash]
             [allgo.demo.sphere-fluid :as sphere-fluid]
+            [allgo.demo.surflets :as surflets]
             [allgo.demo.terrain-webgl :as terrain]
             [allgo.demo.textures :as textures]
             [allgo.demo.three-body :as three-body]
@@ -81,6 +83,8 @@
    "geometry" {:start geometry/start! :stop geometry/stop!}
    "genetic"  {:start genetic/start!  :stop genetic/stop!}
    "antialias" {:start antialias/start! :stop antialias/stop!}
+   "surflets" {:start surflets/start! :stop surflets/stop!}
+   "gesture"  {:start gesture/start!  :stop gesture/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}

@@ -143,6 +143,13 @@
     (+ (if (zero? (bit-and h 1)) u (- u))
        (if (zero? (bit-and h 2)) v (- v)))))
 
+(defn lattice-gradient
+  "The gradient `gradient-basis` gives the lattice point `i j k` under the
+  permutation table `p`, as a vector: one of the twelve `grad3` picks."
+  [^ints p i j k]
+  (let [h (hash3 p (long i) (long j) (long k))]
+    [(grad3 h 1.0 0.0 0.0) (grad3 h 0.0 1.0 0.0) (grad3 h 0.0 0.0 1.0)]))
+
 (def ^:private grad4-table
   "The 32 gradients of 4D noise: every vector with one zero component and
   +/-1 in the other three, flattened four doubles to a gradient."

@@ -12,7 +12,7 @@ namespaces, and the numbers behind them.
 
 ## Texturing & Modeling
 
-Thirteen namespaces under `allgo.procedural` follow Ebert, Hart,
+Fifteen namespaces under `allgo.procedural` follow Ebert, Hart,
 Musgrave, Peachey, Perlin and Worley, *Texturing & Modeling: A
 Procedural Approach*, and are arranged the way chapter 20 argues they
 should be -- a small set of parts that compose freely, rather than a
@@ -22,10 +22,12 @@ set of finished effects:
 |-------------------------------|---------|------------------------------------------------------------------|
 | `allgo.procedural.shaping`    | 2       | `step`, `smoothstep`, `bias`, `gain`, `spline` -- the vocabulary |
 | `allgo.procedural.noise`      | 2, 12   | Value, gradient and 4D gradient noise, sparse convolution, warps |
+| `allgo.procedural.surflet`    | 12      | Noise as a sum of surflets: separable, radial, editable by hand  |
 | `allgo.procedural.cellular`   | 4       | Worley's F1, F2, F2-F1 and the metrics that reshape the cells    |
 | `allgo.procedural.texture`    | 2-4, 15 | Brick, stone, metal; clouds, water, earth, gas giants; bump maps |
 | `allgo.procedural.antialias`  | Worley  | Box-filtered patterns, octave clamping, and three supersamplers  |
-| `allgo.procedural.volume`     | 6-8, 12 | Fire, steam, cumulus, cirrus, stratus; hypertexture; a ray marcher |
+| `allgo.procedural.volume`     | 6-8, 12 | Hypertexture, fire, steam, cumulus, cirrus, stratus, ray marched |
+| `allgo.procedural.gesture`    | 12      | Procedural gesture: sines and noise, layered and blended         |
 | `allgo.procedural.instancing` | Hart    | Recursive, parameterized instancing: trees, forests, fractals    |
 | `allgo.procedural.lsystem`    | Hart    | L-systems: rewriting, and a turtle with tropism                  |
 | `allgo.procedural.fractal`    | 14, 16  | fBm, turbulence, and the three multifractals                     |
@@ -81,6 +83,22 @@ five of its first samples land on squares of one color it believes the
 pixel is flat. Its corners are not shared between pixels, which a real
 renderer would do, and which would bring that count down -- but not fix
 the moiré.
+
+Perlin's surflets are the same noise read another way, and
+`surflet/basis` proves it: summing one hump-weighted ramp per lattice
+point reproduces `noise/gradient-basis` to 1e-15, because a corner's
+blend weight along an axis is one minus the fade, which is the hump.
+What the reading buys is locality -- an edited gradient changes the
+noise within a cell of its point and nowhere else, which the tests
+check point by point -- and the freedom to make the hump round, at the
+price of reaching 64 lattice points in 3D instead of 8.
+
+`gesture` is the other half of the same chapter: noise used for time
+rather than space. Its actions are ranges of joint angles driven by
+sines and noise, in three layers that blend; a change in the middle
+of a change freezes the half-finished blend as its starting point, so
+the angles never jump, and the legs are solved by two-bone IK rather
+than animated, so the feet stay planted whatever the hips do.
 
 ## Perlin noise and fBm
 
