@@ -100,6 +100,17 @@ of a change freezes the half-finished blend as its starting point, so
 the angles never jump, and the legs are solved by two-bone IK rather
 than animated, so the feet stay planted whatever the hips do.
 
+The volumes are animated Ebert's way, by moving the noise through a
+gas that stays put, and every one but the two solid hypertextures takes
+`:time`; the catalog marks which (`:moves?`), and the tests hold it to
+that. Playing them is the problem: a frame is hundreds of thousands of
+ray marches on the CPU, so the demo renders a loop once, small -- a
+frame of 240 pixels takes about two seconds -- at eight frames a second,
+and plays it back fading each frame into the next, which gas forgives.
+Noise in time never repeats, so a quarter as many frames again are
+rendered past the end and faded into the start; measured frame to frame
+across the seam, the picture changes no more there than anywhere else.
+
 ## Perlin noise and fBm
 
 `allgo.procedural.noise` (value, gradient, 4D

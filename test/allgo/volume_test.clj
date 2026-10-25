@@ -19,7 +19,17 @@
         (doseq [i (range 200)
                 :let [a (* 0.31 i) b (* 0.17 i)
                       p [(* 0.999 (Math/cos a) (Math/cos b)) (* 0.999 (Math/sin b)) (* 0.999 (Math/sin a) (Math/cos b))]]]
-          (is (< (apply density p) 0.05) name))))))
+          (is (< (apply density p) 0.05) name)))))
+  (testing "the volumes marked as moving change with time, and the rest keep still"
+    (doseq [{:keys [name make moves?]} vol/catalog]
+      (let [a (:density (make {:time 0.0}))
+            b (:density (make {:time 0.7}))
+            pts (for [i (range 300) :let [r (* 0.003 i) t (* 0.9 i)]]
+                  [(* r (Math/cos t)) (- (* 0.002 i) 0.25) (* r (Math/sin t))])
+            change (reduce max (map #(abs (- (apply a %) (apply b %))) pts))]
+        (if moves?
+          (is (> change 0.05) name)
+          (is (zero? change) name))))))
 
 (deftest march-test
   (let [ray (vol/camera-ray 0.0 0.0 3.0 0.8 0.0 0.0)]

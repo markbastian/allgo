@@ -173,9 +173,12 @@
   is procedural: the point is moved by turbulence before the blobs are
   asked about it, which tears the smooth outline into billows, and more
   turbulence thins the inside. Neither level alone looks like a cloud --
-  blobs are cotton wool, turbulence is fog."
+  blobs are cotton wool, turbulence is fog.
+
+  `:time` boils it: the noise of both levels is read further down each
+  instant, so billows roll up through a cloud that stays where it is."
   ([] (cumulus {}))
-  ([{:keys [seed blobs billow] :or {seed 0 blobs 14 billow 0.22}}]
+  ([{:keys [seed blobs billow time] :or {seed 0 blobs 14 billow 0.22 time 0.0}}]
    (let [rng (random/rng seed 41 0 0)
          blobs (vec (for [i (range blobs)]
                       (let [a (* 2.0 math/PI (random/uniform rng 1.0))
@@ -187,12 +190,14 @@
                          r])))
          warp (noise/vector-basis {:seed (+ seed 1)})
          t (turbulence (+ seed 2) 4)
-         billow (double billow)]
+         billow (double billow) time (double time)]
      {:density (fn [x y z]
                  (let [x (double x) y (double y) z (double z)
+                       ;; Up through the noise: the billows rise.
+                       ny (- y (* 0.3 time))
                        ;; Two octaves of warp: the billows, and the billows on them.
-                       [wx wy wz] (warp (* 2.5 x) (* 2.5 y) (* 2.5 z))
-                       [vx vy vz] (warp (* 7.0 x) (* 7.0 y) (* 7.0 z))
+                       [wx wy wz] (warp (* 2.5 x) (* 2.5 ny) (* 2.5 z))
+                       [vx vy vz] (warp (* 7.0 x) (* 7.0 ny) (* 7.0 z))
                        px (+ x (* billow (+ (double wx) (* 0.4 (double vx)))))
                        py (+ y (* billow (+ (double wy) (* 0.4 (double vy)))))
                        pz (+ z (* billow (+ (double wz) (* 0.4 (double vz)))))
@@ -206,7 +211,7 @@
                      ;; Turbulence eats into the field before it is
                      ;; thresholded, so the edge breaks into puffs, and
                      ;; thins what is left.
-                     (let [e (t (* 6.0 x) (* 6.0 y) (* 6.0 z))]
+                     (let [e (t (* 6.0 x) (* 6.0 ny) (* 6.0 z))]
                        (* (s/smoothstep 0.3 0.55 (- field (* 0.3 e)))
                           ;; The flat base, where the air stops rising.
                           (s/smoothstep -0.32 -0.22 y)
@@ -319,14 +324,15 @@
       :surface 0.0})))
 
 (def catalog
-  "Every volume here, by name."
+  "Every volume here, by name. `:moves?` marks the ones that `:time`
+  animates; the two hypertextures are solids, and keep still."
   [{:name "noisy sphere" :make noisy-sphere :source "chapter 12"}
    {:name "eroded cube" :make eroded-cube :source "chapter 12"}
-   {:name "fireball" :make fireball :source "chapter 12"}
-   {:name "steam" :make steam :source "chapters 5, 6"}
-   {:name "cumulus" :make cumulus :source "chapter 8"}
-   {:name "cirrus" :make cirrus :source "chapter 8"}
-   {:name "stratus" :make stratus :source "chapter 8"}])
+   {:name "fireball" :make fireball :source "chapter 12" :moves? true}
+   {:name "steam" :make steam :source "chapters 5, 6" :moves? true}
+   {:name "cumulus" :make cumulus :source "chapter 8" :moves? true}
+   {:name "cirrus" :make cirrus :source "chapter 8" :moves? true}
+   {:name "stratus" :make stratus :source "chapter 8" :moves? true}])
 
 ;; ---------------------------------------------------------------------------
 ;; Rendering
