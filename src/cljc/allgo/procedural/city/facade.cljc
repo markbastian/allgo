@@ -71,23 +71,23 @@
 ;; Layers and stacks
 
 (defn layer
-  "A layer of the interval groups `s` and `t`. `eval` is `:and`, `:or`,
+  "A layer of the interval groups `s` and `t`. `combine` is `:and`, `:or`,
   or a function of the two pulses (each `[index fraction]` or nil) and
   the point; `color` is a function of a map of the cell -- `:i :j :u :v`,
   where `u` and `v` are the fractions through it, or nil along a band --
   and the point, `:s :t`."
-  [s t eval color]
-  {:s s :t t :eval eval :color color})
+  [s t combine color]
+  {:s s :t t :eval combine :color color})
 
 (defn active
   "The cell of `layer` at `(s, t)` if the point is active in it, or nil."
-  [{s-group :s t-group :t eval :eval} s t]
+  [{s-group :s t-group :t combine :eval} s t]
   (let [ps (locate s-group s)
         pt (locate t-group t)
-        on (case eval
+        on (case combine
              :and (and ps pt)
              :or (or ps pt)
-             (eval ps pt s t))]
+             (combine ps pt s t))]
     (when on
       {:i (first ps) :u (second ps) :j (first pt) :v (second pt) :s s :t t})))
 
