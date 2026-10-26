@@ -158,6 +158,36 @@
    "href": "play/?demo=gesture"
   },
   {
+   "id": "city-plan",
+   "group": "Procedural Generation",
+   "label": "City Plan",
+   "blurb": "Highways and streets grown by an extended L-system, then cut into blocks and lots",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=city-plan"
+  },
+  {
+   "id": "city",
+   "group": "Procedural Generation",
+   "label": "Procedural City",
+   "blurb": "Land, roads, lots and a building on every lot, grown from a seed and refined round by round",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=city"
+  },
+  {
+   "id": "city-agents",
+   "group": "Procedural Generation",
+   "label": "Town by Agents",
+   "blurb": "Road builders and developers that never meet, growing a town between them",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=city-agents"
+  },
+  {
    "id": "hex",
    "group": "Geometry",
    "label": "Hex Grids",

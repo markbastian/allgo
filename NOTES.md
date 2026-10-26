@@ -302,6 +302,94 @@ on the map ever share one.
 **Not implemented**: states as distinct from realms, religions,
 population, history.
 
+## Cities
+
+Six namespaces under `allgo.procedural.city`, from three papers:
+Parish and Müller, "Procedural Modeling of Cities" (SIGGRAPH 2001),
+for the pipeline; Lechner, Watson, Wilensky and Felsen, "Procedural
+City Modeling", for the agents; and Kelly and McCabe's survey of the
+field, for Greuter's buildings. Plane geometry is in
+`allgo.geometry.polygon`.
+
+| Namespace   | From                          | What it is                                                                        |
+|-------------|-------------------------------|-----------------------------------------------------------------------------------|
+| `land`      | Parish & Müller §2            | The input maps, as functions: elevation, water, population, street pattern, zones |
+| `roads`     | Parish & Müller §3            | Highways and streets by the extended, self-sensitive L-system                     |
+| `lots`      | Parish & Müller §4.1          | Blocks as faces of the road graph, cut into lots                                  |
+| `buildings` | Parish & Müller §4.2, Greuter | A building per lot by a stochastic L-system from its bounding box                 |
+| `facade`    | Parish & Müller §4.3          | Layered grids: interval groups, layers, stacks                                    |
+| `agents`    | Lechner et al.                | Extenders, connectors and developers on a grid of patches                         |
+
+**The L-system is a queue.** The paper's road productions only decide
+*when* each proposed segment is considered: a branch waits out its delay,
+a road module proposes its successor, and everything else -- where a road
+goes and whether it may -- is in the global goals and local constraints
+they call. So the productions are run as what they come to, a queue of
+proposals ordered by when each is due, and popping one and checking it is
+the insertion query `?I`. The paper's own rules are all there: highways
+cast a fan of rays and turn toward the population they sum; streets keep
+to the pattern of their district and stop where nobody lives; patterns
+blend by their weights; a segment into water is pruned, turned or (a
+highway) bridged; one that crosses a road stops there, one ending near a
+junction is pulled to it, one ending short of a road is stretched to it.
+One rule is added: a highway with nobody ahead of it goes straight,
+because the ray casting otherwise turns it back toward the people behind
+it, and the first highways all closed into rings.
+
+**Blocks fall out of the junction rule.** Every crossing is made by
+cutting both roads at one point, so the network is a plane graph with
+exactly shared junctions, and its faces are found by walking it --
+sharpest left at every junction -- after pruning dead ends. A block is
+its face shrunk by half of each surrounding road's width. Lots are the
+paper's recursive rule, a cut across the longest side until under the
+zone's area, and as there, lots that are concave, too small or without a
+street side are thrown away: for seed 2, 3714 lots on 68% of the block
+area, the rest being the middles of deep blocks.
+
+**A building's rounds are its levels of detail.** The axiom is the lot's
+bounding box at its height, every production refines a box into what is
+inside it, and the tests hold every round inside the axiom. So round 0 is
+the city as boxes and the last is the city, and the demo's `detail`
+slider walks between them -- the paper notes this and does not show it.
+Downtown towers step back as they rise, offices are Greuter's plans (each
+section down adds a primitive), low commercial blocks carry plant, and
+houses get gable or hipped roofs. For seed 2 nothing needs more than 7
+rounds; the tallest building is 226 m.
+
+**Facades.** A style is a stack of layers, each two interval groups and a
+function of their pulses, with the wall at the bottom. The house style has
+the paper's own example of a function between layers -- lintels of darker
+brick that exist only over an opening -- and the ground floor is always a
+layer of its own, which is why the 3D demo bakes it as a separate texture
+that repeats only along the street. Window lights are hashed through
+Perlin's permutation table: a seeded stream folded over neighboring cells
+comes out a constant step apart, and lit whole runs of windows at once.
+
+**Agents.** Lechner et al. ran in NetLogo; this is arrays mutated in
+place, so the browser steps it every frame. Their grid constraint is
+taken as "every patch of a road within the deviation of one grid line":
+at 0 the town is a strict grid, at 1 a loose one, from half the spacing
+up organic -- their Figure 5's three towns. A test checks that commerce
+sits on thicker road than housing, which is the pattern their Chicago
+comparison is about. Two choices are mine where the paper gives none: the
+weights in the land value, and that a road laid over a building clears
+it.
+
+**Same seed, same city -- on one platform.** The land and the RNG are
+exact on both, but the road rules take `sin`, `cos` and `exp`, which the
+JVM and V8 may round differently in the last place, and over a thousand
+decisions one near-tie flips: seed 2 grows 1211 segments on the JVM and
+1187 in the browser. Each is repeatable on its own platform. A related
+trap found here: ClojureScript's `(int-array n)` is `n` nils, not zeros,
+so the agents' arrays are all given their zero explicitly.
+
+**Not implemented**: the paper's smoothing of sharp bends, its streets
+lowering the population around them, the zone and height *maps* as input
+images (they are functions of the land here), Sun et al.'s template road
+networks and Wonka's split grammars (the survey describes both too
+briefly to build from), and the agents' speculators and multi-patch plots,
+which the paper lists as future work.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

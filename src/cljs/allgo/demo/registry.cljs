@@ -15,6 +15,9 @@
             [allgo.demo.bricks :as bricks]
             [allgo.demo.broad-phase :as broad-phase]
             [allgo.demo.cave :as cave]
+            [allgo.demo.city :as city]
+            [allgo.demo.city-agents :as city-agents]
+            [allgo.demo.city-plan :as city-plan]
             [allgo.demo.cloth :as cloth]
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dla :as dla]
@@ -85,6 +88,9 @@
    "antialias" {:start antialias/start! :stop antialias/stop!}
    "surflets" {:start surflets/start! :stop surflets/stop!}
    "gesture"  {:start gesture/start!  :stop gesture/stop!}
+   "city-plan" {:start city-plan/start! :stop city-plan/stop!}
+   "city"     {:start city/start!     :stop city/stop!}
+   "city-agents" {:start city-agents/start! :stop city-agents/stop!}
    "sphere-fluid" {:start sphere-fluid/start! :stop sphere-fluid/stop!}
    "dungeon"  {:start dungeon/start! :stop dungeon/stop!}
    "boids"    {:start boids-2d/start! :stop boids-2d/stop!}

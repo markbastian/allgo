@@ -49,6 +49,8 @@ Where a namespace follows a book, it says so. The main ones:
 - **Ebert et al., *Texturing & Modeling: A Procedural Approach***:
   fifteen namespaces under `allgo.procedural`, built as small parts that
   compose freely rather than as finished effects.
+- **Parish & Müller, "Procedural Modeling of Cities"**, with Lechner et
+  al.'s agents and Kelly & McCabe's survey: `allgo.procedural.city`.
 - **Matthias Müller's [Ten Minute Physics](https://matthias-research.github.io/pages/tenMinutePhysics/)**:
   most of `allgo.physics` and `allgo.spatial`.
 - **Craig, *Introduction to Robotics***: `allgo.kinematics`.
@@ -77,7 +79,7 @@ groups:
 
 | Group                 | Demos                                                                                          |
 |-----------------------|------------------------------------------------------------------------------------------------|
-| Procedural Generation | Cellular caves, dungeons, fractal terrain, hydraulic erosion, diffusion-limited aggregation, islands, planets, textures, clouds and fire, trees and L-system plants, bred and antialiased textures, noise as surflets, procedural gesture |
+| Procedural Generation | Cellular caves, dungeons, fractal terrain, hydraulic erosion, diffusion-limited aggregation, islands, planets, textures, clouds and fire, trees and L-system plants, bred and antialiased textures, noise as surflets, procedural gesture, cities grown by L-system and by agents |
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
