@@ -509,6 +509,56 @@ cyclic plans for the slippery vacuum world (4.3.3); partially observable
 search with percepts (4.4.2-4.4.4); and the genetic algorithm on tours,
 for which one-point crossover makes no tour.
 
+## Games, after Russell & Norvig
+
+Chapter 5, `allgo.search.adversarial`, with tic-tac-toe and Connect Four
+in `allgo.search.games` for the demo; the book's figure 5.2 game and a
+chance game are in the tests.
+
+**The same shape again.** Minimax, alpha-beta and expectiminimax are one
+frame function for `call-seq` -- a decision node tries its moves as
+child frames, a chance node sums its outcomes -- with pruning, a depth
+cutoff, move ordering and a transposition table as options to it. To
+count nodes and share a table across frames, `call-seq` gained an
+optional context: state beyond the frames, which a frame may replace as
+it calls or returns. The root's best move and each move's score live
+there too, so a search part way through can be shown. Iterative
+deepening is a composition, alpha-beta passes concatenated, each trying
+the last pass's choice first and inheriting its table; Monte Carlo tree
+search steps one playout at a time. The demo spreads every search across
+animation frames -- a few thousand steps each -- so a full minimax of
+tic-tac-toe runs in the browser without the page stopping.
+
+**Checked against the book.** Figure 5.2's game: minimax values MIN's
+three nodes at 3, 2 and 2 and plays a1 for 3; alpha-beta finds the same
+and never looks at the two leaves figure 5.5 prunes. Tic-tac-toe is a
+draw by every search; full minimax visits 549,946 nodes (the commonly
+quoted size of its tree), alpha-beta 20,866, with the center-corners-
+edges ordering 7,865 and with a transposition table as well 2,178. On
+Connect Four cut off at 4 plies alpha-beta visits 858 nodes to
+minimax's 2,801 for the same value; at 8, ordered and with a table,
+13,734 in 0.2 s on the JVM. A test checks, on random positions, that
+alpha-beta's value is minimax's at the same depth with and without
+ordering and the table, and that every search takes a win in one and
+blocks a loss in one. Expectiminimax is tested on a chance game where an
+order-preserving change to the utilities changes the move, which it
+cannot do to minimax -- the point of the book's section 5.5.
+
+**Choices of my own.** A win is worth 1 plus a hundredth for each empty
+cell left, so a search that sees two wins takes the nearer; Connect
+Four's evaluation (open lines of four weighted 1, 4, 16 by the cells
+held, through tanh) stays inside 0.9, so a real win outranks any guess.
+Under alpha-beta a move cut short at the root has only an upper bound
+for a score, and the context marks it (the demo writes it with a ≤).
+Monte Carlo picks the move with the most playouts, where figure 5.11's
+pseudocode says the highest average, which a lucky move with few
+playouts can top; UCB1's constant is sqrt 2. Its tree is keyed by state,
+so transpositions share statistics.
+
+**Not implemented here:** multiplayer games' vectors of utilities, and
+forward pruning (beam search on moves, ProbCut), which the chapter
+describes without pseudocode.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

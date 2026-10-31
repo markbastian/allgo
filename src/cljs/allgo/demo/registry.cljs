@@ -27,6 +27,7 @@
             [allgo.demo.fire :as fire]
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
+            [allgo.demo.game-search :as game-search]
             [allgo.demo.genetic :as genetic]
             [allgo.demo.geometry :as geometry]
             [allgo.demo.gesture :as gesture]
@@ -64,6 +65,7 @@
    "hex"      {:start hex/start!      :stop hex/stop!}
    "search"   {:start search/start!   :stop search/stop!}
    "local-search" {:start local-search/start! :stop local-search/stop!}
+   "game-search" {:start game-search/start! :stop game-search/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

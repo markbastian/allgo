@@ -406,18 +406,27 @@
   stack and returns `[:call child frame']`, to suspend the frame as
   `frame'` and run `child`, or `[:return value]`, to finish it. A frame
   that called another gets that call's value as its `:returned` when it
-  next runs. The last state has an empty stack and the root's `:value`."
-  [run-frame root]
-  (run (fn [{:keys [stack]}]
-         (when (seq stack)
-           (let [[op x frame'] (run-frame (peek stack))
-                 stack (pop stack)]
-             (case op
-               :call {:stack (conj stack frame' x) :event :call}
-               :return (if (seq stack)
-                         {:stack (conj (pop stack) (assoc (peek stack) :returned x)) :event :return}
-                         {:stack [] :value x :event :return})))))
-       {:stack [root] :event :call}))
+  next runs. The last state has an empty stack and the root's `:value`.
+
+  With `context`, the computation has state beyond its frames -- a count,
+  a table of results -- in each machine state's `:context`: `run-frame`
+  then takes the frame and the context, and may return a new context as
+  the fourth element of either answer, `[:call child frame' context']` or
+  `[:return value nil context']`; nil leaves it as it was."
+  ([run-frame root] (call-seq (fn [frame _] (run-frame frame)) root nil))
+  ([run-frame root context]
+   (run (fn [{:keys [stack context]}]
+          (when (seq stack)
+            (let [[op x frame' ctx] (run-frame (peek stack) context)
+                  context (if (some? ctx) ctx context)
+                  stack (pop stack)]
+              (case op
+                :call {:stack (conj stack frame' x) :event :call :context context}
+                :return (if (seq stack)
+                          {:stack (conj (pop stack) (assoc (peek stack) :returned x))
+                           :event :return :context context}
+                          {:stack [] :value x :event :return :context context})))))
+        {:stack [root] :event :call :context context})))
 
 ;; ---------------------------------------------------------------------------
 ;; Recursive best-first search
