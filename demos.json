@@ -518,6 +518,16 @@
     "Interactive"
    ],
    "href": "play/?demo=game-search"
+  },
+  {
+   "id": "constraints",
+   "group": "Search",
+   "label": "Constraint Satisfaction",
+   "blurb": "Sudoku, map coloring and n-queens by backtracking with forward checking or MAC, AC-3, min-conflicts and cutset conditioning",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=constraints"
   }
  ]
 }
