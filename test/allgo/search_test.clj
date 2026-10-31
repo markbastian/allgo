@@ -9,14 +9,15 @@
             [clojure.test :refer [deftest is testing]]))
 
 ;; ---------------------------------------------------------------------------
-;; The book's worked problems
+;; The worked problems of Russell and Norvig, *Artificial Intelligence: A
+;; Modern Approach*, 4th edition, chapters 3 and 4
 ;;
 ;; Romania's roads and straight-line distances are as aima-python and
 ;; aima-java (both MIT) have them: the two agree on every road, and
-;; aima-java alone has the straight-line table of figure 3.16.
+;; aima-java alone has the straight-line table.
 
 (def roads
-  "Figure 3.1: each road once, with its length in kilometers."
+  "The map of Romania: each road once, with its length in kilometers."
   {[:arad :zerind] 75 [:arad :sibiu] 140 [:arad :timisoara] 118
    [:zerind :oradea] 71 [:oradea :sibiu] 151 [:timisoara :lugoj] 111
    [:lugoj :mehadia] 70 [:mehadia :drobeta] 75 [:drobeta :craiova] 120
@@ -29,7 +30,7 @@
    [:iasi :neamt] 87})
 
 (def straight-line-to-bucharest
-  "Figure 3.16: the straight-line distance from each city to Bucharest."
+  "The straight-line distance from each city to Bucharest."
   {:arad 366 :bucharest 0 :craiova 160 :drobeta 242 :eforie 161
    :fagaras 176 :giurgiu 77 :hirsova 151 :iasi 226 :lugoj 244
    :mehadia 241 :neamt 234 :oradea 380 :pitesti 100 :rimnicu-vilcea 193
@@ -54,7 +55,7 @@
 ;; The 8-puzzle
 
 (def eight-goal
-  "The goal of figure 3.3: the blank, 0, in the top left corner."
+  "The book's goal: the blank, 0, in the top left corner."
   [0 1 2 3 4 5 6 7 8])
 
 (defn- tile-moves [n blank]
@@ -153,7 +154,7 @@
       (doseq [f [s/dijkstra s/a-star s/ida-star s/recursive-best-first s/bidirectional s/beam]]
         (is (= best-route (f r)))
         (is (= 418 (s/path-cost r (f r))))))
-    (testing "greedy best-first goes by Fagaras, 450 km, as the book's figure 3.17 shows"
+    (testing "greedy best-first goes by Fagaras, 450 km, as the book shows"
       (is (= [:arad :sibiu :fagaras :bucharest] (s/greedy r)))
       (is (= 450 (s/path-cost r (s/greedy r)))))
     (testing "breadth-first and iterative deepening find the fewest roads, three"

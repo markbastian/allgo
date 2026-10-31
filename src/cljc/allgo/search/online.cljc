@@ -1,13 +1,13 @@
 (ns allgo.search.online
-  "Online search: Russell and Norvig's section 4.5. An online agent does
+  "Online search: Russell and Norvig's chapter 4, its last section. An online agent does
   not know the state space in advance; it learns what an action does only
   by doing it, so it must act to explore, and it can only expand the
   state it is standing in.
 
-    online DFS   figure 4.21's ONLINE-DFS-AGENT: depth-first, physically
+    online DFS   figure 4.20's ONLINE-DFS-AGENT: depth-first, physically
                  -- it walks back to backtrack, which needs every action
                  to be undoable
-    LRTA*        figure 4.24's LRTA*-AGENT: moves toward the neighbor
+    LRTA*        figure 4.23's LRTA*-AGENT: moves toward the neighbor
                  that looks cheapest by its cost plus the estimate from
                  there, and raises its estimate of each state it leaves
                  to what it learned, so that a dead end, once tried, stops

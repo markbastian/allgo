@@ -32,8 +32,8 @@ A few namespaces sit at the root because more than one package uses
 them: `allgo.graph` (union-find, components, minimum spanning trees),
 `allgo.search` (Russell and Norvig's chapter 3 searches, breadth-first
 to IDA*, each a step of one shape, with `allgo.search.local`,
-`.nondeterministic` and `.online` for chapter 4 and `.adversarial` for
-chapter 5), and `allgo.array` (flat numeric arrays on either platform).
+`.nondeterministic` and `.online` for chapter 4, `.adversarial` for
+chapter 5 and `.csp` for chapter 6), and `allgo.array` (flat numeric arrays on either platform).
 
 Where a namespace follows a book, it says so. The main ones:
 
@@ -53,7 +53,7 @@ Where a namespace follows a book, it says so. The main ones:
 - **Parish & Müller, "Procedural Modeling of Cities"**, with Lechner et
   al.'s agents and Kelly & McCabe's survey: `allgo.procedural.city`.
 - **Russell & Norvig, *Artificial Intelligence: A Modern Approach* (4th
-  ed.)**: chapters 3 to 5, `allgo.search` and its namespaces.
+  ed.)**: chapters 3 to 6, `allgo.search` and its namespaces.
 - **Matthias Müller's [Ten Minute Physics](https://matthias-research.github.io/pages/tenMinutePhysics/)**:
   most of `allgo.physics` and `allgo.spatial`.
 - **Craig, *Introduction to Robotics***: `allgo.kinematics`.
@@ -86,7 +86,7 @@ groups:
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
-| Search                | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo |
+| Search                | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems |
 | Robotics              | Inverse kinematics, redundancy in a human arm                                                  |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |

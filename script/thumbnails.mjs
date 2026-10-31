@@ -37,7 +37,8 @@ const SETTLE = { fire: 12000, dla: 15000, erosion: 12000, flip: 9000,
                  "boids-voronoi-3d": 8000, "orbit-determination": 8000,
                  textures: 15000, volumes: 25000, genetic: 15000, antialias: 12000,
                  "city-plan": 20000, city: 12000, "city-agents": 14000,
-                 search: 25000, "local-search": 9000, "game-search": 45000 };
+                 search: 25000, "local-search": 9000, "game-search": 45000,
+                 constraints: 15000 };
 const DEFAULT_SETTLE = 6000;
 
 // How far to zoom toward the middle, for the demos whose subject is small

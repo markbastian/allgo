@@ -1,5 +1,5 @@
 (ns allgo.search.local
-  "Local search: Russell and Norvig's section 4.1, as steps.
+  "Local search: Russell and Norvig's chapter 4, as steps.
 
   Local search keeps no paths, only a current state (or a few) and a way
   to judge it, and moves to better ones. Each algorithm here is a step
@@ -14,14 +14,14 @@
                           first random successor that is uphill)
     random restarts       any of them, again from random states, until one
                           reaches a goal -- a composition of seqs
-    simulated annealing   figure 4.6: a random move, taken if uphill, and
+    simulated annealing   SIMULATED-ANNEALING: a random move, taken if uphill, and
                           if downhill only with probability e^(dE/T)
     local beam            k states, each step the best k of all their
                           successors
     genetic algorithm     figure 4.7: a population bred by tournament
                           selection, one-point recombination and mutation
 
-  Continuous local search (section 4.2) -- gradient ascent, Newton-
+  Continuous local search -- the chapter's gradient ascent, Newton-
   Raphson, the simplex method of Nelder and Mead -- is
   `allgo.numerics.optimize`, minimizing where the book maximizes.
 
@@ -137,7 +137,7 @@
   (fn [t] (let [temp (* t0 (math/pow alpha t))] (if (< temp floor) 0.0 temp))))
 
 (defn- annealing-step
-  "Figure 4.6: a random successor, taken if it is better, and if worse
+  "SIMULATED-ANNEALING: a random successor, taken if it is better, and if worse
   only with probability e^(dE/T); done when the schedule reaches zero.
   It keeps the best state seen as `:best`, which the book's version, which
   returns where it is when the temperature runs out, does not need."

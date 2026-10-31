@@ -332,7 +332,7 @@
 ;; replaced by its children. When the stack runs dry with something cut off, a
 ;; deepening search starts again from the root with the bound raised to
 ;; that smallest amount. Bound by depth, that is iterative deepening
-;; (figures 3.12 and 3.14) -- raised by one each time; bound by g + h, it
+;; (figure 3.12) -- raised by one each time; bound by g + h, it
 ;; is IDA*, raised to the next contour.
 
 (defn- deepening-step

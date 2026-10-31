@@ -19,6 +19,7 @@
             [allgo.demo.city-agents :as city-agents]
             [allgo.demo.city-plan :as city-plan]
             [allgo.demo.cloth :as cloth]
+            [allgo.demo.constraints :as constraints]
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dla :as dla]
             [allgo.demo.dungeon :as dungeon]
@@ -66,6 +67,7 @@
    "search"   {:start search/start!   :stop search/stop!}
    "local-search" {:start local-search/start! :stop local-search/stop!}
    "game-search" {:start game-search/start! :stop game-search/stop!}
+   "constraints" {:start constraints/start! :stop constraints/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

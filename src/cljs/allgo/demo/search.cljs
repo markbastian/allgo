@@ -1,6 +1,6 @@
 (ns allgo.demo.search
   "Canvas demo for `allgo.search` and `allgo.search.online`: Russell and
-  Norvig's chapter 3 searches, and section 4.5's online agents, on one
+  Norvig's chapter 3 searches, and chapter 4's online agents, on one
   maze, a step at a time.
 
   Every algorithm is a lazy seq of search states, and this walks it --

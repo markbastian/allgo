@@ -417,10 +417,10 @@ worked problems are in the tests, with the problems themselves.
 | Namespace                        | Chapter | What it is                                                                 |
 |----------------------------------|---------|----------------------------------------------------------------------------|
 | `allgo.search`                   | 3       | Best-first (BFS, DFS, uniform cost, greedy, A*, weighted A*, beam), deepening (depth-limited, iterative, IDA*), RBFS, bidirectional |
-| `allgo.search.local`             | 4.1     | Hill climbing and its variants, random restarts, simulated annealing, local beam, the genetic algorithm |
-| `allgo.search.nondeterministic`  | 4.3-4.4 | AND-OR search for conditional plans; sensorless problems as belief-state search |
-| `allgo.search.online`            | 4.5     | Online DFS and LRTA* agents                                                 |
-| `allgo.search.problems`          |         | n-queens, a traveling salesperson, a maze of walls and mud, for the demos  |
+| `allgo.search.local`             | 4       | Hill climbing and its variants, random restarts, simulated annealing, local beam, the genetic algorithm |
+| `allgo.search.nondeterministic`  | 4       | AND-OR search for conditional plans; sensorless problems as belief-state search |
+| `allgo.search.online`            | 4       | Online DFS and LRTA* agents                                                 |
+| `allgo.search.problems`          |         | n-queens, a traveling salesperson, a maze, sudoku and map coloring, for the demos |
 
 **Every search is a step.** `allgo.search` began as breadth-first,
 depth-first, Dijkstra, greedy and A* written as one step function over
@@ -458,7 +458,7 @@ which is the same. Settlements and the hex demo use A*; the hex tests
 still pass, their moves all costing the same.
 
 **The book's examples, as tests.** On Romania (roads as aima-python and
-aima-java, both MIT, have them; aima-java alone has figure 3.16's
+aima-java, both MIT, have them; aima-java alone has the book's
 straight-line distances) uniform cost, A*, IDA*, RBFS, bidirectional and
 beam search all find Arad-Sibiu-Rimnicu Vilcea-Pitesti-Bucharest, 418 km;
 greedy goes by Fagaras, 450. AND-OR search on the erratic vacuum world
@@ -503,16 +503,16 @@ larger f with one -- and when one frontier is empty, on the other's
 alone; without that it stopped early on a directed graph whose backward
 search had run out.
 
-**Not implemented here:** continuous local search (section 4.2) is
+**Not implemented here:** continuous local search is
 `allgo.numerics.optimize`, minimizing where the book maximizes;
-cyclic plans for the slippery vacuum world (4.3.3); partially observable
-search with percepts (4.4.2-4.4.4); and the genetic algorithm on tours,
+cyclic plans for the slippery vacuum world; partially observable
+search with percepts; and the genetic algorithm on tours,
 for which one-point crossover makes no tour.
 
 ## Games, after Russell & Norvig
 
 Chapter 5, `allgo.search.adversarial`, with tic-tac-toe and Connect Four
-in `allgo.search.games` for the demo; the book's figure 5.2 game and a
+in `allgo.search.games` for the demo; the book's two-ply game and a
 chance game are in the tests.
 
 **The same shape again.** Minimax, alpha-beta and expectiminimax are one
@@ -529,9 +529,9 @@ search steps one playout at a time. The demo spreads every search across
 animation frames -- a few thousand steps each -- so a full minimax of
 tic-tac-toe runs in the browser without the page stopping.
 
-**Checked against the book.** Figure 5.2's game: minimax values MIN's
+**Checked against the book.** The chapter's two-ply game: minimax values MIN's
 three nodes at 3, 2 and 2 and plays a1 for 3; alpha-beta finds the same
-and never looks at the two leaves figure 5.5 prunes. Tic-tac-toe is a
+and never looks at the two leaves the book shows it pruning. Tic-tac-toe is a
 draw by every search; full minimax visits 549,946 nodes (the commonly
 quoted size of its tree), alpha-beta 20,866, with the center-corners-
 edges ordering 7,865 and with a transposition table as well 2,178. On
@@ -542,7 +542,7 @@ alpha-beta's value is minimax's at the same depth with and without
 ordering and the table, and that every search takes a win in one and
 blocks a loss in one. Expectiminimax is tested on a chance game where an
 order-preserving change to the utilities changes the move, which it
-cannot do to minimax -- the point of the book's section 5.5.
+cannot do to minimax -- the book's point about games of chance.
 
 **Choices of my own.** A win is worth 1 plus a hundredth for each empty
 cell left, so a search that sees two wins takes the nearer; Connect
@@ -558,6 +558,58 @@ so transpositions share statistics.
 **Not implemented here:** multiplayer games' vectors of utilities, and
 forward pruning (beam search on moves, ProbCut), which the chapter
 describes without pseudocode.
+
+## Constraint satisfaction, after Russell & Norvig
+
+Chapter 6 of *Artificial Intelligence: A Modern Approach* (4th ed.):
+`allgo.search.csp`, with sudoku, n-queens and a random map to color in
+`allgo.search.problems`; Australia and TWO + TWO = FOUR are in the tests.
+
+| Algorithm            | Shape                                                                    |
+|----------------------|--------------------------------------------------------------------------|
+| AC-3                 | One arc revised a step, from a queue                                     |
+| Backtracking         | `call-seq` frames, each holding its assignment and pruned domains; MRV with the degree heuristic, LCV, forward checking, MAC as options |
+| Min-conflicts        | One conflicted variable moved a step                                     |
+| Tree solver          | Arcs made consistent leaves up, then values assigned root down, a step each |
+| Cutset conditioning  | Tree-solver seqs concatenated, one per consistent assignment of the cutset |
+
+**Checked.** Australia has 18 three-colorings -- six for the mainland, three
+for Tasmania -- and the cycle cutset found is SA alone, the book's own
+example; with two colors backtracking finds none but AC-3 finds nothing
+wrong, the case the book makes for path consistency. Forward checking
+after WA = red and Q = green leaves NT and SA only blue, and V = blue
+empties SA, as the book walks through. Every solution of TWO + TWO =
+FOUR backtracking finds is checked against brute force, and it finds them
+all. The tree solver agrees with backtracking on random tree CSPs, solvable
+or not.
+
+**Measured.** On 12-queens, plain backtracking makes 3,066 assignments;
+MRV alone, the same, since without inference no domain shrinks; with
+forward checking, 153; with MRV, LCV and MAC, 17. Min-conflicts solves
+100 queens in 47 steps. Plain backtracking ran past ten minutes on a
+generated sudoku with 55 blanks, which with MRV and MAC takes a second.
+Cutset conditioning is exponential in the cutset, as the book says, and
+the greedy cutset of a random map grows fast:
+
+| Regions | Cutset | Steps        |
+|---------|--------|--------------|
+| 20      | 10     | 22           |
+| 30      | 11     | 40           |
+| 45      | 22     | 86,680       |
+| 60      | 26     | over 300,000 |
+
+So the demo offers it only on the map, at 30 regions by default.
+
+**Choices of my own.** The cycle cutset is greedy -- most constrained
+first -- not minimal. Higher-order constraints are checked once their
+scope is assigned, so AC-3 and the tree solver see only the binary ones.
+The sudoku generator fills a grid by backtracking with shuffled digits and
+blanks cells while the puzzle keeps exactly one solution; the demo's four
+puzzles are its output for seeds 11 to 14.
+
+**Not implemented here:** path consistency and k-consistency, bounds
+propagation, conflict-directed backjumping and constraint learning, and
+tree decomposition, which the chapter describes without pseudocode.
 
 ## A spatial index for the triangulation
 

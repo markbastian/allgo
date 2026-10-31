@@ -1,5 +1,5 @@
 (ns allgo.demo.local-search
-  "Canvas demo for `allgo.search.local`: Russell and Norvig's section 4.1
+  "Canvas demo for `allgo.search.local`: Russell and Norvig's local search (chapter 4)
   on n-queens and on a traveling salesperson's tour, a move a step.
 
   On the queens' board, red lines join the queens that attack each other;

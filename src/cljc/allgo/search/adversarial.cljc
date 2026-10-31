@@ -5,14 +5,14 @@
                       taking the best of its moves and MIN the worst
     alpha-beta        figure 5.7: the same value, without the branches
                       that cannot change it
-    heuristic         section 5.3: either of them cut off at `:depth`,
+    heuristic         the chapter's cutoff: either of them cut off at `:depth`,
                       an evaluation function standing in for the rest of
                       the game; with `:order`, moves tried best-looking
                       first, and with `:table?`, a transposition table
     deepening         iterative deepening on top: depth 1, 2, 3 ..., each
                       pass trying first the move the last one chose, until
                       the game is searched to its end or the depth runs out
-    expectiminimax    section 5.5: chance nodes valued at the expectation
+    expectiminimax    for games of chance: chance nodes valued at the expectation
                       of their outcomes, for games with dice
     Monte Carlo       figure 5.11: no evaluation function at all -- each
                       step one playout, down the tree by UCB1 to a new

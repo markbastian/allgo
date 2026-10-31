@@ -5,10 +5,11 @@
             [clojure.test :refer [deftest is testing]]))
 
 ;; ---------------------------------------------------------------------------
-;; The book's worked problems
+;; The worked problems of Russell and Norvig, *Artificial Intelligence: A
+;; Modern Approach*, 4th edition, chapter 5
 
 (def ^:private figure-5-2
-  "Figure 5.2's two-ply game: MAX moves a1, a2 or a3, then MIN b, c or d
+  "The chapter's two-ply game: MAX moves a1, a2 or a3, then MIN b, c or d
   (and so on), and the leaves are worth to MAX 3 12 8, 2 4 6, 14 5 2."
   (let [leaves {[0 0] 3 [0 1] 12 [0 2] 8 [1 0] 2 [1 1] 4 [1 2] 6 [2 0] 14 [2 1] 5 [2 2] 2}]
     {:initial []
@@ -24,7 +25,7 @@
       (is (= 3 (:value r)))
       (is (= 0 (:best r)))
       (is (= {0 3 1 2 2 2} (:scores r)))))
-  (testing "alpha-beta: the same move and value, and figure 5.5's two leaves never looked at"
+  (testing "alpha-beta: the same move and value, and the two leaves the book shows it never looking at"
     (let [r (adv/alpha-beta figure-5-2 [])]
       (is (= 3 (:value r)))
       (is (= 0 (:best r)))

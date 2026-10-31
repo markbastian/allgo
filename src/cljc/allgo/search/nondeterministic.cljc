@@ -1,8 +1,9 @@
 (ns allgo.search.nondeterministic
   "Search where an action's outcome is not known, or the state is not:
-  Russell and Norvig's sections 4.3 and 4.4.
+  Russell and Norvig's chapter 4, on nondeterministic actions and partial
+  observability.
 
-    and-or-seq    AND-OR search (figure 4.11, AND-OR-GRAPH-SEARCH): a
+    and-or-seq    AND-OR search (figure 4.10, AND-OR-GRAPH-SEARCH): a
                   plan that reaches a goal whatever the actions turn out
                   to do. Its OR-SEARCH and AND-SEARCH call each other; the
                   recursion is run a step at a time by
@@ -64,7 +65,7 @@
   "Every machine state of an AND-OR search, one per call or return; the
   last has the plan as its `:value`, or `:allgo.search.nondeterministic/failure`.
   It fails on a cycle rather than plan one, as the book's does: a plan
-  that says 'try again until it works' is section 4.3.3's cyclic plan,
+  that says 'try again until it works' is the chapter's cyclic plan,
   not this."
   [problem]
   (search/call-seq (and-or-frame problem) (or-frame problem (:initial problem) #{})))
