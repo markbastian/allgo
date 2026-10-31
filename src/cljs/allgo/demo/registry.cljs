@@ -35,6 +35,7 @@
             [allgo.demo.island :as island]
             [allgo.demo.joints :as joints]
             [allgo.demo.kepler :as kepler]
+            [allgo.demo.local-search :as local-search]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.motorcycle :as motorcycle]
             [allgo.demo.orbit-determination :as od]
@@ -42,6 +43,7 @@
             [allgo.demo.ragdoll :as ragdoll]
             [allgo.demo.rigid :as rigid]
             [allgo.demo.satellite :as satellite]
+            [allgo.demo.search :as search]
             [allgo.demo.skinning :as skinning]
             [allgo.demo.soft-body :as soft-body]
             [allgo.demo.solar-system :as solar]
@@ -60,6 +62,8 @@
   {"caves"    {:start cave/start!    :stop cave/stop!}
    "delaunay" {:start delaunay/start! :stop delaunay/stop!}
    "hex"      {:start hex/start!      :stop hex/stop!}
+   "search"   {:start search/start!   :stop search/stop!}
+   "local-search" {:start local-search/start! :stop local-search/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

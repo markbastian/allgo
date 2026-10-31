@@ -5,6 +5,7 @@
   "Procedural Generation",
   "Geometry",
   "Spatial Queries",
+  "Search",
   "Robotics",
   "Soft Bodies",
   "Rigid Bodies",
@@ -487,6 +488,26 @@
    ],
    "href": "solar/",
    "featured": true
+  },
+  {
+   "id": "search",
+   "group": "Search",
+   "label": "Search Algorithms",
+   "blurb": "Breadth-first to IDA*, bidirectional and online agents, a step at a time through a maze",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=search"
+  },
+  {
+   "id": "local-search",
+   "group": "Search",
+   "label": "Local Search",
+   "blurb": "Hill climbing, annealing, beams and a genetic algorithm on n-queens and a salesman's tour",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=local-search"
   }
  ]
 }

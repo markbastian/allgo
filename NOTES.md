@@ -407,6 +407,108 @@ networks and Wonka's split grammars (the survey describes both too
 briefly to build from), and the agents' multi-patch plots, which the
 paper lists as future work beside the speculators.
 
+## Search, after Russell & Norvig
+
+Chapters 3 and 4 of *Artificial Intelligence: A Modern Approach* (4th
+ed.), from the book's pseudocode (aimacode/aima-pseudocode, CC BY 4.0).
+There is no copy of the book in `nocommit/`; the figures it gives for its
+worked problems are in the tests, with the problems themselves.
+
+| Namespace                        | Chapter | What it is                                                                 |
+|----------------------------------|---------|----------------------------------------------------------------------------|
+| `allgo.search`                   | 3       | Best-first (BFS, DFS, uniform cost, greedy, A*, weighted A*, beam), deepening (depth-limited, iterative, IDA*), RBFS, bidirectional |
+| `allgo.search.local`             | 4.1     | Hill climbing and its variants, random restarts, simulated annealing, local beam, the genetic algorithm |
+| `allgo.search.nondeterministic`  | 4.3-4.4 | AND-OR search for conditional plans; sensorless problems as belief-state search |
+| `allgo.search.online`            | 4.5     | Online DFS and LRTA* agents                                                 |
+| `allgo.search.problems`          |         | n-queens, a traveling salesperson, a maze of walls and mud, for the demos  |
+
+**Every search is a step.** `allgo.search` began as breadth-first,
+depth-first, Dijkstra, greedy and A* written as one step function over
+one search state, run by `iterate`, the algorithms differing only in
+their frontier and its priority. Everything added keeps that shape:
+
+- Weighted A* is A*'s step with another priority; beam search is A*'s
+  step on a priority frontier with a size limit, which drops its worst.
+- Depth-limited search, iterative deepening and IDA* are one step over an
+  explicit stack of nodes, differing only in what they bound -- depth or
+  g + h -- and the deepening ones restart from the root, inside the step,
+  with the bound raised to the smallest that cut something off.
+- RBFS and AND-OR search are recursive, and run by `call-seq`: recursion
+  reified as a stack of frames, where each step is a call (push a frame)
+  or a return (pop one and hand its value to the frame below). RBFS's
+  backed-up f-values and AND-OR's mutually recursive OR and AND searches
+  are each one frame function.
+- Local search steps a move, or a generation; random restarts are a
+  composition of any of them, concatenated seqs from fresh states.
+- An online agent is `(fn [memory percept]) -> [action memory']`, the
+  book's persistent tables passed back in, and `run-seq` iterates it in
+  its environment.
+- Sensorless search is no new algorithm: a function from a problem to
+  a belief-state problem that breadth-first search then solves.
+
+So every algorithm can be watched, stopped early, or counted, the same
+way; the search demo is one loop over whichever seq it is given.
+
+**A bug found on the way.** Dijkstra and A* stopped as soon as the goal
+was *reached*, so on a graph where a costly road reaches the goal before
+a cheap one does, they returned the costly one. The book's uniform-cost
+search keeps going while the frontier holds anything cheaper than the
+best solution; here they stop when the goal comes off the frontier,
+which is the same. Settlements and the hex demo use A*; the hex tests
+still pass, their moves all costing the same.
+
+**The book's examples, as tests.** On Romania (roads as aima-python and
+aima-java, both MIT, have them; aima-java alone has figure 3.16's
+straight-line distances) uniform cost, A*, IDA*, RBFS, bidirectional and
+beam search all find Arad-Sibiu-Rimnicu Vilcea-Pitesti-Bucharest, 418 km;
+greedy goes by Fagaras, 450. AND-OR search on the erratic vacuum world
+returns the book's plan -- Suck, then if the right square is still dirty
+Right, Suck -- and the sensorless vacuum world is cleaned blind in four
+actions (Left, Suck, Right, Suck; the book's is the mirror image).
+
+**Measured.** 8-queens by steepest ascent, 2000 random boards: 13.6%
+solved, in 4.0 moves when solved and 3.1 when stuck; with up to 100
+sideways moves, 94.6%, in 19.6 and 64.6. These are the figures I recall
+the book giving (14%, 4 and 3; 94%, 21 and 64) -- worth checking against
+it. Random restarts average 6.3 restarts, as a 14% success rate implies.
+On 20 8-puzzles 16 to 26 moves deep (mean 22), the steps to solve:
+
+| Search                         | Steps (mean) |
+|--------------------------------|--------------|
+| Breadth-first                  | 68394        |
+| A*, h1 (misplaced tiles)       | 11512        |
+| A*, h2 (Manhattan distance)    | 1142         |
+| IDA*, h2                       | 3253         |
+| RBFS, h2                       | 3347         |
+| Bidirectional uniform cost     | 1630         |
+
+IDA* and RBFS do about three times A*'s work for memory linear in the
+depth. Iterative deepening, a tree search, takes 1.5 s at 20 moves and
+about three times longer a move deeper, so the tests run it only on
+shallow boards; on a grid full of loops it, IDA* and RBFS revisit the same
+cells so often that the demo gives up at a million steps -- which is what
+it is there to show. A measuring loop that kept every state of a 200,000
+step run exhausted a 17 GB heap; counting with `take-while` without
+holding the seq does not.
+
+**Choices of my own.** The tree searches -- deepening, RBFS -- skip a
+child whose state is already on its own path, as the book's 4th-edition
+IS-CYCLE does. The deepening step checks the bound before the goal, so
+that depth-limited search to depth 2 does not report a three-move
+solution. Online DFS does not record a move into a wall as a way back,
+which the figure would, and then walk into the wall to backtrack.
+Bidirectional search stops when the best meeting is no worse than the
+lower bound -- the two frontiers' g's summed without a heuristic, the
+larger f with one -- and when one frontier is empty, on the other's
+alone; without that it stopped early on a directed graph whose backward
+search had run out.
+
+**Not implemented here:** continuous local search (section 4.2) is
+`allgo.numerics.optimize`, minimizing where the book maximizes;
+cyclic plans for the slippery vacuum world (4.3.3); partially observable
+search with percepts (4.4.2-4.4.4); and the genetic algorithm on tours,
+for which one-point crossover makes no tour.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of
