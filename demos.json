@@ -508,6 +508,16 @@
     "Interactive"
    ],
    "href": "play/?demo=local-search"
+  },
+  {
+   "id": "game-search",
+   "group": "Search",
+   "label": "Game Search",
+   "blurb": "Connect Four and tic-tac-toe against minimax, alpha-beta, iterative deepening or Monte Carlo tree search",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=game-search"
   }
  ]
 }
