@@ -31,7 +31,7 @@
 (def ^:private ^js controls
   #js {:seed     2
        :pattern  "mixed"
-       :detail   8
+       :detail   10
        :facades  true})
 
 ;; ---------------------------------------------------------------------------

@@ -318,7 +318,7 @@ field, for Greuter's buildings. Plane geometry is in
 | `lots`      | Parish & Müller §4.1          | Blocks as faces of the road graph, cut into lots                                  |
 | `buildings` | Parish & Müller §4.2, Greuter | A building per lot by a stochastic L-system from its bounding box                 |
 | `facade`    | Parish & Müller §4.3          | Layered grids: interval groups, layers, stacks                                    |
-| `agents`    | Lechner et al.                | Extenders, connectors and developers on a grid of patches                         |
+| `agents`    | Lechner et al.                | Extenders, connectors, developers and speculators on a grid of patches            |
 
 **The L-system is a queue.** The paper's road productions only decide
 *when* each proposed segment is considered: a branch waits out its delay,
@@ -375,6 +375,23 @@ comparison is about. Two choices are mine where the paper gives none: the
 weights in the land value, and that a road laid over a building clears
 it.
 
+**Speculators.** The paper's future work gives them one paragraph:
+"pseudo-developers" reserving large tracts to sell to developers later,
+for residential districts, universities and parks. Everything past that
+is this code's. A speculator roams the edge of town and, on land the roads
+do not serve yet, reserves the free patches joined to it within a disc of
+100 patches (it keeps the tract if it gets 60 of them), holding one tract
+at a time. Rough or waterside land it holds for a park half the time;
+flat land for a campus, one per town; the rest for housing. It sells
+once the roads serve a quarter of the tract and it has been held 120
+ticks, and gives up a tract held five times that. Sold, a residential
+district takes houses only, a park takes nothing -- not even a road --
+and counts for housing as water does, and a campus is built by an
+institution one hall at a time, never beside another. Commerce is what
+they cost: on seed 4 it falls from 829 patches to 412 in 1500 ticks,
+shut out of the districts and parks, while the speculators add nothing
+measurable to the time a tick takes.
+
 **Same seed, same city -- on one platform.** The land and the RNG are
 exact on both, but the road rules take `sin`, `cos` and `exp`, which the
 JVM and V8 may round differently in the last place, and over a thousand
@@ -387,8 +404,8 @@ so the agents' arrays are all given their zero explicitly.
 lowering the population around them, the zone and height *maps* as input
 images (they are functions of the land here), Sun et al.'s template road
 networks and Wonka's split grammars (the survey describes both too
-briefly to build from), and the agents' speculators and multi-patch plots,
-which the paper lists as future work.
+briefly to build from), and the agents' multi-patch plots, which the
+paper lists as future work beside the speculators.
 
 ## A spatial index for the triangulation
 

@@ -153,6 +153,31 @@
             mean-rd (fn [u] (let [ks (filter #(= u (aget ^ints (:use w) %)) (range n))]
                               (/ (reduce + (map #(agents/road-density w (mod % wd) (quot % wd)) ks)) (count ks))))]
         (is (> (mean-rd agents/commercial) (mean-rd agents/residential)))))
+    (testing "speculators reserve tracts and sell them, for every kind of use"
+      (let [w (agents/run 1500 {:seed 4 :deviation 6})
+            wd (:w w)
+            ts (vals @(:tracts w))
+            at (fn [arr [i j]] (aget ^ints (arr w) (+ i (* wd j))))]
+        (is (= #{:residential :park :campus} (set (map :kind (filter :sold? ts)))))
+        (doseq [{:keys [id kind sold? patches]} ts
+                p patches
+                :when (= id (at :tract p))]
+          (cond
+            ;; Nobody builds on land a speculator still holds.
+            (not sold?) (is (zero? (at :use p)))
+            ;; Nobody builds in a park, nor lays a road through it.
+            (= kind :park) (is (and (zero? (at :use p)) (zero? (at :road p))))
+            ;; A residential district takes houses only.
+            (= kind :residential) (is (contains? #{agents/empty-use agents/residential} (at :use p)))
+            ;; And a campus is the institution's, its buildings apart.
+            (= kind :campus) (is (contains? #{agents/empty-use agents/institution} (at :use p)))))
+        (let [campus (first (filter #(= :campus (:kind %)) ts))
+              halls (filter #(= agents/institution (at :use %)) (:patches campus))]
+          (is (seq halls))
+          (doseq [[i j] halls [a b] halls :when (not= [i j] [a b])]
+            (is (> (max (abs (- i a)) (abs (- j b))) 1))))
+        (testing "and without them, there are none"
+          (is (empty? @(:tracts (agents/run 300 {:seed 4 :speculators 0})))))))
     (testing "with no deviation allowed, every road lies along a grid line"
       (let [g (agents/run 600 {:seed 4 :deviation 0})
             sp (:spacing agents/defaults)]

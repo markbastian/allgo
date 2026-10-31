@@ -31,6 +31,22 @@
                   both like their own kind nearby, water, and ground a
                   little above the average, and dislike a neighbor much
                   denser or sparser than themselves
+      speculators the paper's future work, in one paragraph: \"pseudo-
+                  developers\" that reserve large tracts of land to sell
+                  to developers later, for residential districts,
+                  universities and parks. It says no more, so the rules
+                  here are this code's own. A speculator roams the edge
+                  of town, and on land the roads do not serve yet it
+                  reserves a compact tract and holds it: nobody builds
+                  there. Rough or waterside land it holds for a park,
+                  a little flat land for a campus, the rest for housing.
+                  When the roads reach a quarter of the tract, and it
+                  has been held a while, it sells. A residential
+                  district then takes houses only; a park takes nothing,
+                  not even a road, and housing values it as it does
+                  water; a campus is built out by an institution, a
+                  building at a time with grounds between. A tract the
+                  roads never reach is given up
 
   The paper's grid constraint is `:deviation`: a road may only be laid on
   patches within that many of a grid line, every `:spacing` patches. Near
@@ -50,6 +66,12 @@
    :connectors 6
    :residential 40
    :commercial 20
+   :speculators 3
+   ;; Patches a speculator's tract aims for, the ticks it is held before
+   ;; it may sell, and how many campuses a town gets.
+   :tract-size 100
+   :hold 120
+   :campuses 1
    ;; A patch is served by a road this many patches away or nearer.
    :service 3.0
    ;; How far a road stamps its distance.
@@ -69,6 +91,7 @@
 (def empty-use 0)
 (def residential 1)
 (def commercial 2)
+(def institution 3)
 
 (defn- idx ^long [w i j] (+ (long i) (* (long w) (long j))))
 
@@ -142,6 +165,10 @@
                   :dist (double-array n ##Inf)
                   :use (int-array n 0)
                   :density (int-array n 0)
+                  ;; The tract each patch is reserved in, 0 for none,
+                  ;; and the tracts by id.
+                  :tract (int-array n 0)
+                  :tracts (atom (sorted-map))
                   :junctions (atom #{})
                   :roads (atom [])
                   :agents (atom [])
@@ -159,7 +186,8 @@
        (lay! world seed-path)
        (reset! (:agents world)
                (vec (for [[kind n] [[:extender (:extenders opts)] [:connector (:connectors opts)]
-                                    [:residential (:residential opts)] [:commercial (:commercial opts)]]
+                                    [:residential (:residential opts)] [:commercial (:commercial opts)]
+                                    [:speculator (:speculators opts)]]
                           _ (range n)]
                       {:kind kind :at (random/pick rng seed-path)})))
        world))))
@@ -181,6 +209,24 @@
   (let [ps (around w i j 2)]
     (/ (count (filter (fn [[a b]] (road? world a b)) ps)) (double (count ps)))))
 
+(defn- held
+  "The tract `(i, j)` is reserved in, or nil."
+  [{:keys [w tract tracts]} i j]
+  (let [id (aget ^ints tract (idx w i j))]
+    (when (pos? id) (get @tracts id))))
+
+(defn- park? [world i j]
+  (= :park (:kind (held world i j))))
+
+(defn- zoned-for?
+  "Whether a developer of `kind` may build on `(i, j)`: anywhere no
+  speculator holds, and in a residential district once it is sold, if
+  it builds houses."
+  [world kind i j]
+  (let [t (held world i j)]
+    (or (nil? t)
+        (and (:sold? t) (= :residential (:kind t)) (= :residential kind)))))
+
 (defn value
   "What `(i, j)` is worth to a developer of `kind`, built to `density`."
   [{:keys [w use water elev dist] :as world} kind i j density]
@@ -190,6 +236,8 @@
         other (if (= kind :residential) commercial residential)
         frac (fn [u] (/ (count (filter (fn [[a b]] (= u (aget ^ints use (idx w a b)))) ps)) (double (count ps))))
         near-water (if (some (fn [[a b]] (= 1 (aget ^ints water (idx w a b)))) ps) 1.0 0.0)
+        ;; Housing likes a park as it likes the water.
+        near-park (if (and (= kind :residential) (some (fn [[a b]] (park? world a b)) ps)) 1.0 0.0)
         rise (- (aget ^doubles elev k) (double (:mean-elevation world)))
         ;; A little above the average is best; well above is a climb.
         r (/ rise 12.0)
@@ -204,7 +252,7 @@
                             (/ (reduce + (map (fn [[a b]] (aget ^ints (:density world) (idx w a b))) same))
                                (double (count same)))))
                     0.0)]
-    (+ 0.2 (* 0.4 near-water) height
+    (+ 0.2 (* 0.4 near-water) (* 0.4 near-park) height
        (* 0.9 (frac own)) (* -0.4 (frac other))
        (* -0.08 disparity)
        ;; Building denser pays less with every storey: more where the
@@ -243,7 +291,8 @@
 (defn- acceptable?
   "The paper's constraint tests on a proposed road `path`: dry, on the
   grid within the deviation allowed, not into a neighborhood already
-  thick with road, and not ending too near another junction."
+  thick with road, and not ending too near another junction -- nor, a
+  rule of this code's, through a park."
   [{:keys [w water opts junctions] :as world} path]
   (let [{:keys [max-road-density junction-gap]} opts
         [i j] (nth path (quot (count path) 2))
@@ -252,7 +301,9 @@
         ;; Where the new road meets the network.
         joins (filter (fn [[a b]] (road? world a b)) [start end])]
     (and (>= (count path) 2)
-         (every? (fn [[a b]] (and (inside? w a b) (zero? (aget ^ints water (idx w a b))))) path)
+         (every? (fn [[a b]] (and (inside? w a b) (zero? (aget ^ints water (idx w a b)))
+                                  (not (park? world a b))))
+                 path)
          (on-grid? world path)
          (< (road-density world i j) (double max-road-density))
          (not-any? (fn [[[a b] [x y]]]
@@ -371,7 +422,7 @@
         own (if (= kind :residential) residential commercial)
         u (aget ^ints use k)
         dn (aget ^ints density k)]
-    (when (and (not (road? world i j)) (<= (aget ^doubles dist k) service))
+    (when (and (not (road? world i j)) (<= (aget ^doubles dist k) service) (zoned-for? world kind i j))
       (cond
         (and (= u empty-use) (pos? (value world kind i j 1)))
         (do (aset ^ints use k (int own)) (aset ^ints density k 1))
@@ -380,8 +431,100 @@
         (aset ^ints density k (int (inc dn)))))
     (assoc agent :at [i j])))
 
+;; ---------------------------------------------------------------------------
+;; Speculators, and the institution that builds a campus
+
+(defn- free? [{:keys [w water road use tract]} i j]
+  (let [k (idx w i j)]
+    (and (zero? (aget ^ints water k)) (zero? (aget ^ints road k))
+         (zero? (aget ^ints use k)) (zero? (aget ^ints tract k)))))
+
+(defn- survey
+  "The tract a speculator at `(i, j)` could reserve: the free patches
+  joined to it within the disc of the tract size, or nil if they are
+  too few."
+  [{:keys [w opts] :as world} i j]
+  (let [size (long (:tract-size opts))
+        r (math/sqrt (/ size math/PI))
+        in? (fn [a b] (<= (+ (* (- a i) (- a i)) (* (- b j) (- b j))) (* r r)))]
+    (when (free? world i j)
+      (loop [frontier [[i j]] seen #{[i j]}]
+        (if (seq frontier)
+          (let [nxt (vec (distinct (for [[a b] frontier [di dj] neighbors4
+                                         :let [x (+ (long a) di) y (+ (long b) dj)]
+                                         :when (and (inside? w x y) (not (seen [x y])) (in? x y) (free? world x y))]
+                                     [x y])))]
+            (recur nxt (into seen nxt)))
+          (when (>= (count seen) (* 0.6 size)) (vec (sort seen))))))))
+
+(defn- zoning
+  "What a speculator holds `patches` for: a park on rough ground or the
+  waterside, half the time; a campus on flat ground while the town has
+  fewer than it allows; otherwise a residential district."
+  [{:keys [w water elev opts tracts rng]} patches]
+  (let [es (map (fn [[i j]] (aget ^doubles elev (idx w i j))) patches)
+        relief (- (double (reduce max es)) (double (reduce min es)))
+        wet? (some (fn [[i j]] (some (fn [[a b]] (= 1 (aget ^ints water (idx w a b)))) (around w i j 2))) patches)
+        campuses (count (filter #(= :campus (:kind %)) (vals @tracts)))]
+    (cond
+      (and (or wet? (> relief 9.0)) (< (double (rng)) 0.5)) :park
+      (and (< campuses (long (:campuses opts))) (< relief 6.0)) :campus
+      :else :residential)))
+
+(defn- release! [{:keys [w tract tracts]} id]
+  (doseq [[i j] (:patches (@tracts id))
+          :when (= id (aget ^ints tract (idx w i j)))]
+    (aset ^ints tract (idx w i j) 0))
+  (swap! tracts dissoc id))
+
+(defn- speculator [{:keys [w dist water opts rng tract tracts ticks] :as world} {:keys [at holding] :as agent}]
+  (if holding
+    ;; Holding: sell once the roads reach a quarter of it and it has been
+    ;; held long enough; give it up if they never do.
+    (let [{:keys [patches since]} (@tracts holding)
+          held-for (- (long @ticks) (long since))
+          served (count (filter (fn [[a b]] (<= (aget ^doubles dist (idx w a b)) (double (:service opts)))) patches))]
+      (cond
+        (and (>= held-for (long (:hold opts))) (>= served (* 0.25 (count patches))))
+        (do (swap! tracts assoc-in [holding :sold?] true) (dissoc agent :holding))
+
+        (> held-for (* 5 (long (:hold opts))))
+        (do (release! world holding) (dissoc agent :holding))
+
+        :else agent))
+    ;; Roaming the edge of town, for land the roads do not serve yet.
+    (let [ok? (fn [a b] (and (inside? w a b) (zero? (aget ^ints water (idx w a b)))
+                             (< (aget ^doubles dist (idx w a b)) (double (:reach opts)))))
+          [i j] (nth (iterate #(wander rng % ok?) at) 2)
+          patches (when (and (> (aget ^doubles dist (idx w i j)) (double (:service opts)))
+                             (< (double (rng)) 0.15))
+                    (survey world i j))]
+      (if patches
+        (let [id (inc (long (or (first (keys (rseq @tracts))) 0)))]
+          (doseq [[a b] patches] (aset ^ints tract (idx w a b) (int id)))
+          (swap! tracts assoc id {:id id :kind (zoning world patches) :patches patches
+                                  :since @ticks :sold? false})
+          (assoc agent :at [i j] :holding id))
+        (assoc agent :at [i j])))))
+
+(defn- institution!
+  "A sold campus's builder: a building on a served patch of it, if none
+  stands beside it, so that the campus keeps its grounds."
+  [{:keys [w use density dist opts rng] :as world} {:keys [patches]}]
+  (let [[i j] (random/pick rng patches)
+        k (idx w i j)]
+    (when (and (not (road? world i j)) (zero? (aget ^ints use k))
+               (<= (aget ^doubles dist k) (double (:service opts)))
+               (not-any? (fn [[di dj]]
+                           (let [a (+ (long i) di) b (+ (long j) dj)]
+                             (and (inside? w a b) (= institution (aget ^ints use (idx w a b))))))
+                         neighbors8))
+      (aset ^ints use k (int institution))
+      (aset ^ints density k (int (+ 2 (long (random/below rng 3))))))))
+
 (defn tick!
-  "Every agent takes one turn. Returns the world."
+  "Every agent takes one turn, and every sold campus builds. Returns the
+  world."
   [world]
   (swap! (:agents world)
          (fn [agents]
@@ -389,8 +532,12 @@
                    (case kind
                      :extender (extender world a)
                      :connector (connector world a)
+                     :speculator (speculator world a)
                      (developer world a)))
                  agents)))
+  (doseq [t (vals @(:tracts world))
+          :when (and (:sold? t) (= :campus (:kind t)))]
+    (institution! world t))
   (swap! (:ticks world) inc)
   world)
 
