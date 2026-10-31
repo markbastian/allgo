@@ -5,7 +5,7 @@
   "Procedural Generation",
   "Geometry",
   "Spatial Queries",
-  "Search",
+  "AI",
   "Robotics",
   "Soft Bodies",
   "Rigid Bodies",
@@ -491,7 +491,7 @@
   },
   {
    "id": "search",
-   "group": "Search",
+   "group": "AI",
    "label": "Search Algorithms",
    "blurb": "Breadth-first to IDA*, bidirectional and online agents, a step at a time through a maze",
    "badges": [
@@ -501,7 +501,7 @@
   },
   {
    "id": "local-search",
-   "group": "Search",
+   "group": "AI",
    "label": "Local Search",
    "blurb": "Hill climbing, annealing, beams and a genetic algorithm on n-queens and a salesman's tour",
    "badges": [
@@ -511,7 +511,7 @@
   },
   {
    "id": "game-search",
-   "group": "Search",
+   "group": "AI",
    "label": "Game Search",
    "blurb": "Connect Four and tic-tac-toe against minimax, alpha-beta, iterative deepening or Monte Carlo tree search",
    "badges": [
@@ -521,13 +521,23 @@
   },
   {
    "id": "constraints",
-   "group": "Search",
+   "group": "AI",
    "label": "Constraint Satisfaction",
    "blurb": "Sudoku, map coloring and n-queens by backtracking with forward checking or MAC, AC-3, min-conflicts and cutset conditioning",
    "badges": [
     "Interactive"
    ],
    "href": "play/?demo=constraints"
+  },
+  {
+   "id": "wumpus",
+   "group": "AI",
+   "label": "Wumpus World",
+   "blurb": "A logical agent that proves which squares are safe, with DPLL, before it steps on them",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=wumpus"
   }
  ]
 }
