@@ -56,7 +56,8 @@
             [allgo.demo.textures :as textures]
             [allgo.demo.three-body :as three-body]
             [allgo.demo.volumes :as volumes]
-            [allgo.demo.water :as water]))
+            [allgo.demo.water :as water]
+            [allgo.demo.wumpus :as wumpus]))
 
 (def lifecycles
   "id -> `{:start :stop}`. Adding a demo is a line here and an entry in
@@ -68,6 +69,7 @@
    "local-search" {:start local-search/start! :stop local-search/stop!}
    "game-search" {:start game-search/start! :stop game-search/stop!}
    "constraints" {:start constraints/start! :stop constraints/stop!}
+   "wumpus"   {:start wumpus/start!   :stop wumpus/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

@@ -611,6 +611,72 @@ puzzles are its output for seeds 11 to 14.
 propagation, conflict-directed backjumping and constraint learning, and
 tree decomposition, which the chapter describes without pseudocode.
 
+## Logical agents, after Russell & Norvig
+
+Chapter 7 of *Artificial Intelligence: A Modern Approach* (4th ed.), in a
+package of its own:
+
+| Namespace                     | What it is                                                                  |
+|-------------------------------|-----------------------------------------------------------------------------|
+| `allgo.logic.propositional`   | Sentences and a parser, CNF, TT-ENTAILS?, PL-RESOLUTION, forward and backward chaining, DPLL, WalkSAT |
+| `allgo.logic.wumpus`          | The wumpus world and the hybrid agent                                       |
+| `allgo.logic.satplan`         | SATPlan: a STRIPS-like problem to CNF for each plan length, solved by DPLL  |
+
+Its tests are the first to follow the package layout, under
+`test/allgo/logic/`.
+
+**Steps again.** Model checking steps a model, resolution a pair of
+clauses, forward chaining a symbol off the agenda, WalkSAT a flip;
+backward chaining and DPLL are recursive and run on `call-seq`; SATPlan
+concatenates DPLL's seqs, one per plan length; the agent is a function
+of its memory and a percept, iterated with the world.
+
+**Checked against the book.** On the chapter's knowledge base after a
+breeze in [2,1] -- R1 to R5 -- model checking (all 128 models of its seven
+symbols), resolution and DPLL all entail no pit in [1,2], and none of them
+decides [2,2]. Forward chaining on the chapter's definite clauses infers
+A, B, L, M, P, Q in that order; backward chaining agrees. SATPlan solves
+the 'have cake and eat cake too' problem with Eat, then Bake. DPLL is
+checked against trying every model on 200 random 3-SAT problems.
+
+**DPLL keeps its clauses simplified.** The figure tests every clause
+against the partial model on every call; here each call carries the
+clauses left under its model -- satisfied ones dropped, false literals
+removed -- so a unit clause is one of length one and a conflict an empty
+one. Same algorithm, same answers (checked against trying every model on
+600 random problems); a wumpus safety query went from 12.6 ms to 1.5, and
+200 games from 172 s to 22. It also splits on a symbol of the first
+clause left rather than the next in a fixed order.
+
+**A bug the agent found.** At first the world sensed a stench in the
+wumpus's own square, as well as next to it. The physics says next to it
+only, so once the agent stood on the dead wumpus its knowledge base
+became contradictory -- and a contradiction entails everything, so every
+square was proved safe and the agent walked into pits it had 'proved'
+empty. A test now checks the physics against every cave's percepts, and
+that the agent never dies in a square it proved safe.
+
+**How it plays.** Over 200 random caves the agent brings out the gold in
+101, climbs out empty-handed in 7, and dies in 92, for a mean score of
++30; it shoots in 148 games and kills the wumpus in 46. The deaths are
+the book's policy: with no square left proved safe, it takes a risk on
+one not proved deadly rather than give up.
+
+**Choices of my own.** The agent knows where it is and which way it
+faces by counting, so its knowledge base holds only the atemporal physics
+and the percepts -- the book keeps location in the logic too, with
+successor-state axioms. A shot without a scream is told directly as 'no
+wumpus on the arrow's line', which the temporal axioms would infer. Only
+squares next to visited ones are asked about each turn, and a proof once
+made is kept, since the knowledge base only grows. Scores are
+aima-python's (-1 an action, +1000 for the gold out, -1000 for dying);
+the book's extra charge for the arrow is `:arrow-cost`, default -1 like
+any action, since neither aima-python nor aima-java confirms it.
+
+**Not implemented here:** the generic KB-AGENT (figure 7.1) as anything
+but the hybrid agent's shape, and successor-state axioms for the agent's
+own location.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

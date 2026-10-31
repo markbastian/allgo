@@ -20,6 +20,7 @@ discipline:
 | `allgo.procedural` | Noise, fractals and shaping functions; caves, dungeons, diamond-square and TIN terrain, hydraulic erosion, DLA; islands with settlements, roads and names; planets and their atmospheres |
 | `allgo.geometry`   | Vectors and quaternions, Delaunay triangulation, the Delaunay/Voronoi dual mesh, 3D Voronoi cells, GJK/EPA, hex grids, triangle and tetrahedral meshes                       |
 | `allgo.spatial`    | Spatial hashing, sweep and prune, Morton codes, a bounding volume hierarchy                                                                                                  |
+| `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent, SATPlan                                                       |
 | `allgo.kinematics` | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm                                                                                 |
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
 | `allgo.simulation` | Reynolds' boids, and a motorcycle with a rider and courses to ride                                                                                                           |
@@ -53,7 +54,8 @@ Where a namespace follows a book, it says so. The main ones:
 - **Parish & Müller, "Procedural Modeling of Cities"**, with Lechner et
   al.'s agents and Kelly & McCabe's survey: `allgo.procedural.city`.
 - **Russell & Norvig, *Artificial Intelligence: A Modern Approach* (4th
-  ed.)**: chapters 3 to 6, `allgo.search` and its namespaces.
+  ed.)**: chapters 3 to 7, `allgo.search` and its namespaces, and
+  `allgo.logic`.
 - **Matthias Müller's [Ten Minute Physics](https://matthias-research.github.io/pages/tenMinutePhysics/)**:
   most of `allgo.physics` and `allgo.spatial`.
 - **Craig, *Introduction to Robotics***: `allgo.kinematics`.
@@ -86,7 +88,7 @@ groups:
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
-| Search                | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems |
+| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world |
 | Robotics              | Inverse kinematics, redundancy in a human arm                                                  |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |
