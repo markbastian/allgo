@@ -62,15 +62,35 @@
 (defn layer-out-size [{:keys [type W kernels] :as layer}]
   (if (= type :dense) (count W) (let [[oh ow] (conv-out-shape layer)] (* (count kernels) oh ow))))
 
+(defn- dot-window
+  "The kernel row `row` dotted with the `k` inputs from `base` on."
+  [row a base k]
+  (loop [j 0 acc 0.0] (if (= j k) acc (recur (inc j) (+ acc (* (row j) (a (+ base j))))))))
+
+(defn- scatter-window!
+  "`df` times kernel row `row` added into the transient `acc` at the `k`
+  inputs from `base` on."
+  [acc row df base k]
+  (loop [j 0 acc acc]
+    (if (= j k) acc (recur (inc j) (assoc! acc (+ base j) (+ (nth acc (+ base j)) (* df (row j))))))))
+
 (defn- pre-activation
   "in, before the activation function."
   [{:keys [type W b kernels shape] :as layer} a]
   (case type
     :dense (mapv (fn [row bj] (+ bj (reduce + (map * row a)))) W b)
     :conv (let [[_ w] shape [oh ow] (conv-out-shape layer) k (count (first kernels))]
-            (vec (for [f (range (count kernels)) r (range oh) c (range ow)]
-                   (+ (b f) (reduce + (for [i (range k) j (range k)]
-                                        (* (get-in kernels [f i j]) (a (+ (* (+ r i) w) c j)))))))))))
+            ;; loops rather than nested `for` and `get-in`: this is the
+            ;; inner loop of every convolutional network's training
+            (persistent!
+             (reduce (fn [out [f r c]]
+                       (let [K (kernels f)]
+                         (conj! out (loop [i 0 acc (b f)]
+                                      (if (= i k)
+                                        acc
+                                        (recur (inc i) (+ acc (dot-window (K i) a (+ (* (+ r i) w) c) k))))))))
+                     (transient [])
+                     (for [f (range (count kernels)) r (range oh) c (range ow)] [f r c]))))))
 
 (defn forward
   "Every layer's `[in a]`, input first: `[[nil x] [in1 a1] ...]`."
@@ -94,16 +114,26 @@
             :db delta
             :back (mapv (fn [i] (reduce + (map (fn [row dj] (* (row i) dj)) W delta))) (range (count a)))}
     :conv (let [[_ w] shape [oh ow] (conv-out-shape layer) k (count (first kernels))
-                d (fn [f r c] (delta (+ (* f oh ow) (* r ow) c)))]
-            {:dK (vec (for [f (range (count kernels))]
-                        (vec (for [i (range k)]
-                               (vec (for [j (range k)]
-                                      (reduce + (for [r (range oh) c (range ow)] (* (d f r c) (a (+ (* (+ r i) w) c j)))))))))))
-             :db (vec (for [f (range (count kernels))] (reduce + (for [r (range oh) c (range ow)] (d f r c)))))
-             :back (let [acc (volatile! (vec (repeat (count a) 0.0)))]
-                     (doseq [f (range (count kernels)) r (range oh) c (range ow) i (range k) j (range k)]
-                       (vswap! acc update (+ (* (+ r i) w) c j) + (* (d f r c) (get-in kernels [f i j]))))
-                     @acc)})))
+                d (fn [f r c] (delta (+ (* f oh ow) (* r ow) c)))
+                cells (for [r (range oh) c (range ow)] [r c])
+                sum-over (fn [g] (loop [[[r c] & more] cells acc 0.0] (if r (recur more (+ acc (g r c))) acc)))]
+            {:dK (mapv (fn [f]
+                         (mapv (fn [i] (mapv (fn [j] (sum-over (fn [r c] (* (d f r c) (a (+ (* (+ r i) w) c j)))))) (range k)))
+                               (range k)))
+                       (range (count kernels)))
+             :db (mapv (fn [f] (sum-over (fn [r c] (d f r c)))) (range (count kernels)))
+             ;; each input's share of the deltas, accumulated in place
+             :back (persistent!
+                    (reduce (fn [acc [f r c]]
+                              (let [df (d f r c) K (kernels f)]
+                                (if (zero? df)
+                                  acc
+                                  (loop [i 0 acc acc]
+                                    (if (= i k)
+                                      acc
+                                      (recur (inc i) (scatter-window! acc (K i) df (+ (* (+ r i) w) c) k)))))))
+                            (transient (vec (repeat (count a) 0.0)))
+                            (for [f (range (count kernels)) r (range oh) c (range ow)] [f r c])))})))
 
 (defn gradients
   "The gradient of the loss on one example with respect to every weight,
@@ -146,6 +176,14 @@
                     X Y))
      (count X)))
 
+(defn sgd-step
+  "One stochastic gradient step on one example: the network moved
+  against its gradient by `alpha`. `train-seq` is this over every example
+  an epoch; a caller that must not stall -- a demo training between
+  frames -- can take it a few examples at a time."
+  [network x y alpha loss]
+  (apply-gradients network (gradients network x y loss) alpha))
+
 (defn train-seq
   "Stochastic gradient descent, an epoch a step: the examples shuffled,
   and the weights moved against each one's gradient by `alpha`."
@@ -153,6 +191,6 @@
   (let [rng (or rng (random/rng 1))
         pairs (vec (map vector X Y))]
     (iterate (fn [net]
-               (reduce (fn [net [x y]] (apply-gradients net (gradients net x y loss) alpha))
+               (reduce (fn [net [x y]] (sgd-step net x y alpha loss))
                        net (random/shuffle rng pairs)))
              network)))

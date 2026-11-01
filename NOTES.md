@@ -945,6 +945,91 @@ landmarks that cannot be told apart; the contract net and other
 cooperative protocols; Lemke-Howson, for games larger than support
 enumeration can handle.
 
+## Computer vision, after Russell & Norvig
+
+Chapter 25 of *Artificial Intelligence: A Modern Approach* (4th ed.), in
+a package of its own. The chapter gives no figures of pseudocode; these
+are the algorithms its text teaches.
+
+| Namespace                     | What it is                                                                 |
+|-------------------------------|----------------------------------------------------------------------------|
+| `allgo.vision.image`          | Images as values, separable convolution, Gaussian smoothing, gradients, bilinear sampling; scenes drawn from shapes |
+| `allgo.vision.camera`         | Perspective and scaled orthographic projection, Lambertian shading, triangulation from two views, stereo depth |
+| `allgo.vision.edges`          | Canny's detector a stage at a time; orientation histograms for texture     |
+| `allgo.vision.flow`           | Optical flow by block matching and by Lucas-Kanade                         |
+| `allgo.vision.segmentation`   | Felzenszwalb-Huttenlocher graph-based segmentation, an edge a step; k-means on color |
+| `allgo.vision.stereo`         | Disparity by matching along rows, a row a step; depth from disparity       |
+| `allgo.vision.detection`      | A convolutional classifier with augmented data; sliding windows, IoU, non-maximum suppression; hard-negative mining |
+
+**Reused, not rewritten.** Segmentation keeps its regions in
+`allgo.graph`'s disjoint sets, joining smaller into larger so the trees
+stay shallow; color clustering is `allgo.learning.unsupervised`'s
+k-means, with restarts; the classifier is `allgo.learning.neural`'s conv
+and dense layers; subpixel sampling is `allgo.numerics.splines`'
+bilinear interpolation; cameras turn by `allgo.geometry.quaternion` and
+the triangulation's two unknowns are a small `allgo.numerics.linear`
+solve. The image code is new: nothing here had images, and `dla`'s blur
+is private to its grid.
+
+**Images are values.** `{:w :h :px}`, the pixels a vector of numbers or
+of `[r g b]`; every operation returns a new image, and a color image
+filters a channel at a time. At the sizes a demo or a test uses -- a
+hundred pixels across -- that costs nothing worth trading clarity for.
+
+**Steps again.** Canny is a stage a step and its hysteresis a ring of
+growth; graph-based segmentation an edge; k-means an iteration;
+Lucas-Kanade a warp and correction; disparity a row; non-maximum
+suppression a window; the classifier an epoch, or in the demo a few
+examples a frame (`neural/sgd-step`).
+
+**Checked against drawn scenes, whose answers are known.**
+
+- Canny on a noisy square: 84 edge pixels against a perimeter of 88, every
+  one within half a pixel of the true boundary, one pixel thick; noise
+  alone gives none.
+- Projection: a unit up at depth 5 lands f / 5 above the center, twice as
+  far half as high; parallel lines converge on the vanishing point;
+  triangulation recovers a point from its two images to 1e-9.
+- Flow: block matching finds a (2, 1) move exactly at every grid point;
+  Lucas-Kanade finds it to 1e-6, and a subpixel (0.6, -0.3) to a few
+  hundredths; a featureless window gives nothing -- the aperture problem.
+- Segmentation of three noisy colored regions: graph-based 97.5% pure in
+  at most six regions, k-means with restarts exactly the three.
+- Stereo: the exact disparity at over nine pixels in ten, the misses at
+  the occluding box's borders.
+- Detection: every disk found among squares in new scenes, and the false
+  alarms down to none after mining.
+
+**Two remedies the chapter's methods need.** k-means from random centers
+can put two in the background and merge the shapes: 85% pure on the test
+scene, and restarts, keeping the run of least cost, make it 100%. A
+detector trained on patches of whole objects fires on the clutter a
+sliding window shows it -- squares, and parts of things -- so its examples
+come from whole scenes (the objects' windows and random windows that
+barely touch them), and then from its own false alarms: one round of
+mining took three false alarms a scene to one in eight scenes, a second
+to none.
+
+**The conv layer made faster.** Training the detector spent its time in
+`learning.neural`'s convolution -- nested `for` and `get-in` forward, an
+`update` per input element back. Loops and transients there took a
+training example from 3.8 ms to 1.4 on the JVM, the same network, with
+the gradients still matching numerical ones; the classifiers demo gains
+too.
+
+**The demo.** Computer Vision runs each method on a drawn scene: Canny's
+stages, regions merging, k-means painting, flow arrows over a moving
+disk, a disparity map filling in a row at a time, and a network learning
+to find disks a few examples a frame, mining its false alarms every six
+epochs. Canny works on brightness, and two of the scene's colors are
+equally bright, so no edge shows where they meet -- the caption says so.
+
+**Not implemented here:** shape from shading, texture and contour;
+structure from motion over many views; region proposals and bounding-box
+regression (the chapter's Faster R-CNN); image generation and style
+transfer; and the deep networks of the chapter's classification, which
+need far more data and computing than a drawn scene.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

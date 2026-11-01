@@ -598,6 +598,16 @@
     "Interactive"
    ],
    "href": "play/?demo=classifiers"
+  },
+  {
+   "id": "vision",
+   "group": "AI",
+   "label": "Computer Vision",
+   "blurb": "Canny edges, segmentation, optical flow, stereo, and a network that learns to detect, a step at a time",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=vision"
   }
  ]
 }

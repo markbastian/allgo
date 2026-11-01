@@ -61,6 +61,7 @@
             [allgo.demo.terrain-webgl :as terrain]
             [allgo.demo.textures :as textures]
             [allgo.demo.three-body :as three-body]
+            [allgo.demo.vision :as vision]
             [allgo.demo.volumes :as volumes]
             [allgo.demo.water :as water]
             [allgo.demo.wumpus :as wumpus]))
@@ -79,6 +80,7 @@
    "first-order" {:start first-order/start! :stop first-order/stop!}
    "grid-world" {:start grid-world/start! :stop grid-world/stop!}
    "classifiers" {:start classifiers/start! :stop classifiers/stop!}
+   "vision" {:start vision/start! :stop vision/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
    "slam" {:start slam/start! :stop slam/stop!}
