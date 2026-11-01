@@ -548,6 +548,36 @@
     "Interactive"
    ],
    "href": "play/?demo=first-order"
+  },
+  {
+   "id": "grid-world",
+   "group": "AI",
+   "label": "Grid World",
+   "blurb": "Value and policy iteration, TD, ADP, Q-learning, SARSA and REINFORCE on the 4 x 3 world",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=grid-world"
+  },
+  {
+   "id": "classifiers",
+   "group": "AI",
+   "label": "Classifiers",
+   "blurb": "Logistic regression to SVMs, nearest neighbors, networks and trees, drawing the regions they learn",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=classifiers"
+  },
+  {
+   "id": "localization",
+   "group": "AI",
+   "label": "Robot Localization",
+   "blurb": "Monte Carlo localization: particles that find a robot that does not know where it is",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=localization"
   }
  ]
 }
