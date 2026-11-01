@@ -15,6 +15,9 @@
     visibility graph     the corners of the grown obstacles, joined where
                          they see each other, searched by A*: the shortest
                          path, which grazes the obstacles
+    Voronoi graph        the points equidistant from two obstacles,
+                         searched by A*: a path that keeps as far from
+                         them as it can, and may be long
     cell decomposition   a grid whose cells are wholly free, searched by A*:
                          complete only down to the cell size
     PRM                  a probabilistic roadmap: free samples joined to
@@ -33,7 +36,8 @@
   of joint angles collide, and planning is a grid search there.
 
   Paths are vectors of points. The A* searches are `allgo.search`'s."
-  (:require [allgo.geometry.polygon :as polygon]
+  (:require [allgo.geometry.delaunay :as delaunay]
+            [allgo.geometry.polygon :as polygon]
             [allgo.geometry.quaternion :as q]
             [allgo.random :as random]
             [allgo.robotics.kinematics.chain :as chain]
@@ -196,6 +200,76 @@
   (let [grid (cell-grid world h)]
     (when-let [cells (search/path (search/goal-state (cell-seq grid start goal)))]
       (vec (concat [start] (map #(cell-center grid %) (rest (butlast cells))) [goal])))))
+
+;; ---------------------------------------------------------------------------
+;; Voronoi graph
+
+(defn- boundaries
+  "Every obstacle, and each wall of the room, as a separate owner of its
+  edges: `[[owner [a b]] ...]`."
+  [{:keys [bounds obstacles]}]
+  (let [[[x0 y0] [x1 y1]] bounds
+        walls [[[x0 y0] [x1 y0]] [[x1 y0] [x1 y1]] [[x1 y1] [x0 y1]] [[x0 y1] [x0 y0]]]]
+    (concat (map-indexed (fn [i w] [[:wall i] w]) walls)
+            (for [[i poly] (map-indexed vector obstacles) e (polygon/edges poly)] [i e]))))
+
+(defn- boundary-samples
+  "Points every `h` or less along each boundary edge: a map from each to
+  its owner, a corner two owners share kept once."
+  [world h]
+  (into {} (for [[owner [a b]] (reverse (boundaries world))
+                 :let [n (max 1 (long (math/ceil (/ (polygon/distance a b) h))))]
+                 k (range n)]
+             [(polygon/lerp a b (/ (double k) n)) owner])))
+
+(defn voronoi-graph
+  "The Voronoi graph of the free space: the points equidistant from two or
+  more obstacles -- each wall of the room counting as one -- and at least
+  the robot's radius from all of them. `{:nodes :edges}`, the edges index
+  pairs.
+
+  Made from the Voronoi diagram of points spaced `h` (default 0.2) along
+  every boundary, by `allgo.geometry.delaunay`: of its edges, those that
+  part two points on different obstacles. Points on one obstacle part
+  only from each other, so those edges are dropped; what is left
+  approximates the graph to within about `h`."
+  ([world] (voronoi-graph world 0.2))
+  ([world h]
+   (let [owner (boundary-samples world h)
+         tris (vec (delaunay/triangulate (keys owner)))
+         ;; Each Delaunay edge, with the triangles either side of it.
+         sides (reduce (fn [m [t {[a b c] :points}]]
+                         (reduce (fn [m e] (update m (set e) (fnil conj []) t)) m [[a b] [b c] [c a]]))
+                       {} (map-indexed vector tris))
+         center #(get-in tris [% :circle :center])
+         free-center? (memoize #(free? world (center %)))
+         links (for [[e ts] sides
+                     :when (= 2 (count ts))
+                     :let [[a b] (vec e) [t u] ts]
+                     :when (and (not= (owner a) (owner b)) (free-center? t) (free-center? u)
+                                (segment-free? world (center t) (center u)))]
+                 [t u])
+         used (vec (distinct (mapcat identity links)))
+         index (zipmap used (range))]
+     {:nodes (mapv center used)
+      :edges (vec (distinct (map (fn [[t u]] (vec (sort [(index t) (index u)]))) links)))})))
+
+(defn voronoi-path
+  "A path from `start` to `goal` along `graph` (default the world's
+  Voronoi graph), as the chapter plans one: a straight move onto the
+  graph, at the nearest point reachable that way, along it, and a
+  straight move off it to the goal. Nil if either end cannot reach it or
+  the graph does not join them. It keeps away from the obstacles rather
+  than being short."
+  ([world start goal] (voronoi-path world (voronoi-graph world) start goal))
+  ([world {:keys [nodes edges]} start goal]
+   (let [n (count nodes)
+         onto (fn [p] (first (filter #(segment-free? world p (nodes %))
+                                     (sort-by #(polygon/distance p (nodes %)) (range n)))))
+         s (onto start) g (onto goal)]
+     (when (and s g)
+       (when-let [p (graph-path nodes (adjacency n edges) s g)]
+         (vec (concat [start] p [goal])))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Sampling

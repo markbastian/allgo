@@ -873,9 +873,11 @@ algorithms are the ones their text teaches.
 
 | Namespace                       | What it is                                                                 |
 |---------------------------------|----------------------------------------------------------------------------|
-| `allgo.robotics.motion`         | Configuration space for a disk robot among polygons; the visibility graph, cell decomposition, PRM, RRT and RRT*, shortcutting, potential fields; a two-link arm's configuration space |
-| `allgo.robotics.localization`   | Monte Carlo localization, and now EKF localization among landmarks         |
+| `allgo.robotics.motion`         | Configuration space for a disk robot among polygons; the visibility graph, the Voronoi graph, cell decomposition, PRM, RRT and RRT*, shortcutting, potential fields; a two-link arm's configuration space |
+| `allgo.robotics.localization`   | Monte Carlo localization, its low-variance resampling, and now EKF localization among landmarks |
 | `allgo.robotics.slam`           | EKF SLAM: the pose and every landmark in one Gaussian                       |
+| `allgo.robotics.fastslam`       | FastSLAM: a particle per path, a little Kalman filter per landmark in each  |
+| `allgo.robotics.graph-slam`     | Graph SLAM: the whole run's poses and landmarks by Gauss-Newton least squares |
 | `allgo.robotics.control`        | PID as a step; LQR by the Riccati recursion                                |
 | `allgo.robotics.kinematics`     | Craig's chains and the IK solvers, moved here from `allgo.kinematics`      |
 | `allgo.decision.games`          | Normal-form games, dominance and its iterated elimination, Nash equilibria pure and mixed, zero-sum games by linear programming, repeated games, bargaining, the Shapley value, voting, auctions and VCG |
@@ -939,9 +941,49 @@ reckoning the estimate traces a perfect rectangle while the robot
 wanders off it, and under the filters it keeps to the route. Both demos
 and Robot Localization are in the gallery's Robotics group, with the arms.
 
-**Not implemented here:** Voronoi roadmaps, kinodynamic planning and
-trajectory optimization; FastSLAM, graph SLAM and data association for
-landmarks that cannot be told apart; the contract net and other
+**The rest of chapter 26, later.** Three more of the chapter's methods,
+each reusing what was here:
+
+- *The Voronoi graph* -- the points equidistant from two or more
+  obstacles -- is made from `allgo.geometry.delaunay`: points every `h`
+  along each obstacle's edges and each wall, triangulated, and of the
+  dual Voronoi diagram's edges those that part points of different
+  obstacles, where the robot fits. Points of one obstacle part only from
+  each other, so dropping their edges leaves the graph, to within about
+  `h`. The plan is the book's: a straight move onto it, along it by
+  A*, and off. Round the test square in its 6 m room every node is
+  equidistant from its two nearest obstacles to within `h`, and the path
+  keeps a metre from the square where the shortest grazes it at 0.2 m --
+  and is 7.6 m to its 5.3.
+- *FastSLAM*, the Rao-Blackwellized particle filter the chapter's notes
+  credit: given the path, the landmarks are independent, so each
+  particle is a pose and a 2 by 2 Kalman filter per landmark, weighted by
+  the likelihood of its sightings and resampled -- by MCL's low-variance
+  resampling, pulled out of `mcl-step` into `localization/resample` for
+  both. On EKF SLAM's test lap, with 50 particles, all twelve landmarks
+  within 0.17 m and the pose within 0.18 m all the way, in a quarter of
+  a second.
+- *Graph SLAM*: poses kept every ten steps and the landmarks as one
+  least-squares problem. Odometry constraints are the controls between
+  two kept poses composed by `localization/ekf-predict` from a pose known
+  exactly, which gives the relative move and its covariance at once;
+  sightings are ranges and bearings with `range-bearing-jacobian`'s
+  partials. Gauss-Newton, an iteration a step, solved by
+  `numerics.linear`'s Cholesky with the first pose held. On the same lap
+  it converges in seven iterations, the weighted squared error falling
+  from 13718 to 288 -- about the measurements' degrees of freedom, as
+  it should for a consistent model -- and the path error from dead
+  reckoning's 0.81 m to 0.18, the start of the run included.
+
+The demos have them: Motion Planning's Voronoi graph, and SLAM's
+FastSLAM, its particles and the best one's map, and graph SLAM, which
+records a lap and then solves it an iteration at a time, dead
+reckoning's drifted path snapping onto the true one. Graph SLAM's lap
+is steered by the truth, since it estimates nothing until the lap is
+over.
+
+**Not implemented here:** kinodynamic planning and trajectory
+optimization; data association for landmarks that cannot be told apart; the contract net and other
 cooperative protocols; Lemke-Howson, for games larger than support
 enumeration can handle.
 

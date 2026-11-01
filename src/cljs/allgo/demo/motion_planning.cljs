@@ -6,7 +6,8 @@
   The robot (white) is a disk; the obstacles are drawn as they are and,
   faintly, grown by its radius -- the configuration space, where it is a
   point. The visibility graph joins the grown corners that see each
-  other and gives the shortest path. Cell decomposition searches the
+  other and gives the shortest path; the Voronoi graph runs between the
+  obstacles, equally far from each, and gives the safest. Cell decomposition searches the
   wholly free cells, shown as the A* search spreads through them. PRM
   scatters a roadmap and searches it; RRT grows a tree toward random
   samples until it touches the goal; RRT* keeps growing and rewiring,
@@ -44,6 +45,8 @@
     (case method
       "visibility graph" (let [g (motion/visibility-graph world start goal)]
                            (repeat {:graph g :path (motion/visibility-path world start goal)}))
+      "Voronoi graph" (let [g (motion/voronoi-graph world 0.15)]
+                        (repeat {:graph g :path (motion/voronoi-path world g start goal)}))
       "cell decomposition" (let [grid (motion/cell-grid world 0.25)
                                  ;; up to and including the step that reaches the goal
                                  [before after] (split-with (complement :solved?) (motion/cell-seq grid start goal))]
@@ -150,6 +153,16 @@
                         (path! px path "#ffd479")
                         (robot-on! px scale path path-t)
                         (str (count edges) " sight lines, shortest path " (.toFixed (motion/path-length path) 2) " m"))
+
+                      "Voronoi graph"
+                      (let [{{:keys [nodes edges]} :graph path :path} st]
+                        (doseq [[i j] edges] (line! px (nodes i) (nodes j) "rgba(140,170,220,0.55)" 1.5))
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count edges) " graph edges, the points equidistant from two obstacles"
+                             (if path (str "; path " (.toFixed (motion/path-length path) 2) " m, at least "
+                                           (.toFixed (reduce min (map #(motion/clearance world %) (subvec path 1 (dec (count path))))) 2)
+                                           " m from every obstacle along the graph")
+                                 "; the goal cannot reach the graph")))
 
                       "cell decomposition"
                       (let [{:keys [grid search]} st
@@ -258,7 +271,7 @@
                                  (reset! goal [x y])
                                  (restart!))))))
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["visibility graph" "cell decomposition" "PRM" "RRT" "RRT*"
+        (.onChange (.add gui controls "method" #js ["visibility graph" "Voronoi graph" "cell decomposition" "PRM" "RRT" "RRT*"
                                                     "potential field" "two-link arm"])
                    restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)

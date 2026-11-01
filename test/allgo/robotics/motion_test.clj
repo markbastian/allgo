@@ -1,5 +1,6 @@
 (ns allgo.robotics.motion-test
-  (:require [allgo.random :as random]
+  (:require [allgo.geometry.polygon :as polygon]
+            [allgo.random :as random]
             [allgo.robotics.motion :as motion]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
@@ -38,6 +39,38 @@
         (is (< (abs (- (shortest r) (motion/path-length p))) 1e-9) r)
         ;; it grazes the grown square, so it clears a slightly smaller robot
         (when (pos? r) (is (motion/path-free? (assoc room :radius (* 0.999 r)) p) r))))))
+
+;; The walls of `room`, each its own obstacle to the Voronoi graph.
+(def ^:private walls [[[-1.0 -1.0] [5.0 -1.0]] [[5.0 -1.0] [5.0 5.0]] [[5.0 5.0] [-1.0 5.0]] [[-1.0 5.0] [-1.0 -1.0]]])
+
+(defn- distances
+  "The distance from `p` to the square and to each wall, nearest first."
+  [p]
+  (sort (cons (apply min (map (fn [[a b]] (polygon/segment-distance p a b)) (polygon/edges square)))
+              (map (fn [[a b]] (polygon/segment-distance p a b)) walls))))
+
+(defn- least-clearance [w path]
+  (apply min (for [[a b] (partition 2 1 path) t (range 0.0 1.0001 0.05)] (motion/clearance w (polygon/lerp a b t)))))
+
+(deftest voronoi-test
+  (let [w (assoc room :radius 0.2)
+        h 0.2
+        g (motion/voronoi-graph w h)]
+    (testing "every node of the graph is about equally far from its two nearest obstacles"
+      (is (seq (:nodes g)))
+      (doseq [n (:nodes g)]
+        (let [[d1 d2] (distances n)]
+          (is (< (- d2 d1) h) n))))
+    (testing "the chapter's plan: onto the graph, along it, off it -- free, and well clear"
+      (let [p (motion/voronoi-path w g start goal)
+            v (motion/visibility-path w start goal)]
+        (is (motion/path-free? w p))
+        (is (= [start goal] [(first p) (peek p)]))
+        (is (> (least-clearance w (subvec p 1 (dec (count p)))) 0.9) "the graph's part a meter clear")
+        (is (< (least-clearance w v) 0.21) "the shortest path grazes the square")
+        (is (> (motion/path-length p) (motion/path-length v)) "and is the longer for it")))
+    (testing "no path when the goal cannot reach the graph"
+      (is (nil? (motion/voronoi-path w g start [2.0 2.0]))))))
 
 (deftest planners-test
   (let [w (assoc room :radius 0.2)

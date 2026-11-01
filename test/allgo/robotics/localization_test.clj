@@ -7,6 +7,16 @@
 ;; Monte Carlo localization, after Russell and Norvig, *Artificial
 ;; Intelligence: A Modern Approach*, 4th edition, chapter 26.
 
+(deftest resample-test
+  (testing "low-variance resampling keeps a particle of weight w about w n times"
+    (let [ps (vec (range 10))
+          ws [0.0 0.0 0.5 0.0 0.25 0.25 0.0 0.0 0.0 0.0]
+          counts (frequencies (loc/resample ps ws (random/rng 1)))]
+      (is (= 10 (reduce + (vals counts))))
+      (is (= #{2 4 5} (set (keys counts))))
+      (is (= 5 (counts 2)))
+      (is (every? #(<= 2 (counts %) 3) [4 5])))))
+
 (deftest raycast-test
   (testing "rays meet the walls where geometry says"
     (let [{:keys [walls max-range]} (loc/room)]

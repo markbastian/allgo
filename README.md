@@ -27,7 +27,7 @@ discipline:
 | `allgo.learning`   | Decision trees, AdaBoost, random forests; linear and logistic regression, SVMs, k nearest neighbors, naive Bayes; k-means, EM, Baum-Welch; neural networks by back-propagation; reverse-mode differentiation |
 | `allgo.language`   | CYK parsing and treebank trees; word embeddings, recurrent language models, sequence to sequence with attention, the transformer                         |
 | `allgo.vision`     | Images, convolution and smoothing; Canny edges and orientation histograms; optical flow; segmentation; stereo and triangulation; a convolutional detector with non-maximum suppression |
-| `allgo.robotics`   | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm; motion planning; localization and mapping; control                         |
+| `allgo.robotics`   | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm; motion planning, Voronoi graphs included; localization; EKF, FastSLAM and graph SLAM; control |
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
 | `allgo.simulation` | Reynolds' boids, and a motorcycle with a rider and courses to ride                                                                                                           |
 | `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, extrapolation, FFT, tridiagonal and small dense linear solves, table interpolation, least-squares fits                     |
@@ -104,7 +104,7 @@ groups:
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
 | AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; knowledge representation, from semantic networks to truth maintenance; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; computer vision -- edges, segmentation, flow, stereo and detection; word embeddings, language models, attention and a transformer, training live |
-| Robotics              | Inverse kinematics, redundancy in a human arm; Monte Carlo localization; motion planning, from visibility graphs to RRT* and an arm in configuration space; EKF localization and SLAM |
+| Robotics              | Inverse kinematics, redundancy in a human arm; Monte Carlo localization; motion planning, from visibility and Voronoi graphs to RRT* and an arm in configuration space; EKF localization, and SLAM by the EKF, FastSLAM and graph SLAM |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |
 | Fluids                | Eulerian fluid, FLIP fluid, fire and smoke, height-field water                                 |

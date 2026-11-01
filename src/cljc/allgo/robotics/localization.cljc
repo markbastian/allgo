@@ -62,6 +62,24 @@
   [z z* sigma]
   (reduce * (map (fn [a b] (let [d (- a b)] (math/exp (- (/ (* d d) (* 2 sigma sigma)))))) z z*)))
 
+(defn resample
+  "`particles` drawn again in proportion to `weights`, as many as there
+  were, by low-variance resampling: one random offset, then evenly spaced
+  pointers into the cumulative weights -- less noise than independent
+  draws, and a particle of weight w kept about w n times. The weights
+  need not sum to one, but must not all be zero."
+  [particles weights rng]
+  (let [total (double (reduce + weights))
+        cumulative (vec (reductions + (map #(/ % total) weights)))
+        n (count particles)
+        r (/ (double (rng)) n)]
+    (loop [i 0 j 0 out (transient [])]
+      (if (= i n)
+        (persistent! out)
+        (let [u (+ r (/ (double i) n))
+              j (loop [j j] (if (and (< j (dec n)) (> u (double (cumulative j)))) (recur (inc j)) j))]
+          (recur (inc i) j (conj! out (particles j))))))))
+
 (defn mcl-step
   "One MONTE-CARLO-LOCALIZATION update: the particles moved by `[v w]`,
   weighted by the scan `z`, and resampled."
@@ -71,24 +89,14 @@
         weights (mapv (fn [p] (if (inside? bounds p) (likelihood z (scan walls p angles max-range) sigma-z) 0.0)) moved)
         total (reduce + weights)]
     (if (pos? total)
-      (let [cumulative (vec (reductions + (map #(/ % total) weights)))
-            n (count moved)
-            ;; Low-variance resampling: one random offset, n evenly spaced
-            ;; pointers into the cumulative weights.
-            r (/ (double (rng)) n)]
-        (loop [i 0 j 0 out (transient [])]
-          (if (= i n)
-            ;; A few particles replaced by random ones: the remedy for
-            ;; sample impoverishment, which otherwise leaves every particle a
-            ;; copy of one early guess -- right or not.
-            (let [[[x0 y0] [x1 y1]] bounds]
-              (mapv (fn [p] (if (< (double (rng)) random-fraction)
-                              [(+ x0 (* (- x1 x0) (rng))) (+ y0 (* (- y1 y0) (rng))) (* 2 math/PI (rng))]
-                              p))
-                    (persistent! out)))
-            (let [u (+ r (/ (double i) n))
-                  j (loop [j j] (if (and (< j (dec n)) (> u (cumulative j))) (recur (inc j)) j))]
-              (recur (inc i) j (conj! out (moved j)))))))
+      ;; A few particles replaced by random ones: the remedy for sample
+      ;; impoverishment, which otherwise leaves every particle a copy of
+      ;; one early guess -- right or not.
+      (let [[[x0 y0] [x1 y1]] bounds]
+        (mapv (fn [p] (if (< (double (rng)) random-fraction)
+                        [(+ x0 (* (- x1 x0) (rng))) (+ y0 (* (- y1 y0) (rng))) (* 2 math/PI (rng))]
+                        p))
+              (resample moved weights rng)))
       ;; Nothing fits: start again from anywhere.
       (let [[[x0 y0] [x1 y1]] bounds]
         (vec (repeatedly (count particles) #(vector (+ x0 (* (- x1 x0) (rng))) (+ y0 (* (- y1 y0) (rng))) (* 2 math/PI (rng)))))))))
