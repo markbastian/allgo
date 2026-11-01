@@ -30,7 +30,8 @@
   `sweep` runs the swivel round on its own, which is the clearest way to
   see a hand held still by an arm that will not stop moving.
 
-  Click a ball and the arm reaches it, as the six-axis robot next door
+  It starts reaching for the first ball in range; click another and it
+  reaches that, as the six-axis robot next door
   does -- and the difference between the two readouts is the whole point.
   There the count is eight, and you can list them. Here there is no count
   to give: the answers form a circle, and the ghosts are samples of it
@@ -175,7 +176,15 @@
       (.add scene ring)
       (set! (.-enableDamping orbit) true)
       (.set (.-target orbit) 0.18 0.0 0.0)
-      (letfn [(rebuild! []
+      (letfn [(select! [idx]
+                ;; Reach for target idx, highlighting it.
+                (doseq [[i ^js m] (map-indexed vector (:target-meshes @state))]
+                  (.setHex (.. m -material -color)
+                           (cond (= i idx) 0xf2b134
+                                 (:beyond? (nth (:targets @state) i)) 0x8b4a52
+                                 :else 0x4f7ac0)))
+                (swap! state assoc :picked idx :target (:pos (nth (:targets @state) idx))))
+              (rebuild! []
                 (doseq [^js m (:target-meshes @state)] (.remove scene m))
                 (let [targets (scatter-targets (.-targets controls))
                       meshes (mapv (fn [t]
@@ -189,7 +198,11 @@
                                        m))
                                    targets)]
                   (swap! state assoc :targets targets :target-meshes meshes
-                         :picked nil :target nil)))
+                         :picked nil :target nil)
+                  ;; Start reaching for the first ball in range, so the arm
+                  ;; is there from the first frame rather than after a click.
+                  (when-let [idx (first (keep-indexed (fn [i t] (when-not (:beyond? t) i)) targets))]
+                    (select! idx))))
               (pick! [^js e]
                 (let [rect (.getBoundingClientRect (.-domElement renderer))
                       nx (- (* 2 (/ (- (.-clientX e) (.-left rect)) (.-width rect))) 1)
@@ -198,16 +211,8 @@
                   (let [hits (.intersectObjects raycaster
                                                 (clj->js (:target-meshes @state)) false)]
                     (when (pos? (.-length hits))
-                      (let [idx (.indexOf (to-array (:target-meshes @state))
-                                          (.-object (aget hits 0)))
-                            t (nth (:targets @state) idx)]
-                        ;; Highlight the one being reached for.
-                        (doseq [[i ^js m] (map-indexed vector (:target-meshes @state))]
-                          (.setHex (.. m -material -color)
-                                   (cond (= i idx) 0xf2b134
-                                         (:beyond? (nth (:targets @state) i)) 0x8b4a52
-                                         :else 0x4f7ac0)))
-                        (swap! state assoc :picked idx :target (:pos t)))))))
+                      (select! (.indexOf (to-array (:target-meshes @state))
+                                         (.-object (aget hits 0))))))))
               (resize! []
                 (let [w (.-clientWidth container) h (.-clientHeight container)]
                   (when (and (pos? w) (pos? h))
