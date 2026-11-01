@@ -43,6 +43,10 @@ chapter 5 and `.csp` for chapter 6), `allgo.agents` (chapter 2's vacuum
 world and agents), `allgo.language` (CYK parsing and treebank trees),
 and `allgo.array` (flat numeric arrays on either platform).
 
+The tests in `test/allgo` follow the same packages: `allgo.search.csp`
+is tested by `allgo.search.csp-test` in `test/allgo/search/`, and the
+root namespaces by tests at the root.
+
 Where a namespace follows a book, it says so. The main ones:
 
 - **Montenbruck & Gill, *Satellite Orbits***: `allgo.numerics` and

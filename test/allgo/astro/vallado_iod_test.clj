@@ -1,0 +1,257 @@
+(ns allgo.astro.vallado-iod-test
+  "Vallado chapter 7 -- Gibbs, Herrick-Gibbs, Gauss and Lambert -- each
+  given positions, sightings or times taken from an orbit flown with the
+  two-body propagator, and asked to recover it; every Lambert solution is
+  flown as well, to check it arrives."
+  (:require [allgo.astro.constants :as c]
+            [allgo.astro.iod :as iod]
+            [allgo.astro.kepler :as kep]
+            [allgo.astro.universal :as u]
+            [allgo.geometry.vec3 :as v3]
+            [clojure.math :as math]
+            [clojure.test :refer [deftest is testing]]))
+
+(def ^:private mu c/GM-earth)
+(defn- close? [a b tol] (<= (abs (- a b)) (* tol (max 1.0 (abs b)))))
+(defn- rel-err [a b] (/ (v3/distance a b) (v3/length b)))
+
+(def ^:private truth
+  "An orbit to recover: 12000 km, e 0.2, inclined 30 degrees."
+  (kep/elements->state mu {:a 12000.0 :e 0.2 :i (math/to-radians 30) :raan (math/to-radians 40)
+                           :argp (math/to-radians 60) :M 0.3}))
+
+(defn- at [t] (let [[r v] truth] (kep/propagate mu r v t)))
+(defn- angle [a b] (math/acos (/ (v3/dot a b) (* (v3/length a) (v3/length b)))))
+
+(deftest three-positions
+  (testing "Gibbs, from three positions tens of degrees apart"
+    (let [[r1] (at -1800.0) [r2 v2] (at 0.0) [r3] (at 2400.0)
+          {:keys [theta12 theta23 copa] v :v2} (iod/gibbs r1 r2 r3)]
+      (is (< (rel-err v v2) 1e-10))
+      (is (close? theta12 (angle r1 r2) 1e-12))
+      (is (close? theta23 (angle r2 r3) 1e-12))
+      (is (< (abs copa) 1e-12))))
+  (testing "Gibbs sees a position off the plane"
+    (let [[r1] (at -1800.0) [r2] (at 0.0) [r3] (at 2400.0)]
+      (is (> (abs (:copa (iod/gibbs (v3/add r1 [0.0 0.0 50.0]) r2 r3))) 1e-3))))
+  (testing "Herrick-Gibbs, from three positions a minute apart"
+    (let [[r1] (at -60.0) [r2 v2] (at 0.0) [r3] (at 75.0)
+          {v :v2} (iod/herrick-gibbs r1 r2 r3 -60.0 0.0 75.0)]
+      ;; a Taylor expansion, good to its truncation
+      (is (< (rel-err v v2) 1e-6)))))
+
+(def ^:private omega 7.292115e-5)
+
+(defn- site
+  "A site at latitude `lat` on a spherical Earth, turned by the Earth's
+  rotation `t` seconds from when it was on the x-z plane."
+  [lat t]
+  (let [th (* omega t)]
+    (v3/scale [(* (math/cos lat) (math/cos th)) (* (math/cos lat) (math/sin th)) (math/sin lat)]
+              c/R-earth)))
+
+(deftest angles-only
+  (testing "Gauss, from three sightings a few minutes apart"
+    (let [ts [-480.0 0.0 480.0]
+          sites (map #(site (math/to-radians 40) %) ts)
+          obs (map (fn [t s]
+                     (let [[x y z] (v3/normalize (v3/sub (first (at t)) s))]
+                       [(math/atan2 y x) (math/asin z)]))
+                   ts sites)
+          {:keys [r2 v2]} (iod/gauss obs ts sites)
+          [r-true v-true] (at 0.0)]
+      ;; Gauss's method truncates the f and g series, so it is close, not exact
+      (is (< (rel-err r2 r-true) 0.02))
+      (is (< (rel-err v2 v-true) 0.05)))))
+
+(defn- sightings
+  "Sightings of the true orbit at `ts` from a site at 40 degrees north."
+  [ts]
+  (let [sites (map #(site (math/to-radians 40) %) ts)]
+    [(map (fn [t s]
+            (let [[x y z] (v3/normalize (v3/sub (first (at t)) s))]
+              [(math/atan2 y x) (math/asin z)]))
+          ts sites)
+     sites]))
+
+(deftest double-r
+  (testing "refines Gauss to the orbit itself"
+    (doseq [ts [[-480.0 0.0 480.0] [-900.0 0.0 1200.0]]]
+      (let [[obs sites] (sightings ts)
+            {:keys [r2 v2]} (iod/double-r obs ts sites)
+            gauss (iod/gauss obs ts sites)
+            [r-true v-true] (at 0.0)]
+        (is (< (rel-err r2 r-true) 1e-9) (str ts))
+        (is (< (rel-err v2 v-true) 1e-9) (str ts))
+        (is (> (rel-err (:r2 gauss) r-true) 1e-4) "where Gauss alone was off"))))
+  (testing "from a guess well away from the answer"
+    (let [ts [-480.0 0.0 480.0]
+          [obs sites] (sightings ts)
+          [r-true] (at 0.0)
+          {:keys [r2]} (iod/double-r c/GM-earth obs ts sites [9000.0 9000.0])]
+      (is (< (rel-err r2 r-true) 1e-9)))))
+
+(deftest laplace
+  (testing "Laplace's method, from three sightings a few minutes apart"
+    (let [ts [-480.0 0.0 480.0]
+          [obs sites] (sightings ts)
+          {:keys [r2 v2]} (iod/laplace obs ts sites)
+          [r-true v-true] (at 0.0)]
+      ;; the derivatives are a quadratic's, so it is close, not exact:
+      ;; 0.4% in position here, where Gauss's single pass is 1.1% off
+      (is (< (rel-err r2 r-true) 0.01))
+      (is (< (rel-err v2 v-true) 0.03))))
+  (testing "and closer as the sightings close up, as its derivatives do"
+    (let [err (fn [dt] (let [ts [(- dt) 0.0 dt] [obs sites] (sightings ts)]
+                         (rel-err (:r2 (iod/laplace obs ts sites)) (first (at 0.0)))))]
+      ;; a quarter the error for half the arc
+      (is (< (* 3.0 (err 120.0)) (err 240.0)))
+      (is (< (* 3.0 (err 240.0)) (err 480.0))))))
+
+(defn- arrives? [r1 v1 r2 dt]
+  (let [[r _] (u/propagate mu r1 v1 dt)]
+    (< (v3/distance r r2) (* 1e-6 (v3/length r2)))))
+
+(deftest lambert
+  (let [[r1 v1] (at 0.0)
+        period (kep/period mu 12000.0)]
+    (testing "the short way: the velocities of the orbit the two points came from"
+      (let [dt 2400.0 [r2 v2] (at dt)
+            [a b] (iod/lambert r1 r2 dt {})]
+        (is (< (rel-err a v1) 1e-8))
+        (is (< (rel-err b v2) 1e-8))))
+    (testing "the long way"
+      (let [dt (* 0.7 period) [r2 v2] (at dt)
+            [a b] (iod/lambert r1 r2 dt {:long? true})]
+        (is (< (rel-err a v1) 1e-8))
+        (is (< (rel-err b v2) 1e-8))))
+    (testing "with a revolution on the way, one of the two orbits is the true one, and both arrive"
+      (let [dt (+ period 2400.0) [r2 v2] (at dt)
+            sols (for [high? [false true]] (iod/lambert r1 r2 dt {:revs 1 :high? high?}))]
+        (is (some (fn [[a b]] (and (< (rel-err a v1) 1e-7) (< (rel-err b v2) 1e-7))) sols))
+        (doseq [[a] sols] (is (arrives? r1 a r2 dt)))))
+    (testing "all four one-revolution transfers arrive"
+      (let [r2 (first (at 3000.0)) dt (* 1.6 period)]
+        (doseq [long? [false true] high? [false true]
+                :let [[a] (iod/lambert r1 r2 dt {:long? long? :revs 1 :high? high?})]]
+          (is (arrives? r1 a r2 dt) (str {:long? long? :high? high?})))))
+    (testing "too little time for a revolution"
+      (is (nil? (iod/lambert r1 (first (at 3000.0)) 4560.0 {:revs 1}))))))
+
+(deftest lambert-limits
+  (let [r1 (first (at 0.0)) r2 (first (at 3000.0))
+        chord (v3/distance r1 r2)
+        s (* 0.5 (+ (v3/length r1) (v3/length r2) chord))]
+    (testing "the minimum-energy orbit's semi-major axis is half the semiperimeter"
+      (is (close? (:a (iod/lambert-min-energy r1 r2 false 0)) (* 0.5 s) 1e-12)))
+    (testing "flying it for its time arrives, the short way and the long"
+      (doseq [long? [false true]]
+        (let [{:keys [v1 tof]} (iod/lambert-min-energy r1 r2 long? 0)]
+          (is (arrives? r1 v1 r2 tof) (str long?)))))
+    (testing "and Lambert, asked for that time, finds that orbit"
+      (let [{:keys [v1 tof]} (iod/lambert-min-energy r1 r2 false 0)
+            [a] (iod/lambert r1 r2 tof {})]
+        (is (< (rel-err a v1) 1e-7))))
+    (testing "the long way with a revolution takes longer than the short"
+      (is (< (:tof (iod/lambert-min-energy r1 r2 false 1)) (:tof (iod/lambert-min-energy r1 r2 true 1)))))
+    (testing "no ellipse beats the parabola, and just above its time the orbit is nearly one"
+      (let [{:keys [tof tof-parabolic]} (iod/lambert-min-energy r1 r2 false 0)
+            [a] (iod/lambert r1 r2 (* tof-parabolic 1.0001) {})
+            energy (kep/specific-energy mu r1 a)]
+        (is (< tof-parabolic tof))
+        (is (< (abs energy) (* 1e-3 (/ mu (v3/length r1)))))))))
+
+(deftest lambert-by-lagrange
+  (let [[r1 v1] (at 0.0)
+        period (kep/period mu 12000.0)
+        same? (fn [[a b] [a' b']] (and (< (rel-err a a') 1e-7) (< (rel-err b b') 1e-7)))]
+    (testing "the short way, the long way, and a hyperbola: one orbit each, the universal solver's"
+      (doseq [[r2 dt opts] [[(first (at 2400.0)) 2400.0 {}]
+                            [(first (at (* 0.7 period))) (* 0.7 period) {:long? true}]
+                            [(first (at 2400.0)) 600.0 {}]]]
+        (let [sols (iod/lambert-lagrange r1 r2 dt opts)]
+          (is (= 1 (count sols)) (str opts))
+          (is (same? (first sols) (iod/lambert r1 r2 dt opts)) (str opts))
+          (is (arrives? r1 (ffirst sols) r2 dt)))))
+    (testing "the true orbit is among them"
+      (let [dt 2400.0 [r2 v2] (at dt)]
+        (is (same? (first (iod/lambert-lagrange r1 r2 dt)) [v1 v2]))))
+    (testing "with a revolution: both orbits for the time, each the universal solver's high or low"
+      (let [r2 (first (at 3000.0)) dt (* 1.6 period)]
+        (doseq [long? [false true]]
+          (let [sols (iod/lambert-lagrange r1 r2 dt {:long? long? :revs 1})
+                univ (for [high? [false true]] (iod/lambert r1 r2 dt {:long? long? :revs 1 :high? high?}))]
+            (is (= 2 (count sols)) (str long?))
+            (doseq [u univ] (is (some #(same? u %) sols) (str long?)))
+            (doseq [[a] sols] (is (arrives? r1 a r2 dt)))))))
+    (testing "too little time for a revolution: none"
+      (is (empty? (iod/lambert-lagrange r1 (first (at 3000.0)) 4560.0 {:revs 1}))))))
+
+(deftest lambert-by-battin
+  (let [[r1 v1] (at 0.0)
+        period (kep/period mu 12000.0)
+        same? (fn [[a b] [a' b']] (and (< (rel-err a a') 1e-9) (< (rel-err b b') 1e-9)))]
+    (testing "the same transfers as the universal and Lagrange solvers, and each arrives"
+      (doseq [[r2 dt opts] [[(first (at 2400.0)) 2400.0 {}]
+                            [(first (at (* 0.7 period))) (* 0.7 period) {:long? true}]
+                            [(first (at 2400.0)) 600.0 {}]
+                            [(first (at 2400.0)) 30000.0 {}]]]
+        (let [b (iod/lambert-battin r1 r2 dt opts)]
+          (is (some? b) (str opts dt))
+          (is (same? b (iod/lambert r1 r2 dt opts)) (str opts dt))
+          (is (same? b (first (iod/lambert-lagrange r1 r2 dt opts))) (str opts dt))
+          (is (arrives? r1 (first b) r2 dt)))))
+    (testing "the true orbit, recovered"
+      (let [dt 2400.0 [r2 v2] (at dt)]
+        (is (same? (iod/lambert-battin r1 r2 dt) [v1 v2]))))
+    (testing "through very nearly 180 degrees, where Battin's method has no singularity"
+      (let [r2 (v3/scale (v3/normalize [(- (first r1)) (- (second r1)) (+ (- (nth r1 2)) 1.0)]) 9000.0)
+            dt 3000.0
+            b (iod/lambert-battin r1 r2 dt)]
+        (is (arrives? r1 (first b) r2 dt))))))
+
+(deftest battins-continued-fractions
+  (testing "K(0) is a third"
+    (is (< (abs (- (iod/battin-k 0.0) (/ 1.0 3.0))) 1e-16)))
+  (testing "each y is the root of Battin's cubic y^3 - (1 + h1) y^2 - h2 = 0"
+    (doseq [x [0.01 0.3 1.5 4.0] l [0.05 0.4] m [0.2 3.0 40.0]]
+      (let [{:keys [y h1 h2]} (iod/battin-y x l m)]
+        (is (< (abs (- (* y y y) (* (+ 1.0 h1) y y) h2)) (* 1e-12 (* y y y))) (str [x l m]))))))
+
+(deftest lambert-by-gauss
+  (testing "X(x)'s series is its closed form (E - sin E)/sin^3(E/2), x = sin^2(E/4)"
+    (doseq [E [0.1 0.8 1.6 2.4]]
+      (let [x (math/pow (math/sin (* 0.25 E)) 2)]
+        (is (< (abs (- (iod/gauss-x-series x) (/ (- E (math/sin E)) (math/pow (math/sin (* 0.5 E)) 3)))) 1e-12) (str E)))))
+  (testing "over short arcs, the same transfer as the other solvers, and it arrives"
+    (let [[r1] (at 0.0)]
+      (doseq [dt [300.0 900.0 1800.0]]
+        (let [r2 (first (at dt))
+              g (iod/lambert-gauss r1 r2 dt)]
+          (is (< (rel-err (first g) (first (iod/lambert r1 r2 dt {}))) 1e-9) (str dt))
+          (is (< (rel-err (first g) (first (iod/lambert-battin r1 r2 dt))) 1e-9) (str dt))
+          (is (arrives? r1 (first g) r2 dt)))))))
+
+(deftest gooding
+  (testing "Gooding's method recovers the orbit from a short arc, as double-r does"
+    (doseq [ts [[-480.0 0.0 480.0] [-900.0 0.0 1200.0]]]
+      (let [[obs sites] (sightings ts)
+            {:keys [r2 v2]} (iod/gooding obs ts sites)
+            [r-true v-true] (at 0.0)]
+        (is (< (rel-err r2 r-true) 1e-9) (str ts))
+        (is (< (rel-err v2 v-true) 1e-9) (str ts)))))
+  (testing "and from a long arc, more than half the 3.6-hour orbit, from rough guesses"
+    (let [ts [-3000.0 0.0 4500.0]
+          [obs sites] (sightings ts)
+          {:keys [r2 v2]} (iod/gooding c/GM-earth obs ts sites {:guesses [8000.0 8000.0] :long? true})
+          [r-true v-true] (at 0.0)]
+      (is (< (rel-err r2 r-true) 1e-9))
+      (is (< (rel-err v2 v-true) 1e-9))))
+  (testing "and across a whole revolution, told how many"
+    (let [period (kep/period mu 12000.0)
+          ts [0.0 1500.0 (+ period 2400.0)]
+          [obs sites] (sightings ts)
+          [r-true v-true] (at 1500.0)
+          found (keep #(iod/gooding c/GM-earth obs ts sites {:guesses [6000.0 6000.0] :revs 1 :high? %})
+                      [false true])]
+      (is (some #(and (< (rel-err (:r2 %) r-true) 1e-9) (< (rel-err (:v2 %) v-true) 1e-9)) found)))))

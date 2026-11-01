@@ -631,8 +631,7 @@ package of its own:
 | `allgo.logic.wumpus`          | The wumpus world and the hybrid agent                                       |
 | `allgo.logic.satplan`         | SATPlan: a STRIPS-like problem to CNF for each plan length, solved by DPLL  |
 
-Its tests are the first to follow the package layout, under
-`test/allgo/logic/`.
+Its tests are under `test/allgo/logic/`.
 
 **Steps again.** Model checking steps a model, resolution a pair of
 clauses, forward chaining a symbol off the agenda, WalkSAT a flip;
@@ -757,8 +756,8 @@ examples of chapter 19 are inlined in their test.
 | `allgo.language`                   | 23       | CYK parsing with a probabilistic grammar; treebank trees                  |
 | `allgo.robotics.localization`      | 26       | Monte Carlo localization with a range scanner                             |
 
-The tests mirror the packages, under `test/allgo/decision/`,
-`probability/`, `learning/` and `robotics/`.
+The tests are under `test/allgo/decision/`, `probability/`,
+`learning/` and `robotics/`.
 
 **Steps again.** Every iterative algorithm is a seq of its states: value
 iteration a sweep, policy iteration an evaluate-and-improve, POMDP value
