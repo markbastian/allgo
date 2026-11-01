@@ -19,3 +19,6 @@ repos:
     rev: v2023.01.12
     hooks:
       - id: clj-kondo
+        # one process at a time: parallel runs contend for kondo's cache
+        # lock and fail on large commits
+        require_serial: true
