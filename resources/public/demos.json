@@ -608,6 +608,16 @@
     "Interactive"
    ],
    "href": "play/?demo=vision"
+  },
+  {
+   "id": "language",
+   "group": "AI",
+   "label": "Deep Learning for Language",
+   "blurb": "Word embeddings, recurrent language models, attention and a transformer, training as you watch",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=language"
   }
  ]
 }

@@ -1,5 +1,6 @@
-(ns allgo.language-test
-  (:require [allgo.language :as lang]
+(ns allgo.language.parsing-test
+  (:require [allgo.language.parsing :as lang]
+            [allgo.random]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
@@ -30,3 +31,11 @@
       (is (= text (lang/write-tree tree)))
       (is (= ["Her" "eyes" "were" "glazed" "*-2" "as" "if" "she" "did" "n't" "hear" "*-1" "or" "even" "see" "*-1" "him" "."]
              (lang/leaves tree))))))
+
+(deftest generation-test
+  (testing "sampled sentences are the grammar's: every one parses, and every word's tag is one the lexicon gives it"
+    (let [rng (allgo.random/rng 1)
+          sentences (repeatedly 50 #(lang/generate lang/ambiguous-grammar rng))]
+      (is (every? #(lang/parse-tree (mapv first %) lang/ambiguous-grammar) sentences))
+      (is (every? (fn [[w t]] (some #(= t (first %)) (get-in lang/ambiguous-grammar [:lexicon w])))
+                  (apply concat sentences))))))

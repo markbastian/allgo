@@ -753,7 +753,7 @@ examples of chapter 19 are inlined in their test.
 | `allgo.learning.unsupervised`      | 20       | k-means, EM for Gaussian mixtures, Baum-Welch                             |
 | `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD                     |
 | `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
-| `allgo.language`                   | 23       | CYK parsing with a probabilistic grammar; treebank trees                  |
+| `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees                  |
 | `allgo.robotics.localization`      | 26       | Monte Carlo localization with a range scanner                             |
 
 The tests are under `test/allgo/decision/`, `probability/`,
@@ -1029,6 +1029,92 @@ structure from motion over many views; region proposals and bounding-box
 regression (the chapter's Faster R-CNN); image generation and style
 transfer; and the deep networks of the chapter's classification, which
 need far more data and computing than a drawn scene.
+
+## Deep learning for language, after Russell & Norvig
+
+Chapter 24 of *Artificial Intelligence: A Modern Approach* (4th ed.). It
+gives no figures of pseudocode; these are the methods its text teaches,
+on data drawn from grammars and templates so that every right answer is
+known.
+
+| Namespace                        | What it is                                                                 |
+|----------------------------------|----------------------------------------------------------------------------|
+| `allgo.learning.autodiff`        | Reverse-mode differentiation over matrices; Adam and clipping              |
+| `allgo.language.embeddings`      | Skip-gram with negative sampling; similarity, nearest words, analogies, a 2-D projection |
+| `allgo.language.recurrent`       | Language models with an RNN or an LSTM cell; sampling, perplexity          |
+| `allgo.language.seq2seq`         | An encoder-decoder with attention; greedy and beam decoding                |
+| `allgo.language.transformer`     | Multi-head self-attention, positional encoding, layer norm; tagging, masked language modeling, fine-tuning |
+| `allgo.language.parsing`         | Chapter 23's CYK and treebank code, moved from `allgo.language`, now also sampling sentences from a grammar |
+
+**One differentiation, every architecture.** Back-propagation through
+time, through attention and through a transformer are each a page of
+calculus by hand. `allgo.learning.autodiff` does them all: every matrix
+operation records how to send a gradient back to its inputs, and
+`value-and-grad` walks the graph backwards. Each model here is only its
+forward pass. Every operation's gradient is checked against central
+differences, through a function that uses them all. Skip-gram alone
+follows its gradient directly, being two lines and many thousand updates
+an epoch.
+
+**Reused, not rewritten.** Beam decoding is `allgo.search`'s beam
+search: a state a prefix, a step's cost the negative log probability of
+the token added, best-first with the frontier cut to the beam. The
+embeddings' projection is `allgo.numerics.eigen`'s Jacobi method on their
+covariance. The training text is sampled from probabilistic grammars in
+`allgo.language.parsing`, whose CYK parser then judges what the language
+models write. `allgo.language` became a package for these, its parser
+moving to `.parsing`.
+
+**Steps again.** Skip-gram a chunk of pairs or an epoch; each network a
+sentence, or a sentence pair, a step of Adam; beam search a prefix
+expanded.
+
+**Checked.**
+
+- Embeddings, on a corpus where each person word is a gender, a rank and
+  an age said by context words of its own: king - man + woman = queen, and
+  five more analogies of the kind, on every seed tried.
+- A recurrent language model of grammar sentences: perplexity 4.6 on
+  unseen ones against 13.9 for word frequencies alone, and most of what it
+  writes parses under the grammar.
+- The last word must match the first, six words back: an LSTM learns it,
+  the plain RNN stays at chance -- the vanishing gradient the chapter
+  describes.
+- Attention, learning to reverse digit strings: every unseen string
+  reversed, greedily and by beam search, and the attention the
+  anti-diagonal.
+- The transformer tagging a grammar whose words are often two parts of
+  speech -- "the duck will duck a dog": 100% of held-out words, and of the
+  ambiguous ones, where tagging each word with its most frequent tag gets
+  57%.
+
+**Pretraining, honestly.** A masked language model trained on unlabeled
+sentences fills each hole with a word of the right part of speech 79% of
+the time, so it learns the grammar's categories without labels. But on
+this small grammar it does not make a better tagger: twenty labeled
+sentences already tag the held-out ones perfectly from scratch, and with
+fifteen that leave four words out, fine-tuning the pretrained encoder,
+or training a linear layer on its frozen output, did no better on those
+words than a randomly started one (a frozen random encoder probed for
+long enough reached 84%, the pretrained one 68%). The chapter's case for
+pretraining is data far larger and scarcer in labels than this;
+`fine-tune` and `:train-only` are here to try it, and the test claims
+only what was measured.
+
+**Faster arithmetic.** The training loop was mostly matrix products, and
+`numerics.linear`'s goes through lazy sequences: a loop over the rows in
+`autodiff` took a sequence-to-sequence step from 8.7 ms to 5.9.
+
+**The demo.** Deep Learning for Language trains each model in front of
+you, a little each frame within a time budget: the embeddings on their
+principal components, the male-to-female arrows turning parallel; a
+language model's loss and its sentences, green where they parse; the
+attention grid of a reversal model becoming the anti-diagonal; and a
+transformer tagging both ducks, with one head's attention.
+
+**Not implemented here:** GloVe and contextual embeddings such as ELMo;
+the bidirectional and stacked recurrent networks of the chapter; and
+anything at the scale of BERT or GPT, whose point is the scale.
 
 ## A spatial index for the triangulation
 

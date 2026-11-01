@@ -40,6 +40,7 @@
             [allgo.demo.island :as island]
             [allgo.demo.joints :as joints]
             [allgo.demo.kepler :as kepler]
+            [allgo.demo.language :as language]
             [allgo.demo.local-search :as local-search]
             [allgo.demo.localization :as localization]
             [allgo.demo.lorenz :as lorenz]
@@ -81,6 +82,7 @@
    "grid-world" {:start grid-world/start! :stop grid-world/stop!}
    "classifiers" {:start classifiers/start! :stop classifiers/stop!}
    "vision" {:start vision/start! :stop vision/stop!}
+   "language" {:start language/start! :stop language/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
    "slam" {:start slam/start! :stop slam/stop!}

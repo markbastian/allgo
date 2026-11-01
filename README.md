@@ -24,7 +24,8 @@ discipline:
 | `allgo.planning`   | Classical planning over ground actions, hierarchical and angelic search, job-shop scheduling                                                                                 |
 | `allgo.decision`   | Expected utility and the value of information; MDPs by value and policy iteration, POMDPs; reinforcement learning -- ADP, TD, Q-learning, SARSA, REINFORCE; game theory, voting and auctions |
 | `allgo.probability`| Bayesian networks, exact and by sampling; HMMs, Viterbi, particle and Kalman filters; probabilistic programs                                                                |
-| `allgo.learning`   | Decision trees, AdaBoost, random forests; linear and logistic regression, SVMs, k nearest neighbors, naive Bayes; k-means, EM, Baum-Welch; neural networks by back-propagation |
+| `allgo.learning`   | Decision trees, AdaBoost, random forests; linear and logistic regression, SVMs, k nearest neighbors, naive Bayes; k-means, EM, Baum-Welch; neural networks by back-propagation; reverse-mode differentiation |
+| `allgo.language`   | CYK parsing and treebank trees; word embeddings, recurrent language models, sequence to sequence with attention, the transformer                         |
 | `allgo.vision`     | Images, convolution and smoothing; Canny edges and orientation histograms; optical flow; segmentation; stereo and triangulation; a convolutional detector with non-maximum suppression |
 | `allgo.robotics`   | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm; motion planning; localization and mapping; control                         |
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
@@ -40,8 +41,7 @@ them: `allgo.graph` (union-find, components, minimum spanning trees),
 to IDA*, each a step of one shape, with `allgo.search.local`,
 `.nondeterministic` and `.online` for chapter 4, `.adversarial` for
 chapter 5 and `.csp` for chapter 6), `allgo.agents` (chapter 2's vacuum
-world and agents), `allgo.language` (CYK parsing and treebank trees),
-and `allgo.array` (flat numeric arrays on either platform).
+world and agents), and `allgo.array` (flat numeric arrays on either platform).
 
 The tests in `test/allgo` follow the same packages: `allgo.search.csp`
 is tested by `allgo.search.csp-test` in `test/allgo/search/`, and the
@@ -102,7 +102,7 @@ groups:
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
-| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; computer vision -- edges, segmentation, flow, stereo and detection |
+| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; computer vision -- edges, segmentation, flow, stereo and detection; word embeddings, language models, attention and a transformer, training live |
 | Robotics              | Inverse kinematics, redundancy in a human arm; Monte Carlo localization; motion planning, from visibility graphs to RRT* and an arm in configuration space; EKF localization and SLAM |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |

@@ -1,4 +1,4 @@
-(ns allgo.language
+(ns allgo.language.parsing
   "Natural language: Russell and Norvig, *Artificial Intelligence: A
   Modern Approach*, 4th edition, chapter 23.
 
@@ -9,6 +9,10 @@
                      tree read back from it
     sentence trees   bracketed trees as the Penn Treebank writes them
                      (figure 23.8), read and written
+    generation       sentences sampled from a probabilistic grammar, each
+                     word with the part of speech it was drawn as: tagged
+                     data whose tags are right by construction, for
+                     training the taggers of chapter 24
 
   A grammar is `{:rules [[X Y Z p] ...] :lexicon {word [[X p] ...]}}`:
   binary rules X -> Y Z with probability p, and lexical rules X -> word.
@@ -111,3 +115,44 @@
   "The words of a tree, in order."
   [tree]
   (if (string? tree) [tree] (vec (mapcat leaves (rest tree)))))
+
+;; ---------------------------------------------------------------------------
+;; Generation
+
+(def ambiguous-grammar
+  "A small grammar of this library's whose words are often more than one
+  part of speech -- \"fish\", \"duck\", \"watch\" and \"saw\" nouns or
+  verbs, \"can\" a noun or a modal -- so that tagging needs the context,
+  not just the word. Nonterminals other than the start are free to
+  appear only on the right; the lexicon gives P(word | tag)."
+  {:rules [[:S :NP :VP 1.0]
+           [:NP :Det :N 0.7] [:NP :Adj :N 0.3]
+           [:VP :V :NP 0.5] [:VP :Modal :VB 0.3] [:VP :V :Adv 0.2]
+           [:VB :V :NP 1.0]]
+   :lexicon {"the" [[:Det 0.6]] "a" [[:Det 0.4]]
+             "fish" [[:N 0.2] [:V 0.2]] "duck" [[:N 0.15] [:V 0.15]] "watch" [[:N 0.15] [:V 0.2]]
+             "saw" [[:N 0.1] [:V 0.15]] "can" [[:N 0.1] [:Modal 0.7]]
+             "dog" [[:N 0.15]] "cat" [[:N 0.15]] "sees" [[:V 0.15]] "likes" [[:V 0.15]]
+             "young" [[:Adj 0.5]] "old" [[:Adj 0.5]] "will" [[:Modal 0.3]]
+             "quickly" [[:Adv 0.5]] "well" [[:Adv 0.5]]}})
+
+(defn- pick-weighted [rng choices]
+  (let [total (reduce + (map second choices))
+        r (* total (double (rng)))]
+    (loop [[[x p] & more] choices acc 0.0]
+      (if (or (empty? more) (< r (+ acc p))) x (recur more (+ acc p))))))
+
+(defn generate
+  "A sentence sampled from `grammar` from `start` (default :S): each
+  nonterminal expanded by one of its rules chosen by probability, each
+  part of speech by a word chosen by P(word | tag). `[[word tag] ...]`."
+  ([grammar rng] (generate grammar rng :S))
+  ([{:keys [rules lexicon]} rng start]
+   (let [by-head (group-by first rules)
+         words-of (reduce (fn [m [w tags]] (reduce (fn [m [t p]] (update m t (fnil conj []) [w p])) m tags)) {} lexicon)]
+     (letfn [(expand [x]
+               (if-let [rs (by-head x)]
+                 (let [[_ y z] (pick-weighted rng (map (fn [r] [r (peek r)]) rs))]
+                   (concat (expand y) (expand z)))
+                 [[(pick-weighted rng (words-of x)) x]]))]
+       (vec (expand start))))))

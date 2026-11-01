@@ -40,7 +40,7 @@ const SETTLE = { fire: 12000, dla: 15000, erosion: 12000, flip: 9000,
                  search: 25000, "local-search": 9000, "game-search": 45000,
                  constraints: 15000, wumpus: 12000, "first-order": 10000,
                  "grid-world": 12000, classifiers: 15000, localization: 20000,
-                 "motion-planning": 45000, slam: 25000, vision: 30000 };
+                 "motion-planning": 45000, slam: 25000, vision: 30000, language: 30000 };
 const DEFAULT_SETTLE = 6000;
 
 // How far to zoom toward the middle, for the demos whose subject is small
@@ -133,5 +133,10 @@ for (const d of demos) {
 }
 
 ws.close();
+// Wait for Chrome to be gone before removing its profile: removing it
+// while Chrome is still writing failed with ENOTEMPTY and left the
+// browser running.
+const gone = exited !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
 chrome.kill();
+await gone;
 rmSync(profile, { recursive: true, force: true });
