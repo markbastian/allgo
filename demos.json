@@ -249,6 +249,36 @@
    "href": "play/?demo=human-arm"
   },
   {
+   "id": "localization",
+   "group": "Robotics",
+   "label": "Robot Localization",
+   "blurb": "Monte Carlo localization: particles that find a robot that does not know where it is",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=localization"
+  },
+  {
+   "id": "motion-planning",
+   "group": "Robotics",
+   "label": "Motion Planning",
+   "blurb": "Visibility graphs, cells, PRM, RRT and RRT*, potential fields, and a two-link arm in configuration space",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=motion-planning"
+  },
+  {
+   "id": "slam",
+   "group": "Robotics",
+   "label": "SLAM",
+   "blurb": "The extended Kalman filter locating a robot among landmarks, then mapping them as it goes",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=slam"
+  },
+  {
    "id": "soft-body",
    "group": "Soft Bodies",
    "label": "Soft Bodies — XPBD",
@@ -568,16 +598,6 @@
     "Interactive"
    ],
    "href": "play/?demo=classifiers"
-  },
-  {
-   "id": "localization",
-   "group": "AI",
-   "label": "Robot Localization",
-   "blurb": "Monte Carlo localization: particles that find a robot that does not know where it is",
-   "badges": [
-    "Interactive"
-   ],
-   "href": "play/?demo=localization"
   }
  ]
 }
