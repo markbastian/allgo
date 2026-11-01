@@ -1116,6 +1116,101 @@ transformer tagging both ducks, with one head's attention.
 the bidirectional and stacked recurrent networks of the chapter; and
 anything at the scale of BERT or GPT, whose point is the scale.
 
+## Knowledge representation, after Russell & Norvig
+
+Chapter 10 of *Artificial Intelligence: A Modern Approach* (4th ed.):
+ontologies, categories, events, knowledge of knowledge, and reasoning
+by default. The copy at hand is the 3rd edition, where the same material
+is chapter 12, and the code follows its text. The chapter gives no
+pseudocode, and says outright that it leaves out the truth maintenance
+algorithms; what is here is the usual algorithm for each idea it
+teaches.
+
+| Namespace                    | What it is                                                                  |
+|------------------------------|-----------------------------------------------------------------------------|
+| `allgo.logic.categories`     | Semantic networks: MemberOf and SubsetOf, boxed and double-boxed links, inheritance with overriding, reified events; Disjoint, ExhaustiveDecomposition, Partition |
+| `allgo.logic.description`    | CLASSIC without SameAs: normal forms, structural subsumption, incoherence, classification into a taxonomy, membership of individuals |
+| `allgo.logic.events`         | The event calculus's T, Happens, Initiates, Terminates, Clipped, Restored; processes; the interval relations; the time scale and Date |
+| `allgo.logic.modal`          | Possible worlds and accessibility, K_a with nesting and quantifiers, checked by labeling; reflexive, transitive and symmetric frames |
+| `allgo.logic.defaults`       | Circumscription, plain and prioritized, as preferred models; default logic's extensions |
+| `allgo.logic.tms`            | A JTMS and an ATMS                                                          |
+
+**Steps again.** Inheritance a node a step up the links; labeling a
+subsentence a step; the event calculus a time point a step; models one
+DPLL call a step, with a clause blocking each one found; default logic
+a process -- an order of applying the rules -- a step, depth first;
+classification a concept placed a step; a JTMS a node off its queue,
+an ATMS a justification.
+
+**Reused.** Default logic and circumscription ground their first-order
+sentences over the constants they mention and hand them to
+`allgo.logic.propositional`'s DPLL: entailment for a rule's
+prerequisite, satisfiability for its justification, and every model for
+circumscription. The sentences are parsed by `allgo.logic.first-order`,
+whose substitution also grounds the modal quantifiers. PartOf's
+transitivity -- PartOf(Bucharest, Earth) -- is just forward chaining
+there, and is tested as such rather than given code of its own.
+
+**The book's dates are Pacific time.** Its time scale counts seconds
+from midnight GMT at the start of 1900, and it gives Time(Begin(AD2001))
+= 3187324800, Time(End(AD2001)) = 3218860800 and Date(0, 20, 21, 24, 1,
+1995) = 3000000000. None of these is right on Greenwich time; all are
+on Pacific Standard Time, eight hours behind -- midnight in California
+-- and the last only with Date's arguments read seconds, minutes, hours,
+not the hours, minutes, seconds the text names: 3,000,000,000 seconds
+after 1900 began in Greenwich is 21:20:00 on 24 January 1995 in
+California. `events/date` takes a `:utc-offset` and the seconds-first
+order, and the tests reproduce every number with an offset of -8. (Only
+the 3rd edition was checked.)
+
+**Choices the text leaves open.**
+
+- Inheritance: a value is overridden by one on any node below it, not
+  just by the first one found going up, so a near general category
+  cannot beat a far specific one (Opus is a penguin, and a pet, and pets
+  are animals). Values that neither overrides and that disagree -- the
+  Nixon diamond -- are returned as ambiguous.
+- The event calculus states only when a fluent holds and when it does
+  not; a fluent nothing has initiated or terminated is neither, and
+  `holds` says nil. Its Clipped counts an event at the very moment of
+  initiation, so an initiation and a termination at once leave the
+  fluent undecided too.
+- Figure 12.4's arrows were taken from its description; the figure
+  itself did not survive extraction. Every claim the text makes of it
+  holds: Lois knows Superman knows whether he is Clark, Superman knows
+  Lois knows the forecast, and in the joined model, in w0, Superman knows
+  I but not R, nor whether Lois knows R.
+- CLASSIC's individuals: membership reads an individual's role fillers as
+  all it has, so All(Son, Married) can be decided from the sons named.
+- The truth maintenance systems are monotonic: justifications have only
+  in-lists. The JTMS retracts in two passes -- everything that depended
+  on the retracted node out, then whatever another justification still
+  supports back in -- which is what stops two nodes that justify each
+  other from keeping each other in.
+
+**Checked**, besides the dates: Mary's two legs and John's one (figure
+12.5); Fly17 (figure 12.6); the Nixon diamond as two preferred models,
+religion over politics making a pacifist, and as two extensions; Tweety
+flying until told it is abnormal; the bachelor, and the men with three
+sons, against what follows from them and what does not; the three JTMS
+cases of Q's justifications; the car that won't start; K_a P => P only
+on reflexive frames, K_a P => K_a K_a P failing on a frame that is not
+transitive; Bond's two readings.
+
+**The demo.** Knowledge Representation shows each, a step at a time:
+inheritance climbing figure 12.5 and the Nixon diamond; figure 12.4's
+worlds lit as each part of a knowledge sentence is labeled; a wumpus
+hunt's fluents through time; the Nixon diamond's processes, extensions
+and preferred models; a taxonomy filling in; and the 2048 Olympic sites
+under a JTMS -- the chapter's example, the consequences ours --
+Athletics moving from Bucharest to Sibiu, with the car's ATMS labels
+beside it.
+
+**Not implemented here:** the ontology of measures, and of stuff and
+things, which the chapter gives as axioms rather than procedures;
+CLASSIC's SameAs; nonmonotonic justifications (out-lists) in the JTMS;
+and the 3rd edition's internet shopping agent, which the 4th dropped.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

@@ -20,7 +20,7 @@ discipline:
 | `allgo.procedural` | Noise, fractals and shaping functions; caves, dungeons, diamond-square and TIN terrain, hydraulic erosion, DLA; islands with settlements, roads and names; planets and their atmospheres |
 | `allgo.geometry`   | Vectors and quaternions, Delaunay triangulation, the Delaunay/Voronoi dual mesh, 3D Voronoi cells, GJK/EPA, hex grids, triangle and tetrahedral meshes                       |
 | `allgo.spatial`    | Spatial hashing, sweep and prune, Morton codes, a bounding volume hierarchy                                                                                                  |
-| `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent, SATPlan; first-order unification, chaining and resolution     |
+| `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent, SATPlan; first-order unification, chaining and resolution; knowledge representation -- semantic networks, description logic, the event calculus, modal logic, default reasoning, truth maintenance |
 | `allgo.planning`   | Classical planning over ground actions, hierarchical and angelic search, job-shop scheduling                                                                                 |
 | `allgo.decision`   | Expected utility and the value of information; MDPs by value and policy iteration, POMDPs; reinforcement learning -- ADP, TD, Q-learning, SARSA, REINFORCE; game theory, voting and auctions |
 | `allgo.probability`| Bayesian networks, exact and by sampling; HMMs, Viterbi, particle and Kalman filters; probabilistic programs                                                                |
@@ -66,7 +66,8 @@ Where a namespace follows a book, it says so. The main ones:
   al.'s agents and Kelly & McCabe's survey: `allgo.procedural.city`.
 - **Russell & Norvig, *Artificial Intelligence: A Modern Approach* (4th
   ed.)**: every algorithm it gives as pseudocode, chapters 2 to 26,
-  and the main ones its text teaches: `allgo.agents`,
+  and the main ones its text teaches -- chapter 10 from the 3rd
+  edition's chapter 12: `allgo.agents`,
   `allgo.search` and its namespaces, `allgo.logic`, `allgo.planning`,
   `allgo.probability`, `allgo.decision`, `allgo.learning`,
   `allgo.language`, `allgo.vision` and `allgo.robotics`.
@@ -102,7 +103,7 @@ groups:
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
-| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; computer vision -- edges, segmentation, flow, stereo and detection; word embeddings, language models, attention and a transformer, training live |
+| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; knowledge representation, from semantic networks to truth maintenance; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; computer vision -- edges, segmentation, flow, stereo and detection; word embeddings, language models, attention and a transformer, training live |
 | Robotics              | Inverse kinematics, redundancy in a human arm; Monte Carlo localization; motion planning, from visibility graphs to RRT* and an arm in configuration space; EKF localization and SLAM |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |
