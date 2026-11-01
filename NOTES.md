@@ -865,6 +865,86 @@ exact POMDP pruning by linear programming; GraphPlan, which the 4th
 edition dropped; partial-order planning; and the deep learning chapter's
 recurrent networks, attention and anything that needs a GPU.
 
+## Robotics and multiagent decisions, after Russell & Norvig
+
+The rest of chapter 26 and all of chapter 18 of *Artificial Intelligence:
+A Modern Approach* (4th ed.). Neither gives figures of pseudocode; the
+algorithms are the ones their text teaches.
+
+| Namespace                       | What it is                                                                 |
+|---------------------------------|----------------------------------------------------------------------------|
+| `allgo.robotics.motion`         | Configuration space for a disk robot among polygons; the visibility graph, cell decomposition, PRM, RRT and RRT*, shortcutting, potential fields; a two-link arm's configuration space |
+| `allgo.robotics.localization`   | Monte Carlo localization, and now EKF localization among landmarks         |
+| `allgo.robotics.slam`           | EKF SLAM: the pose and every landmark in one Gaussian                       |
+| `allgo.robotics.control`        | PID as a step; LQR by the Riccati recursion                                |
+| `allgo.robotics.kinematics`     | Craig's chains and the IK solvers, moved here from `allgo.kinematics`      |
+| `allgo.decision.games`          | Normal-form games, dominance and its iterated elimination, Nash equilibria pure and mixed, zero-sum games by linear programming, repeated games, bargaining, the Shapley value, voting, auctions and VCG |
+
+**Reused, not rewritten.** The arm is an `allgo.robotics.kinematics`
+chain -- Craig's parameters, two revolute joints -- rather than its own
+trigonometry. The 2D segment-to-segment distance went into
+`allgo.geometry.polygon` beside the segment helpers already there; the
+3D ones in `physics.contact` return points, and GJK works on general
+convex shapes. The filters use the scalar Joseph-form update that orbit
+determination had, now moved to `allgo.probability.temporal` with the
+chapter 14 Kalman filter, so that robotics does not depend on astro.
+`allgo.kinematics` moved under `allgo.robotics` for the same reason of
+grouping: the arms, the planners and the filters are one package.
+
+**Steps again.** PRM grows a sample a step; RRT and RRT* a node; the
+cell planner is `allgo.search`'s A*; the potential field a move down the
+gradient; shortcutting a try; EKF localization and SLAM a control and
+its observations; PID a control; the Riccati recursion a step further
+from the horizon; iterated elimination a strategy removed; instant
+runoff a round; the English auction a raise; bargaining a round of
+backward induction.
+
+**Checked.**
+
+- The visibility graph's path round a square, for radii 0, 0.2 and 0.5,
+  is the exact shortest, 2 sqrt((1 - r)^2 + (1 + r)^2) + 2 + 2r, to 1e-9.
+  Every other planner's path is collision free and no shorter; RRT*'s
+  shortens as it grows (5.69, 5.44, 5.34, 5.30 m against 5.284 at 200 to
+  2000 nodes).
+- A passage narrower than a cell is lost to cell decomposition and found
+  by the visibility graph -- the incompleteness the book warns of. The
+  potential field reaches the goal past a post and stalls in a cup.
+- The arm's configuration space agrees with a direct collision test at
+  every cell, and its plans never collide.
+- EKF localization stays within 15 cm over a lap, against dead
+  reckoning's metre or more, with a normalized position error averaging
+  near 2 -- the filter's covariance is honest. EKF SLAM maps all twelve
+  landmarks to within 0.3 m and ends within 10 cm.
+- PID on a mass: P alone oscillates for ever between 0 and twice the
+  target; PD settles; a constant push of d leaves PD d / kp off; the
+  integral removes it. LQR for x' = x + u with unit costs gives P = the
+  golden ratio and K its reciprocal.
+- Two-finger Morra's value is -1/12, the even player showing one finger
+  7/12 of the time, from the linear program and from support
+  enumeration; battle of the sexes has its two pure equilibria and the
+  mixed (2/3, 1/3); the glove game's Shapley values are 2/3, 1/6, 1/6;
+  bargaining converges to Rubinstein's split; truthful bidding is never
+  beaten in a second-price auction.
+
+**The Joseph update made quadratic.** The scalar update formed I - K H
+as a matrix and multiplied it out, cubic in the state's size: fine for an
+orbit's six, 24 s for SLAM's 27 over a lap. For one row H the Joseph form
+is outer products -- A = P - K (P H)^T, then A - (A H) K^T + R K K^T --
+quadratic, the same to 4e-15, and symmetrized; SLAM's lap now takes 5 s.
+
+**The demos.** Motion Planning runs each planner in one room, the arm
+beside its configuration space; click to move the goal. SLAM drives laps
+of a field of landmarks, steering by its own estimate -- so under dead
+reckoning the estimate traces a perfect rectangle while the robot
+wanders off it, and under the filters it keeps to the route. Both demos
+and Robot Localization are in the gallery's Robotics group, with the arms.
+
+**Not implemented here:** Voronoi roadmaps, kinodynamic planning and
+trajectory optimization; FastSLAM, graph SLAM and data association for
+landmarks that cannot be told apart; the contract net and other
+cooperative protocols; Lemke-Howson, for games larger than support
+enumeration can handle.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

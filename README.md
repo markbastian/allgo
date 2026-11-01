@@ -22,11 +22,10 @@ discipline:
 | `allgo.spatial`    | Spatial hashing, sweep and prune, Morton codes, a bounding volume hierarchy                                                                                                  |
 | `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent, SATPlan; first-order unification, chaining and resolution     |
 | `allgo.planning`   | Classical planning over ground actions, hierarchical and angelic search, job-shop scheduling                                                                                 |
-| `allgo.decision`   | Expected utility and the value of information; MDPs by value and policy iteration, POMDPs; reinforcement learning -- ADP, TD, Q-learning, SARSA, REINFORCE                     |
+| `allgo.decision`   | Expected utility and the value of information; MDPs by value and policy iteration, POMDPs; reinforcement learning -- ADP, TD, Q-learning, SARSA, REINFORCE; game theory, voting and auctions |
 | `allgo.probability`| Bayesian networks, exact and by sampling; HMMs, Viterbi, particle and Kalman filters; probabilistic programs                                                                |
 | `allgo.learning`   | Decision trees, AdaBoost, random forests; linear and logistic regression, SVMs, k nearest neighbors, naive Bayes; k-means, EM, Baum-Welch; neural networks by back-propagation |
-| `allgo.robotics`   | Monte Carlo localization                                                                                                                                                     |
-| `allgo.kinematics` | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm                                                                                 |
+| `allgo.robotics`   | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm; motion planning; localization and mapping; control                         |
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
 | `allgo.simulation` | Reynolds' boids, and a motorcycle with a rider and courses to ride                                                                                                           |
 | `allgo.numerics`   | Runge-Kutta, Runge-Kutta-Nystrom, Adams multistep, extrapolation, FFT, tridiagonal and small dense linear solves, table interpolation, least-squares fits                     |
@@ -72,7 +71,7 @@ Where a namespace follows a book, it says so. The main ones:
   `allgo.language` and `allgo.robotics`.
 - **Matthias Müller's [Ten Minute Physics](https://matthias-research.github.io/pages/tenMinutePhysics/)**:
   most of `allgo.physics` and `allgo.spatial`.
-- **Craig, *Introduction to Robotics***: `allgo.kinematics`.
+- **Craig, *Introduction to Robotics***: `allgo.robotics.kinematics`.
 - **Featherstone**: `allgo.physics.articulated`.
 - **[Red Blob Games](https://www.redblobgames.com/)**: hex grids and
   island generation.
@@ -102,8 +101,8 @@ groups:
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
-| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; Monte Carlo localization |
-| Robotics              | Inverse kinematics, redundancy in a human arm                                                  |
+| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data |
+| Robotics              | Inverse kinematics, redundancy in a human arm; Monte Carlo localization; motion planning, from visibility graphs to RRT* and an arm in configuration space; EKF localization and SLAM |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |
 | Fluids                | Eulerian fluid, FLIP fluid, fire and smoke, height-field water                                 |

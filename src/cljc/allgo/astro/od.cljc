@@ -17,13 +17,13 @@
 
   States are `[r v]`, km and km/s; `accel` is `(fn [t r v])`, the
   acceleration, two-body included."
-  (:require [allgo.astro.estimation :as est]
-            [allgo.astro.variational :as var]
+  (:require [allgo.astro.variational :as var]
             [allgo.numerics.core :as core]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
-            [allgo.numerics.rk :as rk]))
+            [allgo.numerics.rk :as rk]
+            [allgo.probability.temporal :as tm]))
 
 (defn- flat [r v] (vec (concat r v)))
 
@@ -152,8 +152,8 @@
                 ;; one scalar update per component, the reference fixed at x1
                 {dx :x P' :P} (reduce (fn [{:keys [x P]} k]
                                         (let [h (mapv #(nth % k) H)]
-                                          (select-keys (est/kalman-update x P h (- (residuals k) (lin/dot h x))
-                                                                          (* (sigma k) (sigma k)))
+                                          (select-keys (tm/kalman-update x P h (- (residuals k) (lin/dot h x))
+                                                                         (* (sigma k) (sigma k)))
                                                        [:x :P])))
                                       {:x (vec (repeat 6 0.0)) :P P1}
                                       (range (count z)))
@@ -183,8 +183,8 @@
                 H (measurement-partials model tk x1)
                 residuals (mapv - z (model tk r1 v1))
                 {dx' :x P' :P} (reduce (fn [{:keys [x P]} k]
-                                         (select-keys (est/kalman-update x P (H k) (- (residuals k) (lin/dot (H k) x))
-                                                                         (* (sigma k) (sigma k)))
+                                         (select-keys (tm/kalman-update x P (H k) (- (residuals k) (lin/dot (H k) x))
+                                                                        (* (sigma k) (sigma k)))
                                                       [:x :P]))
                                        {:x dx1 :P P1}
                                        (range (count z)))

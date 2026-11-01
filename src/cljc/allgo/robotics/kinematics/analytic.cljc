@@ -1,4 +1,4 @@
-(ns allgo.kinematics.analytic
+(ns allgo.robotics.kinematics.analytic
   "Closed-form inverse kinematics for a six-axis arm with a spherical
   wrist, after Craig chapter 4.
 
@@ -41,8 +41,8 @@
   verified."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
-            [allgo.kinematics.chain :as k]
             [allgo.math :as am]
+            [allgo.robotics.kinematics.chain :as k]
             [clojure.math :as math]))
 
 (def ^:private half-pi (/ math/PI 2.0))

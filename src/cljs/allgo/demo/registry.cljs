@@ -43,6 +43,7 @@
             [allgo.demo.local-search :as local-search]
             [allgo.demo.localization :as localization]
             [allgo.demo.lorenz :as lorenz]
+            [allgo.demo.motion-planning :as motion-planning]
             [allgo.demo.motorcycle :as motorcycle]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.planet :as planet]
@@ -51,6 +52,7 @@
             [allgo.demo.satellite :as satellite]
             [allgo.demo.search :as search]
             [allgo.demo.skinning :as skinning]
+            [allgo.demo.slam :as slam]
             [allgo.demo.soft-body :as soft-body]
             [allgo.demo.solar-system :as solar]
             [allgo.demo.spatial-hash :as spatial-hash]
@@ -78,6 +80,8 @@
    "grid-world" {:start grid-world/start! :stop grid-world/stop!}
    "classifiers" {:start classifiers/start! :stop classifiers/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
+   "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
+   "slam" {:start slam/start! :stop slam/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

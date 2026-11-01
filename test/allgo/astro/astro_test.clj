@@ -1458,36 +1458,6 @@
     (is (close? 5.0 (first even) 1e-12) "equal weights split the difference")
     (is (> (first heavy) 9.0) "a hundredfold weight nearly wins outright")))
 
-(deftest the-kalman-update-shrinks-the-covariance
-  (let [P0 [[100.0 0.0] [0.0 100.0]]
-        {:keys [x P]} (est/kalman-update [0.0 0.0] P0 [1.0 0.0] 10.0 1.0)]
-    (is (> (first x) 9.0) "a precise measurement moves the state most of the way")
-    (is (< (nth (nth P 0) 0) (nth (nth P0 0) 0)) "and shrinks the variance it informs")
-    (is (close? 100.0 (nth (nth P 1) 1) 1e-9) "leaving the unobserved one alone")))
-
-(deftest the-covariance-stays-symmetric-and-positive
-  ;; The Joseph form exists for this. A covariance that loses positive
-  ;; definiteness gives a negative variance, and the filter is finished.
-  (let [rng (java.util.Random. 11)]
-    (loop [x [0.0 0.0] P [[10.0 1.0] [1.0 10.0]] n 0]
-      (when (< n 200)
-        (let [{x' :x P' :P} (est/kalman-update x P [1.0 0.3] (.nextGaussian rng) 0.01)]
-          (is (close? (nth (nth P' 0) 1) (nth (nth P' 1) 0) 1e-12) "symmetric")
-          (is (pos? (nth (nth P' 0) 0)) "positive variance")
-          (is (pos? (nth (nth P' 1) 1)))
-          (is (some? (lin/cholesky P')) "and still positive definite")
-          (recur x' P' (inc n)))))))
-
-(deftest process-noise-keeps-a-filter-listening
-  ;; Without it the covariance shrinks forever and the filter stops learning,
-  ;; which is the classic way to make one diverge.
-  (let [phi (lin/eye 2)
-        P   [[1.0 0.0] [0.0 1.0]]
-        no-q  (:P (est/kalman-predict [0.0 0.0] P phi (lin/mat-scale (lin/eye 2) 0.0)))
-        with-q (:P (est/kalman-predict [0.0 0.0] P phi (lin/mat-scale (lin/eye 2) 0.5)))]
-    (is (close? 1.0 (nth (nth no-q 0) 0) 1e-12) "no noise, no growth")
-    (is (close? 1.5 (nth (nth with-q 0) 0) 1e-12) "noise adds uncertainty back")))
-
 (deftest an-orbit-is-recovered-from-noisy-ranges
   ;; The capstone, and the point of the whole package: chapter 2's elements
   ;; set the truth, chapter 3's J2 perturbs it, chapter 4 propagates it,

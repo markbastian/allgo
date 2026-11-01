@@ -7,12 +7,12 @@
   converging from a start kilometers out, their errors within their
   covariances."
   (:require [allgo.astro.constants :as c]
-            [allgo.astro.estimation :as est]
             [allgo.astro.kepler :as kep]
             [allgo.astro.od :as od]
             [allgo.geometry.vec3 :as v3]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
+            [allgo.probability.temporal :as tm]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -139,7 +139,7 @@
           zs (map #(+ 3.0 (* -0.5 %) (* 0.1 (math/sin (* 7.0 %)))) ts)
           x0 [0.0 0.0] P0 [[100.0 0.0] [0.0 10.0]]
           steps (map (fn [_ z] {:phi (phi 1.0) :H [[1.0 0.0]] :z [z] :R [0.01]}) ts zs)
-          {:keys [x P]} (peek (est/linear-kalman x0 P0 steps))
+          {:keys [x P]} (peek (tm/linear-kalman x0 P0 steps))
           rows (map (fn [t z] {:H (first (lin/mat-mul [[1.0 0.0]] (phi t))) :residual z :weight 100.0}) ts zs)
           {xb :x Pb :P} (peek (od/sequential-batch {:x x0 :P P0} [rows]))
           PhiN (phi (last ts))]

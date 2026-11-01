@@ -44,7 +44,7 @@
   (:require [allgo.demo.fps :as fps]
             [allgo.geometry.quaternion :as quat]
             [allgo.geometry.vec3 :as v]
-            [allgo.kinematics.arm :as arm]
+            [allgo.robotics.kinematics.arm :as arm]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))

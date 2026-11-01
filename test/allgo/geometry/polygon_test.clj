@@ -25,7 +25,12 @@
   (testing "segments: where they cross, and where they do not"
     (is (= [0.5 0.5] (poly/segment-intersection [0.0 0.0] [2.0 2.0] [0.0 2.0] [2.0 0.0])))
     (is (nil? (poly/segment-intersection [0.0 0.0] [1.0 0.0] [0.0 1.0] [1.0 1.0])))
-    (is (close? 1.0 (poly/segment-distance [5.0 1.0] [0.0 0.0] [10.0 0.0])))))
+    (is (close? 1.0 (poly/segment-distance [5.0 1.0] [0.0 0.0] [10.0 0.0]))))
+  (testing "segment to segment: zero where they cross, else the nearest ends -- parallel, skew, collinear"
+    (is (close? 0.0 (poly/segment-segment-distance [0.0 0.0] [2.0 2.0] [0.0 2.0] [2.0 0.0])))
+    (is (close? 1.0 (poly/segment-segment-distance [0.0 0.0] [1.0 0.0] [0.0 1.0] [1.0 1.0])))
+    (is (close? 1.0 (poly/segment-segment-distance [0.0 0.0] [1.0 0.0] [2.0 0.0] [3.0 0.0])))
+    (is (close? (Math/sqrt 2.0) (poly/segment-segment-distance [0.0 0.0] [1.0 1.0] [3.0 1.0] [2.0 2.0])))))
 
 (deftest clip-test
   (testing "a square cut down the middle: two halves, the area shared, tags kept"

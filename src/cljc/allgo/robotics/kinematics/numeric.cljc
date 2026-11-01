@@ -1,7 +1,7 @@
-(ns allgo.kinematics.numeric
+(ns allgo.robotics.kinematics.numeric
   "Inverse kinematics by descent, for chains that have no closed form.
 
-  `allgo.kinematics.analytic` is exact, instant and complete -- it hands
+  `allgo.robotics.kinematics.analytic` is exact, instant and complete -- it hands
   back every configuration at once -- but it only exists because a
   spherical wrist makes the algebra separable. Take the wrist apart, add a
   seventh joint, bolt on a tool at an angle, and there is no formula. What
@@ -33,10 +33,10 @@
   but you will never know whether you have them all."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
-            [allgo.kinematics.chain :as k]
             [allgo.math :as am]
             [allgo.numerics.linear :as lin]
             [allgo.random :as random]
+            [allgo.robotics.kinematics.chain :as k]
             [clojure.math :as math]))
 
 (defn pose-error

@@ -13,7 +13,9 @@
 
   A Kalman filter processes observations one at a time, carrying a covariance
   that says how well it currently knows the state. It is what you use when
-  the data is still arriving, and it never revisits a measurement.
+  the data is still arriving, and it never revisits a measurement. The
+  filter itself -- predict, the Joseph-form update, Vallado's linear filter
+  -- is general, and lives in `allgo.probability.temporal`.
 
   Both need the state transition matrix of chapter 7 to relate a correction
   at the epoch to its effect at the time of an observation."
@@ -56,60 +58,6 @@
   [rows]
   (math/sqrt (/ (reduce + (map #(let [r (:residual %)] (* r r)) rows))
                 (max 1 (count rows)))))
-
-;; -------------------------------------------------------- sequential filter
-
-(defn kalman-predict
-  "Time update: carry the state and its covariance forward.
-
-    P = Phi P Phi^T + Q
-
-  The process noise Q is what stops a filter becoming so confident that it
-  ignores new data. Without it the covariance shrinks forever and the filter
-  quietly stops learning, which is the classic way to make one diverge."
-  [x P phi Q]
-  {:x (lin/mat-vec phi x)
-   :P (lin/mat-add (lin/mat-mul (lin/mat-mul phi P) (lin/transpose phi)) Q)})
-
-(defn kalman-update
-  "Measurement update for a scalar observation.
-
-  The covariance is updated in Joseph form, which stays symmetric and
-  positive definite under roundoff where the shorter (I - KH)P does not.
-  That matters over a long arc: a covariance that loses positive
-  definiteness produces a negative variance, and the filter is finished."
-  [x P H z-residual R]
-  (let [PHt  (lin/mat-vec P H)                      ; P is symmetric
-        S    (+ (lin/dot H PHt) R)
-        K     (lin/scale PHt (/ 1.0 S))
-        x'    (lin/add x (lin/scale K z-residual))
-        n     (count x)
-        IKH   (lin/mat-sub (lin/eye n) (mapv (fn [ki] (mapv #(* ki %) H)) K))
-        joseph (lin/mat-add (lin/mat-mul (lin/mat-mul IKH P) (lin/transpose IKH))
-                            (lin/mat-scale (mapv (fn [ki] (mapv #(* ki % R) K)) K) 1.0))]
-    {:x x' :P joseph :gain K :innovation-variance S}))
-
-(defn linear-kalman
-  "The Kalman filter for a linear system (Vallado's algorithm 67): from
-  the estimate `x0` with covariance `P0`, through `steps`, each `{:phi :Q
-  :H :z :R}` -- the transition matrix from the last step and the process
-  noise it adds, then the rows of the measurement matrix, the measured
-  values and their variances, taken one at a time. Returns the estimate
-  after each step, `[{:x :P} ...]`."
-  [x0 P0 steps]
-  (->> steps
-       (reductions
-        (fn [{:keys [x P]} {:keys [phi Q H z R]}]
-          (let [n (count x)
-                predicted (kalman-predict x P phi (or Q (lin/mat-scale (lin/eye n) 0.0)))]
-            (reduce (fn [{:keys [x P]} k]
-                      (let [h (H k)]
-                        (select-keys (kalman-update x P h (- (z k) (lin/dot h x)) (R k)) [:x :P])))
-                    predicted
-                    (range (count z)))))
-        {:x x0 :P P0})
-       rest
-       vec))
 
 ;; ------------------------------------------------- orthogonal least squares
 ;;

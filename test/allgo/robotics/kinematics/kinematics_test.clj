@@ -1,11 +1,11 @@
-(ns allgo.kinematics.kinematics-test
+(ns allgo.robotics.kinematics.kinematics-test
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
-            [allgo.kinematics.analytic :as ik]
-            [allgo.kinematics.arm :as arm]
-            [allgo.kinematics.chain :as k]
-            [allgo.kinematics.numeric :as num]
             [allgo.math :as am]
+            [allgo.robotics.kinematics.analytic :as ik]
+            [allgo.robotics.kinematics.arm :as arm]
+            [allgo.robotics.kinematics.chain :as k]
+            [allgo.robotics.kinematics.numeric :as num]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 

@@ -58,6 +58,17 @@
   ^double [p a b]
   (distance p (lerp a b (closest-on-segment p a b))))
 
+(defn segment-segment-distance
+  "How far segment `a`-`b` is from segment `c`-`d`: zero where they
+  cross, otherwise the least of the four end-to-segment distances."
+  ^double [a b c d]
+  (let [crossed (when-let [[t u] (segment-intersection a b c d)]
+                  (and (<= 0.0 t 1.0) (<= 0.0 u 1.0)))]
+    (if crossed
+      0.0
+      (min (segment-distance a c d) (segment-distance b c d)
+           (segment-distance c a b) (segment-distance d a b)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Polygons
 

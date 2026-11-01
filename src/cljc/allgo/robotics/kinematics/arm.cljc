@@ -1,10 +1,10 @@
-(ns allgo.kinematics.arm
+(ns allgo.robotics.kinematics.arm
   "An anthropomorphic arm: a ball at the shoulder, a hinge at the elbow, a
   ball at the wrist. Seven degrees of freedom for a hand pose that has
   only six.
 
   That spare degree is what makes a human arm different in kind from the
-  six-axis robot of `allgo.kinematics.analytic`, not merely different in
+  six-axis robot of `allgo.robotics.kinematics.analytic`, not merely different in
   size. A six-axis arm reaching a given pose has eight ways to do it -- a
   handful of discrete choices. A seven-axis arm has *infinitely* many, a
   continuous family, and you can watch it: hold your hand flat on a table

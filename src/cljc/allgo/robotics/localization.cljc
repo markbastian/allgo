@@ -12,8 +12,17 @@
   particles that survive cluster where the robot is.
 
   A map is a vector of wall segments `[[x0 y0] [x1 y1]]`; `scan-angles`
-  are the beams, relative to the heading."
+  are the beams, relative to the heading.
+
+  The chapter's other localizer is the extended Kalman filter, for a map
+  of landmarks the robot can tell apart: one Gaussian over the pose,
+  carried through the motion model linearized about the estimate, and
+  corrected by each landmark's range and bearing linearized the same way.
+  `ekf-localization-seq` is that, a step a move; `allgo.robotics.slam`
+  builds the map as well, with the same models."
   (:require [allgo.geometry.polygon :as polygon]
+            [allgo.numerics.linear :as lin]
+            [allgo.probability.temporal :as tm]
             [allgo.random :as random]
             [clojure.math :as math]))
 
@@ -33,14 +42,18 @@
   [walls [x y heading] angles max-range]
   (mapv #(raycast walls [x y] (+ heading %) max-range) angles))
 
+(defn drive
+  "The motion model without noise: `pose` driven at speed `v` and turn
+  rate `w` for `dt` -- turned first, then moved along the new heading."
+  [[x y heading] v w dt]
+  (let [heading' (+ heading (* w dt))]
+    [(+ x (* v dt (math/cos heading'))) (+ y (* v dt (math/sin heading'))) heading']))
+
 (defn move
   "The motion model: `pose` driven at speed `v` and turn rate `w` for
   `dt`, with Gaussian noise of `sigma-v` and `sigma-w` on each."
-  [[x y heading] v w dt rng sigma-v sigma-w]
-  (let [v (random/gaussian rng v sigma-v)
-        w (random/gaussian rng w sigma-w)
-        heading' (+ heading (* w dt))]
-    [(+ x (* v dt (math/cos heading'))) (+ y (* v dt (math/sin heading'))) heading']))
+  [pose v w dt rng sigma-v sigma-w]
+  (drive pose (random/gaussian rng v sigma-v) (random/gaussian rng w sigma-w) dt))
 
 (defn- inside? [[[x0 y0] [x1 y1]] [x y]] (and (< x0 x x1) (< y0 y y1)))
 
@@ -124,3 +137,112 @@
      :bounds [[0.0 0.0] [10.0 6.0]]
      :angles (mapv #(* % (/ math/PI 4)) (range 8))
      :max-range 12.0 :dt 0.1 :sigma-v 0.3 :sigma-w 0.2 :sigma-z 0.6 :random-fraction 0.02}))
+
+;; ---------------------------------------------------------------------------
+;; EKF localization with landmarks
+
+(defn wrap-angle
+  "`a` brought into [-pi, pi)."
+  ^double [a]
+  (- (mod (+ a math/PI) (* 2 math/PI)) math/PI))
+
+(defn motion-jacobians
+  "The motion model's partials at `pose` for control `[v w]`: `[G V]`, G
+  with respect to the pose, V to the control."
+  [[_ _ heading] [v w] dt]
+  (let [h' (+ heading (* w dt)) c (math/cos h') s (math/sin h')]
+    [[[1.0 0.0 (* -1.0 v dt s)]
+      [0.0 1.0 (* v dt c)]
+      [0.0 0.0 1.0]]
+     [[(* dt c) (* -1.0 v dt s dt)]
+      [(* dt s) (* v dt c dt)]
+      [0.0 dt]]]))
+
+(defn range-bearing
+  "What a sensor at `pose` sees of a landmark at `[mx my]`: its range and
+  its bearing relative to the heading."
+  [[x y heading] [mx my]]
+  (let [dx (- mx x) dy (- my y)]
+    [(math/sqrt (+ (* dx dx) (* dy dy))) (wrap-angle (- (math/atan2 dy dx) heading))]))
+
+(defn range-bearing-jacobian
+  "The partials of `range-bearing` with respect to the pose (the first
+  three columns) and the landmark (the last two)."
+  [[x y _] [mx my]]
+  (let [dx (- mx x) dy (- my y) q (+ (* dx dx) (* dy dy)) r (math/sqrt q)]
+    [[(- (/ dx r)) (- (/ dy r)) 0.0 (/ dx r) (/ dy r)]
+     [(/ dy q) (- (/ dx q)) -1.0 (- (/ dy q)) (/ dx q)]]))
+
+(defn observe-landmarks
+  "The noisy range and bearing of each landmark within `max-range` of
+  `pose`: `[[id r bearing] ...]`."
+  [{:keys [landmarks max-range sigma-r sigma-b]} pose rng]
+  (vec (for [[id m] (map-indexed vector landmarks)
+             :let [[r b] (range-bearing pose m)]
+             :when (<= r max-range)]
+         [id (random/gaussian rng r sigma-r) (wrap-angle (random/gaussian rng b sigma-b))])))
+
+(defn ekf-correct
+  "The EKF's correction of `[mean cov]` by observations `[[id r bearing]
+  ...]`: each measurement row linearized about the predicted mean and
+  applied a scalar at a time in Joseph form (`allgo.probability.temporal`'s
+  `kalman-update`), which with independent noise is the joint update.
+  `predict` gives the expected `[r bearing]` of a landmark and `jacobian`
+  its rows over the whole state."
+  [[mean cov] observations predict jacobian sigma-r sigma-b]
+  (let [rows (for [[id r b] observations
+                   :let [[er eb] (predict mean id)
+                         [hr hb] (jacobian mean id)]]
+               [[hr (- r er) (* sigma-r sigma-r)]
+                [hb (wrap-angle (- b eb)) (* sigma-b sigma-b)]])
+        {:keys [x P]} (reduce (fn [{:keys [x P]} [h innovation R]]
+                                (select-keys (tm/kalman-update x P h (- innovation (lin/dot h x)) R) [:x :P]))
+                              {:x (vec (repeat (count mean) 0.0)) :P cov}
+                              (apply concat rows))
+        mean' (lin/add mean x)]
+    [(assoc mean' 2 (wrap-angle (mean' 2))) P]))
+
+(defn ekf-predict
+  "The EKF's prediction: the pose driven by `[v w]`, the covariance
+  carried by the motion model's partials, the control noise added through
+  them -- `temporal`'s `kalman-predict` with the linearized model."
+  [{:keys [dt sigma-v sigma-w]} [mean cov] u]
+  (let [[G V] (motion-jacobians mean u dt)
+        M [[(* sigma-v sigma-v) 0.0] [0.0 (* sigma-w sigma-w)]]
+        Q (lin/mat-mul (lin/mat-mul V M) (lin/transpose V))
+        [v w] u]
+    [(drive mean v w dt) (:P (tm/kalman-predict mean cov G Q))]))
+
+(defn ekf-localization-step
+  "One step of EKF localization among known, identifiable `:landmarks`:
+  the belief `[mean cov]` predicted through control `[v w]` and corrected
+  by the observations made after it, `[[id r bearing] ...]`."
+  [{:keys [landmarks sigma-r sigma-b] :as world} belief u observations]
+  (ekf-correct (ekf-predict world belief u) observations
+               (fn [mean id] (range-bearing mean (landmarks id)))
+               (fn [mean id] (mapv #(subvec % 0 3) (range-bearing-jacobian mean (landmarks id))))
+               sigma-r sigma-b))
+
+(defn ekf-localization-seq
+  "EKF localization from the belief `[mean cov]` through `controls` and
+  the observations made after each: the beliefs."
+  [world belief controls observations]
+  (reductions (fn [belief [u z]] (ekf-localization-step world belief u z))
+              belief (map vector controls observations)))
+
+(defn drive-and-observe
+  "A simulated run: the robot driven from `start` by `controls` with the
+  world's motion noise, observing the landmarks after each move --
+  `{:truth [pose ...] :observations [[[id r bearing] ...] ...]}`, the
+  truth including the start."
+  [{:keys [dt sigma-v sigma-w] :as world} start controls rng]
+  (let [truth (vec (reductions (fn [p [v w]] (move p v w dt rng sigma-v sigma-w)) start controls))]
+    {:truth truth :observations (mapv #(observe-landmarks world % rng) (rest truth))}))
+
+(defn landmark-field
+  "A test world for the Kalman filters: landmarks scattered round a 20 by
+  14 field, seen within 6 m."
+  []
+  {:landmarks [[2.0 2.0] [9.0 1.0] [17.0 2.5] [18.5 8.0] [16.0 13.0] [10.0 12.5]
+               [3.0 12.0] [1.5 7.0] [7.0 6.0] [13.0 7.5] [5.0 9.5] [14.5 4.0]]
+   :max-range 6.0 :dt 0.1 :sigma-v 0.1 :sigma-w 0.05 :sigma-r 0.1 :sigma-b 0.02})

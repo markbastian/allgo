@@ -1,4 +1,4 @@
-(ns allgo.kinematics.chain
+(ns allgo.robotics.kinematics.chain
   "Serial kinematic chains, after John J. Craig's Introduction to Robotics.
 
   A robot arm is a sequence of rigid links joined end to end, and the only
