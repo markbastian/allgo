@@ -18,6 +18,7 @@
             [allgo.demo.city :as city]
             [allgo.demo.city-agents :as city-agents]
             [allgo.demo.city-plan :as city-plan]
+            [allgo.demo.classifiers :as classifiers]
             [allgo.demo.cloth :as cloth]
             [allgo.demo.constraints :as constraints]
             [allgo.demo.delaunay-viewer :as delaunay]
@@ -33,12 +34,14 @@
             [allgo.demo.genetic :as genetic]
             [allgo.demo.geometry :as geometry]
             [allgo.demo.gesture :as gesture]
+            [allgo.demo.grid-world :as grid-world]
             [allgo.demo.hex :as hex]
             [allgo.demo.human-arm :as human-arm]
             [allgo.demo.island :as island]
             [allgo.demo.joints :as joints]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.local-search :as local-search]
+            [allgo.demo.localization :as localization]
             [allgo.demo.lorenz :as lorenz]
             [allgo.demo.motorcycle :as motorcycle]
             [allgo.demo.orbit-determination :as od]
@@ -72,6 +75,9 @@
    "constraints" {:start constraints/start! :stop constraints/stop!}
    "wumpus"   {:start wumpus/start!   :stop wumpus/stop!}
    "first-order" {:start first-order/start! :stop first-order/stop!}
+   "grid-world" {:start grid-world/start! :stop grid-world/stop!}
+   "classifiers" {:start classifiers/start! :stop classifiers/stop!}
+   "localization" {:start localization/start! :stop localization/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

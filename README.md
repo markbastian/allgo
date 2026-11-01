@@ -21,6 +21,11 @@ discipline:
 | `allgo.geometry`   | Vectors and quaternions, Delaunay triangulation, the Delaunay/Voronoi dual mesh, 3D Voronoi cells, GJK/EPA, hex grids, triangle and tetrahedral meshes                       |
 | `allgo.spatial`    | Spatial hashing, sweep and prune, Morton codes, a bounding volume hierarchy                                                                                                  |
 | `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent, SATPlan; first-order unification, chaining and resolution     |
+| `allgo.planning`   | Classical planning over ground actions, hierarchical and angelic search, job-shop scheduling                                                                                 |
+| `allgo.decision`   | Expected utility and the value of information; MDPs by value and policy iteration, POMDPs; reinforcement learning -- ADP, TD, Q-learning, SARSA, REINFORCE                     |
+| `allgo.probability`| Bayesian networks, exact and by sampling; HMMs, Viterbi, particle and Kalman filters; probabilistic programs                                                                |
+| `allgo.learning`   | Decision trees, AdaBoost, random forests; linear and logistic regression, SVMs, k nearest neighbors, naive Bayes; k-means, EM, Baum-Welch; neural networks by back-propagation |
+| `allgo.robotics`   | Monte Carlo localization                                                                                                                                                     |
 | `allgo.kinematics` | Serial chains, closed-form and numeric inverse kinematics, a redundant seven-joint human arm                                                                                 |
 | `allgo.physics`    | XPBD soft bodies and cloth, rigid bodies and joints, three contact solvers, articulated bodies, mixed scenes, continuous collision, Eulerian and FLIP fluids, fire, height-field water, fluid on a sphere, skinning |
 | `allgo.simulation` | Reynolds' boids, and a motorcycle with a rider and courses to ride                                                                                                           |
@@ -34,7 +39,9 @@ them: `allgo.graph` (union-find, components, minimum spanning trees),
 `allgo.search` (Russell and Norvig's chapter 3 searches, breadth-first
 to IDA*, each a step of one shape, with `allgo.search.local`,
 `.nondeterministic` and `.online` for chapter 4, `.adversarial` for
-chapter 5 and `.csp` for chapter 6), and `allgo.array` (flat numeric arrays on either platform).
+chapter 5 and `.csp` for chapter 6), `allgo.agents` (chapter 2's vacuum
+world and agents), `allgo.language` (CYK parsing and treebank trees),
+and `allgo.array` (flat numeric arrays on either platform).
 
 Where a namespace follows a book, it says so. The main ones:
 
@@ -54,8 +61,11 @@ Where a namespace follows a book, it says so. The main ones:
 - **Parish & Müller, "Procedural Modeling of Cities"**, with Lechner et
   al.'s agents and Kelly & McCabe's survey: `allgo.procedural.city`.
 - **Russell & Norvig, *Artificial Intelligence: A Modern Approach* (4th
-  ed.)**: chapters 3 to 9, `allgo.search` and its namespaces, and
-  `allgo.logic`.
+  ed.)**: every algorithm it gives as pseudocode, chapters 2 to 26,
+  and the main ones its text teaches: `allgo.agents`,
+  `allgo.search` and its namespaces, `allgo.logic`, `allgo.planning`,
+  `allgo.probability`, `allgo.decision`, `allgo.learning`,
+  `allgo.language` and `allgo.robotics`.
 - **Matthias Müller's [Ten Minute Physics](https://matthias-research.github.io/pages/tenMinutePhysics/)**:
   most of `allgo.physics` and `allgo.spatial`.
 - **Craig, *Introduction to Robotics***: `allgo.kinematics`.
@@ -88,7 +98,7 @@ groups:
 | Simulation            | Fluid on a sphere                                                                              |
 | Geometry              | Hex grids, Delaunay / Voronoi                                                                  |
 | Spatial Queries       | Spatial hashing, broad phase (hashing, sweep and prune and a Morton BVH, raced)                |
-| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference |
+| AI                    | Chapter 3's searches and the online agents through a maze; local search on n-queens and a tour; Connect Four and tic-tac-toe against minimax, alpha-beta and Monte Carlo; sudoku, map coloring and n-queens as constraint problems; a logical agent in the wumpus world; first-order inference; value iteration and reinforcement learners in the 4 x 3 world; ten classifiers on two-dimensional data; Monte Carlo localization |
 | Robotics              | Inverse kinematics, redundancy in a human arm                                                  |
 | Soft Bodies           | XPBD soft bodies, skinning, cloth                                                              |
 | Rigid Bodies          | Bricks (three contact solvers), ragdoll, motorcycle, XPBD rigid bodies, joints                 |

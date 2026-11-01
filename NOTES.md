@@ -503,11 +503,20 @@ larger f with one -- and when one frontier is empty, on the other's
 alone; without that it stopped early on a directed graph whose backward
 search had run out.
 
+**Cyclic plans and percepts, added later.** AND-OR search with
+`:cyclic?` returns `[:loop state]` where it meets a state already on its
+path, rather than failing; an OR node takes a plan only if a goal is
+reachable from every point of it, so a plan that could only loop is
+refused. On the slippery vacuum world it finds the book's plan -- Suck,
+then try Right until it works, then Suck. `partially-observable` makes a
+problem with percepts an AND-OR problem over belief states, an action
+predicting the states it may lead to and the percepts splitting them;
+on the local-sensing vacuum world it plans the book's Suck, Right, then
+Suck only if the square is dirty. `execute` follows loops, with a cap.
+
 **Not implemented here:** continuous local search is
-`allgo.numerics.optimize`, minimizing where the book maximizes;
-cyclic plans for the slippery vacuum world; partially observable
-search with percepts; and the genetic algorithm on tours,
-for which one-point crossover makes no tour.
+`allgo.numerics.optimize`, minimizing where the book maximizes; and the
+genetic algorithm on tours, for which one-point crossover makes no tour.
 
 ## Games, after Russell & Norvig
 
@@ -722,6 +731,140 @@ bounded by the caller: first-order entailment is semidecidable.
 **Not implemented here:** equality and paramodulation, indexing and
 retrieval beyond a linear scan, the Rete algorithm, and constraint logic
 programming.
+
+## The rest of the book, after Russell & Norvig
+
+Chapters 2 and 11 to 26 of *Artificial Intelligence: A Modern Approach*
+(4th ed.): every algorithm the book gives as pseudocode, and the main
+ones it teaches in its text. Problems and expected answers come from
+aima-python (MIT) and aima-pseudocode (CC BY 4.0); the restaurant
+examples of chapter 19 are inlined in their test.
+
+| Namespace                          | Chapters | What it is                                                                 |
+|------------------------------------|----------|----------------------------------------------------------------------------|
+| `allgo.agents`                     | 2        | The vacuum world; table-driven, reflex, simple reflex and model-based agents |
+| `allgo.planning`                   | 11       | Classical planning by A* over ground actions; air cargo, spare tire, blocks world; hierarchical and angelic search; job-shop scheduling |
+| `allgo.decision.utility`           | 12, 16   | Expected utility, the decision-theoretic agent, the value of information, the information-gathering agent |
+| `allgo.probability.bayes`          | 13       | Bayesian networks: enumeration, variable elimination, prior, rejection and likelihood-weighted sampling, Gibbs |
+| `allgo.probability.temporal`       | 14       | HMMs: filtering, forward-backward, fixed-lag smoothing, Viterbi, particle filtering; the Kalman filter |
+| `allgo.probability.programs`       | 15       | Probabilistic programs: `sample!`, `observe!`, likelihood weighting       |
+| `allgo.decision.mdp`               | 17       | Value and policy iteration on grid MDPs; POMDP value iteration            |
+| `allgo.learning.trees`             | 19       | Decision trees, cross-validation and model selection, decision lists, AdaBoost, random forests |
+| `allgo.learning.models`            | 19, 20   | Linear and logistic regression, the perceptron, k nearest neighbors, SVMs, naive Bayes |
+| `allgo.learning.unsupervised`      | 20       | k-means, EM for Gaussian mixtures, Baum-Welch                             |
+| `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD                     |
+| `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
+| `allgo.language`                   | 23       | CYK parsing with a probabilistic grammar; treebank trees                  |
+| `allgo.robotics.localization`      | 26       | Monte Carlo localization with a range scanner                             |
+
+The tests mirror the packages, under `test/allgo/decision/`,
+`probability/`, `learning/` and `robotics/`.
+
+**Steps again.** Every iterative algorithm is a seq of its states: value
+iteration a sweep, policy iteration an evaluate-and-improve, POMDP value
+iteration a depth of plans; each sampler an estimate after each sample;
+filtering a message per observation, Kalman a step; AdaBoost a stump,
+k-means and EM an iteration, Baum-Welch a re-estimation, a network an
+epoch, an SVM a pass of SMO; CYK a span length; Monte Carlo localization
+a move, a scan and a resampling. Hierarchical search runs on the same
+frontier as chapter 3's. Agents -- the vacuum world's and the
+reinforcement learners -- are a function of memory and percept, run by
+`run-seq` or `trial-seq` against the world.
+
+**Checked against the book's answers.**
+
+- Value iteration on the 4 x 3 world gives aima-python's utilities exactly,
+  and policy iteration its policy.
+- P(Burglary | JohnCalls, MaryCalls) = 0.284 by enumeration and by
+  elimination, which agree on every query of the sprinkler network; every
+  sampler comes near the exact answer, and Gibbs gives P(Cloudy | Rain) = 0.8.
+- The umbrella world filters to 0.818 and 0.883. Fixed-lag smoothing
+  gives aima-python's [0.2259 0.7741], and Viterbi its paths and messages.
+  The Kalman filter's closed form gives mean 1.875 and variance 0.75.
+- On the restaurant data, Patrons has the greatest information gain,
+  0.541 bits, and the tree tests Patrons, Hungry, Type and Fri/Sat.
+- The survey in the oil-block example is worth C/n.
+- The blocks world plan is the figure's three moves.
+- The car assembly's critical path is 85.
+- "The robot is good" parses with probability 0.015.
+- Back-propagated gradients match numerical ones to 1e-7, through a
+  convolution and two dense layers.
+
+**Value iteration returns the book's U.** The book's loop updates U' from
+U and returns U when δ is small enough, so the answer is the utilities
+before the last sweep. Returning U' instead was 6e-4 off aima-python's
+values; returning U, as the book does, matches them exactly.
+
+**POMDP plans pruned on a lattice of beliefs.** The book prunes dominated
+conditional plans; doing that exactly takes a linear program per plan,
+and ours was slow and failed on degenerate ones. Instead a plan is kept
+only if it is best at some belief of a lattice (200 points a side for two
+states), which keeps every plan that matters except on slivers between
+lattice points (a coarser lattice past three states). Each depth's plans are worth what expectimax lookahead
+over beliefs says, to 1e-9 at every belief tried.
+
+**Reinforcement learners that finish.** The learners follow the book --
+α = 60/(59 + n), exploration f(u, n) with Ne = 5 and R+ = 2 -- with three
+additions. Ties between actions are broken at random: with a fixed order
+SARSA kept bumping into a wall at a Q of -0.4 for ever. A trial stops
+after `max-moves` (default 10000). And SARSA takes an `:epsilon`, the
+chance of a random action, since on-policy learning with only the
+book's optimism stops exploring once the counts reach Ne; the demo uses
+0.1. Q-learning's test uses Ne = 30, as with 5 some seeds settle too
+soon on a worse route. REINFORCE learns a softmax policy over a preference for each state
+and action, from the returns of whole trials.
+
+**One linear regression.** The chapter teaches gradient descent on the
+squared loss as well as the closed form. Linear regression here is the
+closed form only (`allgo.numerics.regression`), being exact and faster;
+`gradient-descent-seq` is the one optimizer, used by the models that have
+no closed form, and its test checks it reaches the closed form's
+weights.
+
+**Baum-Welch kept monotone.** The first version let the likelihood fall:
+it re-estimated the prior from the first observation's smoothed state
+rather than the state before it, and left the transition from that state
+to the first out of the counts. With both fixed the likelihood never
+falls, as EM promises.
+
+**Scheduling: minimum slack is not optimal.** The book's minimum-slack
+heuristic, with one engine hoist, schedules engine 2 first and takes 130
+minutes; `optimal-schedule`, a branch and bound over the order, finds
+115 by doing engine 1 first. The test asserts both.
+
+**Angelic search needs its progress check.** Without the figure's
+MAKING-PROGRESS test, a high-level action that refines to itself
+recursed until the stack overflowed.
+
+**Localization that recovers.** Monte Carlo localization in a 10 x 6
+room with an L-shaped wall and a pillar, eight range rays a scan. The
+plain algorithm collapsed onto a wrong place now and then, and stayed
+there. What fixed it: a few percent of particles thrown anywhere each
+step (the book's remedy for the kidnapped robot), motion and sensor noise
+broader than the truth's, a route that runs past what tells look-alike places apart, and an estimate taken from the densest cluster rather than the
+mean of every particle. From not knowing where it starts, the estimate
+is within a meter at the end of the route on every seed tested, and
+within half a meter on most.
+
+**Chapter 15 from my own examples.** The book's programs for the chapter
+-- citations, NET-VISA, radar tracking, image generation, Markov letters --
+are listed in aima-pseudocode's index, but its files for them are missing
+(404). So `allgo.probability.programs` gives the idea -- a model as a
+program that samples and observes, inferred by likelihood weighting --
+on two examples of my own, each checked against an exact answer: a
+Markov chain of letters read through noise, against HMM smoothing of
+the same model, and an open-universe count of aircraft on a radar that
+misses some and invents others, against summing over the detections.
+
+**Demos.** Grid World runs every chapter 17 and 22 method on the 4 x 3
+world; Classifiers runs ten learners on five two-dimensional datasets,
+drawing their regions; Localization runs MCL with the scan and the
+particles.
+
+**Not implemented here:** the book's chapter 15 programs themselves;
+exact POMDP pruning by linear programming; GraphPlan, which the 4th
+edition dropped; partial-order planning; and the deep learning chapter's
+recurrent networks, attention and anything that needs a GPU.
 
 ## A spatial index for the triangulation
 
