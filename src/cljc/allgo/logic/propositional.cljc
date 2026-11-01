@@ -94,7 +94,8 @@
             (implies [] (let [a (disj*)] (if (= "=>" (peek-tok)) (do (next-tok) [:implies a (implies)]) a)))
             (iff [] (let [a (implies)] (if (= "<=>" (peek-tok)) (do (next-tok) [:iff a (iff)]) a)))]
       (let [s (iff)]
-        (assert (= @pos (count toks)) (str "unparsed: " (str/join " " (subvec toks @pos))))
+        (when-not (= @pos (count toks))
+          (throw (ex-info (str "unparsed: " (str/join " " (subvec toks @pos))) {:text text})))
         s))))
 
 (defn show

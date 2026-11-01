@@ -123,7 +123,10 @@
         pos (volatile! 0)
         peek-tok #(get toks @pos)
         next-tok #(let [t (peek-tok)] (vswap! pos inc) t)
-        expect (fn [t] (assert (= t (next-tok)) (str "expected " t)))]
+        ;; Not an assert: a release build drops those, and with them the
+        ;; token this consumes.
+        expect (fn [t] (let [got (next-tok)]
+                         (when-not (= t got) (throw (ex-info (str "expected " t ", read " got) {:text text})))))]
     (letfn [(term []
               (let [t (next-tok)
                     head (term-of t)]
@@ -156,7 +159,8 @@
             (implies [] (let [a (disj*)] (if (= "=>" (peek-tok)) (do (next-tok) [:implies a (implies)]) a)))
             (sentence [] (let [a (implies)] (if (= "<=>" (peek-tok)) (do (next-tok) [:iff a (sentence)]) a)))]
       (let [s (sentence)]
-        (assert (= @pos (count toks)) (str "unparsed: " (str/join " " (subvec toks @pos))))
+        (when-not (= @pos (count toks))
+          (throw (ex-info (str "unparsed: " (str/join " " (subvec toks @pos))) {:text text})))
         s))))
 
 (defn show

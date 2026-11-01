@@ -105,6 +105,9 @@
       (is (empty? more))
       (is (vector? (second lit)) "the lover is a Skolem function of x")
       (is (= (nth lit 2) (second (second lit))))))
+  (testing "a malformed sentence is refused, in a release build too: no asserts"
+    (is (thrown? clojure.lang.ExceptionInfo (fo/parse "Owns(Nono, M1")))
+    (is (thrown? clojure.lang.ExceptionInfo (fo/parse "Owns(Nono) Missile(M1)"))))
   (testing "parse and show round-trip"
     (doseq [t (concat crime-text ["forall x: exists y: Loves(y, x)" "~(A(x) | B(x)) <=> C"])]
       (is (= (fo/parse t) (fo/parse (fo/show (fo/parse t))))))))
