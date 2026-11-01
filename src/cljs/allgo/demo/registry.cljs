@@ -21,6 +21,7 @@
             [allgo.demo.classifiers :as classifiers]
             [allgo.demo.cloth :as cloth]
             [allgo.demo.constraints :as constraints]
+            [allgo.demo.contract-net :as contract-net]
             [allgo.demo.delaunay-viewer :as delaunay]
             [allgo.demo.dla :as dla]
             [allgo.demo.dungeon :as dungeon]
@@ -84,6 +85,7 @@
    "classifiers" {:start classifiers/start! :stop classifiers/stop!}
    "vision" {:start vision/start! :stop vision/stop!}
    "knowledge" {:start knowledge/start! :stop knowledge/stop!}
+   "contract-net" {:start contract-net/start! :stop contract-net/stop!}
    "language" {:start language/start! :stop language/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}

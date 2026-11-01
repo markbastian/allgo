@@ -880,6 +880,7 @@ algorithms are the ones their text teaches.
 | `allgo.robotics.graph-slam`     | Graph SLAM: the whole run's poses and landmarks by Gauss-Newton least squares |
 | `allgo.robotics.control`        | PID as a step; LQR by the Riccati recursion                                |
 | `allgo.robotics.kinematics`     | Craig's chains and the IK solvers, moved here from `allgo.kinematics`      |
+| `allgo.decision.contract-net`   | The contract net: announcement, marginal-cost bids, award, subcontracting, recontracting |
 | `allgo.decision.games`          | Normal-form games, dominance and its iterated elimination, Nash equilibria pure and mixed, zero-sum games by linear programming, repeated games, bargaining, the Shapley value, voting, auctions and VCG |
 
 **Reused, not rewritten.** The arm is an `allgo.robotics.kinematics`
@@ -982,10 +983,46 @@ reckoning's drifted path snapping onto the true one. Graph SLAM's lap
 is steered by the truth, since it estimates nothing until the lap is
 over.
 
+**The contract net, later.** `allgo.decision.contract-net` allocates
+tasks among cooperating agents the way chapter 18 describes. It follows
+Smith's protocol, with Sandholm's marginal-cost bids. A manager
+announces each task; every agent replies with a bid, the length the
+task would add to its route at the cheapest place in it, or declines
+because it lacks the skill or is full; once every reply is in, the
+cheapest bid wins and the other bidders are told they lost. A task with
+parts makes its contractor the manager of those, so the net is
+recursive. A message is a step. Then recontracting: each agent offers
+each task it holds, and the task moves when another agent bids less
+than dropping it saves the holder (Sandholm's O-contracts). Total cost
+only falls.
+
+The 4th edition's text of the chapter was not at hand -- the 3rd does
+not mention the contract net -- so the protocol is Smith's, as he
+gives it.
+
+Checked: every task placed with an agent able to do it, and a
+subtask announced by its parent's contractor; per task, an
+announcement and a reply from every agent, one award and a rejection
+for every other bidder; the award to the cheapest bid, and the winning
+bids summing to the total route length exactly. An agent at capacity
+declines, and a task no one can take is left unplaced. Against the best
+allocation found by trying every one on three agents and six tasks,
+neither the contract net nor recontracting is ever better, and
+recontracting is never worse. It ends where no single task can move at
+a profit. That is a local optimum: on one instance it reaches 15.56
+against the optimum's 15.55; on others it stops short, because
+one-task moves cannot make a swap, and a route keeps the order its
+insertions gave it.
+
+The demo, Contract Net, has a dispatcher and four vehicles, some with
+cranes, placing a day's jobs a message at a time; the message flies
+between sender and receiver, labeled with its type and bid. Then
+recontracting moves jobs between the vehicles, and a new day begins.
+
 **Not implemented here:** kinodynamic planning and trajectory
-optimization; data association for landmarks that cannot be told apart; the contract net and other
-cooperative protocols; Lemke-Howson, for games larger than support
-enumeration can handle.
+optimization; data association for landmarks that cannot be told apart;
+Sandholm's swap and cluster contracts; Lemke-Howson, for games larger
+than support enumeration can handle.
 
 ## Computer vision, after Russell & Norvig
 

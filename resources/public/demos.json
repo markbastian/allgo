@@ -600,6 +600,16 @@
    "href": "play/?demo=grid-world"
   },
   {
+   "id": "contract-net",
+   "group": "AI",
+   "label": "Contract Net",
+   "blurb": "A dispatcher and four vehicles allocating jobs by announcement, bidding and award, a message at a time, then recontracting",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=contract-net"
+  },
+  {
    "id": "classifiers",
    "group": "AI",
    "label": "Classifiers",
