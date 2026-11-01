@@ -580,6 +580,16 @@
    "href": "play/?demo=first-order"
   },
   {
+   "id": "knowledge",
+   "group": "AI",
+   "label": "Knowledge Representation",
+   "blurb": "Inheritance in a semantic network, knowledge in possible worlds, the event calculus, default logic, description logic and truth maintenance, a step at a time",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=knowledge"
+  },
+  {
    "id": "grid-world",
    "group": "AI",
    "label": "Grid World",
