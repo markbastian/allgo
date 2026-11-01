@@ -538,6 +538,16 @@
     "Interactive"
    ],
    "href": "play/?demo=wumpus"
+  },
+  {
+   "id": "first-order",
+   "group": "AI",
+   "label": "First-Order Inference",
+   "blurb": "Forward chaining, backward chaining and resolution on a crime, a family of rabbits and Append, a step at a time",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=first-order"
   }
  ]
 }
