@@ -26,6 +26,7 @@
             [allgo.demo.dungeon-boids :as dungeon-boids]
             [allgo.demo.erosion :as erosion]
             [allgo.demo.fire :as fire]
+            [allgo.demo.first-order :as first-order]
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
             [allgo.demo.game-search :as game-search]
@@ -70,6 +71,7 @@
    "game-search" {:start game-search/start! :stop game-search/stop!}
    "constraints" {:start constraints/start! :stop constraints/stop!}
    "wumpus"   {:start wumpus/start!   :stop wumpus/stop!}
+   "first-order" {:start first-order/start! :stop first-order/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

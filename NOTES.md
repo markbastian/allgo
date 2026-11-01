@@ -677,6 +677,52 @@ any action, since neither aima-python nor aima-java confirms it.
 but the hybrid agent's shape, and successor-state axioms for the agent's
 own location.
 
+## First-order logic, after Russell & Norvig
+
+Chapters 8 and 9 of *Artificial Intelligence: A Modern Approach* (4th
+ed.): chapter 8 is the language, without algorithms, and chapter 9 the
+inference, in `allgo.logic.first-order`. Variables are lowercase symbols
+and constants, predicates and functions capitalized keywords, so the
+book's notation reads straight in: `parse` takes `Owns(Nono, M1)`, `=>`,
+`forall x, y: ...`.
+
+**Steps again.** Forward chaining steps a rule at a time through rounds;
+backward chaining -- the book's generators FOL-BC-OR and FOL-BC-AND --
+runs as one explicit stack of goal lists, a step resolving the top list's
+first goal against every rule, which is the same depth-first order the
+generators take; resolution steps a given clause at a time, the negated
+query as its set of support, each clause keeping its parents so that a
+refutation reads out as a proof.
+
+**Checked.** The chapter's crime -- is Colonel West a criminal? -- as
+aima-python (MIT) states it: forward chaining, backward chaining and
+resolution all prove it, forward chaining in two rounds; resolution in
+68 steps from the quantified sentences, an existential Skolemized. Every
+answer aima-python's tests expect of its crime and 'Peter Rabbit'
+knowledge bases comes out the same by both chainings, and its unification
+tests pass, compared by what each substitution does rather than its
+exact form. Append(x, y, [1, 2]) gives its three answers in depth-first
+order.
+
+**A bug found on the way.** Standardizing a rule apart renamed its
+variables with SUBST, which passed the rule -- a map -- through
+untouched, so a rule's `x` was the query's `x`: backward chaining could
+not prove Criminal(x) though it proved every subgoal, and Append found
+one answer of three. Forward chaining hid it, its facts having no
+variables.
+
+**Choices of my own.** Forward chaining keeps going past the first answer
+and gathers them all, as aima-python's does; the book's stops at the
+first. Backward chaining cuts proofs off at `:max-depth` (default 50),
+since the wrong order of conjuncts sends depth-first search down for
+ever -- aima-python's knowledge base carries a comment about exactly
+that rule. Resolution orders its queue shortest clause first, and is
+bounded by the caller: first-order entailment is semidecidable.
+
+**Not implemented here:** equality and paramodulation, indexing and
+retrieval beyond a linear scan, the Rete algorithm, and constraint logic
+programming.
+
 ## A spatial index for the triangulation
 
 `allgo.geometry.delaunay` indexes triangles by the bounding box of

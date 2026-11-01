@@ -38,7 +38,7 @@ const SETTLE = { fire: 12000, dla: 15000, erosion: 12000, flip: 9000,
                  textures: 15000, volumes: 25000, genetic: 15000, antialias: 12000,
                  "city-plan": 20000, city: 12000, "city-agents": 14000,
                  search: 25000, "local-search": 9000, "game-search": 45000,
-                 constraints: 15000, wumpus: 12000 };
+                 constraints: 15000, wumpus: 12000, "first-order": 10000 };
 const DEFAULT_SETTLE = 6000;
 
 // How far to zoom toward the middle, for the demos whose subject is small
