@@ -880,7 +880,7 @@ algorithms are the ones their text teaches.
 | `allgo.robotics.graph-slam`     | Graph SLAM: the whole run's poses and landmarks by Gauss-Newton least squares |
 | `allgo.robotics.control`        | PID as a step; LQR by the Riccati recursion                                |
 | `allgo.robotics.kinematics`     | Craig's chains and the IK solvers, moved here from `allgo.kinematics`      |
-| `allgo.decision.contract-net`   | The contract net: announcement, marginal-cost bids, award, subcontracting, recontracting |
+| `allgo.decision.contract-net`   | The contract net: announcement, marginal-cost bids, award, subcontracting; recontracting by one-task, swap and cluster contracts; routes by Held and Karp |
 | `allgo.decision.games`          | Normal-form games, dominance and its iterated elimination, Nash equilibria pure and mixed, zero-sum games by linear programming, repeated games, bargaining, the Shapley value, voting, auctions and VCG |
 
 **Reused, not rewritten.** The arm is an `allgo.robotics.kinematics`
@@ -991,10 +991,20 @@ task would add to its route at the cheapest place in it, or declines
 because it lacks the skill or is full; once every reply is in, the
 cheapest bid wins and the other bidders are told they lost. A task with
 parts makes its contractor the manager of those, so the net is
-recursive. A message is a step. Then recontracting: each agent offers
-each task it holds, and the task moves when another agent bids less
-than dropping it saves the holder (Sandholm's O-contracts). Total cost
-only falls.
+recursive. A message is a step. Then recontracting, after the contract
+types of Sandholm's "Contract Types for Satisficing Task Allocation: I
+Theoretical Results" (AAAI Spring Symposium, 1998): each agent first
+replans its route, the shortest through its tasks (exact, by Held and
+Karp's dynamic program, up to a dozen stops), so that what its work
+costs it depends on which tasks it holds and not on the order they came
+in. Then agents make offers, a step each: one task (an O-contract, the
+contract net's own), a task in exchange for one of the taker's (an
+S-contract, a swap), or two or more tasks together (a C-contract, a
+cluster). The other agent whose reply lowers the two agents' summed cost
+most takes the offer, if any does -- with the gain split by a payment,
+the contract is individually rational for both -- and both replan.
+Passes of every offer repeat until one moves nothing. Total cost only
+falls.
 
 The 4th edition's text of the chapter was not at hand -- the 3rd does
 not mention the contract net -- so the protocol is Smith's, as he
@@ -1008,20 +1018,34 @@ bids summing to the total route length exactly. An agent at capacity
 declines, and a task no one can take is left unplaced. Against the best
 allocation found by trying every one on three agents and six tasks,
 neither the contract net nor recontracting is ever better, and
-recontracting is never worse. It ends where no single task can move at
-a profit. That is a local optimum: on one instance it reaches 15.56
-against the optimum's 15.55; on others it stops short, because
-one-task moves cannot make a swap, and a route keeps the order its
-insertions gave it.
+recontracting is never worse, with any of the three types. It ends
+where no task, cluster or swap lowers the cost, checked by trying them
+all. Of twelve instances, the three together reach the optimum on
+ten, one-task contracts alone on five; on four, one-task contracts stop
+at least half a meter short and the three reach the optimum exactly.
+Two small cases need each new type: a swap between two full agents,
+neither able to take the other's task, and a cluster of two tasks
+neither of which is worth moving alone. One-task,
+swap and cluster contracts still leave local optima: on one instance
+the best allocation needs b to hand three tasks to c as c hands one to
+a, a contract among three agents at once. Sandholm shows that each of
+his types alone can stop short, and that only a contract free to move
+any tasks among any agents together -- his OCSM-contract -- always
+reaches the optimum; his M-contracts, among three or more agents
+each moving one task, are not built here. Held and Karp's routes are
+checked against every order of up to seven stops.
 
 The demo, Contract Net, has a dispatcher and four vehicles, some with
 cranes, placing a day's jobs a message at a time; the message flies
 between sender and receiver, labeled with its type and bid. Then
-recontracting moves jobs between the vehicles, and a new day begins.
+recontracting: the vehicles replan, and each contract made is shown
+with what moved and what it saved, then a new day. A Contracts control
+compares one-task contracts with all three; on the first day they take
+total route length from 27.24 m to 23.90 m and to 22.99 m.
 
 **Not implemented here:** kinodynamic planning and trajectory
 optimization; data association for landmarks that cannot be told apart;
-Sandholm's swap and cluster contracts; Lemke-Howson, for games larger
+Sandholm's M- and OCSM-contracts; Lemke-Howson, for games larger
 than support enumeration can handle.
 
 ## Computer vision, after Russell & Norvig

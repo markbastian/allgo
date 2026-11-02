@@ -9,16 +9,21 @@
   declines if it lacks the skill (only some have cranes, marked C) or is
   full; the cheapest bid wins the award, and the rest are told they lost.
   A job with a part (the ringed ones) makes its winner a manager in turn,
-  announcing the part itself. When every job is placed, the vehicles
-  offer their jobs to one another, and a job moves when another can do it
-  for less than its holder saves: recontracting, cost only ever falling.
-  Then a new day."
+  announcing the part itself. When every job is placed, recontracting:
+  each vehicle replans its route, the best through its jobs, and then
+  they offer jobs to one another -- one at a time, a job in exchange for
+  one of the taker's (a swap), or several together (a cluster) -- and a
+  contract is made when it shortens the two routes together. Cost only
+  ever falls. Then a new day."
   (:require [allgo.decision.contract-net :as cn]
             [allgo.random :as random]
             ["lil-gui" :default GUI]
-            [clojure.math :as math]))
+            [clojure.math :as math]
+            [clojure.string :as str]))
 
-(def ^:private ^js controls #js {:jobs 12 :seed 1 :speed 4})
+(def ^:private ^js controls #js {:jobs 12 :seed 1 :speed 4 :contracts "one, swap, cluster"})
+
+(def ^:private contract-types {"one, swap, cluster" #{:o :s :c} "one task only" #{:o}})
 
 (def ^:private colors {:a "#7dc4ff" :b "#ffaa50" :c "#7dffa0" :d "#ff8fc8"})
 
@@ -42,8 +47,12 @@
 
 (defn- run [seed n]
   (let [protocol (vec (cn/contract-net-seq fleet (day seed n) :dispatcher))
-        re (vec (rest (cn/recontract-seq (peek protocol))))]
-    {:states (into (mapv #(assoc % :phase :protocol) protocol) (map #(assoc % :phase :recontract) re))
+        re (vec (rest (cn/recontract-seq (peek protocol) :contracts (contract-types (.-contracts controls)))))
+        ;; Of the offers, show those taken, and where it ends.
+        shown (keep-indexed (fn [k st] (when (or (:replanned st) (:moved st) (= k (dec (count re))))
+                                         (assoc st :phase :recontract :offers k)))
+                            re)]
+    {:states (into (mapv #(assoc % :phase :protocol) protocol) shown)
      :first-cost (cn/total-cost (peek protocol))}))
 
 (defn init! [^js container]
@@ -71,6 +80,12 @@
                     ;; a pause at the end, then a new day
                     (let [d (inc (:day @model))]
                       (reset! model (assoc (run (+ (.-seed controls) d) (.-jobs controls)) :i 0 :t 0.0 :last now :day d)))))))
+            (contract [{:keys [type from to tasks back]}]
+              (let [jobs (fn [ts] (str (if (next ts) "jobs " "job ") (str/join ", " (sort ts))))]
+                (case type
+                  :o (str (name from) " -> " (name to) ": " (jobs tasks))
+                  :c (str (name from) " -> " (name to) ": " (jobs tasks) ", a cluster")
+                  :s (str (name from) " <-> " (name to) ": " (jobs tasks) " for " (jobs back)))))
             (text! [s x y color & [size align]]
               (set! (.-fillStyle ctx) color) (set! (.-font ctx) (str (or size 12) "px ui-monospace,Menlo,monospace"))
               (set! (.-textAlign ctx) (or align "left")) (.fillText ctx s x y) (set! (.-textAlign ctx) "left"))
@@ -99,7 +114,7 @@
                 (doseq [[tid {:keys [at needs subtasks]}] tasks]
                   (let [[x y] (px at)
                         owner ((:awarded st) tid)
-                        hot? (or (= tid (:task msg)) (= tid (first moved)) (= tid (second (:offer st))))]
+                        hot? (or (= tid (:task msg)) (contains? (:tasks moved) tid) (contains? (:back moved) tid))]
                     (set! (.-fillStyle ctx) (if owner (colors owner) "#c9d2e0"))
                     (.beginPath ctx) (.arc ctx x y (if hot? 7 5) 0 (* 2 math/PI)) (.fill ctx)
                     (when (seq subtasks)
@@ -127,11 +142,14 @@
                     (.beginPath ctx) (.arc ctx x y 5 0 (* 2 math/PI)) (.fill ctx)
                     (text! (str (name (:type msg)) (when (:cost msg) (str " " (.toFixed (:cost msg) 2)))) (+ x 8) (- y 8) color 12)))
                 (when moved
-                  (let [[tid from to gain] moved [x y] (px (:at (tasks tid)))]
-                    (text! (str "job " tid ": " (name from) " -> " (name to) ", saves " (.toFixed gain 2)) (+ x 10) (+ y 16) "#7dffa0" 12)))
+                  (let [{:keys [from gain] :as m} moved [x y] (px (where from))]
+                    (text! (str (contract m) ", saves " (.toFixed gain 2) " m") x (- y 18) "#7dffa0" 12 "center")))
                 (set! (.-textContent caption)
                       (str (if (= :recontract (:phase st))
-                             (str "recontracting  |  " (if-let [[h tid] (:offer st)] (str (name h) " offers job " tid) "")
+                             (str "recontracting  |  " (cond (:replanned st) "each vehicle replans its route"
+                                                             (:moved st) (contract (:moved st))
+                                                             :else (str "nothing more to gain"))
+                                  "  |  " (:offers st) " offers"
                                   "  |  total route " (.toFixed (cn/total-cost st) 2) " m, from " (.toFixed first-cost 2) " after the first round")
                              (str "contract net  |  " (:messages st) " messages  |  " (count (:awarded st)) " of " (count tasks) " jobs placed"
                                   (when (seq (:unplaced st)) (str ", " (count (:unplaced st)) " unplaced"))
@@ -151,6 +169,7 @@
         (.onChange (.add gui controls "jobs" 4 20 1) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui controls "speed" 1 30 1)
+        (.onChange (.add gui controls "contracts" (clj->js (keys contract-types))) restart!)
         (.add gui #js {:restart restart!} "restart"))
       (.observe (js/ResizeObserver. resize!) container)
       (resize!)
