@@ -98,7 +98,7 @@
   (let [agents (mapv #(dissoc % :skills) fleet)]
     (testing "never better than the best allocation; recontracting, of any type, never worse"
       (doseq [seed (range 6)
-              contracts [#{:o} #{:s} #{:c} #{:o :s :c}]]
+              contracts [#{:o} #{:s} #{:c} #{:m} #{:o :s :c} #{:o :s :c :m} #{:ocsm}]]
         (let [tasks (random-jobs seed 6)
               end (cn/allocate agents tasks :m)
               re (vec (cn/recontract-seq end :contracts contracts))]
@@ -122,17 +122,25 @@
           (is (<= before (+ 1e-9 (set-cost st from (remove moving (held from))) (set-cost st to (into (held to) moving))))))
         (doseq [t (held from) u (held to)]
           (is (<= before (+ 1e-9 (set-cost st from (conj (disj (held from) t) u)) (set-cost st to (conj (disj (held to) u) t))))))))
-    (testing "and a local optimum of all three that only a contract among three agents leaves"
+    (testing "a local optimum of one-task, swap, cluster and M-contracts that an OCSM-contract leaves"
       (let [tasks (random-jobs 10 6)
             end (cn/allocate agents tasks :m)
-            re (vec (cn/recontract-seq end))]
-        (is (not-any? :moved re))
-        (is (= {:a [2] :b [3 1 4 5] :c [0]} (:routes (peek re))))
-        ;; b handing 1, 4 and 5 to c as c hands 0 to a
-        (let [st (assoc end :routes {:a [0 2] :b [3] :c [1 4 5]})]
-          (is (< (+ (optimum agents tasks) -1e-9) (reduce + (map #(set-cost st % ((:routes st) %)) [:a :b :c]))
-                 (+ (optimum agents tasks) 1e-9)))
-          (is (< (+ (optimum agents tasks) 0.4) (cn/total-cost (peek re)))))))))
+            stuck (vec (cn/recontract-seq end :contracts #{:o :s :c :m}))
+            re (vec (cn/recontract-seq end :contracts #{:o :s :c :m :ocsm}))]
+        (is (not-any? :moved stuck))
+        (is (= {:a [2] :b [3 1 4 5] :c [0]} (:routes (peek stuck))))
+        (is (< (+ (optimum agents tasks) 0.4) (cn/total-cost (peek stuck))))
+        (testing "b handing 1, 4 and 5 to c as c hands 0 to a: a cluster and a task, among three"
+          (is (= [{:type :ocsm :tasks #{0 1 4 5} :moves {0 [:c :a] 1 [:b :c] 4 [:b :c] 5 [:b :c]}}]
+                 (keep #(some-> (:moved %) (select-keys [:type :tasks :moves])) re)))
+          (is (< (abs (- (optimum agents tasks) (cn/total-cost (peek re)))) 1e-9)))))
+    (testing "OCSM-contracts reach the optimum from any start; bounded, they can stop short"
+      (doseq [seed (range 6)
+              :let [tasks (random-jobs seed 6)
+                    end (cn/allocate agents tasks :m)]]
+        (is (< (abs (- (optimum agents tasks) (cn/total-cost (final end :contracts #{:ocsm})))) 1e-9) seed))
+      (let [tasks (random-jobs 1 6)]
+        (is (< (+ (optimum agents tasks) 1.0) (cn/total-cost (final (cn/allocate agents tasks :m) :contracts #{:ocsm} :max-ocsm 2))))))))
 
 (deftest contract-types
   (let [agents [{:id :a :home [0 0] :capacity 1} {:id :b :home [10 0] :capacity 1}]
@@ -143,7 +151,7 @@
       (is (not-any? :moved (cn/recontract-seq st :contracts #{:o :c})))
       (let [re (vec (cn/recontract-seq st :contracts #{:s}))
             moved (some :moved re)]
-        (is (= [:s :a #{1} :b #{2}] ((juxt :type :from :tasks :to :back) moved)))
+        (is (= {1 [:a :b] 2 [:b :a]} (:moves moved)))
         (is (= {:a [2] :b [1]} (:routes (peek re)))))))
   (let [agents [{:id :a :home [0 0]} {:id :b :home [10 0]}]
         tasks [{:id 1 :at [5 0]} {:id 2 :at [6 0]}]
@@ -152,6 +160,20 @@
       (is (not-any? :moved (cn/recontract-seq st :contracts #{:o :s})))
       (let [re (vec (cn/recontract-seq st :contracts #{:c}))
             moved (some :moved re)]
-        (is (= [:c :a #{1 2} :b] ((juxt :type :from :tasks :to) moved)))
+        (is (= {1 [:a :b] 2 [:a :b]} (:moves moved)))
         (is (< (abs (- 1.0 (:gain moved))) 1e-9) "a saves 6, b's route grows by 5")
-        (is (= {:a [] :b [2 1]} (:routes (peek re))))))))
+        (is (= {:a [] :b [2 1]} (:routes (peek re)))))))
+
+  (let [;; a ring of skills, each task doable by two agents, each agent full
+        agents [{:id :a :home [0 0] :skills #{:p :q} :capacity 1}
+                {:id :b :home [10 0] :skills #{:q :r} :capacity 1}
+                {:id :c :home [5 8] :skills #{:r :p} :capacity 1}]
+        tasks [{:id :tp :at [5 7] :needs :p} {:id :tq :at [1 1] :needs :q} {:id :tr :at [9 1] :needs :r}]
+        st (assoc (cn/allocate agents tasks :m) :routes {:a [:tp] :b [:tq] :c [:tr]})]
+    (testing "an M-contract: no one can take a task or trade one, but the three can pass them round"
+      (is (not-any? :moved (cn/recontract-seq st :contracts #{:o :s :c})))
+      (let [re (vec (cn/recontract-seq st :contracts #{:m}))]
+        (is (= [{:tp [:a :c] :tq [:b :a] :tr [:c :b]}] (keep #(some-> % :moved :moves) re)))
+        (is (= {:a [:tq] :b [:tr] :c [:tp]} (:routes (peek re))))))
+    (testing "which an OCSM-contract makes too"
+      (is (= {:a [:tq] :b [:tr] :c [:tp]} (:routes (final st :contracts #{:ocsm})))))))

@@ -170,29 +170,35 @@
 (defn- held-karp
   "The shortest path from `home` through every point of `pts`, by Held and
   Karp's dynamic program: for each set of points and each one of them,
-  the shortest path from home through the set that ends there, built up
-  from the sets one smaller. `[order cost]`."
+  the shortest path from home through the set that ends there, each
+  extended by one point into the sets one larger. `[order cost]`."
   [home pts]
   (let [pts (vec pts)
         n (count pts)
-        full (dec (bit-shift-left 1 n))
-        ;; table: mask -> point j -> [cost previous-point], j in the mask
-        table (reduce (fn [table mask]
-                        (conj table
-                              (vec (for [j (range n)]
-                                     (cond (not (bit-test mask j)) nil
-                                           (= mask (bit-set 0 j)) [(polygon/distance home (pts j)) nil]
-                                           :else (let [m (bit-clear mask j)]
-                                                   (apply min-key first
-                                                          (for [k (range n) :when (bit-test m k)]
-                                                            [(+ (double (first ((table m) k))) (polygon/distance (pts k) (pts j))) k]))))))))
-                      [[]] (range 1 (inc full)))
-        last-j (apply min-key #(first ((table full) %)) (range n))
-        order (loop [mask full j last-j order ()]
-                (if (nil? j)
-                  order
-                  (recur (bit-clear mask j) (second ((table mask) j)) (cons j order))))]
-    [(vec order) (first ((table full) last-j))]))
+        size (bit-shift-left 1 n)
+        full (dec size)
+        dist (double-array (* n n))
+        ;; cost and previous point, at (mask * n + last point)
+        cost (double-array (* size n) ##Inf)
+        prev (long-array (* size n) -1)]
+    (dotimes [i n]
+      (dotimes [j n] (aset dist (+ (* i n) j) (polygon/distance (pts i) (pts j))))
+      (aset cost (+ (* (bit-shift-left 1 i) n) i) (polygon/distance home (pts i))))
+    (doseq [mask (range 1 size) j (range n)
+            :let [c (aget cost (+ (* (long mask) n) (long j)))]
+            :when (< c ##Inf)
+            k (range n) :when (not (bit-test mask k))
+            :let [at (+ (* (bit-set mask k) n) (long k))
+                  v (+ c (aget dist (+ (* (long j) n) (long k))))]
+            :when (< v (aget cost at))]
+      (aset cost at v)
+      (aset prev at (long j)))
+    (let [last-j (apply min-key #(aget cost (+ (* full n) (long %))) (range n))]
+      [(loop [mask (long full) j (long last-j) order ()]
+         (if (neg? j)
+           (vec order)
+           (recur (bit-clear mask j) (aget prev (+ (* mask n) j)) (cons j order))))
+       (aget cost (+ (* full n) (long last-j)))])))
 
 (defn best-route
   "The shortest route from `home` through every one of `stops` (points),
@@ -227,36 +233,68 @@
 
 (defn- offers
   "A pass's offers, in the order they are made: every one-task offer,
-  then every task offered for a swap, then every cluster of two or more
-  of an agent's tasks, up to `max-cluster`."
-  [{:keys [routes]} contracts max-cluster]
-  (let [held (sort-by key routes)]
+  every task offered for a swap, every cluster of two or more of an
+  agent's tasks up to `max-cluster`, every task offered to start an
+  M-contract, and every set of tasks, smallest first, up to `max-ocsm`,
+  put up for an OCSM-contract."
+  [{:keys [routes]} contracts max-cluster max-ocsm]
+  (let [held (sort-by key routes)
+        all (sort (mapcat val held))]
     (concat (when (contracts :o) (for [[a r] held t r] {:type :o :from a :tasks #{t}}))
             (when (contracts :s) (for [[a r] held t r] {:type :s :from a :tasks #{t}}))
             (when (contracts :c) (for [[a r] held T (subsets r 2 (or max-cluster (count r)))]
-                                   {:type :c :from a :tasks T})))))
+                                   {:type :c :from a :tasks T}))
+            (when (contracts :m) (for [[a r] held t r] {:type :m :from a :tasks #{t}}))
+            (when (contracts :ocsm) (for [T (subsets all 1 (or max-ocsm (count all)))]
+                                      {:type :ocsm :tasks T})))))
 
-(defn- replies
-  "What each other agent would give to take `offer`'s tasks: `[gain to
-  back]`, the fall in the two agents' summed costs and, for a swap, the
-  task it hands back. `cost` values an agent's set of tasks."
-  [{:keys [agents tasks routes]} cost {type :type from :from moving :tasks}]
-  (let [able? (fn [a ts n] (let [{:keys [skills capacity]} (agents a)]
-                             (and (every? #(or (nil? (:needs (tasks %))) (contains? skills (:needs (tasks %)))) ts)
-                                  (or (nil? capacity) (<= n (long capacity))))))
-        mine (set (routes from))
-        before-from (cost from mine)
-        after-from (cost from (reduce disj mine moving))]
-    (for [b (sort (keys agents)) :when (not= b from)
-          :let [theirs (set (routes b))]
-          back (if (= type :s) (map vector (routes b)) [[]])
-          :let [back (set back)]
-          :when (and (able? b moving (+ (count theirs) (count moving) (- (count back))))
-                     (able? from back (+ (count mine) (count back) (- (count moving)))))]
-      [(- (+ before-from (cost b theirs))
-          (if (= type :s) (cost from (into (disj mine (first moving)) back)) after-from)
-          (cost b (into (reduce disj theirs back) moving)))
-       b back])))
+(defn- candidates
+  "The contracts `offer` admits, each a map of task to the agent it
+  moves to. `holder` maps each task to the agent holding it."
+  [{:keys [agents routes]} holder {:keys [type from tasks]}]
+  (let [others (fn [a] (remove #{a} (sort (keys agents))))
+        t (first tasks)]
+    (case type
+      :o (for [b (others from)] {t b})
+      :c (for [b (others from)] (zipmap tasks (repeat b)))
+      :s (for [b (others from) u (routes b)] {t b u from})
+      ;; Three or more agents, each handing on at most one task: `from`
+      ;; hands on `t`, each other agent one of its own or none.
+      :m (for [b (others from)
+               moves (reduce (fn [ms x]
+                               (for [m ms
+                                     choice (cons nil (for [u (routes x) y (others x)] [u y]))]
+                                 (if choice (assoc m (first choice) (second choice)) m)))
+                             [{t b}] (others from))
+               :when (<= 3 (count (into (set (vals moves)) (map holder (keys moves)))))]
+           moves)
+      ;; Every reallocation of the tasks among every agent.
+      :ocsm (->> (reduce (fn [ms u] (for [m ms y (sort (keys agents))] (assoc m u y))) [{}] (sort tasks))
+                 (remove (fn [m] (every? (fn [[u y]] (= y (holder u))) m)))))))
+
+(defn- outcome
+  "What making the contract `moves` does: the sets of tasks the agents
+  party to it end with, and the fall in their summed cost; nil if one of
+  them cannot do, or hold, what it would end with. `owned` maps each
+  agent to the set of tasks it holds."
+  [{:keys [agents tasks]} holder owned cost moves]
+  ;; Whether each can do and hold what it is given, from the moves alone,
+  ;; before any route is planned.
+  (when (and (every? (fn [[u y]] (let [needs (:needs (tasks u))]
+                                   (or (nil? needs) (contains? (:skills (agents y)) needs))))
+                     moves)
+             (every? (fn [[a n]] (let [capacity (:capacity (agents a))]
+                                   (or (nil? capacity) (<= (+ (count (owned a)) (long n)) (long capacity)))))
+                     (reduce (fn [d [u y]] (-> d (update (holder u) (fnil dec 0)) (update y (fnil inc 0)))) {} moves)))
+    (let [sets (reduce (fn [sets [u y]]
+                         (let [x (holder u)]
+                           (-> sets
+                               (update x (fnil disj (owned x)) u)
+                               (update y (fnil conj (owned y)) u))))
+                       {} moves)]
+      {:sets sets
+       :gain (- (reduce + (map #(cost % (owned %)) (keys sets)))
+                (reduce + (map (fn [[a ts]] (cost a ts)) sets)))})))
 
 (defn- replan
   "Agent `a`'s route made the best through `ts`."
@@ -265,50 +303,81 @@
         [order] (best-route (:home (agents a)) (map #(:at (tasks %)) ts))]
     (assoc-in st [:routes a] (mapv ts order))))
 
+(defn- weigh
+  "Weighs up to `chunk` more of the candidates of the offer in hand; when
+  they run out, makes the best contract, if any lowers the cost."
+  [{:keys [weighing] :as st} cost chunk]
+  (let [{:keys [offer holder owned left best]} weighing
+        now (take chunk left)
+        later (drop chunk left)
+        best (reduce (fn [best moves]
+                       (let [o (outcome st holder owned cost moves)]
+                         (if (and o (> (double (:gain o)) (double (:gain best 1e-9))))
+                           (assoc o :moves moves)
+                           best)))
+                     best now)
+        st (update st :weighed + (count now))]
+    (cond (seq later) (assoc st :weighing (assoc weighing :left later :best best))
+          best (-> (reduce (fn [st [a ts]] (replan st a ts)) st (:sets best))
+                   (assoc :weighing nil :concluded true
+                          :moved (assoc offer :gain (:gain best)
+                                        :moves (into (sorted-map) (for [[u y] (:moves best) :when (not= y (holder u))]
+                                                                    [u [(holder u) y]])))))
+          :else (assoc st :weighing nil :concluded true))))
+
 (defn- recontract-step
-  [{:keys [pending routes] :as st} cost]
-  (when-let [{:keys [from tasks] :as offer} (first pending)]
-    (let [st (assoc st :pending (rest pending) :offer offer :moved nil)]
-      (if-not (every? (set (routes from)) tasks)
-        st
-        (let [best (when-let [rs (seq (replies st cost offer))]
-                     (apply max-key first rs))
-              [gain to back] best]
-          (if (and best (> (double gain) 1e-9))
-            (-> st
-                (replan from (into (reduce disj (set (routes from)) tasks) back))
-                (replan to (into (reduce disj (set (routes to)) back) tasks))
-                (assoc :moved (assoc offer :to to :back back :gain gain)))
-            st))))))
+  [{:keys [pending routes weighing] :as st} cost chunk]
+  (let [st (assoc st :moved nil :concluded false)]
+    (if weighing
+      (weigh st cost chunk)
+      (when-let [{:keys [type from tasks] :as offer} (first pending)]
+        (let [st (assoc st :pending (rest pending) :offer offer :weighed 0)
+              holder (into {} (for [[a r] routes t r] [t a]))
+              owned (update-vals routes set)]
+          (if-not (if (= type :ocsm) (every? holder tasks) (every? (owned from) tasks))
+            (assoc st :concluded true)
+            (weigh (assoc st :weighing {:offer offer :holder holder :owned owned
+                                        :left (candidates st holder offer) :best nil})
+                   cost chunk)))))))
 
 (defn recontract-seq
-  "Recontracting from the allocation `st`, an offer a step, after
+  "Recontracting from the allocation `st`, after
   Sandholm's contract types (\"Contract Types for Satisficing Task
   Allocation: I Theoretical Results\", AAAI Spring Symposium, 1998):
 
-    :o  one task, offered by its holder to the others -- the contract
-        net's own contract
-    :s  a swap: a task offered in exchange for one of the taker's
-    :c  a cluster: two or more of the holder's tasks, offered as one
+    :o     one task, offered by its holder to the others -- the contract
+           net's own contract
+    :s     a swap: a task offered in exchange for one of the taker's
+    :c     a cluster: two or more of the holder's tasks, offered as one
+    :m     multiagent: three or more agents at once, each handing on at
+           most one task -- offered by the holder of one of them
+    :ocsm  any reallocation of a set of tasks among any agents: all of
+           the above at once
 
   Each agent first replans its route, the best through its tasks, so
   that what an agent's work costs it is a matter of which tasks it holds
-  and not the order they came in. An offer goes to every other agent;
-  the one whose reply lowers the two agents' summed cost most takes it,
-  if anything lowers it -- the contract individually rational to both
-  once the gain is split by a payment -- and both replan. Passes of
-  every offer repeat until one moves nothing. `:contracts` (default
-  all three) chooses the types, `:max-cluster` caps a cluster's size.
-  Each state's `:offer` is `{:type :from :tasks}`, `:moved` that with
-  `:to`, `:back` (a swap's return) and `:gain` when it was taken. Total
-  cost never rises.
+  and not the order they came in. Of the contracts an offer admits, the
+  one that lowers the summed cost of the agents party to it most is
+  made, if any lowers it -- individually rational to each once the gain
+  is shared out by payments -- and they replan. Passes of every offer
+  repeat until one moves nothing. A step weighs at most `:chunk` (default
+  256) of an offer's contracts, so an offer of many -- an M- or
+  OCSM-contract's -- takes several. Each state's `:offer` is `{:type
+  :from :tasks}`, `:weighed` how many of its contracts have been weighed,
+  and `:concluded` whether it was settled in this step; `:moved`, when a
+  contract was made, is the offer with `:moves` `{task [from to]}` and
+  `:gain`. Total cost never rises.
 
-  Sandholm shows that each type alone can stop short of the best
-  allocation, and that only a contract free to move any tasks among any
-  agents at once -- his OCSM-contract -- always reaches it. These three
-  together can stop short too: when it takes three agents trading at
-  once."
-  [st & {:keys [contracts max-cluster] :or {contracts #{:o :s :c}}}]
+  `:contracts` chooses the types, by default one-task, swap and cluster.
+  `:max-cluster` caps a cluster's size and `:max-ocsm` the tasks an
+  OCSM-contract moves. Sandholm shows that each of O, C, S and M alone
+  can stop short of the best allocation, and that OCSM-contracts cannot:
+  unbounded, they reach it whatever the start. That is because an
+  OCSM-contract may be the whole problem -- with every task put up, the
+  search is over every allocation, n^k of them for k tasks among n
+  agents -- so bounded, as it must be past a handful, it can stop short
+  too."
+  [st & {:keys [contracts max-cluster max-ocsm chunk] :or {contracts #{:o :s :c} chunk 256}}]
   (let [costs (atom {})
         cost (fn [a ts]
                (let [k [a ts]]
@@ -320,8 +389,8 @@
         planned (assoc (reduce (fn [st a] (replan st a (set (get-in st [:routes a])))) st (keys (:agents st)))
                        :replanned true :offer nil :moved nil)]
     (letfn [(pass [st]
-              (let [states (->> (assoc st :pending (offers st contracts max-cluster) :replanned false)
-                                (iterate #(some-> % (recontract-step cost)))
+              (let [states (->> (assoc st :pending (offers st contracts max-cluster max-ocsm) :replanned false)
+                                (iterate #(some-> % (recontract-step cost chunk)))
                                 rest
                                 (take-while some?))]
                 (when (seq states)
