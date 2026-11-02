@@ -1086,6 +1086,9 @@ are the algorithms its text teaches.
 | `allgo.vision.segmentation`   | Felzenszwalb-Huttenlocher graph-based segmentation, an edge a step; k-means on color |
 | `allgo.vision.stereo`         | Disparity by matching along rows, a row a step; depth from disparity       |
 | `allgo.vision.detection`      | A convolutional classifier with augmented data; sliding windows, IoU, non-maximum suppression; hard-negative mining |
+| `allgo.vision.shape`          | Shape from shading (Ikeuchi and Horn's relaxation, the occluding contour fixing it), texture (each texel's slant and tilt; a plane from their sizes) and contour (the ground plane; T-junctions and the depth order they give) |
+| `allgo.vision.structure`      | Structure from motion: Tomasi and Kanade's factorization, a stage a step |
+| `allgo.vision.proposals`      | Selective search, a merge a step; anchors scored for objectness; R-CNN's box regression, an example a step |
 
 **Reused, not rewritten.** Segmentation keeps its regions in
 `allgo.graph`'s disjoint sets, joining smaller into larger so the trees
@@ -1147,14 +1150,106 @@ too.
 stages, regions merging, k-means painting, flow arrows over a moving
 disk, a disparity map filling in a row at a time, and a network learning
 to find disks a few examples a frame, mining its false alarms every six
-epochs. Canny works on brightness, and two of the scene's colors are
+epochs. The newer modes:
+- *Shading:* an ellipsoid's normals found, relit from the left beside
+  the truth.
+- *Texture:* the texels' ellipses and the normals they imply.
+- *Contour:* overlapping shapes, their junctions marked right or wrong,
+  and the depth layers they give.
+- *Structure from motion:* a house's points tracked through thirty
+  turning views, then the shape found turning against the truth.
+- *Selective search:* regions merging and proposals accumulating.
+- *Anchors and regression:* objectness learned an epoch a frame, the
+  box regression an example at a time, then the best proposals moved
+  onto their objects. Canny works on brightness, and two of the scene's colors are
 equally bright, so no edge shows where they meet -- the caption says so.
 
-**Not implemented here:** shape from shading, texture and contour;
-structure from motion over many views; region proposals and bounding-box
-regression (the chapter's Faster R-CNN); image generation and style
-transfer; and the deep networks of the chapter's classification, which
-need far more data and computing than a drawn scene.
+**Shape from one image.** `allgo.vision.shape` takes the chapter's
+cues in turn. The 3rd edition's text, which is what was at hand, gives
+them as cues rather than procedures, so each follows the paper or the
+geometry it rests on.
+
+- *Shading:* Ikeuchi and Horn's relaxation ("Numerical Shape from
+  Shading and Occluding Boundaries", Artificial Intelligence 17, 1981),
+  in stereographic coordinates, which stay finite at the occluding
+  contour. Brightness is one equation for two unknowns, so smoothness
+  is assumed: each iteration moves every normal to the mean of its
+  neighbors' and then along the brightness error. The silhouette fixes
+  the normals at the contour, square to the view and pointing out, and
+  so decides convex over concave. Letting the contour relax too lost
+  that, and failed. On a drawn sphere the mean error falls from 41
+  degrees (every normal facing the viewer) to under 5, and stays there:
+  at about 4.5 the smoothness and the brightness balance, whatever the
+  resolution. Weighing brightness more makes it worse -- 7.9 degrees at 4 --
+  and at 8 it diverges.
+- *Texture:* each round texel's ellipse is measured as a camera turned
+  to look straight at it would see it. Off the axis the image plane is
+  itself oblique to the line of sight, and measured in the image, the
+  slant came out up to 7 degrees wrong. The minor-to-major ratio gives
+  the slant to within 5 degrees of the truth, and the tilt to within 10.
+  The texels' sizes, which go as 1 / distance, place them along their
+  rays, and a plane through them gives the ground's normal to under 5
+  degrees in the test (0.1 in the demo), needing no slant at all.
+  Texels under 40 pixels are left out: those of 15 were 30 degrees off.
+- *Contour:* the ground plane's depth f h / (v - cy) and height are
+  checked exactly. For T-junctions, of the three boundaries meeting at a
+  junction, the two that run on straightest through it are the
+  occluder's outline. The first rule, taking the region covering most of
+  the junction's neighborhood as the occluder, failed where the outline
+  curves: a small disk covers less than half. Even the straightness rule
+  misreads a junction a pixel from a box's corner, or where a small disk
+  bends sharply, so a junction where no pair runs clearly straight
+  (beyond about 145 degrees, and clearly straighter than the next pair)
+  says nothing. On forty random rows of five overlapping shapes, 96% of
+  the region pairs the junctions decide come out right, and every pair
+  in 32 of the 40. Local convexity, the chapter's other figure-ground
+  cue, was tried and not kept: on these scenes it was right about 80% of
+  the time, fooled by the thin slivers an occluder leaves of what it hides.
+  The junctions give a partial order: `in-front` is the relation, and
+  `depth-order` one ordering consistent with it.
+
+**Structure from motion.** `allgo.vision.structure` is Tomasi and
+Kanade's factorization ("Shape and Motion from Image Streams under
+Orthography", IJCV 9, 1992). The tracks, less their means, have rank
+three, so their three largest singular directions are the camera's axes
+and the points, up to a linear map. Here the singular directions are
+the eigenvectors of W W^T by `allgo.numerics.eigen`'s Jacobi. The map is
+fixed by the axes being unit and square to each other: six unknowns,
+linear, by least squares. `lin/inverse` is for symmetric matrices only,
+so Q^-1 comes from Q's own eigenvectors. Without noise, every distance
+between points and the camera's turn between frames come back to 1e-9;
+with 0.01 of noise, the distances are within 2% on average. A mirror
+image in depth is left unknown, as under orthography it must be.
+
+**Region proposals.** `allgo.vision.proposals` has three pieces:
+- *Selective search* (Uijlings et al., IJCV 2013), merging a step from
+  a graph-based segmentation, by color, size and fill; the paper's
+  texture measure is left out.
+- *Anchors* scored for objectness, as the region proposal network of
+  Faster R-CNN (Ren et al., NeurIPS 2015) does, but by logistic
+  regression on the anchor's pixels rather than shared convolutional
+  features. They are sampled as that paper samples them, a fixed number
+  an image at most half positive, which also spares computing features
+  for every anchor.
+- *R-CNN's box regression* (Girshick et al., CVPR 2014): ridge
+  regressions on the proposal's pixels, with context, the normal
+  equations built an example a step.
+
+The test scenes' objects are two-toned, lighter above and darker below,
+so that a segmentation splits each. The starting regions' boxes find
+none of thirty objects to 0.7 IoU, and selective search finds all
+thirty with about ten proposals a scene. Box regression takes jittered
+boxes from 0.62 mean IoU to 0.84 and makes none worse. The anchors keep
+a few dozen of some fourteen hundred and find 27 of 30 objects to 0.5
+but only 15 to 0.7, their sizes being fixed; box regression makes that
+29.
+
+**Not implemented here:** image generation and style transfer; the
+deep networks of the chapter's classification, which need far more
+data and computing than a drawn scene; depth from shading integrated
+from the normals; shape from texture on curved surfaces; the paper's
+texture measure in selective search, and a convolutional region
+proposal network sharing the detector's features.
 
 ## Deep learning for language, after Russell & Norvig
 
