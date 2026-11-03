@@ -24,7 +24,12 @@
   each word.
 
   Sentences are vectors of words; the model adds `<s>` before and `</s>`
-  after each."
+  after each.
+
+  Below the language models: taggers of stacked layers, each layer
+  bidirectional or not; a bidirectional language model whose states give
+  each word an embedding of its context, as ELMo's do; and a probe, a
+  softmax layer trained on frozen features, to see what those hold."
   (:require [allgo.learning.autodiff :as ad]
             [clojure.math :as math]))
 
@@ -156,3 +161,198 @@
         p #(/ (get counts % 0.5) total)]
     (math/exp (/ (- (reduce + (map #(math/log (p %)) (mapcat #(conj (vec %) end) test))))
                  (reduce + (map #(inc (count %)) test))))))
+
+;; ---------------------------------------------------------------------------
+;; Stacked and bidirectional networks: tagging
+
+(defn- cell-params
+  "The parameters of one cell reading `in`-wide inputs into `hidden`,
+  named with `prefix`."
+  [cell in hidden prefix rng]
+  (let [k #(keyword (str prefix (name %)))]
+    (case cell
+      :rnn {(k :Wx) (ad/init in hidden rng) (k :Wh) (ad/init hidden hidden rng) (k :b) [(vec (repeat hidden 0.0))]}
+      :lstm {(k :W) (ad/init (+ in hidden) (* 4 hidden) rng)
+             (k :b) [(vec (concat (repeat hidden 0.0) (repeat hidden 1.0) (repeat (* 2 hidden) 0.0)))]})))
+
+(defn- cell-of
+  "The parameters named with `prefix`, under the names `step` knows."
+  [P cell prefix]
+  (into {} (for [n (case cell :rnn [:Wx :Wh :b] :lstm [:W :b])] [n (P (keyword (str prefix (name n))))])))
+
+(defn- direction-prefix [layer dir] (str "l" layer "-" (name dir) "-"))
+
+(defn- run-cells
+  "The hidden rows of a cell run over the row nodes `xs` in order."
+  [cell P hidden xs]
+  (first (reduce (fn [[hs st] x] (let [[h c] (step cell P x st)] [(conj hs h) [h c]]))
+                 [[] (initial-state hidden)] xs)))
+
+(defn encode-sequence
+  "The rows `xs` through `layers` stacked recurrent layers, each reading
+  the outputs of the one below; with `bidirectional`, each layer two
+  networks, one reading left to right and one right to left, their
+  states side by side -- so each position's output has heard the whole
+  sentence on both sides of it. The rows of the top layer."
+  [{:keys [cell hidden layers bidirectional]} P xs]
+  (reduce (fn [xs l]
+            (let [fwd (run-cells cell (cell-of P cell (direction-prefix l :f)) hidden xs)]
+              (if bidirectional
+                (let [bwd (vec (rseq (run-cells cell (cell-of P cell (direction-prefix l :b)) hidden (vec (rseq xs)))))]
+                  (mapv #(ad/concat-cols [%1 %2]) fwd bwd))
+                fwd)))
+          xs (range layers)))
+
+(defn tagger
+  "A sequence tagger: embeddings of `dim`, `layers` recurrent layers of
+  `cell` with `hidden` units -- each `bidirectional` or not -- and a layer
+  from the top one's output to `tags`. The sentence is read between `<s>`
+  and `</s>`, as the language models read it."
+  [cell vocab tags dim hidden layers bidirectional rng]
+  (let [dirs (if bidirectional [:f :b] [:f])
+        width (* hidden (count dirs))
+        tags (vec tags)]
+    {:cell cell :vocab vocab :hidden hidden :layers layers :bidirectional bidirectional
+     :tags tags :tag-index (zipmap tags (range))
+     :params (merge {:E (ad/init (count (:words vocab)) dim rng)
+                     :Wt (ad/init width (count tags) rng) :bt [(vec (repeat (count tags) 0.0))]}
+                    (apply merge (for [l (range layers) d dirs]
+                                   (cell-params cell (if (zero? l) dim width) hidden (direction-prefix l d) rng))))}))
+
+(defn- word-ids [{:keys [index]} words] (mapv #(get index % (index end)) words))
+
+(defn- tag-logits [m P words]
+  (let [t (word-ids (:vocab m) (concat [start] words [end]))
+        hs (encode-sequence m P (mapv #(ad/row (:E P) %) t))]
+    (ad/add-row (ad/matmul (ad/stack-rows (subvec hs 1 (inc (count words)))) (:Wt P)) (:bt P))))
+
+(defn tag-loss
+  "The mean cross-entropy of the tags of `tagged`, `[[word tag] ...]`."
+  [m P tagged]
+  (ad/cross-entropy (tag-logits m P (mapv first tagged)) (mapv #((:tag-index m) (second %)) tagged)))
+
+(defn- adam-seq
+  "Adam on `loss` over `examples` in turn, clipped at 5, `only` the named
+  parameters moved if given: `{:model :loss}` each step."
+  [m examples loss lr only]
+  (let [examples (vec examples)]
+    (map first
+         (iterate (fn [[_ m opt k]]
+                    (let [ex (examples (mod k (count examples)))
+                          {:keys [value grads]} (ad/value-and-grad #(loss m % ex) (:params m))
+                          grads (if only (select-keys grads only) grads)
+                          [params opt] (ad/adam-step (:params m) (ad/clip grads 5.0) opt :lr lr)
+                          m (assoc m :params params)]
+                      [{:model m :loss value} m opt (inc k)]))
+                  [{:model m :loss nil} m nil 0]))))
+
+(defn train-tagger-seq
+  "The tagger trained on `tagged` sentences, a sentence a step: each state
+  `{:model :loss}`. With `:train-only`, a set of parameter names, the rest
+  stay as they are."
+  [m tagged & {:keys [lr train-only] :or {lr 0.01}}]
+  (adam-seq m tagged tag-loss lr train-only))
+
+(defn tag
+  "The tags `m` gives `words`."
+  [m words]
+  (mapv (fn [row] ((:tags m) (apply max-key row (range (count row)))))
+        (ad/value (tag-logits m (consts (:params m)) words))))
+
+(defn tag-accuracy
+  "The fraction of words of `tagged` sentences tagged right, or of just
+  those `only?` picks out -- by word and position, `(only? word i)`."
+  ([m tagged] (tag-accuracy m tagged (constantly true)))
+  ([m tagged only?]
+   (let [rs (for [s tagged
+                  [i [w t] g] (map vector (range) s (tag m (mapv first s)))
+                  :when (only? w i)]
+              (= t g))]
+     (/ (double (count (filter true? rs))) (max 1 (count rs))))))
+
+;; ---------------------------------------------------------------------------
+;; A bidirectional language model: contextual embeddings
+
+(defn bilm
+  "A bidirectional language model after ELMo's (Peters et al., \"Deep
+  Contextualized Word Representations\", NAACL 2018): two recurrent
+  networks of `cell` over the same embeddings, one predicting each word
+  from the words before it and one from the words after, sharing the
+  embeddings and the output layer as ELMo does. Its parameters are named
+  as a one-layer bidirectional tagger's, so a tagger can start from
+  them."
+  [cell vocab dim hidden rng]
+  (let [v (count (:words vocab))]
+    {:cell cell :vocab vocab :hidden hidden :layers 1 :bidirectional true
+     :params (merge {:E (ad/init v dim rng) :Wy (ad/init hidden v rng) :by [(vec (repeat v 0.0))]}
+                    (cell-params cell dim hidden (direction-prefix 0 :f) rng)
+                    (cell-params cell dim hidden (direction-prefix 0 :b) rng))}))
+
+(defn- bilm-states [{:keys [cell hidden vocab]} P words]
+  (let [t (word-ids vocab (concat [start] words [end]))
+        xs (mapv #(ad/row (:E P) %) t)]
+    [t xs
+     (run-cells cell (cell-of P cell (direction-prefix 0 :f)) hidden xs)
+     (vec (rseq (run-cells cell (cell-of P cell (direction-prefix 0 :b)) hidden (vec (rseq xs)))))]))
+
+(defn bilm-loss
+  "The two directions' mean cross-entropies, summed: each word predicted
+  from the forward state before it and from the backward state after."
+  [m P words]
+  (let [[t _ fwd bwd] (bilm-states m P words)
+        n (count t)
+        out #(ad/add-row (ad/matmul (ad/stack-rows %) (:Wy P)) (:by P))]
+    (ad/add (ad/cross-entropy (out (subvec fwd 0 (dec n))) (subvec t 1))
+            (ad/cross-entropy (out (subvec bwd 1)) (subvec t 0 (dec n))))))
+
+(defn train-bilm-seq
+  "The bidirectional language model trained on unlabeled `sentences`, a
+  sentence a step: `{:model :loss}`."
+  [m sentences & {:keys [lr] :or {lr 0.01}}]
+  (adam-seq m sentences bilm-loss lr nil))
+
+(defn contextual
+  "The contextual embedding of each of `words`: its own embedding beside
+  the forward state after reading it and the backward state after reading
+  it from the other end -- so the same word gets a different vector in
+  each sentence, as its company differs. ELMo learns a weighting of its
+  layers for each task; here they are kept side by side."
+  [m words]
+  (let [[_ xs fwd bwd] (bilm-states m (consts (:params m)) words)]
+    (mapv (fn [i] (vec (mapcat #(first (ad/value (% i))) [xs fwd bwd])))
+          (range 1 (inc (count words))))))
+
+(defn fine-tune
+  "A one-layer bidirectional tagger to `tags` started from the
+  bidirectional language model `m`: its embeddings and both networks, a
+  new output layer."
+  [m tags rng]
+  (let [{:keys [cell vocab hidden]} m
+        fresh (tagger cell vocab tags 1 hidden 1 true rng)]
+    (assoc fresh :params (merge (dissoc (:params m) :Wy :by) (select-keys (:params fresh) [:Wt :bt])))))
+
+;; ---------------------------------------------------------------------------
+;; Probing frozen features
+
+(defn probe
+  "A softmax layer from features of `width` to `tags`, to be trained on
+  frozen features -- how much of a tag a representation already holds."
+  [width tags rng]
+  (let [tags (vec tags)]
+    {:tags tags :tag-index (zipmap tags (range))
+     :params {:Wt (ad/init width (count tags) rng) :bt [(vec (repeat (count tags) 0.0))]}}))
+
+(defn- probe-loss [m P [features tags]]
+  (ad/cross-entropy (ad/add-row (ad/matmul (ad/const features) (:Wt P)) (:bt P)) (mapv (:tag-index m) tags)))
+
+(defn train-probe-seq
+  "The probe trained on `examples`, each `[features tags]` for a sentence
+  -- a row of features and a tag per word -- a sentence a step."
+  [m examples & {:keys [lr] :or {lr 0.01}}]
+  (adam-seq m examples probe-loss lr nil))
+
+(defn probe-tags
+  "The tags the probe gives the rows of `features`."
+  [m features]
+  (mapv (fn [row] ((:tags m) (apply max-key row (range (count row)))))
+        (ad/value (ad/add-row (ad/matmul (ad/const features) (ad/const (:Wt (:params m)))) (ad/const (:bt (:params m)))))))

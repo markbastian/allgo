@@ -6,12 +6,17 @@
 
   Embeddings: word vectors learned by skip-gram, drawn on their two
   principal components; as they settle, man -> woman runs parallel to
-  king -> queen. Language model: a recurrent network reading grammar
+  king -> queen; or by GloVe, fitting the table of how often words occur
+  together, an epoch a step. Language model: a recurrent network reading grammar
   sentences, its perplexity falling and its own sentences growing
   grammatical. Attention: an encoder-decoder learning to reverse digits,
   its attention weights a grid that turns into the anti-diagonal. Tagging:
   a transformer learning parts of speech where a word can be two -- the
-  duck will duck -- and one head's attention over the sentence."
+  duck will duck -- and one head's attention over the sentence.
+  Bidirectional: two recurrent taggers learning sentences whose first
+  word is a noun or a verb by the word after it, \"duck swim today\" and
+  \"duck stones today\": the one reading left to right can only guess,
+  the one reading both ways learns it."
   (:require [allgo.language.embeddings :as emb]
             [allgo.language.parsing :as parsing]
             [allgo.language.recurrent :as rec]
@@ -40,12 +45,33 @@
 (def ^:private probe-sentence ["the" "duck" "will" "duck" "a" "dog"])
 (def ^:private probe-digits [0 1 2 3 4])
 
+(def ^:private right-grammar
+  "The first word a noun before an intransitive verb, a verb before an
+  object: only the word after it decides."
+  {:rules [[:S :A :Adv 1.0] [:A :N :Vi 0.5] [:A :V :Obj 0.5]]
+   :lexicon {"duck" [[:N 0.2] [:V 0.2]] "fish" [[:N 0.2] [:V 0.2]] "watch" [[:N 0.2] [:V 0.2]] "saw" [[:N 0.2] [:V 0.2]]
+             "dogs" [[:N 0.2]] "feed" [[:V 0.2]]
+             "swim" [[:Vi 0.34]] "sleep" [[:Vi 0.33]] "run" [[:Vi 0.33]]
+             "stones" [[:Obj 0.34]] "boats" [[:Obj 0.33]] "bread" [[:Obj 0.33]]
+             "today" [[:Adv 0.34]] "again" [[:Adv 0.33]] "here" [[:Adv 0.33]]}})
+
+(def ^:private right-probes [["duck" "swim" "today"] ["duck" "stones" "today"] ["fish" "sleep" "here"] ["fish" "bread" "here"]])
+
+(defn- first-ambiguous [w i] (and (zero? i) (#{"duck" "fish" "watch" "saw"} w)))
+
 (defn- digits [rng] (vec (repeatedly (+ 3 (random/below rng 3)) #(random/below rng 5))))
 
 (defn- init [method]
   (let [rng (random/rng (.-seed controls))]
     (case method
       "embeddings" {:models (emb/sgns-seq (royal-corpus rng 1500) rng :dim 12 :window 2 :chunk 100) :steps 0}
+      "GloVe" {:models (emb/glove-seq (royal-corpus rng 2000) rng :dim 16 :window 4 :chunk 20) :steps 0 :glove true}
+      "bidirectional" (let [data (vec (repeatedly 300 #(parsing/generate right-grammar rng)))
+                            vocab (rec/vocabulary (map #(mapv first %) data))
+                            tagger (fn [bi] (rec/tagger :lstm vocab [:N :V :Vi :Obj :Adv] 8 12 1 bi (random/rng (inc (.-seed controls)))))]
+                        {:pair [(rec/train-tagger-seq (tagger false) (subvec data 0 200))
+                                (rec/train-tagger-seq (tagger true) (subvec data 0 200))]
+                         :test (subvec data 200 230) :steps 0})
       "language model" (let [sents (vec (repeatedly 400 #(mapv first (parsing/generate parsing/ambiguous-grammar rng))))]
                          {:states (rec/train-seq (rec/model (keyword (.-cell controls)) (rec/vocabulary sents) 8 16 rng) (subvec sents 0 300))
                           :test (subvec sents 300) :rng rng :steps 0 :losses []})
@@ -75,9 +101,12 @@
               ;; train for about a dozen milliseconds a frame
               (let [t0 (js/performance.now) budget 12]
                 (loop []
-                  (swap! model (fn [{:keys [models states] :as m}]
-                                 (if models
-                                   (assoc m :models (rest models) :steps (inc (:steps m)))
+                  (swap! model (fn [{:keys [models states pair] :as m}]
+                                 (cond
+                                   models (assoc m :models (rest models) :steps (inc (:steps m)))
+                                   ;; the two taggers take turns
+                                   pair (-> m (update-in [:pair (mod (:steps m) 2)] rest) (update :steps inc))
+                                   :else
                                    (let [st (second states)]
                                      (-> m (assoc :states (rest states) :steps (inc (:steps m)))
                                          (update :losses #(let [l (conj % (:loss st))] (if (> (count l) 400) (subvec l 1) l))))))))
@@ -109,12 +138,13 @@
                 (set! (.-textContent caption)
                       (str method "  |  "
                            (case method
-                             "embeddings" (draw-embeddings! cw ch)
+                             ("embeddings" "GloVe") (draw-embeddings! cw ch)
+                             "bidirectional" (draw-bidirectional! cw ch)
                              "language model" (draw-lm! cw ch)
                              "attention" (draw-attention! cw ch)
                              "tagging" (draw-tagging! cw ch))))))
             (draw-embeddings! [cw ch]
-              (let [{:keys [models steps]} @model
+              (let [{:keys [models steps glove]} @model
                     m (first models)
                     pts (emb/project-2d (mapv #(emb/word-vector m %) shown-words))
                     xs (map first pts) ys (map second pts)
@@ -132,7 +162,8 @@
                 (doseq [[w [x y]] at]
                   (set! (.-fillStyle ctx) "#ffd479") (.fillRect ctx (- x 3) (- y 3) 6 6)
                   (text! w (+ x 6) (- y 6) "#e6edf7" 13))
-                (str (* 100 steps) " word pairs seen  |  king - man + woman = " (emb/analogy m "man" "woman" "king")
+                (str (if glove (str (* 20 steps) " entries of the co-occurrence table fitted") (str (* 100 steps) " word pairs seen"))
+                     "  |  king - man + woman = " (emb/analogy m "man" "woman" "king")
                      "\nwords on their vectors' two principal components; blue: male to female, parallel when the vectors learn the factor")))
             (draw-lm! [cw _ch]
               (let [{:keys [states test steps losses rng]} @model
@@ -177,6 +208,39 @@
                     (heatmap! (get-in attention [0 0]) 160 360 cell probe-sentence probe-sentence))
                   (str steps " sentences seen"
                        "\ngreen: tags right -- the two ducks differ only by context; the grid: one head's attention, each row a word looking at the others"))))
+            (draw-bidirectional! [_cw _ch]
+              (let [{:keys [pair test steps]} @model
+                    [fwd bi] (map (comp :model first) pair)]
+                ;; the held-out sentences and the four shown, tagged by both a
+                ;; couple a frame, every fifty sentences trained
+                (let [{:keys [checking]} @model]
+                  (cond (and (nil? checking) (zero? (mod steps 100)))
+                        (swap! model assoc :checking {:models [fwd bi] :left (concat right-probes (map #(mapv first %) test)) :done []})
+                        checking
+                        (let [{:keys [models left done]} checking
+                              done (into done (for [s (take 2 left)] (mapv #(rec/tag % s) models)))]
+                          (if (seq (drop 2 left))
+                            (swap! model assoc-in [:checking] (assoc checking :left (drop 2 left) :done done))
+                            (let [[shown held] (split-at (count right-probes) done)
+                                  right (fn [k] (count (filter true? (for [[got s] (map vector held test)
+                                                                           :when (first-ambiguous (ffirst s) 0)]
+                                                                       (= (second (first s)) (first (get got k)))))))
+                                  n (count (filter #(first-ambiguous (ffirst %) 0) test))]
+                              (swap! model assoc :checking nil
+                                     :scores (mapv #(/ (right %) (max 1 n)) [0 1])
+                                     :probes (mapv (fn [k] (mapv #(get % k) shown)) [0 1])))))))
+                (let [{:keys [scores probes]} @model]
+                  (doseq [[col label ps] (map vector [0 1] ["left to right" "both ways"] (or probes [nil nil]))]
+                    (let [x (+ 40 (* col 420))]
+                      (text! label x 140 "#9fb4d8" 13)
+                      (when scores (text! (str (.toFixed (* 100 (scores col)) 0) "% of first words right") x 162 "#e6edf7" 13))
+                      (doseq [[i [s tags]] (map-indexed vector (map vector right-probes (or ps (repeat nil))))]
+                        (let [y (+ 210 (* 56 i)) truth (if (even? i) [:N :Vi :Adv] [:V :Obj :Adv])]
+                          (doseq [[j w] (map-indexed vector s)]
+                            (text! w (+ x (* 110 j)) y "#e6edf7" 15)
+                            (when tags (text! (name (tags j)) (+ x (* 110 j)) (+ y 20) (if (= (truth j) (tags j)) "#7dffa0" "#ff8f70") 13)))))))
+                  (str (quot steps 2) " sentences each"
+                       "\nthe first word is a noun before \"swim\", a verb before \"stones\": reading left to right, it is tagged before the word that decides"))))
             (frame []
               (when @running?
                 (js/requestAnimationFrame frame)
@@ -188,7 +252,7 @@
                   (set! (.-width canvas) cw)
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["embeddings" "language model" "attention" "tagging"]) restart!)
+        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "attention" "tagging" "bidirectional"]) restart!)
         (.onChange (.add gui controls "cell" #js ["lstm" "rnn"]) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui #js {:restart restart!} "restart"))

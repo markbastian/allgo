@@ -20,7 +20,10 @@
 
   The gradient of this objective is two lines, so it is followed directly
   rather than through `allgo.learning.autodiff`: an epoch is many thousand
-  small updates, and that is where the time goes."
+  small updates, and that is where the time goes.
+
+  GloVe, below, gets at the same vectors from the other side: the table
+  of how often each pair of words occurs together, fitted whole."
   (:require [allgo.learning.autodiff :as ad]
             [allgo.numerics.eigen :as eigen]
             [allgo.random :as random]
@@ -128,3 +131,84 @@
         pc (fn [k] (mapv #(nth % k) vectors))
         [p1 p2] [(pc (dec d)) (pc (- d 2))]]
     (mapv (fn [x] [(dot x p1) (dot x p2)]) X)))
+
+;; ---------------------------------------------------------------------------
+;; GloVe
+
+(defn cooccurrences
+  "How much each pair of words occurs together: for every two words
+  within `window` of each other, d apart, 1 / d added to their count --
+  near neighbors counting more, as GloVe weighs them. `{[i j] x}`, by
+  index, both ways round."
+  [sentences {:keys [index]} window]
+  (reduce (fn [m [i j d]] (update m [i j] (fnil + 0.0) (/ 1.0 (double d))))
+          {}
+          (for [s sentences
+                :let [ids (mapv index s)]
+                a (range (count ids))
+                b (range (max 0 (- a window)) (min (count ids) (+ a window 1)))
+                :when (not= a b)]
+            [(ids a) (ids b) (abs (- a b))])))
+
+(defn- glove-weight
+  "f(x) = (x / x-max)^alpha, 1 from x-max up: rare pairs, whose counts
+  are noise, count for less, and the commonest no more than the rest."
+  [x x-max alpha]
+  (if (< x x-max) (math/pow (/ x x-max) alpha) 1.0))
+
+(defn- adagrad
+  "`v` moved against gradient `g`, each component by `lr` over the root
+  of its own running sum of squared gradients, `acc`: `[v' acc']`."
+  [v acc g lr]
+  (let [acc (mapv #(+ %1 (* %2 %2)) acc g)]
+    [(mapv (fn [x gi a] (- x (/ (* lr gi) (math/sqrt a)))) v g acc) acc]))
+
+(defn glove-seq
+  "GloVe (Pennington, Socher and Manning, \"GloVe: Global Vectors for Word
+  Representation\", EMNLP 2014): rather than predict each word's
+  neighbors a pair at a time, fit the whole table of how often words
+  occur together. Each pair's word vector w_i and context vector w~_j,
+  with biases, are fitted so that w_i . w~_j + b_i + b~_j is the log of
+  their count x_ij, by weighted least squares -- the weight `f(x)` --
+  over every pair that occurs at all, with AdaGrad as the paper does.
+  The model after each epoch, the pairs taken in a new random order each
+  time: `{:vocab :in :w :wt :cost}`, `:in` the vectors the similarities
+  and analogies use and `:cost` the epoch's weighted squared error. The
+  paper takes w + w~ as a word's vector, finding the sum a little better
+  than either; `:vectors :sum` does that. The default, `:word`, is w
+  alone: where words keep to their roles -- a person never a context word
+  about a person -- the sum mixes in what each is as a context, and on
+  such corpora the analogies suffered. With `:chunk`, a state after every
+  that many pairs rather than every epoch, `:cost` theirs, for a caller
+  that must not stall. Options `:dim` (default 16),
+  `:window` (2), `:x-max` (100), `:alpha` (0.75) and `:lr` (0.05)."
+  [sentences rng & {:keys [dim window x-max alpha lr vectors chunk] :or {dim 16 window 2 x-max 100.0 alpha 0.75 lr 0.05 vectors :word}}]
+  (let [vocab (vocabulary sentences)
+        n (count (:words vocab))
+        entries (vec (cooccurrences sentences vocab window))
+        ones (fn [] (vec (repeat n (vec (repeat dim 1.0)))))
+        with-in (fn [{:keys [w wt] :as m}] (assoc m :in (if (= vectors :sum) (mapv #(mapv + %1 %2) w wt) w)))
+        start {:vocab vocab :w (ad/init n dim rng) :wt (ad/init n dim rng)
+               :b (vec (repeat n 0.0)) :bt (vec (repeat n 0.0))
+               ;; AdaGrad's sums start at 1, as the paper's code does
+               :gw (ones) :gwt (ones) :gb (vec (repeat n 1.0)) :gbt (vec (repeat n 1.0))}
+        fit (fn [m batch]
+              (with-in
+                (reduce (fn [{:keys [w wt b bt gw gwt gb gbt] :as m} [[i j] x]]
+                          (let [wi (w i) wj (wt j)
+                                diff (- (+ (dot wi wj) (b i) (bt j)) (math/log x))
+                                fd (* (glove-weight x x-max alpha) diff)
+                                [wi' gwi] (adagrad wi (gw i) (mapv #(* fd %) wj) lr)
+                                [wj' gwj] (adagrad wj (gwt j) (mapv #(* fd %) wi) lr)
+                                [[bi'] [gbi]] (adagrad [(b i)] [(gb i)] [fd] lr)
+                                [[bj'] [gbj]] (adagrad [(bt j)] [(gbt j)] [fd] lr)]
+                            (-> m
+                                (assoc-in [:w i] wi') (assoc-in [:gw i] gwi)
+                                (assoc-in [:wt j] wj') (assoc-in [:gwt j] gwj)
+                                (assoc-in [:b i] bi') (assoc-in [:gb i] gbi)
+                                (assoc-in [:bt j] bj') (assoc-in [:gbt j] gbj)
+                                (update :cost + (* 0.5 fd diff)))))
+                        (assoc m :cost 0.0)
+                        batch)))
+        epochs (fn epochs [] (lazy-seq (concat (random/shuffle rng entries) (epochs))))]
+    (reductions fit (assoc (with-in start) :cost nil) (partition (or chunk (count entries)) (epochs)))))

@@ -1261,8 +1261,8 @@ known.
 | Namespace                        | What it is                                                                 |
 |----------------------------------|----------------------------------------------------------------------------|
 | `allgo.learning.autodiff`        | Reverse-mode differentiation over matrices; Adam and clipping              |
-| `allgo.language.embeddings`      | Skip-gram with negative sampling; similarity, nearest words, analogies, a 2-D projection |
-| `allgo.language.recurrent`       | Language models with an RNN or an LSTM cell; sampling, perplexity          |
+| `allgo.language.embeddings`      | Skip-gram with negative sampling; GloVe; similarity, nearest words, analogies, a 2-D projection |
+| `allgo.language.recurrent`       | Language models with an RNN or an LSTM cell; sampling, perplexity; stacked and bidirectional taggers; a bidirectional language model's contextual embeddings, probed and fine-tuned |
 | `allgo.language.seq2seq`         | An encoder-decoder with attention; greedy and beam decoding                |
 | `allgo.language.transformer`     | Multi-head self-attention, positional encoding, layer norm; tagging, masked language modeling, fine-tuning |
 | `allgo.language.parsing`         | Chapter 23's CYK and treebank code, moved from `allgo.language`, now also sampling sentences from a grammar |
@@ -1304,6 +1304,10 @@ expanded.
 - Attention, learning to reverse digit strings: every unseen string
   reversed, greedily and by beam search, and the attention the
   anti-diagonal.
+- GloVe: all six analogies on half of ten seeds, at least four on every
+  one.
+- Taggers: one-way at chance, 49%, on a word whose tag the next word
+  decides; two-way, with one layer or two, all of them.
 - The transformer tagging a grammar whose words are often two parts of
   speech -- "the duck will duck a dog": 100% of held-out words, and of the
   ambiguous ones, where tagging each word with its most frequent tag gets
@@ -1331,11 +1335,66 @@ you, a little each frame within a time budget: the embeddings on their
 principal components, the male-to-female arrows turning parallel; a
 language model's loss and its sentences, green where they parse; the
 attention grid of a reversal model becoming the anti-diagonal; and a
-transformer tagging both ducks, with one head's attention.
+transformer tagging both ducks, with one head's attention. GloVe draws
+the same picture as skip-gram, fitted twenty table entries a frame.
+Bidirectional trains a one-way and a two-way tagger by turns, the
+held-out sentences checked a couple a frame: the one-way at about 50% on
+the first word, the two-way at 100%.
 
-**Not implemented here:** GloVe and contextual embeddings such as ELMo;
-the bidirectional and stacked recurrent networks of the chapter; and
-anything at the scale of BERT or GPT, whose point is the scale.
+**GloVe.** `glove-seq` fits the log of each pair's co-occurrence count
+by weighted least squares with AdaGrad, as Pennington, Socher and
+Manning's paper does (EMNLP 2014). On the analogy corpus it is less sure
+than skip-gram, which solves all six analogies on every seed tried. With
+the paper's choice of word vector, w + w~, it solved one to six. The
+wrong answers were context words: "elder" for king - man + woman.
+Every word in this corpus keeps to one role, a person never a context
+word about a person, so the sum mixes in what each is as a context. The
+word vectors w alone, window 4, dimension 16, solve at least four of the
+six on every one of ten seeds, and all six on half; that is the
+default, and `:vectors :sum` gives the paper's. Centering the vectors
+changed nothing.
+
+**Stacked and bidirectional networks.** A recurrent tagger can stack
+layers, each reading the outputs of the one below, and make each layer
+bidirectional: one network left to right, one right to left, their
+states side by side. The test grammar's first word is a noun before an
+intransitive verb ("duck swim today") and a verb before an object
+("duck stones today"): only the word after decides. Reading left to
+right, a tagger is at chance on it, 49%, with one layer or two; reading
+both ways, it gets all of them.
+
+**Contextual embeddings.** `bilm` is a bidirectional language model
+after ELMo (Peters et al., NAACL 2018), one network predicting each word
+from those before and one from those after, sharing the embeddings and
+the output layer. A word's contextual embedding is its embedding beside
+both networks' states there. ELMo learns a weighting of its layers per
+task; here they are kept side by side. The same word gets a different
+vector in each sentence: on the ambiguous grammar, "duck" the noun's
+vectors are nearer one another than to "duck" the verb's by more than
+0.2 in cosine.
+
+**Pretraining where it pays.** The ambiguous grammar's rules, over a
+vocabulary four times its size, 61 words. The bidirectional language
+model reads 1,500 unlabeled sentences. With ten labeled sentences, a
+third of the test's words were never labeled:
+
+| Tagger                                           | All words | Words never labeled |
+|--------------------------------------------------|----------:|--------------------:|
+| From scratch                                     |       84% |                 65% |
+| A softmax probe on the frozen contextual vectors |       92% |                 84% |
+| Fine-tuned from the language model               |       91% |                 81% |
+
+With a hundred labeled sentences, every test word has been seen, and the
+network trained from scratch tags all of them (the probe 97%, the
+fine-tuned one 99.9%). That is the chapter's case for pretraining, here
+in miniature: it pays when the labels cover little of the vocabulary and
+unlabeled text covers it all. The transformer's masked language model,
+above, met the other case: twenty labeled sentences that cover a small
+grammar already teach it all.
+
+**Not implemented here:** ELMo's learned weighting of layers and its
+character convolutions; anything at the scale of BERT or GPT, whose point
+is the scale.
 
 ## Knowledge representation, after Russell & Norvig
 

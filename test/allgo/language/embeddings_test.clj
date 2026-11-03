@@ -43,3 +43,35 @@
       (is (= 4 (count pts)))
       (is (< (abs (- 1.0 (apply max (map #(abs (first %)) pts)))) 1e-9))
       (is (< (abs (- 0.5 (apply max (map #(abs (second %)) pts)))) 1e-9)))))
+
+(defn- analogies-solved
+  "How many of the six analogies `m` gets."
+  [m]
+  (count (filter true? [(= "queen" (emb/analogy m "man" "woman" "king"))
+                        (= "girl" (emb/analogy m "king" "queen" "boy"))
+                        (= "queen" (emb/analogy m "man" "king" "woman"))
+                        (= "boy" (emb/analogy m "woman" "girl" "man"))
+                        (= "queen" (emb/analogy m "prince" "king" "princess"))
+                        (= "princess" (emb/analogy m "boy" "prince" "girl"))])))
+
+(defn- glove [seed]
+  (let [rng (random/rng seed)] (nth (emb/glove-seq (corpus rng 2000) rng :dim 16 :window 4) 100)))
+
+(deftest glove-test
+  (testing "co-occurrence counts weighted by 1 / distance, both ways round"
+    (let [v (emb/vocabulary [["a" "b" "c"]])
+          x (emb/cooccurrences [["a" "b" "c"] ["a" "b" "c"]] v 2)
+          i (:index v)]
+      (is (= 2.0 (x [(i "a") (i "b")]) (x [(i "b") (i "a")])))
+      (is (= 1.0 (x [(i "a") (i "c")])))))
+  (testing "the weighted squared error of the log counts falls epoch by epoch"
+    (let [rng (random/rng 1) costs (map :cost (take 31 (rest (emb/glove-seq (corpus rng 500) rng))))]
+      (is (apply > costs))))
+  (testing "fitting the table of counts, the same analogies as skip-gram"
+    (let [m (glove 1)]
+      (is (= 6 (analogies-solved m)))
+      (is (> (emb/similarity m "rules" "reigns") (emb/similarity m "rules" "plows")))))
+  (testing "but less surely on this small corpus: at least four of the six on each of ten seeds, all six on half"
+    (let [solved (map #(analogies-solved (glove %)) (range 1 11))]
+      (is (every? #(>= % 4) solved))
+      (is (<= 5 (count (filter #{6} solved)))))))
