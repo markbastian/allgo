@@ -753,7 +753,9 @@ examples of chapter 19 are inlined in their test.
 | `allgo.learning.unsupervised`      | 20       | k-means, EM for Gaussian mixtures, Baum-Welch                             |
 | `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD                     |
 | `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
-| `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees                  |
+| `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees; a grammar learned from a treebank, and by inside-outside |
+| `allgo.language.ngrams`            | 23       | N-gram models: Laplace and interpolated smoothing, EM for the weights, perplexity, <UNK>, sampling, language identification |
+| `allgo.language.tagging`           | 23       | Part-of-speech tagging with an HMM decoded by Viterbi                     |
 | `allgo.robotics.localization`      | 26       | Monte Carlo localization with a range scanner                             |
 
 The tests are under `test/allgo/decision/`, `probability/`,
@@ -1250,6 +1252,70 @@ data and computing than a drawn scene; depth from shading integrated
 from the normals; shape from texture on curved surfaces; the paper's
 texture measure in selective search, and a convolutional region
 proposal network sharing the detector's features.
+
+## Natural language, after Russell & Norvig
+
+The rest of chapter 23 of *Artificial Intelligence: A Modern Approach*
+(4th ed.), beside the CYK parser it already had. The 3rd edition's text
+was what was at hand -- its chapters 22 and 23 -- and its account of
+n-grams, smoothing, perplexity, <UNK> and learning grammars is what the
+code follows. The data are drawn from grammars and from
+`allgo.procedural.naming`'s languages, so the right answers are known.
+
+- **N-gram models** (`allgo.language.ngrams`): counts by order, the
+  sequence padded with start markers and an end. Laplace's add-one, or
+  linear interpolation of every order, with a uniform estimate below
+  the unigram so that no token has probability zero. The interpolation
+  weights are fitted by EM on held-out text, an iteration a step; the
+  held-out likelihood never falls. On sentences from a sixty-word
+  grammar: perplexity 36.5 unigram, 13.0 bigram, 13.0 trigram -- the
+  grammar's words depending mostly on the one before, the trigram adds
+  nothing -- while Laplace's trigram, spreading its mass over trigrams
+  never seen, is 23.3, worse than its own bigram, as the book warns.
+- **Unknown words:** the book's trick, each word's first appearance
+  counted as <UNK>.
+- **Language identification** by character trigrams, on four languages
+  drawn by the naming code: 98.5% of single words.
+- **Tagging** (`allgo.language.tagging`): an HMM counted from tagged
+  sentences, add-one throughout, unknown words as <UNK>, decoded by
+  chapter 14's Viterbi -- `allgo.probability.temporal`'s, unchanged.
+  That HMM starts from P(X0) and moves a step before the first word, so
+  the sentence's start is a state of its own. On the ambiguous grammar
+  every word is tagged right, where each word's most frequent tag gets
+  the ambiguous ones 57%; and Viterbi, weighing the whole sentence, tags
+  a word that only the next word decides, which a recurrent tagger
+  reading left to right cannot.
+- **A grammar from a treebank** (`learn-grammar`), by counting: from
+  three thousand sampled trees every probability is within 0.015 of the
+  truth, and the learned grammar parses new sentences as the true one
+  does.
+- **The inside-outside algorithm** (`inside-outside-seq`): EM over
+  unparsed sentences, inside probabilities from the words up, outside
+  from the root down, an iteration a step. With the rules given and
+  their probabilities uniform, it reaches the sample's maximum in an
+  iteration or two, every probability within 0.03 of the truth and the
+  likelihood a little above the true grammar's on that sample. With
+  every rule allowed among the categories, as the book poses it, the
+  likelihood climbs every iteration from random starts but stops at
+  different local maxima: on a hundred sentences one stalls about fifty
+  below the true grammar, another passes it -- the chapter's warning
+  about local maxima, and its cost, O(n^3 m^3): 20 s for thirty
+  iterations.
+
+`generate` now samples a tree and reads its leaves, drawing the same
+random numbers in the same order, so the data the other tests draw is
+unchanged.
+
+**The demo.** Two more modes of Deep Learning for Language:
+- *N-grams:* each order's samples and perplexity as EM fits the
+  trigram's weights, and the HMM tagging both ducks.
+- *Inside-outside:* the likelihood by iteration and each rule's learned
+  probability against its true one.
+
+**Not implemented here:** Kneser-Ney and other backoff smoothing;
+text classification, which `allgo.learning.models`' naive Bayes already
+covers; dependency parsing, if the 4th edition's chapter teaches it --
+its text was not at hand to check.
 
 ## Deep learning for language, after Russell & Norvig
 

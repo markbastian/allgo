@@ -16,11 +16,18 @@
   Bidirectional: two recurrent taggers learning sentences whose first
   word is a noun or a verb by the word after it, \"duck swim today\" and
   \"duck stones today\": the one reading left to right can only guess,
-  the one reading both ways learns it."
+  the one reading both ways learns it. N-grams: chapter 23's unigram,
+  bigram and trigram models of grammar sentences, their samples and
+  perplexities as EM fits the trigram's interpolation weights, and an HMM
+  tagging both ducks. Inside-outside: EM learning the grammar's rule
+  probabilities from unparsed sentences, the likelihood climbing and the
+  probabilities settling on the true ones."
   (:require [allgo.language.embeddings :as emb]
+            [allgo.language.ngrams :as ng]
             [allgo.language.parsing :as parsing]
             [allgo.language.recurrent :as rec]
             [allgo.language.seq2seq :as s2s]
+            [allgo.language.tagging :as tagging]
             [allgo.language.transformer :as tf]
             [allgo.random :as random]
             ["lil-gui" :default GUI]
@@ -57,6 +64,23 @@
 
 (def ^:private right-probes [["duck" "swim" "today"] ["duck" "stones" "today"] ["fish" "sleep" "here"] ["fish" "bread" "here"]])
 
+(defn- held
+  "The first `n` of `xs`, then the last of those for ever: a run of a
+  converging algorithm that the demo shows and then holds."
+  [n xs]
+  (let [s (take n xs)] (concat s (lazy-seq (repeat (last s))))))
+
+(defn- uniform-grammar
+  "The ambiguous grammar's rules, each left-hand side's equally likely."
+  []
+  (let [g parsing/ambiguous-grammar
+        weights (fn [ks] (let [totals (frequencies (map first ks))] (fn [x] (/ 1.0 (totals x)))))
+        bin (map (fn [[x y z]] [x y z]) (:rules g))
+        lex (for [[w xs] (:lexicon g) [x] xs] [x w])
+        wb (weights bin) wl (weights lex)]
+    {:rules (mapv (fn [[x y z]] [x y z (wb x)]) bin)
+     :lexicon (reduce (fn [m [x w]] (update m w (fnil conj []) [x (wl x)])) {} lex)}))
+
 (defn- first-ambiguous [w i] (and (zero? i) (#{"duck" "fish" "watch" "saw"} w)))
 
 (defn- digits [rng] (vec (repeatedly (+ 3 (random/below rng 3)) #(random/below rng 5))))
@@ -66,6 +90,16 @@
     (case method
       "embeddings" {:models (emb/sgns-seq (royal-corpus rng 1500) rng :dim 12 :window 2 :chunk 100) :steps 0}
       "GloVe" {:models (emb/glove-seq (royal-corpus rng 2000) rng :dim 16 :window 4 :chunk 20) :steps 0 :glove true}
+      "n-grams" (let [tagged (vec (repeatedly 2000 #(parsing/generate parsing/ambiguous-grammar rng)))
+                      sents (mapv #(mapv first %) tagged)
+                      [train held-out test] [(subvec sents 0 1500) (subvec sents 1500 1800) (subvec sents 1800)]
+                      ms (mapv #(ng/model % train) [1 2 3])
+                      fit (fn [m] (:lambdas (nth (ng/interpolation-seq m held-out) 20)))]
+                  {:models (held 25 (mapcat #(repeat 15 %) (ng/interpolation-seq (ms 2) held-out)))
+                   :ms ms :lambdas [(fit (ms 0)) (fit (ms 1))] :test test :rng rng
+                   :tagger (tagging/train (subvec tagged 0 1500)) :steps 0 :paced true})
+      "inside-outside" (let [sents (vec (repeatedly 150 #(parsing/leaves (parsing/generate-tree parsing/ambiguous-grammar rng))))]
+                         {:models (held 360 (mapcat #(repeat 30 %) (parsing/inside-outside-seq (uniform-grammar) sents))) :steps 0 :paced true :history []})
       "bidirectional" (let [data (vec (repeatedly 300 #(parsing/generate right-grammar rng)))
                             vocab (rec/vocabulary (map #(mapv first %) data))
                             tagger (fn [bi] (rec/tagger :lstm vocab [:N :V :Vi :Obj :Adv] 8 12 1 bi (random/rng (inc (.-seed controls)))))]
@@ -98,19 +132,22 @@
     (doto container (.appendChild canvas) (.appendChild caption))
     (letfn [(restart! [] (reset! model (init (.-method controls))))
             (advance! []
-              ;; train for about a dozen milliseconds a frame
-              (let [t0 (js/performance.now) budget 12]
-                (loop []
-                  (swap! model (fn [{:keys [models states pair] :as m}]
-                                 (cond
-                                   models (assoc m :models (rest models) :steps (inc (:steps m)))
+              ;; train for about a dozen milliseconds a frame -- or, paced,
+              ;; a step a frame
+              (if (:paced @model)
+                (swap! model (fn [m] (-> m (update :models rest) (update :steps inc))))
+                (let [t0 (js/performance.now) budget 12]
+                  (loop []
+                    (swap! model (fn [{:keys [models states pair] :as m}]
+                                   (cond
+                                     models (assoc m :models (rest models) :steps (inc (:steps m)))
                                    ;; the two taggers take turns
-                                   pair (-> m (update-in [:pair (mod (:steps m) 2)] rest) (update :steps inc))
-                                   :else
-                                   (let [st (second states)]
-                                     (-> m (assoc :states (rest states) :steps (inc (:steps m)))
-                                         (update :losses #(let [l (conj % (:loss st))] (if (> (count l) 400) (subvec l 1) l))))))))
-                  (when (< (- (js/performance.now) t0) budget) (recur)))))
+                                     pair (-> m (update-in [:pair (mod (:steps m) 2)] rest) (update :steps inc))
+                                     :else
+                                     (let [st (second states)]
+                                       (-> m (assoc :states (rest states) :steps (inc (:steps m)))
+                                           (update :losses #(let [l (conj % (:loss st))] (if (> (count l) 400) (subvec l 1) l))))))))
+                    (when (< (- (js/performance.now) t0) budget) (recur))))))
             (text! [s x y color & [size]]
               (set! (.-fillStyle ctx) color) (set! (.-font ctx) (str (or size 12) "px ui-monospace,Menlo,monospace"))
               (.fillText ctx s x y))
@@ -140,6 +177,8 @@
                            (case method
                              ("embeddings" "GloVe") (draw-embeddings! cw ch)
                              "bidirectional" (draw-bidirectional! cw ch)
+                             "n-grams" (draw-ngrams! cw ch)
+                             "inside-outside" (draw-inside-outside! cw ch)
                              "language model" (draw-lm! cw ch)
                              "attention" (draw-attention! cw ch)
                              "tagging" (draw-tagging! cw ch))))))
@@ -208,6 +247,44 @@
                     (heatmap! (get-in attention [0 0]) 160 360 cell probe-sentence probe-sentence))
                   (str steps " sentences seen"
                        "\ngreen: tags right -- the two ducks differ only by context; the grid: one head's attention, each row a word looking at the others"))))
+            (draw-ngrams! [_cw _ch]
+              (let [{:keys [models ms lambdas test rng steps tagger]} @model
+                    ls (conj lambdas (:lambdas (first models)))
+                    ppl (mapv #(ng/perplexity (ms %) [:interpolate (ls %)] test) [0 1 2])]
+                (when (zero? (mod steps 90))
+                  (swap! model assoc :samples (mapv #(ng/sample (ms %) [:interpolate (ls %)] rng :max-len 12) [0 1 2])))
+                (doseq [[i label] (map-indexed vector ["unigram" "bigram" "trigram"])]
+                  (let [y (+ 140 (* 70 i))]
+                    (text! (str label "  perplexity " (.toFixed (ppl i) 2)) 40 y "#9fb4d8" 13)
+                    (when-let [s (get (:samples @model) i)]
+                      (text! (str/join " " s) 40 (+ y 24) (if (parsing/parse-tree s parsing/ambiguous-grammar) "#7dffa0" "#ff8f70") 14))))
+                (text! (str "the trigram's weights, uniform to trigram: " (str/join "  " (map #(.toFixed % 3) (ls 2)))) 40 370 "#ffd479" 13)
+                (text! "an HMM tagging, Viterbi over the whole sentence:" 40 420 "#9fb4d8" 13)
+                (doseq [[i [w t]] (map-indexed vector (map vector probe-sentence (tagging/tag tagger probe-sentence)))]
+                  (text! w (+ 40 (* 110 i)) 446 "#e6edf7" 15)
+                  (text! (name t) (+ 40 (* 110 i)) 468 (if (= t ([:Det :N :Modal :V :Det :N] i)) "#7dffa0" "#ff8f70") 13))
+                (str "EM iteration " (quot steps 15) " on held-out sentences"
+                     "\nsamples from each model, green where they parse under the grammar; perplexity on unseen sentences, lower the better")))
+            (draw-inside-outside! [_cw _ch]
+              (let [{:keys [models steps history]} @model
+                    {:keys [grammar log-likelihood]} (first models)
+                    ;; an iteration every thirty frames, so that it can be watched
+                    iteration (quot (dec steps) 30)
+                    history (if (and (<= (count history) iteration) (< iteration 12)) (conj history log-likelihood) history)
+                    _ (swap! model assoc :history history)
+                    truth parsing/ambiguous-grammar
+                    p-of (fn [g [x y z]] (or (some (fn [[a b c p]] (when (= [a b c] [x y z]) p)) (:rules g)) 0.0))]
+                (text! "log likelihood of the sentences, iteration by iteration -- EM never lets it fall:" 40 140 "#9fb4d8" 13)
+                (text! (str/join "   " (map #(.toFixed % 1) (take 8 history))) 40 166 "#ffd479" 14)
+                (text! "rule                  learned   true" 40 280 "#9fb4d8" 12)
+                (doseq [[i [x y z p]] (map-indexed vector (:rules truth))]
+                  (let [y0 (+ 300 (* 22 i)) q (p-of grammar [x y z])]
+                    (text! (str (name x) " -> " (name y) " " (name z)) 40 y0 "#e6edf7" 13)
+                    (set! (.-fillStyle ctx) "#7dffa0") (.fillRect ctx 240 (- y0 10) (* 200 q) 8)
+                    (set! (.-strokeStyle ctx) "#ffd479") (.strokeRect ctx 240 (- y0 10) (* 200 p) 8)
+                    (text! (.toFixed q 2) 460 y0 "#7dffa0" 12)))
+                (str "iteration " (min iteration 11) "  |  log likelihood of the sentences " (.toFixed log-likelihood 1)
+                     "\nfrom every rule equally likely, EM on unparsed sentences -- the rules known, one iteration nearly finds them; bars: each rule's learned probability, green, against its true one, outlined")))
             (draw-bidirectional! [_cw _ch]
               (let [{:keys [pair test steps]} @model
                     [fwd bi] (map (comp :model first) pair)]
@@ -252,7 +329,7 @@
                   (set! (.-width canvas) cw)
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "attention" "tagging" "bidirectional"]) restart!)
+        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "attention" "tagging" "bidirectional" "n-grams" "inside-outside"]) restart!)
         (.onChange (.add gui controls "cell" #js ["lstm" "rnn"]) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui #js {:restart restart!} "restart"))
