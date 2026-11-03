@@ -610,6 +610,16 @@
    "href": "play/?demo=contract-net"
   },
   {
+   "id": "probabilistic",
+   "group": "AI",
+   "label": "Learning Probabilistic Models",
+   "blurb": "Bayesian learning from candy bags, beta posteriors, EM on two bags mixed, density estimation, and a Bayes net's structure found by hill climbing",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=probabilistic"
+  },
+  {
    "id": "classifiers",
    "group": "AI",
    "label": "Classifiers",
