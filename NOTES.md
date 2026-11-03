@@ -751,6 +751,7 @@ examples of chapter 19 are inlined in their test.
 | `allgo.learning.trees`             | 19       | Decision trees, cross-validation and model selection, decision lists, AdaBoost, random forests |
 | `allgo.learning.models`            | 19, 20   | Linear and logistic regression, the perceptron, k nearest neighbors, SVMs, naive Bayes |
 | `allgo.learning.unsupervised`      | 20       | k-means, EM for Gaussian mixtures, Baum-Welch                             |
+| `allgo.learning.probabilistic`     | 20       | Bayesian, MAP and ML learning; parameters by counting and by beta and Dirichlet priors; Gaussian and linear Gaussian ML; structure by hill climbing with restarts; k-NN and kernel densities; EM for a naive Bayes mixture |
 | `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD                     |
 | `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
 | `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees; a grammar learned from a treebank, and by inside-outside |
@@ -790,6 +791,46 @@ reinforcement learners -- are a function of memory and percept, run by
 - "The robot is good" parses with probability 0.015.
 - Back-propagated gradients match numerical ones to 1e-7, through a
   convolution and two dense layers.
+
+**Chapter 20, checked against the book's numbers.** The 3rd edition's
+chapter 20 (the same chapter) was at hand, and its worked examples are
+the tests:
+- *Bayesian learning:* the candy bags of Figure 20.1. h3 is the most
+  probable after none and one lime, h4 after two, h5 after three or
+  more, and P(h5) is 0.8956 after ten. After three limes the MAP learner
+  says lime for certain where the Bayesian prediction is 0.796, "about
+  0.8".
+- *Beta and Dirichlet:* conjugate updates as virtual counts, and
+  beta[3,1], [6,2], [30,10] narrowing round 0.75 as Figure 20.5 draws
+  them.
+- *EM on two bags mixed* (section 20.3.2): from the book's table of a
+  thousand candies and its starting values, one iteration gives
+  equation 20.9's parameters to four decimals -- 0.6124, 0.6684, 0.6483,
+  0.6558, 0.3887, 0.3817, 0.3827 -- and the log likelihood goes from
+  about -2044 to -2021. By the tenth iteration it passes the generating
+  model's -1982.214.
+- *Structure learning:* hill climbing over links added, deleted or
+  reversed, scored by log likelihood less BIC's penalty. A single climb
+  from no links found the sprinkler network from 3000 samples on only
+  five of ten samples: the others stopped at local maxima that the
+  true network outscores. Ten random restarts, as the chapter suggests,
+  found it -- its links, and the two into WetGrass directed -- on all
+  ten, at about 1.5 s each. With no penalty the search adds links the
+  network does not have, as the chapter says it must.
+- *Density estimation* on three Gaussian blobs: Gaussian kernels of
+  width 0.07 come nearer the true density than 0.02 or 0.2, and k = 10
+  neighbors nearer than 3 or 40, as Figures 20.8 and 20.9 show. Held-out
+  likelihood is the wrong judge for nearest neighbors -- their estimate
+  is not a density, its integral diverging -- so the tests measure the
+  distance from the truth instead.
+
+The demo, Learning Probabilistic Models, has five modes:
+- *Candy:* Figure 20.1 drawn as candies are unwrapped.
+- *Beta:* the posterior narrowing.
+- *EM:* the mixed bags, iteration by iteration, against the true model.
+- *Density:* the estimate beside the truth, for each width or k.
+- *Structure:* the search, move by move and restart by restart, walked
+  lazily so the page never stalls.
 
 **Value iteration returns the book's U.** The book's loop updates U' from
 U and returns U when δ is small enough, so the answer is the utilities

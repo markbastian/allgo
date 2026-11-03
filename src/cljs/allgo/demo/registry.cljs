@@ -50,6 +50,7 @@
             [allgo.demo.motorcycle :as motorcycle]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.planet :as planet]
+            [allgo.demo.probabilistic :as probabilistic]
             [allgo.demo.ragdoll :as ragdoll]
             [allgo.demo.rigid :as rigid]
             [allgo.demo.satellite :as satellite]
@@ -86,6 +87,7 @@
    "vision" {:start vision/start! :stop vision/stop!}
    "knowledge" {:start knowledge/start! :stop knowledge/stop!}
    "contract-net" {:start contract-net/start! :stop contract-net/stop!}
+   "probabilistic" {:start probabilistic/start! :stop probabilistic/stop!}
    "language" {:start language/start! :stop language/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
