@@ -613,7 +613,7 @@
    "id": "probabilistic",
    "group": "AI",
    "label": "Learning Probabilistic Models",
-   "blurb": "Bayesian learning from candy bags, beta posteriors, EM on two bags mixed, density estimation, and a Bayes net's structure found by hill climbing",
+   "blurb": "Bayesian learning from candy bags, beta posteriors, Bayesian linear regression, EM on two bags mixed, density estimation, and a Bayes net's structure found by hill climbing",
    "badges": [
     "Interactive"
    ],
@@ -623,7 +623,7 @@
    "id": "classifiers",
    "group": "AI",
    "label": "Classifiers",
-   "blurb": "Logistic regression to SVMs, nearest neighbors, networks and trees, drawing the regions they learn",
+   "blurb": "Logistic regression to SVMs, nearest neighbors, networks with and without dropout, and trees, drawing the regions they learn",
    "badges": [
     "Interactive"
    ],
