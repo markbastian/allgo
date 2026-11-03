@@ -7,7 +7,9 @@
   posterior over the kinds after each, and the predictions -- Bayesian,
   averaged over every kind, and MAP, from the likeliest alone. Beta: the
   beta posterior over a bag's fraction of cherries narrowing as candies
-  come, from the uniform prior. EM: the chapter's two bags mixed
+  come, from the uniform prior. Regression: Bayesian linear regression,
+  a line through the origin, its predictions' spread narrowing as points
+  come and widening away from them. EM: the chapter's two bags mixed
   together, their parameters found by EM an iteration at a time, the log
   likelihood passing the true model's. Density: points from three blobs,
   and the density estimated from them by Gaussian kernels or by nearest
@@ -52,6 +54,11 @@
                 {:data data :posts (vec (pl/posterior-seq bags bag-prior data)) :shown 0})
       "beta" (let [data (vec (repeatedly 200 #(< (rng) 0.75)))]
                {:data data :betas (vec (pl/beta-seq [1 1] data)) :shown 0})
+      "regression" (let [;; three points near the origin, then two far out, then more,
+                         ;; as Figure 20.7 adds them
+                         xs (vec (concat (repeatedly 3 #(- (* 1.2 (rng)) 0.6)) [-1.8 1.8] (repeatedly 15 #(- (* 4 (rng)) 2))))
+                         ys (mapv #(+ (* 0.5 %) (random/gaussian rng 0.0 (math/sqrt 0.2))) xs)]
+                     {:xs xs :ys ys :posts (vec (pl/regression-posterior-seq {:mean 0.0 :var 1.0} 0.2 xs ys)) :shown 0})
       "EM" {:states (vec (take 31 (pl/naive-bayes-em-seq {:prior [0.6 0.4] :features [[0.6 0.6 0.6] [0.4 0.4 0.4]]} candy-counts)))
             :truth (pl/mixture-log-likelihood {:prior [0.5 0.5] :features [[0.8 0.8 0.8] [0.3 0.3 0.3]]} candy-counts)
             :shown 0}
@@ -105,6 +112,7 @@
                            (case method
                              "candy" (draw-candy! cw ch)
                              "beta" (draw-beta! cw ch)
+                             "regression" (draw-regression! cw ch)
                              "EM" (draw-em! cw ch)
                              "density" (draw-density! cw ch)
                              "structure" (draw-structure! cw ch))))))
@@ -142,6 +150,29 @@
                 (str n " candies, " (count (filter true? (take n data))) " cherry  |  posterior beta[" a ", " b "], mean "
                      (.toFixed (pl/beta-mean [a b]) 3)
                      "\nthe beta family is closed under update: each cherry adds one to a, each lime one to b -- virtual counts")))
+            (draw-regression! [cw ch]
+              (let [{:keys [xs ys posts shown]} @model
+                    n (min shown (count xs))
+                    post (posts n)
+                    w (- cw 80) h (- ch 240) x0 40 y0 100
+                    px (fn [x] (+ x0 (* w (/ (+ x 2) 4)))) py (fn [y] (+ y0 (* h (/ (- 6 y) 12))))
+                    curve! (fn [f color width]
+                             (set! (.-strokeStyle ctx) color) (set! (.-lineWidth ctx) width)
+                             (.beginPath ctx)
+                             (doseq [i (range 101) :let [x (- (* 0.04 i) 2)]]
+                               (if (zero? i) (.moveTo ctx (px x) (py (f x))) (.lineTo ctx (px x) (py (f x)))))
+                             (.stroke ctx))]
+                (axes! x0 y0 w h)
+                (doseq [k [1 2 3] sign [1 -1]]
+                  (curve! (fn [x] (let [{:keys [mean var]} (pl/regression-predictive post 0.2 x)] (+ mean (* sign k (math/sqrt var)))))
+                          (str "rgba(125,196,255," (- 0.9 (* 0.25 k)) ")") 1.5))
+                (curve! #(:mean (pl/regression-predictive post 0.2 %)) "#ff8f70" 2.5)
+                (set! (.-fillStyle ctx) "#ffd479")
+                (doseq [[x y] (take n (map vector xs ys))] (.beginPath ctx) (.arc ctx (px x) (py y) 4 0 (* 2 math/PI)) (.fill ctx))
+                (text! "y" (+ x0 6) (+ y0 14) "#9fb4d8" 11) (text! "x from -2 to 2, y from -6 to 6" x0 (- y0 8) "#9fb4d8" 11)
+                (when (>= shown (+ 10 (count xs))) (swap! model assoc :shown 0))
+                (str n " points  |  slope's posterior mean " (.toFixed (:mean post) 3) ", variance " (.toFixed (:var post) 4)
+                     "\na line through the origin, noise variance 0.2, prior N(0, 1); red the mean prediction, blue 1, 2 and 3 standard deviations")))
             (draw-em! [cw ch]
               (let [{:keys [states truth shown]} @model
                     i (min shown 30)
@@ -243,7 +274,7 @@
                   (set! (.-width canvas) cw)
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["candy" "beta" "EM" "density" "structure"]) restart!)
+        (.onChange (.add gui controls "method" #js ["candy" "beta" "regression" "EM" "density" "structure"]) restart!)
         (.onChange (.add gui controls "bag" 1 5 1) restart!)
         (.add gui controls "estimator" #js ["kernels" "neighbors"])
         (.add gui controls "width" #js [0.02 0.07 0.2])

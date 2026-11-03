@@ -8,7 +8,9 @@
   on the circles and on XOR; k nearest neighbors follows every bump of
   the data; naive Bayes draws the boundary two Gaussians make; the SVM's
   Gaussian kernel curves round the classes, its support vectors ringed;
-  a network with a hidden layer learns curves an epoch at a time. The
+  a network with a hidden layer learns curves an epoch at a time, and a
+  wider one with two can follow the noise -- unless trained with dropout
+  (section 21.5.4), half its hidden units deactivated each step. The
   trees split on the coordinates binned into ten, so their regions are
   rectangles: one tree, a random forest's vote, or AdaBoost's weighted
   stumps."
@@ -63,6 +65,11 @@
       "network" [(neural/train-seq [(neural/dense 2 12 :tanh rng) (neural/dense 12 1 :sigmoid rng)]
                                    X (mapv vector ys) {:alpha 0.05 :loss :cross-entropy :rng rng})
                  (fn [net x] (first (neural/predict net x)))]
+      ("wide network" "wide network, dropout")
+      [(neural/train-seq (cond-> [(neural/dense 2 32 :tanh rng) (neural/dense 32 32 :tanh rng) (neural/dense 32 1 :sigmoid rng)]
+                           (= learner "wide network, dropout") (neural/with-dropout 0.5))
+                         X (mapv vector ys) {:alpha 0.05 :loss :cross-entropy :rng rng})
+       (fn [net x] (first (neural/predict net x)))]
       "decision tree" [(repeat (trees/decision-tree-learning examples [:bx :by] :y bin-values))
                        (fn [t x] (trees/classify t (binned x)))]
       "random forest" [(repeat (trees/random-forest examples [:bx :by] :y bin-values 25 rng :m 1))
@@ -89,20 +96,24 @@
     (letfn [(restart! []
               (let [rng (random/rng (.-seed controls))
                     [X ys] (dataset (.-data controls) (.-points controls) (.-noise controls) rng)
+                    ;; as many again from the same distribution, held out
+                    [Xt yts] (dataset (.-data controls) (.-points controls) (.-noise controls)
+                                      (random/rng (+ 1000 (.-seed controls))))
                     [states predict] (trainer (.-learner controls) X ys rng)]
-                (reset! model {:X X :ys ys :rest states :st (first states) :predict predict :step 0})))
+                (reset! model {:X X :ys ys :Xt Xt :yts yts :rest states :st (first states) :predict predict :step 0})))
             (advance! []
               (let [n (.-speed controls)]
                 (swap! model (fn [{:keys [rest step] :as m}]
                                (let [rest (nthrest rest n)]
                                  (assoc m :rest rest :st (first rest) :step (+ step n)))))))
             (draw! []
-              (let [{:keys [X ys st predict step]} @model
+              (let [{:keys [X ys Xt yts st predict step]} @model
                     cw (.-width canvas) ch (.-height canvas)
                     side (min (- cw 40) (- ch 110))
                     x0 (* 0.5 (- cw side)) y0 40
                     to-px (fn [[x y]] [(+ x0 (* side (/ (+ x 2) 4))) (+ y0 (* side (/ (- 2 y) 4)))])
-                    correct (count (filter true? (map (fn [x y] (= y (if (> (predict st x) 0.5) 1 0))) X ys)))]
+                    right (fn [X ys] (count (filter true? (map (fn [x y] (= y (if (> (predict st x) 0.5) 1 0))) X ys))))
+                    correct (right X ys)]
                 ;; The regions only when the model has changed: for the
                 ;; learners that are done at once, never again.
                 (when-not (identical? st (:drawn @model))
@@ -131,7 +142,7 @@
                     (.beginPath ctx) (.arc ctx px py 7 0 (* 2 math/PI)) (.stroke ctx)))
                 (set! (.-textContent caption)
                       (str (.-learner controls) " on " (.-data controls) "  |  step " step
-                           "  |  " correct " of " (count X) " training points right"
+                           "  |  " correct " of " (count X) " training points right, " (right Xt yts) " of " (count Xt) " held out"
                            "\nred and blue: the classes, and the regions the learner gives each"
                            (when (:alphas st) "  |  ringed: support vectors")))))
             (frame []
@@ -148,6 +159,7 @@
         (.onChange (.add gui controls "data" #js ["moons" "circles" "XOR" "blobs" "spiral"]) restart!)
         (.onChange (.add gui controls "learner" #js ["logistic regression" "perceptron" "k nearest neighbors" "naive Bayes"
                                                      "SVM, linear" "SVM, Gaussian kernel" "network"
+                                                     "wide network" "wide network, dropout"
                                                      "decision tree" "random forest" "AdaBoost"])
                    restart!)
         (.onChange (.add gui controls "points" 40 400 10) restart!)

@@ -12,10 +12,11 @@
                      learned by EM on held-out text -- an iteration a step
     perplexity       P(tokens)^(-1/N): the model's average branching
                      factor, lower the better it predicts unseen text
-    unknown words    the book's trick: the first time each word appears in
-                     the training text it is replaced by <UNK>, so that
-                     <UNK> is counted like any word, and an unknown word in
-                     a test sentence takes its probability
+    unknown words    the infrequent words of the training text replaced
+                     by <UNK> (the 3rd edition replaced each word's first
+                     appearance instead), so that <UNK> is counted like any
+                     word, and an unknown word in a test sentence takes its
+                     probability
     sampling         a sequence drawn token by token
     identification   a character model for each language, and a text's
                      language the one making it likeliest, by Bayes' rule
@@ -122,15 +123,20 @@
              (state (vec (repeat (inc n) (/ 1.0 (inc n))))))))
 
 (defn with-unknown
-  "`sequences` with the first appearance of each word replaced by
-  `<UNK>`, so that the model learns how often unknown words come and
-  where."
-  [sequences]
-  (first (reduce (fn [[out seen] s]
-                   (let [[s' seen] (reduce (fn [[s' seen] w] (if (seen w) [(conj s' w) seen] [(conj s' unknown) (conj seen w)]))
-                                           [[] seen] s)]
-                     [(conj out s') seen]))
-                 [[] #{}] sequences)))
+  "`sequences` with words replaced by `<UNK>`, so that the model learns
+  how often unknown words come and where. Given `min-count`, the 4th
+  edition's way: every word seen fewer than `min-count` times in all of
+  them, the infrequent ones. Without, the 3rd edition's: the first
+  appearance of each word."
+  ([sequences min-count]
+   (let [counts (frequencies (apply concat sequences))]
+     (mapv (fn [s] (mapv #(if (< (counts %) min-count) unknown %) s)) sequences)))
+  ([sequences]
+   (first (reduce (fn [[out seen] s]
+                    (let [[s' seen] (reduce (fn [[s' seen] w] (if (seen w) [(conj s' w) seen] [(conj s' unknown) (conj seen w)]))
+                                            [[] seen] s)]
+                      [(conj out s') seen]))
+                  [[] #{}] sequences))))
 
 (defn known
   "`tokens` with each the model has not seen replaced by `<UNK>`."

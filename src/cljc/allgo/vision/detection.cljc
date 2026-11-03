@@ -4,8 +4,9 @@
 
     classification   a convolutional network -- `allgo.learning.neural`'s
                      conv layer, then dense ones -- trained on image
-                     patches, with the data augmented as the chapter
-                     recommends: each example also shifted by a pixel and
+                     patches, with the data augmented: each example also
+                     shifted by a pixel, as the chapter recommends (it
+                     names shifts, rotations, stretches and hue), and
                      mirrored, which teaches the network that those do
                      not change what a thing is; and, for a detector,
                      the examples taken from whole scenes: the objects'

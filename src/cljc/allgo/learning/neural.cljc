@@ -11,6 +11,10 @@
     training      stochastic gradient descent, an epoch a step, the
                   examples shuffled each epoch; the deltas propagated back
                   from the output exactly as the figure does
+    dropout       section 21.5.4: each step a thinned network, every
+                  hidden unit (`:keep p`) and input unit (`:keep-input`)
+                  kept with probability p and its output multiplied by
+                  1/p, or else zero; at test time no dropout
 
   A network is a vector of layers:
 
@@ -62,6 +66,9 @@
 (defn layer-out-size [{:keys [type W kernels] :as layer}]
   (if (= type :dense) (count W) (let [[oh ow] (conv-out-shape layer)] (* (count kernels) oh ow))))
 
+(defn- layer-in-size [{:keys [type W shape]}]
+  (if (= type :dense) (count (first W)) (apply * shape)))
+
 (defn- dot-window
   "The kernel row `row` dotted with the `k` inputs from `base` on."
   [row a base k]
@@ -93,11 +100,15 @@
                      (for [f (range (count kernels)) r (range oh) c (range ow)] [f r c]))))))
 
 (defn forward
-  "Every layer's `[in a]`, input first: `[[nil x] [in1 a1] ...]`."
-  [network x]
-  (reductions (fn [[_ a] layer]
-                (let [z (pre-activation layer a)] [z (mapv #(g (:g layer) %) z)]))
-              [nil (vec x)] network))
+  "Every layer's `[in a]`, input first: `[[nil x] [in1 a1] ...]`. With
+  `masks`, a vector or nil a layer, each layer's activations are
+  multiplied by its mask: dropout's thinned network."
+  ([network x] (forward network x nil))
+  ([network x masks]
+   (reductions (fn [[_ a] [layer m]]
+                 (let [z (pre-activation layer a) a (mapv #(g (:g layer) %) z)]
+                   [z (if m (mapv * a m) a)]))
+               [nil (vec x)] (map vector network (or masks (repeat nil))))))
 
 (defn predict [network x] (second (last (forward network x))))
 
@@ -138,25 +149,33 @@
 (defn gradients
   "The gradient of the loss on one example with respect to every weight,
   a layer at a time: the output deltas, then each layer's deltas from the
-  next one's, as BACK-PROP-LEARNING propagates them."
-  [network x y loss]
-  (let [acts (vec (forward network x))
-        n (count network)
-        [z-out a-out] (acts n)
-        out-layer (network (dec n))
+  next one's, as BACK-PROP-LEARNING propagates them. With dropout's
+  `masks` (`dropout-masks`), the gradient of the thinned network's: a
+  dropped unit passes back nothing, a kept one its delta times its mask."
+  ([network x y loss] (gradients network x y loss nil))
+  ([network x y loss masks]
+   (let [acts (vec (forward network x masks))
+         n (count network)
+         [z-out a-out] (acts n)
+         out-layer (network (dec n))
         ;; With a sigmoid output and cross-entropy the g' cancels.
-        delta (if (and (= loss :cross-entropy) (= :sigmoid (:g out-layer)))
-                (mapv - a-out y)
-                (mapv (fn [z a t] (* 2.0 (- a t) (g' (:g out-layer) z a))) z-out a-out y))]
-    (loop [l (dec n) delta delta grads ()]
-      (if (neg? l)
-        (vec grads)
-        (let [{:keys [back] :as gr} (back (network l) delta (second (acts l)))
-              grads (cons (dissoc gr :back) grads)]
-          (if (zero? l)
-            (vec grads)
-            (let [[z a] (acts l) gl (:g (network (dec l)))]
-              (recur (dec l) (mapv (fn [bi zi ai] (* bi (g' gl zi ai))) back z a) grads))))))))
+         delta (if (and (= loss :cross-entropy) (= :sigmoid (:g out-layer)))
+                 (mapv - a-out y)
+                 (mapv (fn [z a t] (* 2.0 (- a t) (g' (:g out-layer) z a))) z-out a-out y))]
+     (loop [l (dec n) delta delta grads ()]
+       (if (neg? l)
+         (vec grads)
+         (let [{:keys [back] :as gr} (back (network l) delta (second (acts l)))
+               grads (cons (dissoc gr :back) grads)]
+           (if (zero? l)
+             (vec grads)
+             (let [[z a] (acts l) gl (:g (network (dec l))) m (get masks (dec l))]
+               (recur (dec l)
+                      (if m
+                       ;; a = m g(in): the unmasked g(in) for g'
+                        (mapv (fn [bi zi mi] (if (zero? mi) 0.0 (* bi mi (g' gl zi (g gl zi))))) back z m)
+                        (mapv (fn [bi zi ai] (* bi (g' gl zi ai))) back z a))
+                      grads)))))))))
 
 (defn- apply-gradients [network grads alpha]
   (mapv (fn [layer {:keys [dW dK db]}]
@@ -176,21 +195,65 @@
                     X Y))
      (count X)))
 
+;; ---------------------------------------------------------------------------
+;; Dropout
+
+(defn- unit-mask
+  "`n` units' mask: each kept with probability `p`, its output then
+  multiplied by 1/p, or else fixed at zero."
+  [n p rng]
+  (let [up (/ 1.0 p)] (vec (repeatedly n #(if (< (rng) p) up 0.0)))))
+
+(defn dropout-masks
+  "The masks for one step of dropout, `{:input mask :layers [mask ...]}`:
+  the input's from the first layer's `:keep-input p`, and each hidden
+  layer's outputs' from its `:keep p` -- every unit kept with probability
+  p and multiplied by 1/p, or fixed at zero; nil where a layer has no
+  `:keep`, and always for the output layer. Multiplying the kept units by
+  1/p leaves each unit's expected output what it is with every unit
+  active, so at test time the network runs with no dropout at all."
+  [network rng]
+  (let [last-l (dec (count network))
+        p-in (:keep-input (first network))]
+    {:input (when (and p-in (< p-in 1.0)) (unit-mask (layer-in-size (first network)) p-in rng))
+     :layers (vec (map-indexed (fn [l {p :keep :as layer}]
+                                 (when (and p (< p 1.0) (< l last-l)) (unit-mask (layer-out-size layer) p rng)))
+                               network))}))
+
+(defn with-dropout
+  "`network` trained with dropout: every hidden unit kept with probability
+  `hidden`, and with `input`, every input unit with that -- the book's
+  0.5 and 0.8."
+  ([network hidden] (with-dropout network hidden nil))
+  ([network hidden input]
+   (cond-> (into (mapv #(assoc % :keep hidden) (pop network)) [(peek network)])
+     input (assoc-in [0 :keep-input] input))))
+
+(defn- dropout? [network]
+  (or (some :keep network) (:keep-input (first network))))
+
 (defn sgd-step
   "One stochastic gradient step on one example: the network moved
   against its gradient by `alpha`. `train-seq` is this over every example
   an epoch; a caller that must not stall -- a demo training between
-  frames -- can take it a few examples at a time."
-  [network x y alpha loss]
-  (apply-gradients network (gradients network x y loss) alpha))
+  frames -- can take it a few examples at a time. Given `rng`, a network
+  with dropout takes the step as a thinned network, its units deactivated
+  by fresh `dropout-masks`."
+  ([network x y alpha loss] (sgd-step network x y alpha loss nil))
+  ([network x y alpha loss rng]
+   (if (and rng (dropout? network))
+     (let [{:keys [input layers]} (dropout-masks network rng)]
+       (apply-gradients network (gradients network (if input (mapv * x input) x) y loss layers) alpha))
+     (apply-gradients network (gradients network x y loss) alpha))))
 
 (defn train-seq
   "Stochastic gradient descent, an epoch a step: the examples shuffled,
-  and the weights moved against each one's gradient by `alpha`."
+  and the weights moved against each one's gradient by `alpha` -- with
+  dropout, each step through a newly thinned network."
   [network X Y {:keys [alpha loss rng] :or {alpha 0.1 loss :squared}}]
   (let [rng (or rng (random/rng 1))
         pairs (vec (map vector X Y))]
     (iterate (fn [net]
-               (reduce (fn [net [x y]] (sgd-step net x y alpha loss))
+               (reduce (fn [net [x y]] (sgd-step net x y alpha loss rng))
                        net (random/shuffle rng pairs)))
              network)))

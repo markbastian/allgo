@@ -13,12 +13,15 @@
                         Gaussian's line is least squares
     parameters by       a beta prior over a Boolean parameter -- the
     Bayes               conjugate prior: each observation adds one to a
-                        virtual count -- and the Dirichlet for many values
+                        virtual count -- and the Dirichlet for many values;
+                        Bayesian linear regression, a Gaussian prior over
+                        a slope, the predictions widening with distance
     structure           hill climbing over networks, adding, deleting or
                         reversing a link a step, never making a cycle,
                         scored by the log likelihood less a penalty for
-                        the parameters (BIC's half log N each): without
-                        the penalty, more links always fit better
+                        the parameters (BIC's half log N each), the
+                        section's MAP or MDL penalty: without it, more
+                        links always fit better
     nonparametric       density estimation by k nearest neighbors and by
                         Gaussian kernels
     hidden variables    EM for a mixture of naive Bayes models, the class
@@ -141,6 +144,37 @@
   [alphas]
   (let [t (double (reduce + (vals alphas)))] (into {} (map (fn [[k a]] [k (/ a t)]) alphas))))
 
+;; Bayesian linear regression, section 20.2.6: a line through the origin,
+;; y = theta x plus Gaussian noise of known variance sigma^2, and a
+;; Gaussian prior over theta -- conjugate, so the posterior is Gaussian.
+
+(defn regression-posterior
+  "The posterior over the slope, `{:mean :var}`, given the `prior` (`{:mean
+  :var}`), the noise variance and the data:
+
+    theta_N   = (sigma^2 theta_0 + sigma_0^2 sum x y) / (sigma^2 + sigma_0^2 sum x^2)
+    sigma_N^2 = sigma^2 sigma_0^2 / (sigma^2 + sigma_0^2 sum x^2)"
+  [{theta0 :mean var0 :var} noise-var xs ys]
+  (let [sxy (reduce + (map * xs ys)) sxx (reduce + (map * xs xs))
+        d (+ noise-var (* var0 sxx))]
+    {:mean (/ (+ (* noise-var theta0) (* var0 sxy)) d)
+     :var (/ (* noise-var var0) d)}))
+
+(defn regression-posterior-seq
+  "The posterior over the slope after each point of `xs` `ys`, the prior
+  first: each posterior the next point's prior, the conjugate prior's
+  closure under update, ending where `regression-posterior` does at once."
+  [prior noise-var xs ys]
+  (reductions (fn [post [x y]] (regression-posterior post noise-var [x] [y])) prior (map vector xs ys)))
+
+(defn regression-predictive
+  "P(y | x, d), the prediction at `x` averaged over the slope's
+  `posterior`: Gaussian, `{:mean :var}`, its mean theta_N x and its
+  variance the noise's plus sigma_N^2 x^2 -- the farther from the origin,
+  the less certain."
+  [{:keys [mean var]} noise-var x]
+  {:mean (* mean x) :var (+ noise-var (* var x x))})
+
 ;; ---------------------------------------------------------------------------
 ;; Structure
 
@@ -194,10 +228,12 @@
   step makes the one move -- a link added, deleted or reversed -- that
   raises the score most, until none does. Climbing stops at a local
   maximum, so with `:restarts` n (and an `:rng`) it climbs again from n
-  random networks after the first climb from no links, as the chapter
-  suggests. The score is the fitted log likelihood less `:penalty` per
-  free parameter: by default BIC's, half the log of the number of
-  examples. Each state `{:parents :score :move :restart :best}`, `:best`
+  random networks after the first climb from no links -- chapter 4's
+  random-restart hill climbing; section 20.2.7 starts from no links or
+  from a guess. The score is the fitted log likelihood less `:penalty`
+  per free parameter, the section's MAP (or MDL) approach, which
+  subtracts a penalty for complexity: by default BIC's, half the log of
+  the number of examples. Each state `{:parents :score :move :restart :best}`, `:best`
   the best `{:parents :score}` met so far."
   [domains data & {:keys [penalty max-parents restarts rng] :or {max-parents 3 restarts 0}}]
   (let [variables (vec (sort (keys domains)))

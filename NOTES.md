@@ -752,7 +752,7 @@ examples of chapter 19 are inlined in their test.
 | `allgo.learning.models`            | 19, 20   | Linear and logistic regression, the perceptron, k nearest neighbors, SVMs, naive Bayes |
 | `allgo.learning.unsupervised`      | 20       | k-means, EM for Gaussian mixtures, Baum-Welch                             |
 | `allgo.learning.probabilistic`     | 20       | Bayesian, MAP and ML learning; parameters by counting and by beta and Dirichlet priors; Gaussian and linear Gaussian ML; structure by hill climbing with restarts; k-NN and kernel densities; EM for a naive Bayes mixture |
-| `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD                     |
+| `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD, dropout            |
 | `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
 | `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees; a grammar learned from a treebank, and by inside-outside |
 | `allgo.language.ngrams`            | 23       | N-gram models: Laplace and interpolated smoothing, EM for the weights, perplexity, <UNK>, sampling, language identification |
@@ -792,9 +792,42 @@ reinforcement learners -- are a function of memory and percept, run by
 - Back-propagated gradients match numerical ones to 1e-7, through a
   convolution and two dense layers.
 
-**Chapter 20, checked against the book's numbers.** The 3rd edition's
-chapter 20 (the same chapter) was at hand, and its worked examples are
-the tests:
+**Dropout, section 21.5.4, checked against the 4th edition's text.**
+Each training step goes through a thinned network: every hidden unit
+(`:keep p`) and input unit (`:keep-input p`) is kept with probability p
+and its output multiplied by 1/p, or fixed at zero. Back-propagation
+runs through the same masks, and at test time the network runs with no
+dropout. The book's p is the probability of *keeping* a unit, 0.5 for
+hidden units and 0.8 for inputs; `with-dropout` takes them in that
+order. The tests check:
+- the masks' values and kept fractions, and that the output layer is
+  never masked;
+- the thinned network's gradients against numerical ones, and that a
+  dropped unit learns nothing on that step;
+- the book's remark that the ensemble claim holds analytically for
+  linear models: over 20,000 masks, a linear network's thinned outputs
+  average to the whole network's;
+- that p = 1 trains exactly as without dropout;
+- the book's "harder to fit the training set": on 50 noisy points the
+  training loss is higher with dropout.
+
+The other half of the claim, a lower test error, did not hold reliably
+at this library's sizes. On noisy circles with 20 hidden units (five
+seeds), dropout lowered the test loss on four and raised it on one,
+where keeping half of twenty units left too little to learn the
+boundary. On 20-dimensional data with 60 examples it lowered the test
+loss on four of six seeds, and the accuracy barely moved. On noisy
+curve fitting with an identity output it made things worse. The book
+adds that dropout usually needs a larger model trained longer, and so
+the tests do not assert it. The classifiers demo shows it instead: a
+"wide network" (two hidden layers of 32) beside the same network with
+dropout, with held-out accuracy now in the caption.
+
+**Chapter 20, checked against the book's numbers.** Written from the
+3rd edition's chapter 20, then checked against the 4th's: the same
+worked examples and numbers, renumbered in places (the kernels are
+Figure 20.10, the nearest neighbors 20.9, EM's first iteration equation
+20.11). They are the tests:
 - *Bayesian learning:* the candy bags of Figure 20.1. h3 is the most
   probable after none and one lime, h4 after two, h5 after three or
   more, and P(h5) is 0.8956 after ten. After three limes the MAP learner
@@ -803,9 +836,17 @@ the tests:
 - *Beta and Dirichlet:* conjugate updates as virtual counts, and
   beta[3,1], [6,2], [30,10] narrowing round 0.75 as Figure 20.5 draws
   them.
+- *Bayesian linear regression* (section 20.2.6, new in the 4th
+  edition): a slope through the origin with a Gaussian prior and known
+  noise. The closed form matches the posterior computed on a grid, a
+  point at a time ends where all at once does, and the predictive
+  variance sigma^2 + sigma_N^2 x^2 widens away from the origin.
+  Figure 20.7 gives only sigma^2 = 0.2 and the slope variances 0.3861
+  and 0.0286, not its data; taking the first as the prior and adding
+  the two points the figure draws at about x = +-1.8 gives 0.0286.
 - *EM on two bags mixed* (section 20.3.2): from the book's table of a
   thousand candies and its starting values, one iteration gives
-  equation 20.9's parameters to four decimals -- 0.6124, 0.6684, 0.6483,
+  equation 20.11's parameters to four decimals -- 0.6124, 0.6684, 0.6483,
   0.6558, 0.3887, 0.3817, 0.3827 -- and the log likelihood goes from
   about -2044 to -2021. By the tenth iteration it passes the generating
   model's -1982.214.
@@ -813,13 +854,14 @@ the tests:
   reversed, scored by log likelihood less BIC's penalty. A single climb
   from no links found the sprinkler network from 3000 samples on only
   five of ten samples: the others stopped at local maxima that the
-  true network outscores. Ten random restarts, as the chapter suggests,
+  true network outscores. Ten random restarts (chapter 4's remedy; the
+  section itself only says to start from no links or from a guess)
   found it -- its links, and the two into WetGrass directed -- on all
   ten, at about 1.5 s each. With no penalty the search adds links the
   network does not have, as the chapter says it must.
 - *Density estimation* on three Gaussian blobs: Gaussian kernels of
   width 0.07 come nearer the true density than 0.02 or 0.2, and k = 10
-  neighbors nearer than 3 or 40, as Figures 20.8 and 20.9 show. Held-out
+  neighbors nearer than 3 or 40, as Figures 20.9 and 20.10 show. Held-out
   likelihood is the wrong judge for nearest neighbors -- their estimate
   is not a density, its integral diverging -- so the tests measure the
   distance from the truth instead.
@@ -1313,8 +1355,9 @@ code follows. The data are drawn from grammars and from
   grammar's words depending mostly on the one before, the trigram adds
   nothing -- while Laplace's trigram, spreading its mass over trigrams
   never seen, is 23.3, worse than its own bigram, as the book warns.
-- **Unknown words:** the book's trick, each word's first appearance
-  counted as <UNK>.
+- **Unknown words:** each word's first appearance counted as <UNK>,
+  the 3rd edition's trick; the 4th replaces the infrequent words instead
+  (`with-unknown` with a minimum count).
 - **Language identification** by character trigrams, on four languages
   drawn by the naming code: 98.5% of single words.
 - **Tagging** (`allgo.language.tagging`): an HMM counted from tagged

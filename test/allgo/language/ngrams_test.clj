@@ -67,6 +67,8 @@
 (deftest unknown-words
   (testing "each word's first appearance becomes <UNK>"
     (is (= [["<UNK>" "<UNK>" "a"] ["b" "<UNK>"]] (ng/with-unknown [["a" "b" "a"] ["b" "c"]]))))
+  (testing "or, the 4th edition's way, every word seen fewer than a minimum count of times"
+    (is (= [["a" "b" "a"] ["b" "<UNK>"]] (ng/with-unknown [["a" "b" "a"] ["b" "c"]] 2))))
   (testing "a word never seen takes <UNK>'s probability, so unseen text has a finite perplexity"
     (let [rng (random/rng 3)
           sents (vec (repeatedly 400 #(mapv first (parsing/generate grammar rng))))

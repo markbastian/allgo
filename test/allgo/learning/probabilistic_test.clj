@@ -6,9 +6,9 @@
             [clojure.test :refer [deftest is testing]]))
 
 ;; Learning probabilistic models: Russell and Norvig, *Artificial
-;; Intelligence: A Modern Approach*, chapter 20, its worked examples as
-;; the 3rd edition (also chapter 20) states them -- the candy bags, the
-;; beta family, and EM on two bags mixed together.
+;; Intelligence: A Modern Approach*, 4th edition, chapter 20, its worked
+;; examples -- the candy bags, the beta family, Bayesian linear regression,
+;; and EM on two bags mixed together.
 
 (defn- close? [a b tol] (< (abs (- (double a) (double b))) tol))
 
@@ -76,6 +76,38 @@
   (testing "the Dirichlet, the same for many values"
     (is (= {:a 0.6 :b 0.2 :c 0.2} (pl/dirichlet-predictive (pl/dirichlet-update {:a 1 :b 1 :c 1} [:a :a]))))))
 
+(deftest bayesian-linear-regression
+  (let [noise 0.2
+        xs [-0.5 0.1 0.5 -1.8 1.8] ys [-0.4 0.1 0.2 -0.9 0.9]
+        prior {:mean 0.0 :var 4.0}
+        {:keys [mean var]} (pl/regression-posterior prior noise xs ys)]
+    (testing "the closed form is the posterior P(theta | d) proportional to P(d | theta) P(theta), on a grid"
+      (let [grid (map #(* 0.0005 %) (range -4000 4001))
+            w (map (fn [t] (math/exp (- (* -0.5 (/ (* t t) (:var prior)))
+                                        (* 0.5 (/ (reduce + (map #(let [d (- %2 (* t %1))] (* d d)) xs ys)) noise)))))
+                   grid)
+            z (reduce + w)
+            m (/ (reduce + (map * grid w)) z)
+            v (/ (reduce + (map #(* (- %1 m) (- %1 m) %2) grid w)) z)]
+        (is (close? m mean 1e-6))
+        (is (close? v var 1e-6))))
+    (testing "a point at a time, each posterior the next prior, ends at the same posterior"
+      (let [post (last (pl/regression-posterior-seq prior noise xs ys))]
+        (is (close? mean (:mean post) 1e-12))
+        (is (close? var (:var post) 1e-12))))
+    (testing "an uninformative prior: the least-squares slope, its variance sigma^2 / sum x^2"
+      (let [p (pl/regression-posterior {:mean 0.0 :var 1e12} noise xs ys)
+            sxx (reduce + (map * xs xs))]
+        (is (close? (/ (reduce + (map * xs ys)) sxx) (:mean p) 1e-9))
+        (is (close? (/ noise sxx) (:var p) 1e-9))))
+    (testing "data near the origin barely constrain the slope: the posterior variance about the prior's"
+      (is (close? 4.0 (:var (pl/regression-posterior prior noise [0.001 -0.002] [0.0 0.0])) 1e-3)))
+    (testing "Figure 20.7: sigma^2 = 0.2, and the slope's variance 0.3861 falls to 0.0286 with the two points added at about x = +-1.8"
+      (is (close? 0.0286 (:var (pl/regression-posterior {:mean 0.0 :var 0.3861} 0.2 [-1.8 1.8] [-0.9 0.9])) 1e-4)))
+    (testing "the prediction's variance the noise's plus sigma_N^2 x^2, its mean theta_N x"
+      (is (= {:mean (* mean 2.0) :var (+ noise (* var 4.0))} (pl/regression-predictive {:mean mean :var var} noise 2.0)))
+      (is (apply < (map #(:var (pl/regression-predictive {:mean mean :var var} noise %)) [0.0 1.0 2.0 4.0]))))))
+
 (deftest structure-learning
   (let [domains (zipmap (:variables bayes/sprinkler) (repeat [true false]))
         skeleton (fn [parents] (set (for [[v ps] parents p ps] #{v p})))
@@ -118,11 +150,11 @@
           ;; how far off an estimate is: the mean absolute log ratio to the
           ;; true density, at points drawn from it
           error (fn [density] (/ (reduce + (map #(abs (- (math/log (density %)) (math/log (mixture-density %)))) probe)) (count probe)))]
-      (testing "Figure 20.9's kernels on 128 points: too narrow is spiky, too wide too smooth -- 0.07 nearest the truth"
+      (testing "Figure 20.10's kernels on 128 points: too narrow is spiky, too wide too smooth -- 0.07 nearest the truth"
         (let [[narrow mid wide] (map (fn [w] (error #(pl/kernel-density train w %))) [0.02 0.07 0.2])]
           (is (< mid narrow) seed)
           (is (< mid wide) seed)))
-      (testing "Figure 20.8's nearest neighbors: k = 10 nearer the truth than 3 or 40"
+      (testing "Figure 20.9's nearest neighbors: k = 10 nearer the truth than 3 or 40"
         (let [[few mid many] (map (fn [k] (error #(pl/knn-density train k %))) [3 10 40])]
           (is (< mid few) seed)
           (is (< mid many) seed)))
@@ -135,14 +167,15 @@
 (deftest em-candy
   ;; Section 20.3.2: two bags mixed, each candy's Flavor (true cherry),
   ;; Wrapper (true red) and Hole; 1000 drawn from bags with theta 0.5,
-  ;; 0.8 for bag 1's three features and 0.3 for bag 2's.
+  ;; 0.8 for bag 1's three features and 0.3 for bag 2's (equation 20.9),
+  ;; EM started from equation 20.10's.
   (let [data [[[true true true] 273] [[true true false] 93] [[true false true] 104] [[true false false] 90]
               [[false true true] 79] [[false true false] 100] [[false false true] 94] [[false false false] 167]]
         start {:prior [0.6 0.4] :features [[0.6 0.6 0.6] [0.4 0.4 0.4]]}
         states (vec (take 11 (pl/naive-bayes-em-seq start data)))
         {:keys [prior features]} (:params (states 1))
         truth (pl/mixture-log-likelihood {:prior [0.5 0.5] :features [[0.8 0.8 0.8] [0.3 0.3 0.3]]} data)]
-    (testing "equation 20.9: the parameters after one iteration"
+    (testing "equation 20.11: the parameters after one iteration"
       (is (close? 0.6124 (prior 0) 5e-5))
       (is (every? true? (map #(close? %1 %2 5e-5) [0.6684 0.6483 0.6558] (features 0))))
       (is (every? true? (map #(close? %1 %2 5e-5) [0.3887 0.3817 0.3827] (features 1)))))
