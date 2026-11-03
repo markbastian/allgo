@@ -1221,145 +1221,6 @@
                   (vec (repeat 6 0.0)))})))
 
 ;; ---------------------------------------------------------------------------
-;; Moving it
-
-(declare solve-constraints contacts-with self-contacts velocity with-velocity
-         poses limited?)
-
-(defn- advance-coordinate
-  "One joint's configuration, moved by its own rates.
-
-  A hinge or a slider adds. A ball joint cannot: its configuration is a
-  quaternion and its rates are an angular velocity in the *child's* own
-  frame, so the step is `qj += dt/2 qj (w,0)` -- the joint's own
-  quaternion on the left, where the base's world-frame spin puts it on
-  the right. Getting that round the wrong way turns a ball joint into a
-  thing that drifts sideways under its own rotation."
-  [link x qd offset dt]
-  (let [offset (long offset) dt (double dt)]
-    (case (kind-of link)
-      (:revolute :prismatic) (+ (double x) (* dt (double (nth qd offset))))
-      :spherical (let [rot (if (and (sequential? x) (= 4 (count x)))
-                             (vec x)
-                             q/identity-q)
-                       w [(double (nth qd offset))
-                          (double (nth qd (+ offset 1)))
-                          (double (nth qd (+ offset 2)))]
-                       [dx dy dz dw] (q/mul rot [(w 0) (w 1) (w 2) 0.0])
-                       [rx ry rz rw] rot
-                       h (* 0.5 dt)]
-                   (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
-                                 (+ rz (* h dz)) (+ rw (* h dw))]))
-      :fixed x)))
-
-(defn- advance-positions
-  "Move by whatever the velocities now are."
-  [model state ^double dt]
-  (let [root (base model)
-        b (:base state)
-        parts (chain model)
-        ;; Where each joint's rates start, and nothing else. Building the
-        ;; whole per-configuration cache to read ten integers off it cost
-        ;; four milliseconds a step, which was a tenth of the frame.
-        offsets (reductions + 0 (map joint-dof parts))
-        q' (mapv (fn [i]
-                   (advance-coordinate (nth parts i) (nth (:q state) i nil)
-                                       (:qd state) (nth offsets i) dt))
-                 (range (count parts)))]
-    (if-not root
-      (assoc state :q q')
-      (let [v (vec (:vel b))
-            rot (or (:rot b) q/identity-q)
-            pos (or (:pos b) v/zero)
-            ;; Both halves of the spatial velocity are in the base's own
-            ;; frame, so both are turned into the world before they move
-            ;; anything.
-            w (q/rotate rot (subvec v 0 3))
-            u (q/rotate rot (subvec v 3 6))
-            ;; rot += dt/2 (omega, 0) rot, then back onto the unit
-            ;; sphere -- the same first-order step `allgo.physics.rigid`
-            ;; takes, and it walks off for the same reason.
-            [dx dy dz dw] (q/mul [(w 0) (w 1) (w 2) 0.0] rot)
-            [rx ry rz rw] rot
-            h (* 0.5 dt)]
-        (assoc state
-               :q q'
-               :base (assoc b
-                            :rot (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
-                                               (+ rz (* h dz)) (+ rw (* h dw))])
-                            :pos (v/add-scaled pos u dt)))))))
-
-(defn advance
-  "Move by whatever the velocities already are, and change nothing else.
-
-  `step` is accelerate, then contacts, then this. A caller that has done
-  its own accelerating and its own contacts -- `allgo.physics.world`,
-  which has other bodies to account for in the same sweep -- wants only
-  the last of the three."
-  [state model dt]
-  (advance-positions model state dt))
-
-(defn step
-  "One semi-implicit Euler step of `{:q :qd}`, and `:base` if there is
-  one, under `tau`.
-
-  Velocity first, then contacts, then position. The order is the whole
-  of what makes a contact hold: the velocities are corrected before
-  anything moves, so a body that was about to be driven into the floor
-  never is, rather than being pulled back out afterward.
-
-  Contacts come either ready-made as `:contacts` or, more usually, from
-  `:obstacles` -- static `allgo.physics.rigid` bodies this model is to
-  be generated against -- and from `:self-collide?`, which adds the
-  model's own parts against each other. They are found at the
-  configuration the step *starts* from, which is where the model
-  actually is when the question is asked.
-
-  The base's state is a pose and a spatial velocity in its own frame,
-  not six more coordinates. Three reasons, and the third is the one that
-  matters: a rotation has no three-number parameterization without a
-  singularity in it; a quaternion is the shape the rest of this library
-  speaks; and a velocity in body coordinates is what the algorithms
-  already produce, so nothing has to be converted on the way in."
-  ([state model dt] (step state model dt nil))
-  ([{:keys [q qd] :as state} model ^double dt
-    {:keys [tau contacts obstacles self-collide?] :as opts}]
-   (let [root (base model)
-         b (:base state)
-         tau (or tau (vec (repeat (dof model) 0.0)))
-         ;; Where everything is, computed once and handed to every pass
-         ;; that needs it. It depends only on `q` and the root's pose,
-         ;; neither of which changes until the very end of the step.
-         ls (links model q)
-         frames (poses model q b)
-         ;; What every joint weighs from above. It depends only on `q`,
-         ;; so the accelerations and every contact impulse afterward
-         ;; share one build -- they were making one apiece.
-         ai (articulated-inertias model ls)
-         {:keys [qdd base-acc]} (forward-dynamics model q qd tau
-                                                  (cond-> (assoc opts :ls ls :ai ai)
-                                                    root (assoc :base b)))
-         accel (if root (vec (concat base-acc qdd)) (vec qdd))
-         moving (with-velocity model state
-                  (mapv (fn [a c] (+ (double a) (* dt (double c))))
-                        (velocity model state)
-                        accel))
-         cs (or contacts
-                (cond-> []
-                  (seq obstacles) (into (contacts-with model q b obstacles frames))
-                  self-collide? (into (self-contacts model q b frames))))]
-     (advance-positions model
-                        ;; Limits are solved even with nothing to stand
-                        ;; on. A joint folding backward in mid-air is
-                        ;; still a joint folding backward, and a model
-                        ;; with no limits at all pays only this test.
-                        (if (or (seq cs) (limited? model))
-                          (solve-constraints model moving (vec cs) dt
-                                             (assoc opts :ls ls :ai ai :frames frames))
-                          moving)
-                        dt))))
-
-;; ---------------------------------------------------------------------------
 ;; Where the links are
 
 (defn poses
@@ -2484,3 +2345,139 @@
                     (axpy-n! u dt' (- a' old))
                     (aset acc idx a')))))))
         (with-velocity model state (vec (seq u)))))))
+
+;; ---------------------------------------------------------------------------
+;; Moving it
+
+(defn- advance-coordinate
+  "One joint's configuration, moved by its own rates.
+
+  A hinge or a slider adds. A ball joint cannot: its configuration is a
+  quaternion and its rates are an angular velocity in the *child's* own
+  frame, so the step is `qj += dt/2 qj (w,0)` -- the joint's own
+  quaternion on the left, where the base's world-frame spin puts it on
+  the right. Getting that round the wrong way turns a ball joint into a
+  thing that drifts sideways under its own rotation."
+  [link x qd offset dt]
+  (let [offset (long offset) dt (double dt)]
+    (case (kind-of link)
+      (:revolute :prismatic) (+ (double x) (* dt (double (nth qd offset))))
+      :spherical (let [rot (if (and (sequential? x) (= 4 (count x)))
+                             (vec x)
+                             q/identity-q)
+                       w [(double (nth qd offset))
+                          (double (nth qd (+ offset 1)))
+                          (double (nth qd (+ offset 2)))]
+                       [dx dy dz dw] (q/mul rot [(w 0) (w 1) (w 2) 0.0])
+                       [rx ry rz rw] rot
+                       h (* 0.5 dt)]
+                   (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
+                                 (+ rz (* h dz)) (+ rw (* h dw))]))
+      :fixed x)))
+
+(defn- advance-positions
+  "Move by whatever the velocities now are."
+  [model state ^double dt]
+  (let [root (base model)
+        b (:base state)
+        parts (chain model)
+        ;; Where each joint's rates start, and nothing else. Building the
+        ;; whole per-configuration cache to read ten integers off it cost
+        ;; four milliseconds a step, which was a tenth of the frame.
+        offsets (reductions + 0 (map joint-dof parts))
+        q' (mapv (fn [i]
+                   (advance-coordinate (nth parts i) (nth (:q state) i nil)
+                                       (:qd state) (nth offsets i) dt))
+                 (range (count parts)))]
+    (if-not root
+      (assoc state :q q')
+      (let [v (vec (:vel b))
+            rot (or (:rot b) q/identity-q)
+            pos (or (:pos b) v/zero)
+            ;; Both halves of the spatial velocity are in the base's own
+            ;; frame, so both are turned into the world before they move
+            ;; anything.
+            w (q/rotate rot (subvec v 0 3))
+            u (q/rotate rot (subvec v 3 6))
+            ;; rot += dt/2 (omega, 0) rot, then back onto the unit
+            ;; sphere -- the same first-order step `allgo.physics.rigid`
+            ;; takes, and it walks off for the same reason.
+            [dx dy dz dw] (q/mul [(w 0) (w 1) (w 2) 0.0] rot)
+            [rx ry rz rw] rot
+            h (* 0.5 dt)]
+        (assoc state
+               :q q'
+               :base (assoc b
+                            :rot (q/normalize [(+ rx (* h dx)) (+ ry (* h dy))
+                                               (+ rz (* h dz)) (+ rw (* h dw))])
+                            :pos (v/add-scaled pos u dt)))))))
+
+(defn advance
+  "Move by whatever the velocities already are, and change nothing else.
+
+  `step` is accelerate, then contacts, then this. A caller that has done
+  its own accelerating and its own contacts -- `allgo.physics.world`,
+  which has other bodies to account for in the same sweep -- wants only
+  the last of the three."
+  [state model dt]
+  (advance-positions model state dt))
+
+(defn step
+  "One semi-implicit Euler step of `{:q :qd}`, and `:base` if there is
+  one, under `tau`.
+
+  Velocity first, then contacts, then position. The order is the whole
+  of what makes a contact hold: the velocities are corrected before
+  anything moves, so a body that was about to be driven into the floor
+  never is, rather than being pulled back out afterward.
+
+  Contacts come either ready-made as `:contacts` or, more usually, from
+  `:obstacles` -- static `allgo.physics.rigid` bodies this model is to
+  be generated against -- and from `:self-collide?`, which adds the
+  model's own parts against each other. They are found at the
+  configuration the step *starts* from, which is where the model
+  actually is when the question is asked.
+
+  The base's state is a pose and a spatial velocity in its own frame,
+  not six more coordinates. Three reasons, and the third is the one that
+  matters: a rotation has no three-number parameterization without a
+  singularity in it; a quaternion is the shape the rest of this library
+  speaks; and a velocity in body coordinates is what the algorithms
+  already produce, so nothing has to be converted on the way in."
+  ([state model dt] (step state model dt nil))
+  ([{:keys [q qd] :as state} model ^double dt
+    {:keys [tau contacts obstacles self-collide?] :as opts}]
+   (let [root (base model)
+         b (:base state)
+         tau (or tau (vec (repeat (dof model) 0.0)))
+         ;; Where everything is, computed once and handed to every pass
+         ;; that needs it. It depends only on `q` and the root's pose,
+         ;; neither of which changes until the very end of the step.
+         ls (links model q)
+         frames (poses model q b)
+         ;; What every joint weighs from above. It depends only on `q`,
+         ;; so the accelerations and every contact impulse afterward
+         ;; share one build -- they were making one apiece.
+         ai (articulated-inertias model ls)
+         {:keys [qdd base-acc]} (forward-dynamics model q qd tau
+                                                  (cond-> (assoc opts :ls ls :ai ai)
+                                                    root (assoc :base b)))
+         accel (if root (vec (concat base-acc qdd)) (vec qdd))
+         moving (with-velocity model state
+                  (mapv (fn [a c] (+ (double a) (* dt (double c))))
+                        (velocity model state)
+                        accel))
+         cs (or contacts
+                (cond-> []
+                  (seq obstacles) (into (contacts-with model q b obstacles frames))
+                  self-collide? (into (self-contacts model q b frames))))]
+     (advance-positions model
+                        ;; Limits are solved even with nothing to stand
+                        ;; on. A joint folding backward in mid-air is
+                        ;; still a joint folding backward, and a model
+                        ;; with no limits at all pays only this test.
+                        (if (or (seq cs) (limited? model))
+                          (solve-constraints model moving (vec cs) dt
+                                             (assoc opts :ls ls :ai ai :frames frames))
+                          moving)
+                        dt))))

@@ -28,8 +28,6 @@
             [allgo.random :as random]
             [clojure.math :as math]))
 
-(declare line-minimize)
-
 (defn- replace-worst
   "The simplex with its worst point swapped for `p`, sorted best first."
   [simplex p]

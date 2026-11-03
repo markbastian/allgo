@@ -12,19 +12,6 @@
   (:require [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
-;; ------------------------------------------------------ small systems
-
-(declare lu det)
-
-(defn cramer
-  "The solution of A x = b by Cramer's rule: each x_i the determinant of
-  A with its column i replaced by b, over det A. For a handful of
-  equations only -- the determinants cost n! the obvious way, n^3 by LU."
-  [A b]
-  (let [d (det A)]
-    (when-not (zero? d)
-      (mapv (fn [i] (/ (det (mapv #(assoc %1 i %2) A b)) d)) (range (count b))))))
-
 ;; --------------------------------------------------- Gauss elimination
 
 (defn gauss
@@ -156,6 +143,17 @@
   (when-let [d (lu A)]
     (let [n (count A)]
       (lin/transpose (mapv (fn [j] (lu-solve d (mapv #(if (= % j) 1.0 0.0) (range n)))) (range n))))))
+
+;; ------------------------------------------------------ small systems
+
+(defn cramer
+  "The solution of A x = b by Cramer's rule: each x_i the determinant of
+  A with its column i replaced by b, over det A. For a handful of
+  equations only -- the determinants cost n! the obvious way, n^3 by LU."
+  [A b]
+  (let [d (det A)]
+    (when-not (zero? d)
+      (mapv (fn [i] (/ (det (mapv #(assoc %1 i %2) A b)) d)) (range (count b))))))
 
 ;; --------------------------------------------------------- conditioning
 

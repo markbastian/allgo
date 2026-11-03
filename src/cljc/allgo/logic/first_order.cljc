@@ -63,28 +63,26 @@
     (vector? x) (some #(occurs? v % theta) x)
     :else false))
 
-(declare unify)
-
-(defn- unify-var [v x theta]
-  (cond
-    (contains? theta v) (unify (theta v) x theta)
-    (and (variable? x) (contains? theta x)) (unify v (theta x) theta)
-    (occurs? v x theta) nil
-    :else (assoc theta v x)))
-
 (defn unify
   "UNIFY: the most general substitution extending `theta` (default empty)
-  that makes `x` and `y` identical, or nil."
+  that makes `x` and `y` identical, or nil. UNIFY-VAR, which the figure
+  gives beside it and which calls back into it, is local to it."
   ([x y] (unify x y {}))
   ([x y theta]
-   (cond
-     (nil? theta) nil
-     (= x y) theta
-     (variable? x) (unify-var x y theta)
-     (variable? y) (unify-var y x theta)
-     (and (vector? x) (vector? y) (= (count x) (count y)))
-     (reduce (fn [th [a b]] (or (unify a b th) (reduced nil))) theta (map vector x y))
-     :else nil)))
+   (letfn [(unify-var [v x theta]
+             (cond
+               (contains? theta v) (unify (theta v) x theta)
+               (and (variable? x) (contains? theta x)) (unify v (theta x) theta)
+               (occurs? v x theta) nil
+               :else (assoc theta v x)))]
+     (cond
+       (nil? theta) nil
+       (= x y) theta
+       (variable? x) (unify-var x y theta)
+       (variable? y) (unify-var y x theta)
+       (and (vector? x) (vector? y) (= (count x) (count y)))
+       (reduce (fn [th [a b]] (or (unify a b th) (reduced nil))) theta (map vector x y))
+       :else nil))))
 
 (def ^:private counter (atom 0))
 

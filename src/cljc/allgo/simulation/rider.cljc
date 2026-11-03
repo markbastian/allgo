@@ -177,7 +177,16 @@
         bent (angle-between upper lower)]
     (assoc link :axis axis :limit [(- bent) (- (double fold) bent)])))
 
-(declare muscle)
+(def ^:private muscle
+  "How hard each joint holds the riding pose: N m per radian and N m s per
+  radian. The spine and hips carry the body and are the stiffest; the
+  arms are soft enough to follow the bars."
+  {torso [900.0 40.0]
+   head [60.0 3.0]
+   (upper-arms :left) [120.0 4.0] (upper-arms :right) [120.0 4.0]
+   (forearms :left) [60.0 2.0] (forearms :right) [60.0 2.0]
+   (thighs :left) [500.0 20.0] (thighs :right) [500.0 20.0]
+   (shins :left) [300.0 10.0] (shins :right) [300.0 10.0]})
 
 (def ^:private stepped-at
   "The substep the rider's joints are made stable for, in seconds. The
@@ -279,17 +288,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Muscles
-
-(def ^:private muscle
-  "How hard each joint holds the riding pose: N m per radian and N m s per
-  radian. The spine and hips carry the body and are the stiffest; the
-  arms are soft enough to follow the bars."
-  {torso [900.0 40.0]
-   head [60.0 3.0]
-   (upper-arms :left) [120.0 4.0] (upper-arms :right) [120.0 4.0]
-   (forearms :left) [60.0 2.0] (forearms :right) [60.0 2.0]
-   (thighs :left) [500.0 20.0] (thighs :right) [500.0 20.0]
-   (shins :left) [300.0 10.0] (shins :right) [300.0 10.0]})
 
 (defn- rotation-vector
   "A ball joint's rotation as an axis scaled by its angle -- the three

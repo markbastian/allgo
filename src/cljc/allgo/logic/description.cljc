@@ -33,21 +33,25 @@
 
 (defn- role-constraint [] {:at-least 0 :at-most nil :fills #{} :all nil})
 
-(declare normalize)
-
-(defn- merge-role [a b]
-  {:at-least (max (long (:at-least a)) (long (:at-least b)))
-   :at-most (cond (nil? (:at-most a)) (:at-most b) (nil? (:at-most b)) (:at-most a)
-                  :else (min (long (:at-most a)) (long (:at-most b))))
-   :fills (into (:fills a) (:fills b))
-   :all (cond (nil? (:all a)) (:all b) (nil? (:all b)) (:all a)
-              :else (normalize {} [:and (:all a) (:all b)]))})
-
-(defn- conjoin [a b]
-  {:prims (into (:prims a) (:prims b))
-   :roles (merge-with merge-role (:roles a) (:roles b))
-   :one-of (cond (nil? (:one-of a)) (:one-of b) (nil? (:one-of b)) (:one-of a)
-                 :else (set/intersection (:one-of a) (:one-of b)))})
+(defn- conjoin
+  "The normal form of two normal forms together: their primitives, their
+  one-of sets intersected, and their role constraints merged -- the
+  tighter of each bound, the fillers of both, and the two `:all`s
+  conjoined in turn, so the two definitions recurse into each other."
+  [a b]
+  (letfn [(merge-role [ra rb]
+            {:at-least (max (long (:at-least ra)) (long (:at-least rb)))
+             :at-most (cond (nil? (:at-most ra)) (:at-most rb) (nil? (:at-most rb)) (:at-most ra)
+                            :else (min (long (:at-most ra)) (long (:at-most rb))))
+             :fills (into (:fills ra) (:fills rb))
+             :all (cond (nil? (:all ra)) (:all rb) (nil? (:all rb)) (:all ra)
+                        :else (both (:all ra) (:all rb)))})
+          (both [a b]
+            {:prims (into (:prims a) (:prims b))
+             :roles (merge-with merge-role (:roles a) (:roles b))
+             :one-of (cond (nil? (:one-of a)) (:one-of b) (nil? (:one-of b)) (:one-of a)
+                           :else (set/intersection (:one-of a) (:one-of b)))})]
+    (both a b)))
 
 (defn- with-role [role f] {:prims #{} :roles {role (f (role-constraint))} :one-of nil})
 

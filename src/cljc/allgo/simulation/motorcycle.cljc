@@ -583,31 +583,6 @@
       (ab/apply-impulse model pose -1 pos (v/scale ground-vel (/ -1.0 speed))
                         (* (resistance cfg speed) (double dt))))))
 
-(declare step-once)
-
-(defn step
-  "One substep: slow the bike by what the air and the tires cost it, work
-  out the forces from where it is now, hand them to the world, and step
-  it.
-
-  Once the rider is thrown it is two half steps, and that is not about
-  accuracy. A ragdoll coming off a crash has arms and a head whipping
-  round at seventy radians a second, and semi-implicit Euler gains
-  energy on light links turning that fast -- measured on a thrown rider
-  alone, with nothing touching it, a sixth more in a quarter of a
-  second at 1/240 s, and half as much each time the step is halved. At
-  full size that compounds: the limbs reached thousands of radians a
-  second and the solver came apart, taking the bike with it. Halving the
-  step and giving the limbs a little damping (`limp`) each fall short
-  alone; together a crash at a hundred kilometers an hour plays out and
-  comes to rest. Riding, none of this applies, and nothing is paid for
-  it."
-  [cfg scene controls dt]
-  (if (and (:rider scene) (not (get-in scene [:rider :attached?])))
-    (let [h (* 0.5 (double dt))]
-      (step-once cfg (step-once cfg scene controls h) controls h))
-    (step-once cfg scene controls dt)))
-
 (defn- step-once
   [cfg scene controls dt]
   (let [;; A thrown rider is no longer riding: nobody on the throttle,
@@ -638,6 +613,29 @@
                                                  (rider/weight-shift (:lean controls 0.0)))
                                                (get-in scene [:rider :passive] 0.0))))]
     (let-go cfg (pw/step scene dt))))
+
+(defn step
+  "One substep: slow the bike by what the air and the tires cost it, work
+  out the forces from where it is now, hand them to the world, and step
+  it.
+
+  Once the rider is thrown it is two half steps, and that is not about
+  accuracy. A ragdoll coming off a crash has arms and a head whipping
+  round at seventy radians a second, and semi-implicit Euler gains
+  energy on light links turning that fast -- measured on a thrown rider
+  alone, with nothing touching it, a sixth more in a quarter of a
+  second at 1/240 s, and half as much each time the step is halved. At
+  full size that compounds: the limbs reached thousands of radians a
+  second and the solver came apart, taking the bike with it. Halving the
+  step and giving the limbs a little damping (`limp`) each fall short
+  alone; together a crash at a hundred kilometers an hour plays out and
+  comes to rest. Riding, none of this applies, and nothing is paid for
+  it."
+  [cfg scene controls dt]
+  (if (and (:rider scene) (not (get-in scene [:rider :attached?])))
+    (let [h (* 0.5 (double dt))]
+      (step-once cfg (step-once cfg scene controls h) controls h))
+    (step-once cfg scene controls dt)))
 
 (defn run
   "`n` substeps of `dt` under fixed `controls`. For tests and tuning."
