@@ -21,8 +21,14 @@
   perplexities as EM fits the trigram's interpolation weights, and an HMM
   tagging both ducks. Inside-outside: EM learning the grammar's rule
   probabilities from unparsed sentences, the likelihood climbing and the
-  probabilities settling on the true ones."
-  (:require [allgo.language.embeddings :as emb]
+  probabilities settling on the true ones. Parsing: grammar sentences'
+  most probable trees, which A* and CYK agree on, with how many states A*
+  expanded and how wide a shift-reduce beam had to be to find them, and
+  the dependency parse the trees' heads give. Semantics: chapter 23's
+  augmented grammars building each phrase's meaning from its parts', the
+  value of an arithmetic expression and the logic of \"Ali loves Bo\"."
+  (:require [allgo.language.augmented :as aug]
+            [allgo.language.embeddings :as emb]
             [allgo.language.ngrams :as ng]
             [allgo.language.parsing :as parsing]
             [allgo.language.recurrent :as rec]
@@ -83,6 +89,44 @@
 
 (defn- first-ambiguous [w i] (and (zero? i) (#{"duck" "fish" "watch" "saw"} w)))
 
+(def ^:private ambiguous-heads
+  "Head rules for the ambiguous grammar's trees: a sentence's head its
+  verb phrase's, a verb phrase's its verb, a noun phrase's its noun."
+  {:S [:VP] :VP [:VB :V] :VB [:V] :NP [:N]})
+
+(defn- parsed
+  "A sentence of the ambiguous grammar parsed every way: CYK's most
+  probable tree, A*'s count of states expanded to find it, the narrowest
+  of the shift-reduce beams 1, 2, 4, 8 and 16 to find it, and its
+  dependencies."
+  [words]
+  (let [g parsing/ambiguous-grammar
+        [tree p] (parsing/parse-tree words g)]
+    {:words words :tree tree :p p
+     :expanded (count (take-while (complement :solved?) (parsing/a-star-parse-seq words g)))
+     :beam (first (filter #(= tree (first (parsing/shift-reduce-parse words g %))) [1 2 4 8 16]))
+     :deps (parsing/dependencies tree ambiguous-heads)}))
+
+(defn- arithmetic-expression
+  "A random arithmetic expression, `depth` levels of operators, the
+  inner ones parenthesized so that it has one parse."
+  [rng depth]
+  (if (zero? depth)
+    [(str (random/below rng 10))]
+    (let [side #(if (< (rng) 0.5) [(str (random/below rng 10))] (concat ["("] (arithmetic-expression rng (dec depth)) [")"]))]
+      (concat (side) [(random/pick rng ["+" "-" "×"])] (side)))))
+
+(defn- show-term
+  "A term as the chapter writes it: Exp(5), Loves(Ali, Bo), lambda x ..."
+  [t]
+  (cond
+    (keyword? t) (name t)
+    (symbol? t) (first (str/split (name t) #"_"))
+    (string? t) t
+    (and (vector? t) (= :lambda (first t))) (str "λ" (show-term (second t)) " " (show-term (nth t 2)))
+    (vector? t) (str (show-term (first t)) "(" (str/join ", " (map show-term (rest t))) ")")
+    :else (str t)))
+
 (defn- digits [rng] (vec (repeatedly (+ 3 (random/below rng 3)) #(random/below rng 5))))
 
 (defn- init [method]
@@ -111,6 +155,15 @@
                           :test (subvec sents 300) :rng rng :steps 0 :losses []})
       "attention" (let [pairs (vec (repeatedly 500 (fn [] (let [d (digits rng)] [d (vec (reverse d))]))))]
                     {:states (s2s/train-seq (s2s/model :rnn (s2s/vocabulary (range 5)) 8 16 rng) pairs) :steps 0 :losses []})
+      ;; a new sentence every two seconds or so
+      "parsing" {:models (mapcat #(repeat 150 %) (map parsed (repeatedly #(mapv first (parsing/generate parsing/ambiguous-grammar rng)))))
+                 :steps 0 :paced true}
+      "semantics" {:models (mapcat #(repeat 180 %)
+                                   (interleave (map (fn [ws] {:words ws :parse (aug/parse ws aug/arithmetic '[:Exp x])})
+                                                    (cons ["3" "+" "(" "4" "÷" "2" ")"] (repeatedly #(vec (arithmetic-expression rng 2)))))
+                                               (map (fn [s] (let [ws (str/split s #" ")] {:words ws :parse (aug/parse ws aug/ali-loves-bo)}))
+                                                    (cycle ["Ali loves Bo" "Bo loves Ali" "Ali loves Ali" "Bo loves Bo"]))))
+                   :steps 0 :paced true}
       "tagging" (let [tagged (vec (repeatedly 400 #(parsing/generate parsing/ambiguous-grammar rng)))
                       vocab (tf/vocabulary (map #(mapv first %) tagged))]
                   {:states (tf/train-tagger-seq (tf/tagger (tf/encoder vocab 16 2 32 1 rng) [:Det :N :V :Adj :Modal :Adv] rng) tagged)
@@ -181,7 +234,62 @@
                              "inside-outside" (draw-inside-outside! cw ch)
                              "language model" (draw-lm! cw ch)
                              "attention" (draw-attention! cw ch)
-                             "tagging" (draw-tagging! cw ch))))))
+                             "tagging" (draw-tagging! cw ch)
+                             "parsing" (draw-parsing! cw ch)
+                             "semantics" (draw-semantics! cw ch))))))
+            (tree! [tree x0 y0 w h label-of]
+              ;; leaves spread evenly along the bottom, each node over the
+              ;; middle of its children, a level a row
+              (let [leaves (volatile! 0)
+                    depth (fn depth [t] (if (string? t) 0 (inc (apply max (map depth (rest t))))))
+                    rows (depth tree)
+                    n (count (parsing/leaves tree))
+                    dy (/ h (max 1 rows))]
+                (letfn [(place [t level]
+                          (if (string? t)
+                            (let [i @leaves]
+                              (vswap! leaves inc)
+                              {:x (+ x0 (* w (/ (+ i 0.5) n))) :y (+ y0 h) :label t :leaf true})
+                            (let [kids (mapv #(place % (inc level)) (rest t))]
+                              {:x (/ (reduce + (map :x kids)) (count kids)) :y (+ y0 (* level dy)) :label (label-of (first t)) :kids kids})))
+                        (draw [{:keys [x y label kids leaf]}]
+                          (doseq [k kids]
+                            (set! (.-strokeStyle ctx) "rgba(160,180,210,0.45)") (set! (.-lineWidth ctx) 1)
+                            (.beginPath ctx) (.moveTo ctx x (+ y 6)) (.lineTo ctx (:x k) (- (:y k) 14)) (.stroke ctx)
+                            (draw k))
+                          (set! (.-textAlign ctx) "center")
+                          (text! label x y (if leaf "#e6edf7" "#ffd479") (if leaf 14 12))
+                          (set! (.-textAlign ctx) "left"))]
+                  (draw (place tree 0)))))
+            (draw-parsing! [cw ch]
+              (let [{:keys [words tree p expanded beam deps]} (first (:models @model))
+                    n (count words)
+                    x0 60 w (- cw 120)
+                    wx (fn [i] (+ x0 (* w (/ (+ i 0.5) n))))]
+                (text! "the most probable parse (CYK and A* agree)" 40 40 "#9fb4d8" 13)
+                (tree! tree x0 70 w (- ch 360) #(name %))
+                ;; the dependency parse, arcs from each head to its dependents
+                (let [y (- ch 90)]
+                  (text! "its dependency parse, by head rules" 40 (- y 110) "#9fb4d8" 13)
+                  (doseq [[i h] (map-indexed vector deps) :when h]
+                    (let [a (wx h) b (wx i) mid (/ (+ a b) 2) r (/ (abs (- b a)) 2)]
+                      (set! (.-strokeStyle ctx) "#7dc4ff") (set! (.-lineWidth ctx) 1.5)
+                      (.beginPath ctx) (.ellipse ctx mid (- y 18) r (min r 80) 0 js/Math.PI 0) (.stroke ctx)
+                      (set! (.-fillStyle ctx) "#7dc4ff") (.beginPath ctx) (.arc ctx b (- y 18) 3 0 (* 2 js/Math.PI)) (.fill ctx)))
+                  (set! (.-textAlign ctx) "center")
+                  (doseq [[i wd] (map-indexed vector words)]
+                    (text! wd (wx i) y (if (nil? (deps i)) "#7dffa0" "#e6edf7") 15))
+                  (set! (.-textAlign ctx) "left"))
+                (str "P = " (.toExponential p 3) "  |  A* expanded " expanded " states to find it"
+                     "  |  shift-reduce found it with a beam of " (or beam "more than 16")
+                     "\ntop: the tree; bottom: arcs from each word's head to it, the sentence's head in green")))
+            (draw-semantics! [cw ch]
+              (let [{:keys [words parse]} (first (:models @model))]
+                (text! (str/join " " words) 40 40 "#e6edf7" 16)
+                (when parse
+                  (tree! (:tree parse) 60 80 (- cw 120) (- ch 190) show-term))
+                (str (if parse (str "meaning: " (show-term (:term parse))) "no parse")
+                     "\neach phrase's meaning made from its parts': numbers by arithmetic, sentences by lambda-expressions applied and beta-reduced")))
             (draw-embeddings! [cw ch]
               (let [{:keys [models steps glove]} @model
                     m (first models)
@@ -329,7 +437,7 @@
                   (set! (.-width canvas) cw)
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "attention" "tagging" "bidirectional" "n-grams" "inside-outside"]) restart!)
+        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "attention" "tagging" "bidirectional" "n-grams" "inside-outside" "parsing" "semantics"]) restart!)
         (.onChange (.add gui controls "cell" #js ["lstm" "rnn"]) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui #js {:restart restart!} "restart"))

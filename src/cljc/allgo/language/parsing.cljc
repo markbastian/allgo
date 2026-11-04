@@ -23,7 +23,8 @@
   binary rules X -> Y Z with probability p, and lexical rules X -> word.
   A tree is `[label child ...]`, a leaf a string. `e-prob-chomsky` is
   aima-python's (MIT) small grammar of that shape."
-  (:require [clojure.math :as math]
+  (:require [allgo.search :as search]
+            [clojure.math :as math]
             [clojure.string :as str]))
 
 (def e-prob-chomsky
@@ -286,3 +287,148 @@
                 (cons {:grammar g :log-likelihood ll}
                       (states (normalize-grammar binary lexical))))))]
      (states grammar))))
+
+;; ---------------------------------------------------------------------------
+;; Dependency parses
+
+(defn- preterminal? [tree] (and (vector? tree) (= 2 (count tree)) (string? (second tree))))
+
+(defn dependencies
+  "The dependency parse a phrase structure tree annotated with heads
+  gives, section 23.3.1: for each word, the index of the word it depends
+  on, nil for the sentence's head. `head-rules` maps a phrase's label to
+  the labels its head child may have, in order of preference; a phrase's
+  head word is its head child's, and every other child's head word
+  depends on it."
+  [tree head-rules]
+  (let [heads (volatile! {})
+        next-index (volatile! 0)]
+    (letfn [(head-of [t]
+              (if (preterminal? t)
+                (let [i @next-index] (vswap! next-index inc) i)
+                (let [[label & kids] t
+                      kid-heads (mapv head-of kids)
+                      labels (mapv first kids)
+                      h (or (some (fn [l] (some #(when (= l (labels %)) %) (range (count kids)))) (head-rules label))
+                            (throw (ex-info "no head child" {:label label :children labels})))]
+                  (doseq [k (range (count kids)) :when (not= k h)]
+                    (vswap! heads assoc (kid-heads k) (kid-heads h)))
+                  (kid-heads h))))]
+      (head-of tree)
+      (mapv @heads (range @next-index)))))
+
+(defn dependency-tree
+  "A phrase structure tree for a dependency parse -- `words` and the
+  index each depends on, nil for the head -- with categories made up, as
+  the chapter says it must: each word with dependents a phrase :XP of
+  the word itself, [:H word], and the phrases of the words that depend on
+  it, in the sentence's order; a word with none just [:X word]. Its head
+  rules are `{:XP [:H]}`."
+  [words heads]
+  (letfn [(phrase [i]
+            (let [deps (filter #(= i (heads %)) (range (count words)))]
+              (if (empty? deps)
+                [:X (words i)]
+                (into [:XP] (map #(if (= % i) [:H (words i)] (phrase %)) (sort (conj deps i)))))))]
+    (phrase (first (filter #(nil? (heads %)) (range (count words)))))))
+
+;; ---------------------------------------------------------------------------
+;; A* parsing
+
+(defn- rule-tables [{:keys [rules lexicon]}]
+  {:binary (group-by (fn [[_ y z]] [y z]) rules)
+   :lexical lexicon
+   :p (merge (into {} (for [[x y z p] rules] [[x y z] p]))
+             (into {} (for [[w xs] lexicon [x p] xs] [[x w] p])))})
+
+(defn- tree-cost
+  "-log of the probability of the rules a tree used."
+  [p tree]
+  (if (string? tree)
+    0.0
+    (let [[x & kids] tree]
+      (+ (- (math/log (p (into [x] (map #(if (string? %) % (first %)) kids)))))
+         (reduce + (map #(tree-cost p %) kids))))))
+
+(defn a-star-parse-seq
+  "Parsing as A* search, as the chapter describes it: a state is a list of
+  items, words or trees, the start the words and the goal a single tree
+  of `root` (default :S); each move replaces a word by a lexical rule's
+  category, or two adjacent trees by a rule's, costing -log of the rule's
+  probability, so that the first parse found is the most probable. The
+  heuristic, admissible, is what each word still unparsed must cost at
+  least, its cheapest lexical rule. The search states of
+  `allgo.search/a-star-seq`."
+  ([words grammar] (a-star-parse-seq words grammar :S))
+  ([words grammar root]
+   (let [{:keys [binary lexical p]} (rule-tables grammar)
+         cost (memoize (fn [items] (reduce + (map #(tree-cost p %) items))))
+         cheapest (into {} (for [[w xs] lexical] [w (apply min (map (fn [[_ q]] (- (math/log q))) xs))]))]
+     (search/a-star-seq
+      {:start (vec words)
+       :goal? (fn [items] (and (= 1 (count items)) (vector? (first items)) (= root (ffirst items))))
+       :neighbors (fn [items]
+                    (concat
+                     (for [i (range (count items)) :let [w (items i)] :when (string? w) [x _] (lexical w)]
+                       (assoc items i [x w]))
+                     (for [i (range (dec (count items)))
+                           :let [a (items i) b (items (inc i))]
+                           :when (and (vector? a) (vector? b))
+                           [x] (binary [(first a) (first b)])]
+                       (vec (concat (subvec items 0 i) [[x a b]] (subvec items (+ i 2)))))))
+       :cost (fn [from to] (- (cost to) (cost from)))
+       :heuristic (fn [items _] (reduce + (map #(if (string? %) (cheapest % 0.0) 0.0) items)))}))))
+
+(defn a-star-parse
+  "The most probable tree for `words` by A*, and its probability: `[tree
+  p]`, or nil."
+  ([words grammar] (a-star-parse words grammar :S))
+  ([words grammar root]
+   (let [{:keys [p]} (rule-tables grammar)]
+     (when-let [goal (:current (search/goal-state (a-star-parse-seq words grammar root)))]
+       [(first goal) (math/exp (- (tree-cost p (first goal))))]))))
+
+;; ---------------------------------------------------------------------------
+;; Shift-reduce parsing
+
+(defn shift-reduce-seq
+  "Shift-reduce parsing by beam search: going through the sentence word
+  by word, each configuration -- a stack of constituents, the words not
+  yet read, and the log probability of the rules used -- either shifts
+  the next word onto the stack, as one of its parts of speech by a
+  lexical rule, or reduces the top two constituents by a binary rule. An
+  action a step, the `b` most probable configurations kept; with b = 1
+  it is a deterministic parser. In Chomsky normal form every parse of n
+  words takes exactly 2n - 1 actions, so the configurations of a step
+  are always compared at the same point. Each state the beam, `[{:stack
+  :pos :log-p} ...]`, `:pos` the words read so far."
+  [words {:keys [rules lexicon]} b]
+  (let [n (count words)
+        binary (group-by (fn [[_ y z]] [y z]) rules)]
+    (take (* 2 n)
+          (iterate (fn [beam]
+                     (->> (for [{:keys [stack pos log-p] :as c} beam
+                                successor (concat
+                                           (when (< pos n)
+                                             (for [[x q] (lexicon (words pos))]
+                                               (assoc c :stack (conj stack [x (words pos)]) :pos (inc pos) :log-p (+ log-p (math/log q)))))
+                                           (when (>= (count stack) 2)
+                                             (let [z (peek stack) y (peek (pop stack))]
+                                               (for [[x _ _ q] (binary [(first y) (first z)])]
+                                                 (assoc c :stack (conj (pop (pop stack)) [x y z]) :log-p (+ log-p (math/log q)))))))]
+                            successor)
+                          (sort-by (comp - :log-p))
+                          (take b)
+                          vec))
+                   [{:stack [] :pos 0 :log-p 0.0}]))))
+
+(defn shift-reduce-parse
+  "The parse a shift-reduce beam of `b` finds for `words`, rooted at
+  `root` (default :S), and its probability: `[tree p]`, or nil when the
+  beam lost every way to one."
+  ([words grammar b] (shift-reduce-parse words grammar b :S))
+  ([words grammar b root]
+   (some (fn [{:keys [stack pos log-p]}]
+           (when (and (= pos (count words)) (= 1 (count stack)) (vector? (peek stack)) (= root (first (peek stack))))
+             [(peek stack) (math/exp log-p)]))
+         (last (shift-reduce-seq words grammar b)))))

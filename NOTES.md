@@ -757,9 +757,10 @@ examples of chapter 19 are inlined in their test.
 | `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE; safe exploration's Bayesian and robust policies; reward shaping; linear and deep function approximation, experience replay |
 | `allgo.decision.hierarchical`      | 22       | Hierarchical RL: partial programs with choose, learned by Q-learning over the joint state space |
 | `allgo.decision.apprenticeship`    | 22       | Imitation learning; inverse RL by feature matching; Boltzmann-rational likelihoods |
-| `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees; a grammar learned from a treebank, and by inside-outside |
+| `allgo.language.parsing`           | 23       | CYK, A* and shift-reduce parsing with a probabilistic grammar; dependency parses from heads and back; treebank trees; a grammar learned from a treebank, and by inside-outside |
+| `allgo.language.augmented`         | 23       | Augmented grammars by unification: agreement, lexicalized probabilities, compositional semantics with lambda-expressions |
 | `allgo.language.ngrams`            | 23       | N-gram models: Laplace and interpolated smoothing, EM for the weights, perplexity, <UNK>, sampling, language identification |
-| `allgo.language.tagging`           | 23       | Part-of-speech tagging with an HMM decoded by Viterbi                     |
+| `allgo.language.tagging`           | 23       | Part-of-speech tagging with an HMM decoded by Viterbi, and by logistic regression decoded greedily or by beam search |
 | `allgo.robotics.localization`      | 26       | Monte Carlo localization with a range scanner                             |
 
 The tests are under `test/allgo/decision/`, `probability/`,
@@ -974,6 +975,62 @@ unsupervised translation, which points ahead to chapter 25.
 The grid-world demo gains three learners: TD with a utility linear in x
 and y, Q-learning with Q linear in x and y for each action, and
 Q-learning shaped toward the +1 exit.
+
+**The rest of chapter 23, from the 4th edition's text and figures.**
+
+- *Logistic-regression tagging* (23.1.6): one logistic model per tag,
+  over features from the chapter's table. Those are the word, its
+  neighbors, the tag before, the word two back with the tag before, and
+  the spelling (suffixes, prefix, hyphen, digit, capitals).
+  - It is trained by SGD with the true previous tags, and decoded by a
+    beam search, greedy being b = 1.
+  - It tags the ambiguous grammar's held-out sentences perfectly.
+  - Restricted to the word and the tag before, greedy search gets the
+    look-ahead sentences ("duck swim today" / "duck stones today") 84%
+    right and a beam of 2 gets 93%. With the next word as a feature, as
+    the chapter allows, greedy gets them all.
+  - Words it never saw that end in "-ous" are tagged adjectives: the
+    chapter's example of what an HMM cannot be told.
+- *Dependency parses* (23.3.1, figure 23.7):
+  - Head rules read off the figure turn its phrase structure tree into
+    exactly its dependency tree: I and wumpus depend on detect; the,
+    smelly and me on wumpus; near on me.
+  - The figure's dependency tree makes the noun phrase, not the
+    preposition, the head of "near me", and the head rules follow it.
+  - Going back, the made-up categories the chapter mentions give a tree
+    whose dependencies are the same again.
+- *A\* parsing* (23.3): states are lists of items, the cost is -log of
+  each rule's probability, and the heuristic is each unparsed word's
+  cheapest lexical rule, which is admissible. Its first parse is CYK's,
+  tree and probability, on 30 sampled sentences.
+- *Shift-reduce parsing* as a beam search (23.3):
+  - My first version let shift push a bare word at no cost. The beam
+    then filled with configurations that shifted everything and could
+    never reduce. So shift now takes the word as one of its parts of
+    speech, and every parse is 2n - 1 actions.
+  - With b = 1, the deterministic parser, only 4 of 30 sentences parse.
+    With b = 4, 23 do, and with b = 16 every one gets the most probable
+    parse.
+- *Augmented grammars* (23.4): rules over terms with variables, a chart
+  parser that unifies (`allgo.logic.first-order`'s unifier), and rule
+  probabilities that may be functions of the bindings.
+  - Figure 23.10's arithmetic grammar parses 3 + (4 ÷ 2) as Exp(5), with
+    figure 23.11's value at every node.
+  - Figure 23.12's grammar parses "Ali loves Bo" as S(Loves(Ali, Bo)),
+    the VP being lambda x Loves(x, Bo) after beta reduction, and parses
+    the figure's three other sentences.
+  - Agreement follows figure 23.9, except that the figure's VP rule
+    gives the object the verb's person and number. Here the object has
+    its own. "I saw she", "I sees her" and "me see them" are rejected.
+  - For the lexicalized PCFG the chapter gives P1 and P4 no values, so
+    the test's are ours. With them, "ate a banana" beats "ate a
+    bandanna", and head words choose [[spaghetti and meatballs] or
+    lasagna] but [spaghetti and [pie or cake]].
+
+The language demo gains parsing (a sentence's tree, its dependency arcs,
+A*'s expansions, the shift-reduce beam needed) and semantics (figure
+23.11's and 23.12's trees with each node's meaning). Left out:
+learning semantic grammars (23.4.2), which the chapter only surveys.
 
 **Chapter 20, checked against the book's numbers.** Written from the
 3rd edition's chapter 20, then checked against the 4th's: the same
