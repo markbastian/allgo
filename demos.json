@@ -593,7 +593,7 @@
    "id": "grid-world",
    "group": "AI",
    "label": "Grid World",
-   "blurb": "Value and policy iteration, TD, ADP, Q-learning, SARSA and REINFORCE on the 4 x 3 world",
+   "blurb": "Value and policy iteration, TD, ADP, Q-learning, SARSA and REINFORCE on the 4 x 3 world, and linear function approximation and reward shaping",
    "badges": [
     "Interactive"
    ],
