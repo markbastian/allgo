@@ -653,7 +653,7 @@
    "id": "language",
    "group": "AI",
    "label": "Deep Learning for Language",
-   "blurb": "Word embeddings, recurrent language models, attention and a transformer, training as you watch",
+   "blurb": "Word embeddings, recurrent language models, attention and a transformer, training as you watch; parsing by CYK, A* and shift-reduce, dependency parses, and augmented grammars building meanings",
    "badges": [
     "Interactive"
    ],
