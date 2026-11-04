@@ -752,7 +752,8 @@ examples of chapter 19 are inlined in their test.
 | `allgo.learning.models`            | 19, 20   | Linear and logistic regression, the perceptron, k nearest neighbors, SVMs, naive Bayes |
 | `allgo.learning.unsupervised`      | 20       | k-means, EM for Gaussian mixtures, Baum-Welch                             |
 | `allgo.learning.probabilistic`     | 20       | Bayesian, MAP and ML learning; parameters by counting and by beta and Dirichlet priors; Gaussian and linear Gaussian ML; structure by hill climbing with restarts; k-NN and kernel densities; EM for a naive Bayes mixture |
-| `allgo.learning.neural`            | 21       | Dense and convolutional layers, back-propagation, SGD, dropout            |
+| `allgo.learning.neural`            | 21       | Dense, convolutional, pooling, residual and batch-norm layers; back-propagation, minibatch SGD, weight decay, dropout |
+| `allgo.learning.generative`        | 21       | Probabilistic PCA by EM; linear and deep autoencoders; a variational autoencoder; Yule-Walker and deep autoregressive models; a GAN |
 | `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
 | `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees; a grammar learned from a treebank, and by inside-outside |
 | `allgo.language.ngrams`            | 23       | N-gram models: Laplace and interpolated smoothing, EM for the weights, perplexity, <UNK>, sampling, language identification |
@@ -822,6 +823,78 @@ adds that dropout usually needs a larger model trained longer, and so
 the tests do not assert it. The classifiers demo shows it instead: a
 "wide network" (two hidden layers of 32) beside the same network with
 dropout, with held-out accuracy now in the caption.
+
+**The rest of chapter 21, from the 4th edition's text.** Each claim the
+chapter makes is a test where it could be checked.
+
+- *Pooling* (21.3.1): max-pooling the chapter's [5, 9, 4] gives 9.
+  Average-pooling equals a convolution with the uniform kernel. A
+  stride of l downsamples by l.
+- *Residual layers* (21.3.3, equation 21.10): with V = 0, relus pass
+  their input through unchanged, the chapter's derivation. Thirty
+  layers deep, the first layer's gradient is about 1e-27 through plain
+  sigmoid layers. Through plain relu layers it is 5e-13, or exactly
+  zero for another seed. Through residual layers it is about 0.8.
+- *Batch normalization* (21.4.2):
+  - In training, each unit has mean beta and standard deviation gamma
+    over the minibatch.
+  - Its gradient runs through every example's dependence on the
+    others, and is checked numerically.
+  - With weights too small, the spread of a deep layer's values decays
+    to near zero without it (4e-7 by the eighth layer here), but not
+    with it.
+  - Six small-weighted tanh layers, trained 40 epochs, reach a loss of
+    0.13 to 0.33 and 92% to 98% accuracy with it, over the two seeds
+    tried. Without it they are stuck at 0.69, which is chance.
+  - The chapter does not say how to normalize at test time, when there
+    is no minibatch. We use running averages of the minibatches'
+    statistics, the usual way.
+- Training now takes minibatches (`:batch`). A minibatch of one gives
+  exactly the old per-example gradients, so every earlier test and
+  demo is unchanged.
+- *Weight decay* (21.5.3): on one linear unit, gradient descent with
+  the penalty lambda w^2 finds ridge regression's cov(x, y) / (var x +
+  lambda) to 1e-9. The penalty applies to the weights and kernels, not
+  the biases.
+- *Probabilistic PCA* (21.7.1, equation 21.16):
+  - The chapter names EM but gives no update, so the step is Tipping
+    and Bishop's.
+  - The check does not rest on that paper: EM never lowers the
+    likelihood, and it converges to the closed-form maximum. That is,
+    sigma^2 is the mean of the discarded eigenvalues, and W W^T +
+    sigma^2 I has the top eigenvalues and eigenvectors.
+  - The chapter's model has mean zero; ours is fitted about the data's
+    mean.
+- *Linear autoencoder*: trained by Adam, W^T W becomes the projection
+  onto the top two principal components (to 1e-9), as the chapter says.
+- *Deep autoencoder*: on an arc, a one-number deep autoencoder
+  reconstructs 70 times better than a linear one.
+- *Variational autoencoder*:
+  - The bound is computed in the chapter's own decomposition, H(Q) +
+    E log P(z, x). The sample's gradient reaches the encoder by Kingma
+    and Welling's reparameterization, which the chapter does not
+    describe.
+  - With a linear decoder the exact log P(x) is known, and the bound
+    stays below it while rising toward it.
+- *AR models*: the Yule-Walker fit recovers an AR(2) model. On the
+  logistic map, the linear model's rms error is 0.24 and the deep
+  one's 0.01.
+- *GAN*:
+  - On N(4, 0.5^2), the generator's mean comes out right, and the
+    discriminator ends near 0.5 on both real and generated data.
+  - The spread falls short, though: about 0.3 for the data's 0.5, a
+    known tendency of GANs. A tanh discriminator did worse, about 0.15,
+    so the discriminator uses relu.
+  - The test asserts only the looser range.
+- In 2-D, the GAN fits a ring well (radius 1.96 for 2), as the demo
+  shows.
+
+The new demo, *Deep Generative Models*, shows all of these on 2-D data
+and on the logistic map. The classifiers demo gains a wide network with
+weight decay, a deep network with batch normalization, and a residual
+network. Left out: momentum and learning-rate schedules, which 21.4
+mentions only as considerations; 21.7.2's transfer learning; and
+unsupervised translation, which points ahead to chapter 25.
 
 **Chapter 20, checked against the book's numbers.** Written from the
 3rd edition's chapter 20, then checked against the 4th's: the same

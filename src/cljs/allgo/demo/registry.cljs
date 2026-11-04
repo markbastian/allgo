@@ -32,6 +32,7 @@
             [allgo.demo.flip :as flip]
             [allgo.demo.fluid :as fluid]
             [allgo.demo.game-search :as game-search]
+            [allgo.demo.generative :as generative]
             [allgo.demo.genetic :as genetic]
             [allgo.demo.geometry :as geometry]
             [allgo.demo.gesture :as gesture]
@@ -84,6 +85,7 @@
    "first-order" {:start first-order/start! :stop first-order/stop!}
    "grid-world" {:start grid-world/start! :stop grid-world/stop!}
    "classifiers" {:start classifiers/start! :stop classifiers/stop!}
+   "generative" {:start generative/start! :stop generative/stop!}
    "vision" {:start vision/start! :stop vision/stop!}
    "knowledge" {:start knowledge/start! :stop knowledge/stop!}
    "contract-net" {:start contract-net/start! :stop contract-net/stop!}

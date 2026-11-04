@@ -623,11 +623,21 @@
    "id": "classifiers",
    "group": "AI",
    "label": "Classifiers",
-   "blurb": "Logistic regression to SVMs, nearest neighbors, networks with and without dropout, and trees, drawing the regions they learn",
+   "blurb": "Logistic regression to SVMs, nearest neighbors, networks with dropout, weight decay, batch normalization or residual layers, and trees, drawing the regions they learn",
    "badges": [
     "Interactive"
    ],
    "href": "play/?demo=classifiers"
+  },
+  {
+   "id": "generative",
+   "group": "AI",
+   "label": "Deep Generative Models",
+   "blurb": "Probabilistic PCA, linear and deep autoencoders, a variational autoencoder and a GAN learning 2-D data, and autoregressive models of a chaotic series",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=generative"
   },
   {
    "id": "vision",

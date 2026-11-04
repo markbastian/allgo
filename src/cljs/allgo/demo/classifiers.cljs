@@ -10,7 +10,10 @@
   Gaussian kernel curves round the classes, its support vectors ringed;
   a network with a hidden layer learns curves an epoch at a time, and a
   wider one with two can follow the noise -- unless trained with dropout
-  (section 21.5.4), half its hidden units deactivated each step. The
+  (section 21.5.4), half its hidden units deactivated each step, or with
+  weight decay (section 21.5.3), its weights kept small. Deeper ones
+  train by batch normalization (section 21.4.2), over minibatches of 16,
+  or by residual layers (section 21.3.3). The
   trees split on the coordinates binned into ten, so their regions are
   rectangles: one tree, a random forest's vote, or AdaBoost's weighted
   stumps."
@@ -65,10 +68,22 @@
       "network" [(neural/train-seq [(neural/dense 2 12 :tanh rng) (neural/dense 12 1 :sigmoid rng)]
                                    X (mapv vector ys) {:alpha 0.05 :loss :cross-entropy :rng rng})
                  (fn [net x] (first (neural/predict net x)))]
-      ("wide network" "wide network, dropout")
+      ("wide network" "wide network, dropout" "wide network, weight decay")
       [(neural/train-seq (cond-> [(neural/dense 2 32 :tanh rng) (neural/dense 32 32 :tanh rng) (neural/dense 32 1 :sigmoid rng)]
                            (= learner "wide network, dropout") (neural/with-dropout 0.5))
-                         X (mapv vector ys) {:alpha 0.05 :loss :cross-entropy :rng rng})
+                         X (mapv vector ys) (cond-> {:alpha 0.05 :loss :cross-entropy :rng rng}
+                                              (= learner "wide network, weight decay") (assoc :lambda 0.002)))
+       (fn [net x] (first (neural/predict net x)))]
+      ;; four layers each normalized over minibatches of 16
+      "deep network, batch norm"
+      [(neural/train-seq (conj (vec (mapcat (fn [n-in] [(neural/dense n-in 16 :identity rng) (neural/batch-norm 16 :tanh)]) [2 16 16 16]))
+                               (neural/dense 16 1 :sigmoid rng))
+                         X (mapv vector ys) {:alpha 0.05 :batch 16 :loss :cross-entropy :rng rng})
+       (fn [net x] (first (neural/predict net x)))]
+      "residual network"
+      [(neural/train-seq (conj (into [(neural/dense 2 16 :relu rng)] (repeatedly 6 #(neural/residual 16 16 rng)))
+                               (neural/dense 16 1 :sigmoid rng))
+                         X (mapv vector ys) {:alpha 0.02 :loss :cross-entropy :rng rng})
        (fn [net x] (first (neural/predict net x)))]
       "decision tree" [(repeat (trees/decision-tree-learning examples [:bx :by] :y bin-values))
                        (fn [t x] (trees/classify t (binned x)))]
@@ -159,7 +174,8 @@
         (.onChange (.add gui controls "data" #js ["moons" "circles" "XOR" "blobs" "spiral"]) restart!)
         (.onChange (.add gui controls "learner" #js ["logistic regression" "perceptron" "k nearest neighbors" "naive Bayes"
                                                      "SVM, linear" "SVM, Gaussian kernel" "network"
-                                                     "wide network" "wide network, dropout"
+                                                     "wide network" "wide network, dropout" "wide network, weight decay"
+                                                     "deep network, batch norm" "residual network"
                                                      "decision tree" "random forest" "AdaBoost"])
                    restart!)
         (.onChange (.add gui controls "points" 40 400 10) restart!)
