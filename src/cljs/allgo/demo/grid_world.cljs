@@ -11,7 +11,12 @@
   slips: the passive ones follow a fixed policy and learn what it is
   worth -- TD from each move, ADP by learning the model -- while
   Q-learning, SARSA and REINFORCE learn what to do, a trial at a time,
-  the white dot the agent on its walk."
+  the white dot the agent on its walk. Section 22.4's variants: TD
+  learning a utility linear in x and y, which can only tilt a plane
+  across the world; Q-learning with Q linear in x and y for each action,
+  which cannot see the wall or the pit; and Q-learning with its rewards
+  shaped by a potential that rises toward the +1 exit, the same optimal
+  policy found sooner."
   (:require [allgo.decision.mdp :as mdp]
             [allgo.decision.reinforcement :as rl]
             [allgo.random :as random]
@@ -27,19 +32,48 @@
   ;; The optimal policy, for the passive learners to evaluate.
   (mdp/policy-iteration w))
 
+(defn- xy
+  "The chapter's linear features, 1, x and y, from (1, 1)."
+  [[x y]]
+  [1.0 (inc x) (inc y)])
+
+(def ^:private linear-q
+  ;; Q linear in x and y for each action
+  (rl/linear-q (fn [[x y] a] (vec (mapcat #(if (= % a) [1.0 (/ (inc x) 4.0) (/ (inc y) 3.0)] [0.0 0.0 0.0])
+                                          [[1 0] [0 1] [-1 0] [0 -1]])))))
+
+(defn- toward-exit
+  "A shaping potential: gamma^(distance to the +1 exit)."
+  [[x y]]
+  (math/pow 0.9 (+ (- 3 x) (- 2 y))))
+
+(defn- q-utilities [Q]
+  (into {} (for [s (:states w)]
+             [s (if (seq ((:actions w) s))
+                  (apply max (map #(get Q [s %] 0.0) ((:actions w) s)))
+                  (get Q [s nil] 0.0))])))
+
 (defn- utilities-of
   "What to draw: `{:U :pi :agent :label}` for the method's state."
   [method st]
   (case method
+    "TD agent, linear U" {:U (into {} (for [s (:states w)]
+                                        [s (if (seq ((:actions w) s)) (rl/linear-utility (:theta (:memory st)) xy s) ((:reward w) s))]))
+                          :pi fixed-policy :agent (:state st)
+                          :label (str "trial " (:trial st) ", theta " (mapv #(.toFixed % 3) (:theta (:memory st))))}
+    "Q-learning, linear Q" (let [params (:params (:memory st))]
+                             {:U (into {} (for [s (:states w) :let [as ((:actions w) s)]]
+                                            [s (if (seq as) (apply max (map #((:q linear-q) params s %) as)) ((:reward w) s))]))
+                              :pi (rl/approximate-greedy-policy w linear-q params) :agent (:state st) :label (str "trial " (:trial st))})
+    "Q-learning, shaped" (let [Q (:Q (:memory st))]
+                           ;; the shaped Q is Q - Phi(s): Phi added back to show utilities
+                           {:U (into {} (map (fn [[s u]] [s (if (seq ((:actions w) s)) (+ u (toward-exit s)) u)]) (q-utilities Q)))
+                            :pi (rl/greedy-policy w Q) :agent (:state st) :label (str "trial " (:trial st))})
     "value iteration" {:U (:U st) :pi (mdp/best-policy w (:U st)) :label (str "sweep " (:sweeps st))}
     "policy iteration" {:U (:U st) :pi (:pi st) :label (str "iteration " (:iterations st) ", " (:changed st) " actions changed")}
     ("TD agent" "ADP agent") {:U (:U (:memory st)) :pi fixed-policy :agent (:state st) :label (str "trial " (:trial st))}
-    ("Q-learning" "SARSA") (let [Q (:Q (:memory st))
-                                 U (into {} (for [s (:states w)]
-                                              [s (if (seq ((:actions w) s))
-                                                   (apply max (map #(get Q [s %] 0.0) ((:actions w) s)))
-                                                   (get Q [s nil] 0.0))]))]
-                             {:U U :pi (rl/greedy-policy w Q) :agent (:state st) :label (str "trial " (:trial st))})
+    ("Q-learning" "SARSA") (let [Q (:Q (:memory st))]
+                             {:U (q-utilities Q) :pi (rl/greedy-policy w Q) :agent (:state st) :label (str "trial " (:trial st))})
     "REINFORCE" {:pi (into {} (for [s (:states w)] [s (let [d (rl/softmax-policy w (:theta st) s)] (when (seq d) (key (apply max-key val d))))]))
                  :U {} :label (str "trial " (:trial st))}))
 
@@ -62,6 +96,9 @@
       "ADP agent" (learner-states (rl/passive-adp-agent w fixed-policy) rng)
       "Q-learning" (learner-states (rl/q-learning-agent w {:ne 30 :rng rng}) rng)
       "SARSA" (learner-states (rl/sarsa-agent w {:epsilon 0.1 :rng rng}) rng)
+      "TD agent, linear U" (learner-states (rl/approximate-td-agent w fixed-policy xy [0.0 0.0 0.0] 0.01) rng)
+      "Q-learning, linear Q" (learner-states (rl/approximate-q-agent w linear-q (vec (repeat 12 0.0)) {:alpha 0.05 :rng rng}) rng)
+      "Q-learning, shaped" (learner-states (rl/q-learning-agent w {:ne 30 :potential toward-exit :rng rng}) rng)
       "REINFORCE" (map-indexed (fn [k theta] {:theta theta :trial k}) (rl/reinforce-seq w [0 0] 0.1 rng)))))
 
 (defn init! [^js container]
@@ -139,7 +176,8 @@
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
         (.onChange (.add gui controls "method" #js ["value iteration" "policy iteration" "TD agent" "ADP agent"
-                                                    "Q-learning" "SARSA" "REINFORCE"])
+                                                    "Q-learning" "SARSA" "REINFORCE" "TD agent, linear U"
+                                                    "Q-learning, linear Q" "Q-learning, shaped"])
                    restart!)
         (.add gui controls "speed" 0.25 20 0.25)
         (.add gui #js {:restart restart!} "restart"))

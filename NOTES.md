@@ -754,7 +754,9 @@ examples of chapter 19 are inlined in their test.
 | `allgo.learning.probabilistic`     | 20       | Bayesian, MAP and ML learning; parameters by counting and by beta and Dirichlet priors; Gaussian and linear Gaussian ML; structure by hill climbing with restarts; k-NN and kernel densities; EM for a naive Bayes mixture |
 | `allgo.learning.neural`            | 21       | Dense, convolutional, pooling, residual and batch-norm layers; back-propagation, minibatch SGD, weight decay, dropout |
 | `allgo.learning.generative`        | 21       | Probabilistic PCA by EM; linear and deep autoencoders; a variational autoencoder; Yule-Walker and deep autoregressive models; a GAN |
-| `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE |
+| `allgo.decision.reinforcement`     | 22       | Direct utility estimation, passive ADP and TD, Q-learning, SARSA, REINFORCE; safe exploration's Bayesian and robust policies; reward shaping; linear and deep function approximation, experience replay |
+| `allgo.decision.hierarchical`      | 22       | Hierarchical RL: partial programs with choose, learned by Q-learning over the joint state space |
+| `allgo.decision.apprenticeship`    | 22       | Imitation learning; inverse RL by feature matching; Boltzmann-rational likelihoods |
 | `allgo.language.parsing`           | 23       | CYK parsing with a probabilistic grammar; treebank trees; a grammar learned from a treebank, and by inside-outside |
 | `allgo.language.ngrams`            | 23       | N-gram models: Laplace and interpolated smoothing, EM for the weights, perplexity, <UNK>, sampling, language identification |
 | `allgo.language.tagging`           | 23       | Part-of-speech tagging with an HMM decoded by Viterbi                     |
@@ -895,6 +897,83 @@ weight decay, a deep network with batch normalization, and a residual
 network. Left out: momentum and learning-rate schedules, which 21.4
 mentions only as considerations; 21.7.2's transfer learning; and
 unsupervised translation, which points ahead to chapter 25.
+
+**The rest of chapter 22, from the 4th edition's text.** As with chapter
+21, each claim that could be checked is a test.
+
+- *Safe exploration* (22.3.2): the Bayesian and robust policies, each
+  chosen among given candidates. The test has two hypotheses about the
+  4 x 3 world, the pit costing 1 or 20. The Bayesian policy takes the
+  risk while the costly pit has probability 0.05, and not at 0.3. The
+  robust policy never takes it.
+- *Widrow-Hoff* (equation 22.10): the chapter's worked example passes.
+  With theta = (0.5, 0.2, 0.1), U(1,1) = 0.8, and an observed 0.4 lowers
+  each parameter by 0.4 alpha.
+- *The 10 x 10 claims* (22.4.1), checked by least squares on the trials'
+  examples, which the chapter also names:
+  - with +1 at (10,10), (1, x, y) fits the true utility to 0.015 rms;
+  - with +1 at (5,5), the pyramid, it cannot do better than 0.11;
+  - adding the distance to the goal brings that to 0.02.
+- *Online fitting* is noisier. The Widrow-Hoff rule and TD (equation
+  22.11) come within 0.06 and 0.08 rms over 2000 trials.
+  - The step must be small: the coordinates run to 10, and with alpha =
+    0.01 TD diverged, which is a step-size instability, not the
+    divergence the chapter warns of.
+  - Five trials from (1,1) leave most of the table empty, but the linear
+    estimate is good there too: the generalization the chapter
+    describes.
+- *Linear Q-learning* (equation 22.12) with Q linear in x and y for each
+  action comes within 0.02 of optimal on the (10,10) world.
+- *Deep Q-learning* (22.4.3): on a 5 x 5 world with +1 in the middle,
+  where no linear Q can do it, a network on (x, y) learns a nearly
+  optimal policy.
+  - It needed experience replay, centered inputs and 32 hidden units.
+    Earlier tries -- no replay, 16 units or inputs from 0 to 1 -- failed
+    in up to 600 trials: the chapter's
+    "delicate art".
+- *Reward shaping* (22.4.4): exact Q iteration shows that shaping by a
+  potential changes Q by exactly -Phi(s), and the optimal policy not at
+  all.
+  - The potential matters for learning speed. Shaping a sparse 10 x 10
+    world with Phi = -0.1 x distance made Q-learning far slower.
+  - Shaping by a potential works like starting Q at that potential, and
+    a negative one makes bumping into a wall, whose value settles toward
+    0, look better than moving on.
+  - With Phi = gamma^distance, an estimate of the utility, it cut
+    epsilon-greedy Q-learning's moves by about two thirds.
+  - A bonus that is not a potential difference changes what is optimal:
+    beside the goal, it makes the agent stay rather than finish.
+- *Hierarchical RL* (22.4.5): partial programs that choose, act or
+  compute, with Q-learning over the choice states of the joint state
+  space.
+  - The rewards between two choices are discounted by gamma^k, the
+    bookkeeping the chapter's footnote mentions.
+  - The trivial program, while true do choose(A(s)), is ordinary
+    Q-learning.
+  - In two rooms, a program choosing door or goal, with shaping by the
+    distance to the routine's target, learns in under half the moves
+    flat Q-learning takes. That target is no part of the physical
+    state.
+  - Flat Q-learning shaped by the distance to the goal was faster
+    still, since that potential is optimistic and drives exploration.
+    The chapter claims only that such advice cannot be given to a flat
+    learner, not that it beats everything.
+- *Inverse RL by feature matching* (22.6):
+  - Abbeel and Ng's projection method, in place of the chapter's
+    max-margin step, which needs a quadratic program.
+  - U(s) = theta . mu(pi) holds exactly.
+  - From 20 of the expert's trajectories, and never its reward, it finds
+    a policy as good as the expert's from the start and from every
+    state.
+  - Imitation learning from the same trajectories does worse, and worst
+    off the expert's path.
+  - Under Boltzmann rationality, R = 0 gives each choice probability 1/4
+    and the true reward explains the trajectories far better: the
+    chapter's argument against R = 0.
+
+The grid-world demo gains three learners: TD with a utility linear in x
+and y, Q-learning with Q linear in x and y for each action, and
+Q-learning shaped toward the +1 exit.
 
 **Chapter 20, checked against the book's numbers.** Written from the
 3rd edition's chapter 20, then checked against the 4th's: the same
