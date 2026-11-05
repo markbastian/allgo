@@ -31,15 +31,17 @@
 
 (defn model
   "An encoder-decoder over `vocab` with `cell` (`:rnn` or `:lstm`),
-  embeddings of `dim` and states of `hidden`."
-  [cell vocab dim hidden rng]
+  embeddings of `dim` and states of `hidden`. With `:attention false`,
+  the basic model of the chapter's Figure 24.6: the decoder knows the
+  source only by the encoder's last state, which it starts from."
+  [cell vocab dim hidden rng & {:keys [attention] :or {attention true}}]
   (let [v (count (:words vocab))
         enc (:params (rec/model cell vocab dim hidden rng))
         dec (:params (rec/model cell vocab dim hidden rng))]
-    {:cell cell :vocab vocab :hidden hidden
+    {:cell cell :vocab vocab :hidden hidden :attention attention
      :params (merge (into {} (map (fn [[k m]] [(keyword (str "enc-" (name k))) m]) (dissoc enc :Wy :by)))
                     (into {} (map (fn [[k m]] [(keyword (str "dec-" (name k))) m]) (dissoc dec :Wy :by)))
-                    {:Wo (ad/init (* 2 hidden) v rng) :bo [(vec (repeat v 0.0))]})}))
+                    {:Wo (ad/init (if attention (* 2 hidden) hidden) v rng) :bo [(vec (repeat v 0.0))]})}))
 
 (defn- sub-params [P prefix]
   (into {} (keep (fn [[k v]] (let [n (name k)] (when (str/starts-with? n prefix) [(keyword (subs n (count prefix))) v]))) P)))
@@ -53,15 +55,17 @@
     [(ad/stack-rows hs) st]))
 
 (defn- decode-step
-  "From decoder state `st` on token `t`: `[logits weights st']`."
-  [{:keys [cell]} P H st t]
+  "From decoder state `st` on token `t`: `[logits weights st']`, the
+  weights nil without attention."
+  [{:keys [cell attention]} P H st t]
   (let [D (sub-params P "dec-")
-        [h c] (rec/step cell D (ad/row (:E D) t) st)
-        ;; attention: the encoder states scored against h, softmaxed
-        weights (ad/softmax-rows (ad/transpose (ad/matmul H (ad/transpose h))))
-        context (ad/matmul weights H)
-        logits (ad/add-row (ad/matmul (ad/concat-cols [h context]) (:Wo P)) (:bo P))]
-    [logits weights [h c]]))
+        [h c] (rec/step cell D (ad/row (:E D) t) st)]
+    (if attention
+      ;; the encoder states scored against h, softmaxed
+      (let [weights (ad/softmax-rows (ad/transpose (ad/matmul H (ad/transpose h))))
+            context (ad/matmul weights H)]
+        [(ad/add-row (ad/matmul (ad/concat-cols [h context]) (:Wo P)) (:bo P)) weights [h c]])
+      [(ad/add-row (ad/matmul h (:Wo P)) (:bo P)) nil [h c]])))
 
 (defn- ids [{:keys [index]} tokens] (mapv index tokens))
 
@@ -99,7 +103,7 @@
   [m P H st0 prefix]
   (let [[_ ws p] (reduce (fn [[st ws _] t]
                            (let [[l w st] (decode-step m P H st t)]
-                             [st (conj ws (first (ad/value w))) (ad/softmax (first (ad/value l)))]))
+                             [st (cond-> ws w (conj (first (ad/value w)))) (ad/softmax (first (ad/value l)))]))
                          [st0 [] nil] prefix)]
     [p ws]))
 
@@ -118,15 +122,15 @@
           {:target (mapv (:words vocab) (rest prefix)) :attention ws}
           (recur (conj prefix nxt)))))))
 
-(defn beam
+(defn beam-search
   "The target by beam search of `width`: `allgo.search/beam-seq` over
-  prefixes, a step's cost minus the log probability of the token it
-  adds, a prefix ending `</s>` -- or `max-len` long -- the goal."
-  [{:keys [vocab params] :as m} source width & {:keys [max-len]}]
-  (let [P (consts params) [H st] (encode m P (ids vocab source))
-        max-len (or max-len (+ 2 (* 2 (count source))))
-        end ((:index vocab) rec/end)
-        dist (memoize (fn [prefix] (first (prefix-distribution m P H st prefix))))
+  prefixes of token indices from `<s>`, `(dist prefix)` the probability
+  of each next token, a step's cost minus the log probability of the
+  token it adds, a prefix ending `</s>` -- or `max-len` long -- the goal.
+  The target's tokens, the markers removed."
+  [vocab dist width max-len]
+  (let [end ((:index vocab) rec/end)
+        dist (memoize dist)
         found (search/path (search/goal-state
                             (search/beam-seq {:start [((:index vocab) rec/start)]
                                               :beam-width width
@@ -135,3 +139,11 @@
                                               :goal? (fn [prefix] (or (= end (peek prefix)) (> (count prefix) max-len)))})))]
     (when found
       (mapv (:words vocab) (remove #{end} (rest (peek found)))))))
+
+(defn beam
+  "The target `m` writes for `source` by a beam search of `width`, at
+  most `max-len` long (default twice the source plus 2)."
+  [{:keys [vocab params] :as m} source width & {:keys [max-len]}]
+  (let [P (consts params) [H st] (encode m P (ids vocab source))]
+    (beam-search vocab #(first (prefix-distribution m P H st %)) width
+                 (or max-len (+ 2 (* 2 (count source)))))))

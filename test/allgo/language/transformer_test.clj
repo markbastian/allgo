@@ -1,6 +1,8 @@
 (ns allgo.language.transformer-test
   (:require [allgo.language.parsing :as parsing]
+            [allgo.language.seq2seq :as s2s]
             [allgo.language.transformer :as tf]
+            [allgo.learning.autodiff :as ad]
             [allgo.random :as random]
             [clojure.test :refer [deftest is testing]]))
 
@@ -52,3 +54,32 @@
                         [i g] (map vector pos got)]
                     (contains? (tags-of g) (second (s i))))]
       (is (> (/ (double (count (filter true? results))) (count results)) 0.7)))))
+
+(deftest learned-positions-test
+  (testing "with a learned embedding for each position, as the chapter has it, in place of the sinusoids: every word tagged right"
+    (let [{:keys [train test vocab]} @data
+          m (:model (nth (tf/train-tagger-seq (tf/tagger (tf/encoder vocab 16 2 32 1 (random/rng 2) :max-len 8) tags (random/rng 3)) train) 800))]
+      (is (= 1.0 (tf/tag-accuracy m test))))))
+
+(deftest causal-mask-test
+  (testing "each position may look at itself and those before it"
+    (is (= [[0.0 -1e9 -1e9] [0.0 0.0 -1e9] [0.0 0.0 0.0]] (tf/causal-mask 3))))
+  (testing "so the decoder's outputs at a position are untouched by the tokens after it"
+    (let [m (tf/encoder-decoder (s2s/vocabulary (range 5)) 8 2 16 1 (random/rng 1))
+          P (into {} (map (fn [[k v]] [k (ad/const v)]) (:params m)))
+          [H] (tf/encode m P [2 3 4])
+          out #(ad/value (first (#'tf/decode m P H %)))
+          a (out [0 2 3 4])
+          b (out [0 2 5 6])]
+      (is (= (take 2 a) (take 2 b)))
+      (is (not= (drop 2 a) (drop 2 b))))))
+
+(deftest encoder-decoder-test
+  (testing "the whole transformer, encoder and decoder, reverses strings of six to eight digits it has not seen"
+    (let [rng (random/rng 1)
+          digits #(vec (repeatedly (+ 6 (random/below rng 3)) (fn [] (random/below rng 5))))
+          pairs (vec (repeatedly 500 (fn [] (let [d (digits)] [d (vec (reverse d))]))))
+          tests (vec (repeatedly 30 digits))
+          m (:model (nth (tf/train-translator-seq (tf/encoder-decoder (s2s/vocabulary (range 5)) 16 2 32 1 (random/rng 2)) pairs) 2000))]
+      (is (>= (count (filter #(= (vec (reverse %)) (:target (tf/translate m %))) tests)) 29))
+      (is (= 10 (count (filter #(= (vec (reverse %)) (:target (tf/translate m % :beam 3))) (take 10 tests))))))))

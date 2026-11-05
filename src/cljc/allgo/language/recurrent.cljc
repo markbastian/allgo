@@ -231,9 +231,10 @@
   [m P tagged]
   (ad/cross-entropy (tag-logits m P (mapv first tagged)) (mapv #((:tag-index m) (second %)) tagged)))
 
-(defn- adam-seq
-  "Adam on `loss` over `examples` in turn, clipped at 5, `only` the named
-  parameters moved if given: `{:model :loss}` each step."
+(defn adam-seq
+  "Adam on `(loss m P example)` over `examples` in turn, clipped at 5,
+  `only` the named parameters moved if given: `{:model :loss}` each step,
+  the loss that example's before its step."
   [m examples loss lr only]
   (let [examples (vec examples)]
     (map first
@@ -269,6 +270,54 @@
                   :when (only? w i)]
               (= t g))]
      (/ (double (count (filter true? rs))) (max 1 (count rs))))))
+
+;; ---------------------------------------------------------------------------
+;; Classifying whole sentences
+
+(defn classifier
+  "A sentence classifier, section 24.2.2: embeddings of `dim`, a
+  recurrent layer of `cell` with `hidden` units, its hidden vectors
+  pooled into one for the sentence -- `:last`, the state after the last
+  word, which has read it all but most recently its end, or `:mean`,
+  average pooling, every word's state weighed alike -- then a
+  feed-forward layer of `hidden` and a softmax over `classes`."
+  [cell vocab classes dim hidden pooling rng]
+  (let [classes (vec classes) zeros #(vector (vec (repeat % 0.0)))]
+    {:cell cell :vocab vocab :hidden hidden :layers 1 :bidirectional false :pooling pooling
+     :classes classes :class-index (zipmap classes (range))
+     :params (merge {:E (ad/init (count (:words vocab)) dim rng)
+                     :Wf (ad/init hidden hidden rng) :bf (zeros hidden)
+                     :Wc (ad/init hidden (count classes) rng) :bc (zeros (count classes))}
+                    (cell-params cell dim hidden (direction-prefix 0 :f) rng))}))
+
+(defn- class-logits [m P words]
+  (let [hs (encode-sequence m P (mapv #(ad/row (:E P) %) (word-ids (:vocab m) words)))
+        z (case (:pooling m)
+            :last (peek hs)
+            :mean (ad/scale (reduce ad/add hs) (/ 1.0 (count hs))))]
+    (ad/add-row (ad/matmul (ad/tanh (ad/add-row (ad/matmul z (:Wf P)) (:bf P))) (:Wc P)) (:bc P))))
+
+(defn class-loss
+  "The cross-entropy of the class of one example, `[words class]`."
+  [m P [words class]]
+  (ad/cross-entropy (class-logits m P words) [((:class-index m) class)]))
+
+(defn train-classifier-seq
+  "The classifier trained on `examples`, each `[words class]`, an example
+  a step: `{:model :loss}`."
+  [m examples & {:keys [lr] :or {lr 0.01}}]
+  (adam-seq m examples class-loss lr nil))
+
+(defn classify
+  "The class `m` gives `words`."
+  [m words]
+  (let [row (first (ad/value (class-logits m (consts (:params m)) words)))]
+    ((:classes m) (apply max-key row (range (count row))))))
+
+(defn class-accuracy
+  "The fraction of `examples`, `[words class]`, classified right."
+  [m examples]
+  (/ (double (count (filter (fn [[ws c]] (= c (classify m ws))) examples))) (max 1 (count examples))))
 
 ;; ---------------------------------------------------------------------------
 ;; A bidirectional language model: contextual embeddings

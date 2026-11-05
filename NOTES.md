@@ -1621,9 +1621,10 @@ known.
 |----------------------------------|----------------------------------------------------------------------------|
 | `allgo.learning.autodiff`        | Reverse-mode differentiation over matrices; Adam and clipping              |
 | `allgo.language.embeddings`      | Skip-gram with negative sampling; GloVe; similarity, nearest words, analogies, a 2-D projection |
-| `allgo.language.recurrent`       | Language models with an RNN or an LSTM cell; sampling, perplexity; stacked and bidirectional taggers; a bidirectional language model's contextual embeddings, probed and fine-tuned |
-| `allgo.language.seq2seq`         | An encoder-decoder with attention; greedy and beam decoding                |
-| `allgo.language.transformer`     | Multi-head self-attention, positional encoding, layer norm; tagging, masked language modeling, fine-tuning |
+| `allgo.language.window`          | The feed-forward tagger over a window of words, learning its embeddings as it tags |
+| `allgo.language.recurrent`       | Language models with an RNN or an LSTM cell; sampling, perplexity; stacked and bidirectional taggers; sentence classification by the last state or average pooling; a bidirectional language model's contextual embeddings, probed and fine-tuned |
+| `allgo.language.seq2seq`         | An encoder-decoder, basic or with attention; greedy and beam decoding      |
+| `allgo.language.transformer`     | Multi-head self-attention, sinusoidal or learned positions, layer norm; tagging, masked language modeling, fine-tuning; the decoder, masked and attending to the encoder, and the whole encoder-decoder |
 | `allgo.language.parsing`         | Chapter 23's CYK and treebank code, moved from `allgo.language`, now also sampling sentences from a grammar |
 
 **One differentiation, every architecture.** Back-propagation through
@@ -1750,6 +1751,61 @@ in miniature: it pays when the labels cover little of the vocabulary and
 unlabeled text covers it all. The transformer's masked language model,
 above, met the other case: twenty labeled sentences that cover a small
 grammar already teach it all.
+
+### The rest of chapter 24
+
+**The window tagger** (`allgo.language.window`) follows section 24.1's
+numbered procedure: a window of w words around the one to tag, a
+vocabulary of the words seen more than a minimum count with the rest
+`<unk>`, an embedding matrix learned with the tagger, the window's
+embeddings concatenated so that each position meets its own part of
+the first layer, then two sigmoid layers and a softmax. On the grammar
+whose first word only the next one decides, a window of one word is at
+chance, 49%, and a window of three tags all of them. On the 61-word
+grammar with 30 labeled sentences it tags the test words never labeled
+95-97% right from their windows alone. Raising the minimum count, so
+that rare words teach the `<unk>` embedding, did not help there: 88-89%
+at one, 84-86% at two. The window already carries what an unknown word
+needs.
+
+**Classifying sentences** (`rec/classifier`, section 24.2.2) pools a
+recurrent layer's states into one vector: the last state, or their
+average. Reviews whose verdict is the fourth word and the ten to twelve
+after it say nothing show the bias the section warns of. The last
+state's classifier, a plain RNN, was at chance on seven seeds of eight
+(42-50%), and averaging got every review on all eight. With two to four
+words after the verdict, the last state gets all of them too.
+
+**The basic sequence-to-sequence model** (`s2s/model ... :attention
+false`), the section's Figure 24.6, knows the source only by the
+encoder's last state. Reversing digits, an LSTM so built reversed 23 of
+30 strings of three to five digits (26 at 1,500 steps) and none of six
+to eight, at 1,000 steps or 1,500: the fixed context size limit. Its
+first two outputs, the source's last digits, were right on 20 and 18 of
+30, the rest near 12 -- the nearby-context bias as well. With attention
+a plain RNN reversed all 30 of the long ones.
+
+**The transformer's decoder** (`tf/encoder-decoder`), which section
+24.4.2 describes in words: each layer's self-attention masked so that a
+position sees only those before it (`causal-mask`, -1e9 added to the
+scores of later ones), then a second attention, to the encoder's
+output, then the feed-forward network, each with its residual and
+normalization. Trained teacher forced, it reverses all 30 unseen strings
+of six to eight digits after 2,000 pairs, greedily and by beam search.
+At the taggers' rate, 0.01, it never learned; at 0.005 it did, so that
+is its default. Its attention to the source is not the clean
+anti-diagonal of the recurrent model's: the encoder's self-attention can
+move each digit's identity to other positions first, so the test claims
+none. The beam search is now `s2s/beam-search`, shared by both models.
+
+**Learned positions.** The chapter's transformer learns an embedding for
+each position, not the sinusoids of Vaswani et al.; `encoder` takes
+`:max-len` to do so. Both tag every held-out word of the ambiguous
+grammar.
+
+**Left out:** coreference resolution as a softmax over
+antecedents, and a character-level model, which the chapter mentions in
+passing -- the recurrent models take any tokens, characters among them.
 
 **Not implemented here:** ELMo's learned weighting of layers and its
 character convolutions; anything at the scale of BERT or GPT, whose point

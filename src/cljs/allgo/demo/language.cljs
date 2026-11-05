@@ -9,8 +9,12 @@
   king -> queen; or by GloVe, fitting the table of how often words occur
   together, an epoch a step. Language model: a recurrent network reading grammar
   sentences, its perplexity falling and its own sentences growing
-  grammatical. Attention: an encoder-decoder learning to reverse digits,
-  its attention weights a grid that turns into the anti-diagonal. Tagging:
+  grammatical. Pooling: two recurrent classifiers of reviews whose
+  verdict is far from their end, one reading the last state, which loses
+  it, and one averaging every word's. Attention: an encoder-decoder
+  learning to reverse digits, its attention weights a grid that turns
+  into the anti-diagonal; Encoder-decoder: the whole transformer learning
+  the same, its decoder's attention to the source beside it. Tagging:
   a transformer learning parts of speech where a word can be two -- the
   duck will duck -- and one head's attention over the sentence.
   Bidirectional: two recurrent taggers learning sentences whose first
@@ -129,6 +133,16 @@
 
 (defn- digits [rng] (vec (repeatedly (+ 3 (random/below rng 3)) #(random/below rng 5))))
 
+(defn- review
+  "A review whose verdict is its fourth word, then ten to twelve words
+  that say nothing: `[words class]`."
+  [rng]
+  (let [good? (zero? (random/below rng 2))
+        verdict (random/pick rng (if good? ["great" "moving" "superb" "fine" "clever"] ["awful" "dull" "poor" "weak" "clumsy"]))
+        filler ["and" "the" "film" "was" "shot" "in" "a" "town" "by" "river" "with" "its" "cast" "of" "actors" "over" "summer"]]
+    [(into ["this" "movie" "was" verdict] (repeatedly (+ 10 (random/below rng 3)) #(random/pick rng filler)))
+     (if good? :positive :negative)]))
+
 (defn- init [method]
   (let [rng (random/rng (.-seed controls))]
     (case method
@@ -155,6 +169,15 @@
                           :test (subvec sents 300) :rng rng :steps 0 :losses []})
       "attention" (let [pairs (vec (repeatedly 500 (fn [] (let [d (digits rng)] [d (vec (reverse d))]))))]
                     {:states (s2s/train-seq (s2s/model :rnn (s2s/vocabulary (range 5)) 8 16 rng) pairs) :steps 0 :losses []})
+      "encoder-decoder" (let [pairs (vec (repeatedly 500 (fn [] (let [d (digits rng)] [d (vec (reverse d))]))))]
+                          {:states (tf/train-translator-seq (tf/encoder-decoder (s2s/vocabulary (range 5)) 16 2 32 1 rng) pairs)
+                           :steps 0 :losses []})
+      "pooling" (let [data (vec (repeatedly 330 #(review rng)))
+                      vocab (rec/vocabulary (map first data))
+                      classifier (fn [pooling] (rec/classifier :rnn vocab [:positive :negative] 8 12 pooling (random/rng (+ 2 (.-seed controls)))))]
+                  {:pair [(rec/train-classifier-seq (classifier :last) (subvec data 0 300))
+                          (rec/train-classifier-seq (classifier :mean) (subvec data 0 300))]
+                   :test (subvec data 300) :steps 0})
       ;; a new sentence every two seconds or so
       "parsing" {:models (mapcat #(repeat 150 %) (map parsed (repeatedly #(mapv first (parsing/generate parsing/ambiguous-grammar rng)))))
                  :steps 0 :paced true}
@@ -234,6 +257,8 @@
                              "inside-outside" (draw-inside-outside! cw ch)
                              "language model" (draw-lm! cw ch)
                              "attention" (draw-attention! cw ch)
+                             "encoder-decoder" (draw-encoder-decoder! cw ch)
+                             "pooling" (draw-pooling! cw ch)
                              "tagging" (draw-tagging! cw ch)
                              "parsing" (draw-parsing! cw ch)
                              "semantics" (draw-semantics! cw ch))))))
@@ -339,6 +364,40 @@
                     (heatmap! (vec (take 6 attention)) 160 290 cell (concat target ["</s>"]) probe-digits))
                   (str steps " pairs seen  |  " (str/join " " probe-digits) " -> " (str/join " " target)
                        "\nrows: each output token; columns: the source; bright where the decoder attends -- reversing, the anti-diagonal"))))
+            (draw-encoder-decoder! [cw ch]
+              (let [{:keys [states steps losses]} @model
+                    m (:model (first states))]
+                (when (zero? (mod steps 10))
+                  (swap! model assoc :probe (tf/translate m probe-digits)))
+                (let [{:keys [target attention]} (:probe @model)
+                      cell (min 60 (/ (- ch 260) 7))]
+                  (loss-curve! losses 40 140 (- cw 80) 80)
+                  (when attention
+                    (heatmap! (vec (take 6 attention)) 160 290 cell (concat target ["</s>"]) probe-digits))
+                  (str steps " pairs seen  |  " (str/join " " probe-digits) " -> " (str/join " " target)
+                       "\nthe transformer, encoder and decoder, learning to reverse; the grid: the decoder's attention to the source, its heads averaged"
+                       " -- the encoder's own attention moves the digits about first, so it need not be the anti-diagonal"))))
+            (draw-pooling! [_cw _ch]
+              (let [{:keys [pair test steps]} @model
+                    models (mapv (comp :model first) pair)]
+                ;; the held-out reviews classified by both, every hundred
+                ;; reviews trained
+                (when (>= steps (get @model :checked -100))
+                  (swap! model assoc :checked (+ steps 100)
+                         :scores (mapv #(rec/class-accuracy % test) models)
+                         :shown (mapv (fn [m] (mapv #(rec/classify m (first %)) (take 4 test))) models)))
+                (let [{:keys [scores shown]} @model]
+                  (doseq [[col label] (map vector [0 1] ["the last state" "average pooling"])]
+                    (let [x (+ 40 (* col 520))]
+                      (text! label x 140 "#9fb4d8" 13)
+                      (when scores (text! (str (.toFixed (* 100 (scores col)) 0) "% of unseen reviews right") x 162 "#e6edf7" 13))
+                      (doseq [[i [ws c]] (map-indexed vector (take 4 test))]
+                        (let [y (+ 210 (* 56 i)) got (get-in shown [col i])]
+                          (text! (str/join " " (take 7 ws)) x y "#e6edf7" 13)
+                          (text! "..." (+ x 330) y "#e6edf7" 13)
+                          (when got (text! (name got) x (+ y 20) (if (= c got) "#7dffa0" "#ff8f70") 13))))))
+                  (str (quot steps 2) " reviews each"
+                       "\nthe verdict is the fourth word of fourteen or so: the last state has read the whole review but holds its end; pooling every word's state keeps the verdict"))))
             (draw-tagging! [cw ch]
               (let [{:keys [states steps losses]} @model
                     m (:model (first states))]
@@ -437,7 +496,7 @@
                   (set! (.-width canvas) cw)
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "attention" "tagging" "bidirectional" "n-grams" "inside-outside" "parsing" "semantics"]) restart!)
+        (.onChange (.add gui controls "method" #js ["embeddings" "GloVe" "language model" "pooling" "attention" "encoder-decoder" "tagging" "bidirectional" "n-grams" "inside-outside" "parsing" "semantics"]) restart!)
         (.onChange (.add gui controls "cell" #js ["lstm" "rnn"]) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui #js {:restart restart!} "restart"))

@@ -130,3 +130,29 @@
       (is (zero? (:unseen many)))
       (is (= 1.0 (first (:scratch many))))
       (is (>= (first (:scratch many)) (first (:probe many)))))))
+
+(defn- review
+  "A review whose verdict is its fourth word, followed by `tail` to
+  `tail` + 2 words that say nothing: `[words class]`."
+  [rng tail]
+  (let [pick #(nth % (random/below rng (count %)))
+        good? (zero? (random/below rng 2))
+        verdict (if good? (pick ["great" "moving" "superb" "fine" "clever"]) (pick ["awful" "dull" "poor" "weak" "clumsy"]))
+        filler ["and" "the" "film" "was" "shot" "in" "a" "town" "by" "river" "with" "its" "cast" "of" "actors" "over" "summer"]]
+    [(into ["this" "movie" "was" verdict] (repeatedly (+ tail (random/below rng 3)) #(pick filler)))
+     (if good? :positive :negative)]))
+
+(deftest sentence-classification-test
+  (let [run (fn [tail pooling seed]
+              (let [rng (random/rng 1)
+                    data (vec (repeatedly 400 #(review rng tail)))
+                    m (rec/classifier :rnn (rec/vocabulary (map first data)) [:positive :negative] 8 12 pooling (random/rng seed))]
+                (rec/class-accuracy (:model (nth (rec/train-classifier-seq m (subvec data 0 300)) 300)) (subvec data 300))))]
+    (testing "with the verdict near the end, the last state classifies every review"
+      (is (= 1.0 (run 2 :last 3))))
+    (testing "ten words further back, the last state has lost it -- the bias toward the end the chapter warns of"
+      (is (< (run 10 :last 3) 0.6))
+      (is (< (run 10 :last 4) 0.6)))
+    (testing "average pooling weighs every word's state alike, and still classifies every one"
+      (is (= 1.0 (run 10 :mean 3)))
+      (is (= 1.0 (run 10 :mean 4))))))
