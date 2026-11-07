@@ -18,6 +18,9 @@
     hysteresis  pixels over `high` start edges, and edges grow into
                 touching pixels over `low`, a ring a step
 
+  and then the edge pixels linked into curves: neighbors whose
+  orientations agree belong to the same one.
+
   Texture is described by what edges there are, regardless of where:
   `orientation-histograms` counts, in each cell of a grid, the gradient
   orientations weighted by their magnitude -- the descriptor the chapter
@@ -100,3 +103,40 @@
                                   (for [y (range (* cy cell) (* (inc cy) cell)) x (range (* cx cell) (* (inc cx) cell))] [x y]))
                      s (reduce + hist)]
                  [[cx cy] (if (pos? s) (mapv #(/ % s) hist) hist)])))))
+
+(defn- turn
+  "The angle between two edge orientations, which are lines, not
+  arrows: folded into [0, pi / 2]."
+  [a b]
+  (let [d (mod (- a b) math/PI)] (min d (- math/PI d))))
+
+(defn link-seq
+  "Edge pixels linked into curves, as the chapter links them: two
+  neighboring edge pixels belong to the same curve when their
+  orientations (from `orient`, an image of gradient angles) differ by no
+  more than `max-turn` radians. A curve grows a ring of neighbors a step
+  from an unlinked pixel, and the next curve starts when it stops: each
+  state `{:curves :curve :frontier :left}`."
+  [edges orient max-turn]
+  (let [angle (fn [[x y]] (img/at orient x y))
+        start (fn [curves left]
+                (if-let [p (first left)]
+                  {:curves curves :curve #{p} :frontier #{p} :left (disj left p)}
+                  {:curves curves :curve nil :frontier nil :left left}))]
+    (take-while some?
+                (iterate (fn [{:keys [curves curve frontier left]}]
+                           (cond
+                             (seq frontier)
+                             (let [new (set (for [p frontier q (neighbors8 p)
+                                                  :when (and (left q) (<= (turn (angle p) (angle q)) max-turn))]
+                                              q))]
+                               {:curves curves :curve (into curve new) :frontier new :left (reduce disj left new)})
+                             curve (start (conj curves curve) left)
+                             :else nil))
+                         (start [] (into (sorted-set) edges))))))
+
+(defn link
+  "The curves `link-seq` finds, largest first: a vector of sets of `[x
+  y]`."
+  [edges orient max-turn]
+  (vec (sort-by (comp - count) (:curves (last (link-seq edges orient max-turn))))))

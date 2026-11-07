@@ -30,7 +30,10 @@
               occluder's outline runs on and the other's stops against
               it -- a T-junction, the occluder the bar of the T, covering
               about half the ground round it; the junctions, voted, give
-              which region is in front of which.
+              which region is in front of which. Objects of one known
+              height place the horizon by how their size goes with
+              how low their feet are, and the horizon rules out
+              detections no such object could make.
 
   Images are `allgo.vision.image`'s; a mask is an image of booleans. In
   the shading the image's x runs right and y down, and a normal `[nx ny
@@ -233,6 +236,59 @@
   cy). The focal length cancels."
   [cy camera-height v-foot v-top]
   (/ (* (double camera-height) (- (double v-foot) (double v-top))) (- (double v-foot) (double cy))))
+
+(defn- line-fit
+  "The least-squares line h = a v + b through `points` `[v h]`: `[a b]`."
+  [points]
+  (let [n (count points)
+        sv (reduce + (map first points)) sh (reduce + (map second points))
+        svv (reduce + (map #(* (first %) (first %)) points)) svh (reduce + (map #(* (first %) (second %)) points))
+        a (/ (- (* n svh) (* sv sh)) (- (* n svv) (* sv sv)))]
+    [a (/ (- sh (* a sv)) n)]))
+
+(defn- horizon-fit [kept]
+  (let [[a b] (line-fit (map (juxt :foot :height) kept))]
+    {:kept kept :scale a :horizon (/ (- b) a)}))
+
+(defn- off-line
+  "How far `d`'s height is from the line's, as a fraction of it."
+  [{:keys [horizon scale]} {:keys [foot height]}]
+  (/ (abs (- height (* scale (- foot horizon)))) height))
+
+(defn horizon-seq
+  "The horizon from `detections` of objects all of one height standing on
+  the ground -- pedestrians -- each `{:foot :height}`, the row of its foot
+  and its height in the image, for a level camera: an object H tall at
+  depth Z has its foot f c / Z below the horizon, c the camera's height,
+  and is f H / Z tall, so its height is (H / c) (v-foot - horizon) -- a
+  line, zero at the horizon. Section 25.6.4's two ways round: the
+  detections place the horizon, and the horizon rules out detections no
+  pedestrian could make, too big or too small for where their feet are.
+
+  One wrong detection far from the rest can drag a least-squares line
+  anywhere, so the start is the consensus: of the lines through every
+  pair of detections, the one most of the others lie within `tolerance`
+  of (as a fraction of their heights). A step fits the line by least
+  squares to the detections kept and keeps those within the tolerance of
+  it; the states `{:kept :dropped :horizon :scale}`, until the kept stop
+  changing."
+  [detections tolerance]
+  (let [ds (vec detections)
+        within (fn [fit] (filterv #(<= (off-line fit %) tolerance) ds))
+        pairs (for [i (range (count ds)) j (range (inc i) (count ds))
+                    :when (not= (:foot (ds i)) (:foot (ds j)))]
+                (horizon-fit [(ds i) (ds j)]))
+        start (apply max-key (comp count within) pairs)
+        step (fn [{:keys [kept]}]
+               (let [fit (horizon-fit kept)]
+                 (assoc fit :kept (within fit) :dropped (filterv #(> (off-line fit %) tolerance) ds))))
+        states (iterate step (step {:kept (within start)}))]
+    (into [(first states)] (map second (take-while (fn [[a b]] (not= (:kept a) (:kept b))) (partition 2 1 states))))))
+
+(defn horizon
+  "The last of `horizon-seq`: `{:kept :dropped :horizon :scale}`."
+  [detections tolerance]
+  (peek (horizon-seq detections tolerance)))
 
 (defn t-junctions
   "Where three regions of `labels` meet: the corners shared by a 2 by 2

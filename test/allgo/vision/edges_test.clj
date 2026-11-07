@@ -38,3 +38,20 @@
       (is (= [1.0 0.0 0.0 0.0] (h (stripes true))))
       (is (= [0.0 0.0 1.0 0.0] (h (stripes false))))
       (is (= [0.0 0.0 0.0 0.0] (h (img/image 32 32 (constantly 0.5)))) "and a flat patch has none"))))
+
+(deftest linking-test
+  (let [scene (img/add-noise (img/render 64 48 0.2 [{:kind :rect :box [8 8 28 30] :value 0.8}
+                                                    {:kind :disk :center [46 24] :radius 10 :value 0.7}])
+                             0.03 (random/rng 1))
+        es (edges/canny scene)
+        orient (img/orientation (img/gradients (img/smooth scene 1.0)))
+        object (fn [curve] (if (every? #(< (first %) 32) curve) :square (when (every? #(> (first %) 32) curve) :disk)))]
+    (testing "neighboring edge pixels whose orientations agree within 29 degrees make one curve round each object"
+      (let [curves (edges/link es orient 0.5)]
+        (is (= [:square :disk] (map object curves)))
+        (is (= (count es) (reduce + (map count curves))))))
+    (testing "within 17 degrees, the square's corners turn too sharply: its four sides are curves of their own, and no curve takes in both objects"
+      (let [curves (edges/link es orient 0.3)
+            sides (filter #(and (= :square (object %)) (> (count %) 10)) curves)]
+        (is (= 4 (count sides)))
+        (is (every? object curves))))))

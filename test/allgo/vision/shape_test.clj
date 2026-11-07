@@ -113,3 +113,24 @@
           right (fn [ps] (count (filter (fn [[a b]] (> (long a) (long b))) ps)))]
       (is (< 0.95 (/ (reduce + (map right pairs)) (reduce + (map count pairs)))))
       (is (<= 30 (count (filter #(= (right %) (count %)) pairs)))))))
+
+(deftest horizon-test
+  ;; a camera 1.6 m up, focal length 500, the horizon at row 110; people
+  ;; 1.75 m tall from 4 to 34 m away
+  (let [rng (random/rng 1) f 500.0 c 1.6 tall 1.75 v0 110.0
+        people (vec (for [z (repeatedly 12 #(+ 4.0 (* 30 (rng))))]
+                      {:foot (random/gaussian rng (+ v0 (/ (* f c) z)) 0.5) :height (random/gaussian rng (/ (* f tall) z) 0.5)}))
+        giant {:foot 125.0 :height 160.0}
+        dwarf {:foot 300.0 :height 20.0}
+        {:keys [horizon scale kept dropped]} (shape/horizon (conj people giant dwarf) 0.2)]
+    (testing "people's sizes against where their feet are place the horizon, to within a pixel, and give their height over the camera's"
+      (is (< (abs (- horizon v0)) 1.0))
+      (is (< (abs (- scale (/ tall c))) 0.02)))
+    (testing "and the horizon rules out what no person could be: a giant near it, a dwarf at the bottom"
+      (is (= #{giant dwarf} (set dropped)))
+      (is (= 12 (count kept))))
+    (testing "least squares alone would not do: the giant drags the line, and the horizon with it"
+      (let [ds (conj people giant dwarf)
+            n (count ds) sv (reduce + (map :foot ds)) sh (reduce + (map :height ds))
+            a (/ (- (* n (reduce + (map #(* (:foot %) (:height %)) ds))) (* sv sh)) (- (* n (reduce + (map #(* (:foot %) (:foot %)) ds))) (* sv sv)))]
+        (is (> (abs (- (/ (- (* a sv) sh) (* a n)) v0)) 50))))))

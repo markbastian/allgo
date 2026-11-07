@@ -23,13 +23,22 @@
   search: regions merging a step, every one a proposal. Anchors and
   regression: objectness learned an epoch a frame, then the box
   regression an example at a time, and the proposals moved onto their
-  objects."
+  objects. Boundaries: Canny's edges on regions told apart by texture,
+  then the learned Pb's. Normalized cuts: superpixels, then the image
+  cut where the second eigenvector says, a cut a step. Time to contact:
+  flying at a textured wall, the flow, its focus of expansion and the
+  time to contact it gives. Horizon: pedestrian detections placing the
+  horizon and the horizon ruling out the impossible ones. Light and
+  color: a shiny sphere and colored patches under orange light, the
+  light's color estimated and divided out beside the scene under white
+  light."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.graph :as graph]
             [allgo.learning.neural :as neural]
             [allgo.learning.unsupervised :as unsupervised]
             [allgo.random :as random]
+            [allgo.vision.boundaries :as bd]
             [allgo.vision.camera :as camera]
             [allgo.vision.detection :as det]
             [allgo.vision.edges :as edges]
@@ -174,6 +183,56 @@
 
 (defn- found [truth boxes t] (count (filter (fn [g] (some #(>= (det/iou g %) t) boxes)) truth)))
 
+(defn- textured
+  "Horizontal stripes behind a square of vertical ones, a square of dots
+  and a plain disk: `[image labels]`."
+  [rng]
+  (let [stripes (fn [vertical?] (fn [x y] (if (< (mod (if vertical? x y) 4) 2) 0.25 0.75)))
+        dots (fn [x y] (if (and (< (mod x 5) 2) (< (mod y 5) 2)) 0.9 0.4))
+        shapes (vec (for [t [(stripes true) dots 0.8]]
+                      (let [x (+ 4 (long (* (rng) 24))) y (+ 4 (long (* (rng) 24))) s (+ 12 (long (* (rng) 8)))]
+                        (if (fn? t)
+                          {:kind :rect :box [x y (+ x s) (+ y s)] :texture t}
+                          {:kind :disk :center [(+ x 6) (+ y 6)] :radius 7 :value t}))))]
+    [(img/add-noise (img/render 48 48 (stripes false) shapes) 0.03 rng)
+     (img/render 48 48 0 (map-indexed (fn [i s] (-> s (dissoc :texture) (assoc :value (inc i)))) shapes))]))
+
+(def ^:private pb-thetas (mapv #(* % (/ math/PI 8)) (range 8)))
+
+(defn- gray-shapes
+  "Three gray shapes on a darker ground, with noise."
+  [rng]
+  (img/add-noise (img/render 48 36 0.15 [{:kind :rect :box [(+ 3 (random/below rng 6)) (+ 3 (random/below rng 6)) (+ 18 (random/below rng 6)) (+ 24 (random/below rng 8))] :value 0.75}
+                                         {:kind :disk :center [(+ 32 (random/below rng 6)) (+ 14 (random/below rng 8))] :radius (+ 6 (random/below rng 3)) :value 0.45}
+                                         {:kind :rect :box [(+ 24 (random/below rng 4)) (+ 26 (random/below rng 3)) (+ 44 (random/below rng 3)) (+ 33 (random/below rng 3))] :value 0.6}])
+                 0.05 rng))
+
+(defn- wall
+  "A textured wall seen from `z`, `z0` the distance its pattern is drawn
+  at: nearer, it fills more of the view."
+  [pat z0 z]
+  (let [s (/ z0 z)]
+    (img/image 64 64 (fn [x y] (pat (+ 32 (/ (- (+ x 0.5) 32) s)) (+ 32 (/ (- (+ y 0.5) 32) s)))))))
+
+(defn- street
+  "Detections of pedestrians 1.75 m tall from a camera 1.6 m up with focal
+  length 300 and its horizon at row `v0`, and two no pedestrian could
+  make."
+  [rng v0]
+  (concat (for [z (repeatedly 10 #(+ 4.0 (* 26 (rng))))]
+            {:foot (random/gaussian rng (+ v0 (/ (* 300 1.6) z)) 0.5) :height (random/gaussian rng (/ (* 300 1.75) z) 0.5) :x (* 150 (rng))})
+          [{:foot (+ v0 12) :height 70.0 :x (* 150 (rng))} {:foot (+ v0 100) :height 15.0 :x (* 150 (rng))}]))
+
+(defn- lit-scene
+  "Colored patches facing the viewer and a shiny sphere before them, lit
+  by `color` from `dir`: patches of the given albedos in a grid."
+  [albedos dir color]
+  (img/image 72 48 (fn [x y]
+                     (let [dx (/ (- x 36) 16.0) dy (/ (- y 24) 16.0) r2 (+ (* dx dx) (* dy dy))]
+                       (if (< r2 1.0)
+                         (camera/shade {:albedo [0.85 0.85 0.85] :specular 0.4 :shininess 25} [dx dy (math/sqrt (- 1.0 r2))] dir [0.0 0.0 1.0] color 0.1)
+                         (camera/shade {:albedo (albedos (+ (* 6 (quot y 8)) (quot x 12)))} [0.0 0.0 1.0] dir [0.0 0.0 1.0] color 0.1))))))
+
 (defn- jitter
   "A box near `g`, overlapping it by at least a half."
   [rng g]
@@ -274,6 +333,47 @@
           ;; which region each starting one is now part of
           parents (rest (reductions (fn [m st] (if-let [[a b n] (:merged st)] (assoc m a n b n) m)) {} states))]
       (map (fn [st parent] {:left image :truth truth :labels labels :ss st :parent parent}) states parents))
+
+    "boundaries"
+    (let [w (nth (bd/train-seq (bd/examples (vec (repeatedly 3 #(textured rng))) 50 3 5 pb-thetas 8 1.0 rng) 1.0) 300)
+          [image labels] (textured rng)
+          truth (bd/true-boundary labels)]
+      ;; Pb only once the edges have been shown: it takes a moment
+      (cons {:left image :truth truth :edges (edges/canny image)}
+            (lazy-seq [{:left image :truth truth :edges (edges/canny image) :pb (bd/thin (bd/pb w image 5 pb-thetas 8 1.0))}])))
+
+    "normalized cuts"
+    (let [image (gray-shapes rng)
+          graph (seg/superpixel-graph image 0.05 8 0.1)]
+      (cons {:left image :superpixels graph}
+            (map (fn [st] {:left image :ncut st}) (seg/normalized-cuts-seq image {}))))
+
+    "time to contact"
+    (let [pat (img/pattern rng 12 9.0)]
+      (map (fn [t] (let [z (- 20.0 (* 0.5 t)) a (wall pat 20.0 z) b (wall pat 20.0 (- z 0.5))
+                         field (flow/flow-field a b 6 10 4 3 :lucas-kanade)
+                         foe (flow/focus-of-expansion field)]
+                     {:left a :flow field :foe foe :truth (/ (- z 0.5) 0.5)
+                      :ttc (when foe (let [ts (for [[p v] field :when (> (math/hypot (- (p 0) (foe 0)) (- (p 1) (foe 1))) 8)]
+                                                (flow/time-to-contact foe p v))]
+                                       (/ (reduce + ts) (max 1 (count ts)))))}))
+           (range 0 28)))
+
+    "horizon"
+    (let [v0 (+ 30 (* 30 (rng)))
+          ds (street rng v0)]
+      (concat [{:detections ds :v0 v0}]
+              (map (fn [st] {:detections ds :v0 v0 :fit st}) (shape/horizon-seq ds 0.2))))
+
+    "light and color"
+    (let [albedos (vec (repeatedly 36 (fn [] (vec (repeatedly 3 #(+ 0.1 (* 0.8 (rng))))))))
+          tint [1.0 0.75 0.45] white (/ (reduce + tint) 3)]
+      (map (fn [t] (let [a (* t 0.12) dir (v/normalize [(math/cos a) (* 0.6 (math/sin a)) 1.2])
+                         tinted (lit-scene albedos dir tint)
+                         {:keys [illuminant image]} (camera/gray-world tinted)]
+                     {:tinted tinted :corrected image :white (lit-scene albedos dir [white white white])
+                      :illuminant illuminant :tint (mapv #(/ % white) tint)}))
+           (range 52)))
 
     "anchors and regression" nil
 
@@ -408,7 +508,8 @@
                   "anchors and regression" (swap! model update :anc anchors-advance n)
                   (let [{:keys [clock]} @model
                         rate (case method "segmentation" 7.0 "stereo" 12.0 "optical flow" 4.0 "shading" 6.0
-                                   "structure from motion" 6.0 "selective search" 0.6 "texture" 4.0 2.0)
+                                   "structure from motion" 6.0 "selective search" 0.6 "texture" 4.0 "time to contact" 3.0
+                                   "light and color" 6.0 "boundaries" 0.5 "normalized cuts" 0.8 "horizon" 0.8 2.0)
                         clock (+ clock (* rate n 0.016))]
                     (if (>= clock 1.0)
                       (swap! model (fn [{:keys [rest step] :as m}]
@@ -437,7 +538,87 @@
                              "contour" (draw-contour!)
                              "structure from motion" (draw-sfm!)
                              "selective search" (draw-selective!)
-                             "anchors and regression" (draw-anchors!))))))
+                             "anchors and regression" (draw-anchors!)
+                             "boundaries" (draw-boundaries!)
+                             "normalized cuts" (draw-ncut!)
+                             "time to contact" (draw-ttc!)
+                             "horizon" (draw-horizon!)
+                             "light and color" (draw-light!))))))
+            (draw-boundaries! []
+              (let [{{:keys [left truth edges pb]} :frame} @model
+                    [[x1 y1 w1 h1] [x2 y2 w2 h2] [x3 y3 w3 h3]] (panels 3)
+                    {:keys [w h]} left
+                    near? (fn [[x y]] (some #(truth [(+ x (% 0)) (+ y (% 1))]) (for [dx (range -2 3) dy (range -2 3)] [dx dy])))
+                    marks (fn [on?] (img/image w h (fn [x y] (cond (not (on? x y)) 0.06 (near? [x y]) [0.5 1.0 0.63] :else [1.0 0.56 0.44]))))
+                    share (fn [ps] (let [ps (seq ps)] (if ps (str (.toFixed (* 100 (/ (count (filter near? ps)) (count ps))) 0) "%") "-")))
+                    pb-pixels (when pb (for [y (range h) x (range w) :when (> (img/at pb x y) 0.5)] [x y]))]
+                (blit! left identity x1 y1 w1 h1) (label! "regions told apart by texture, not brightness" x1 y1)
+                (blit! (marks (fn [x y] (edges [x y]))) identity x2 y2 w2 h2) (label! "Canny's edges" x2 y2)
+                (if pb
+                  (do (blit! (marks (fn [x y] (> (img/at pb x y) 0.5))) identity x3 y3 w3 h3) (label! "Pb, learned, thinned" x3 y3))
+                  (label! "Pb: comparing the halves of a disk round every pixel ..." x3 y3))
+                (str "on a boundary (green, within two pixels of one): Canny " (share edges) (when pb (str ", Pb " (share pb-pixels)))
+                     "\nPb compares the brightness and texture histograms of a disk's two halves at eight orientations; logistic regression, learned from scenes whose boundaries are known, turns the differences into a probability")))
+            (draw-ncut! []
+              (let [{{:keys [left superpixels ncut]} :frame} @model
+                    [[x1 y1 w1 h1] [x2 y2 w2 h2]] (panels 2)
+                    {:keys [w h]} left
+                    paint (fn [groups] (let [color (into {} (for [[k ps] (map-indexed vector groups) p ps] [p (region-colors [:ncut k])]))]
+                                         (img/image w h (fn [x y] (get color [x y] [0.1 0.1 0.1])))))]
+                (blit! left identity x1 y1 w1 h1) (label! "the image" x1 y1)
+                (if superpixels
+                  (do (blit! (paint (map :pixels (:nodes superpixels))) identity x2 y2 w2 h2)
+                      (label! (str (count (:nodes superpixels)) " superpixels: the graph's nodes") x2 y2))
+                  (do (blit! (paint (concat (:regions ncut) (map #(mapcat :pixels (:nodes %)) (:pending ncut)))) identity x2 y2 w2 h2)
+                      (label! "regions so far" x2 y2)))
+                (str (if superpixels
+                       "an over-segmentation first, as the chapter suggests: a few dozen nodes in place of 1,728 pixels"
+                       (str (count (:regions ncut)) " regions finished, " (count (:pending ncut)) " still to try"))
+                     "\nShi and Malik: each part cut where the second eigenvector of the normalized graph gives the least normalized cut, while that is under 0.05")))
+            (draw-ttc! []
+              (let [{{:keys [left flow foe ttc truth]} :frame} @model
+                    [[x1 y1 w1 h1]] (panels 1)
+                    s (blit! left identity x1 y1 w1 h1)]
+                (set! (.-strokeStyle ctx) "#ffe08a") (set! (.-lineWidth ctx) 2)
+                (doseq [[[x y] [u v]] flow :let [px (+ x1 (* s (+ x 0.5))) py (+ y1 (* s (+ y 0.5)))]]
+                  (.beginPath ctx) (.moveTo ctx px py) (.lineTo ctx (+ px (* 4 s u)) (+ py (* 4 s v))) (.stroke ctx))
+                (when foe
+                  (let [[fx fy] foe px (+ x1 (* s (+ fx 0.5))) py (+ y1 (* s (+ fy 0.5)))]
+                    (set! (.-strokeStyle ctx) "#7dffa0") (set! (.-lineWidth ctx) 3)
+                    (.beginPath ctx) (.moveTo ctx (- px 10) py) (.lineTo ctx (+ px 10) py) (.moveTo ctx px (- py 10)) (.lineTo ctx px (+ py 10)) (.stroke ctx)))
+                (str "time to contact from the flow: " (if ttc (.toFixed ttc 1) "-") " frames  |  true: " (.toFixed truth 1)
+                     "\nflying at a textured wall: the flow (four times its length) radiates from the focus of expansion, green; each point's distance from it over its speed is the time to contact")))
+            (draw-horizon! []
+              (let [{{:keys [detections v0 fit]} :frame} @model
+                    [[x1 y1 w1 h1]] (panels 1)
+                    s (min (/ w1 160) (/ h1 200))
+                    kept (set (:kept fit))
+                    at (fn [x v] [(+ x1 (* s (+ 5 x))) (+ y1 (* s v))])]
+                (set! (.-fillStyle ctx) "#161b25") (.fillRect ctx x1 y1 (* s 160) (* s 200))
+                (let [[ax ay] (at -5 v0) [bx _] (at 155 v0)]
+                  (set! (.-strokeStyle ctx) "rgba(255,255,255,0.3)") (set! (.-lineWidth ctx) 1)
+                  (.beginPath ctx) (.moveTo ctx ax ay) (.lineTo ctx bx ay) (.stroke ctx))
+                (when-let [hz (:horizon fit)]
+                  (let [[ax ay] (at -5 hz) [bx _] (at 155 hz)]
+                    (set! (.-strokeStyle ctx) "#ffd479") (set! (.-lineWidth ctx) 2)
+                    (.beginPath ctx) (.moveTo ctx ax ay) (.lineTo ctx bx ay) (.stroke ctx)))
+                (doseq [{:keys [foot height x] :as d} detections
+                        :let [[px py] (at x foot) bw (* s 0.3 height)]]
+                  (set! (.-strokeStyle ctx) (cond (nil? fit) "#c9d2e0" (kept d) "#7dffa0" :else "#ff8f70"))
+                  (set! (.-lineWidth ctx) 2)
+                  (.strokeRect ctx (- px (/ bw 2)) (- py (* s height)) bw (* s height)))
+                (str (if fit
+                       (str "horizon at row " (.toFixed (:horizon fit) 1) " (true " (.toFixed v0 1) ")  |  " (count (:dropped fit)) " detections ruled out")
+                       (str (count detections) " pedestrian detections"))
+                     "\nthe same height on the same ground: the nearer, the lower the feet and the taller -- a line, zero at the horizon. Yellow: the horizon found; faint: the true one; red: detections no pedestrian could be")))
+            (draw-light! []
+              (let [{{:keys [tinted corrected white illuminant tint]} :frame} @model
+                    [[x1 y1 w1 h1] [x2 y2 w2 h2] [x3 y3 w3 h3]] (panels 3)]
+                (blit! tinted identity x1 y1 w1 h1) (label! "under orange light" x1 y1)
+                (blit! corrected identity x2 y2 w2 h2) (label! "gray world: the light's color divided out" x2 y2)
+                (blit! white identity x3 y3 w3 h3) (label! "under white light" x3 y3)
+                (str "light estimated " (apply str (interpose " " (map #(.toFixed % 2) illuminant))) "  |  true " (apply str (interpose " " (map #(.toFixed % 2) tint)))
+                     "\ndiffuse surfaces with a specularity, Lambert's law a channel at a time; color constancy assumes the scene averages to gray")))
             (draw-edges! []
               (let [{{:keys [left stage]} :frame} @model
                     [[x1 y1 w1 h1] [x2 y2 w2 h2]] (panels 2)]
@@ -638,7 +819,8 @@
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
         (.onChange (.add gui controls "method" #js ["edges" "segmentation" "k-means" "optical flow" "stereo" "shading" "texture" "contour"
-                                                    "structure from motion" "detection" "selective search" "anchors and regression"]) restart!)
+                                                    "structure from motion" "detection" "selective search" "anchors and regression"
+                                                    "boundaries" "normalized cuts" "time to contact" "horizon" "light and color"]) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui controls "speed" 1 10 1)
         (.add gui #js {:restart restart!} "restart"))

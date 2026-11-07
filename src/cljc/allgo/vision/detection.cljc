@@ -20,6 +20,13 @@
                      best window kept, those overlapping it by more than a
                      threshold of intersection over union dropped, and
                      again, a window a step
+    test time        a window's shifted and mirrored copies scored too,
+                     the scores averaged
+    ROI pooling      a box of any size reduced to a fixed grid of
+                     maxima, the same number of features from every box
+    evaluation       precision and recall, the detections taken best
+                     first and each matched to an object not yet found;
+                     average precision, the area under that curve
 
   A box is `[x0 y0 x1 y1]`, the corners exclusive at the far side."
   (:require [allgo.learning.neural :as neural]
@@ -138,3 +145,68 @@
              :let [p (patch image b)]
              :when (> (score network p) min-score)]
          p)))
+
+(defn score-augmented
+  "The network's score for a patch with augmentation at test time, as
+  section 25.4.2 offers: the patch's variants -- `augment`'s shifts and
+  mirror -- each scored and the scores averaged, a vote."
+  [network p size]
+  (let [ss (map #(score network %) (augment p size))]
+    (/ (reduce + ss) (count ss))))
+
+;; ---------------------------------------------------------------------------
+;; Pooling a region to a fixed size
+
+(defn roi-pool
+  "A region of interest of any size and shape reduced to `rows` by
+  `cols` numbers: `box` of the image divided into a grid of that many
+  cells, as nearly equal as whole pixels allow, and each cell's largest
+  value taken -- so a classifier made for one size of input can read
+  boxes of every size. Row by row, a flat vector."
+  [image [x0 y0 x1 y1] rows cols]
+  (let [edges (fn [a b n] (mapv #(+ a (quot (* % (- b a)) n)) (range (inc n))))
+        xs (edges x0 x1 cols) ys (edges y0 y1 rows)]
+    (vec (for [i (range rows) j (range cols)]
+           (let [[ya yb] [(ys i) (max (ys (inc i)) (inc (ys i)))]
+                 [xa xb] [(xs j) (max (xs (inc j)) (inc (xs j)))]]
+             (reduce max (for [y (range ya yb) x (range xa xb)] (img/at image x y))))))))
+
+;; ---------------------------------------------------------------------------
+;; Evaluation
+
+(defn precision-recall
+  "How a detector did against the truth, over images: `results` a seq of
+  `[detections boxes]` per image, each detection `{:box :score}`. Taken
+  best score first, a detection is a hit if it overlaps by at least
+  `min-iou` a true box no better detection has claimed, else a false
+  alarm. The curve, a point per detection: `[{:score :precision
+  :recall}]`, precision the fraction of detections so far that hit,
+  recall the fraction of true boxes found."
+  [results min-iou]
+  (let [total (reduce + (map (comp count second) results))
+        ranked (sort-by (comp - :score first)
+                        (for [[i [dets _]] (map-indexed vector results) d dets] [d i]))
+        truth (mapv second results)]
+    (:curve (reduce (fn [{:keys [claimed hits n] :as acc} [{:keys [box score]} i]]
+                      (let [free (remove #(claimed [i %]) (range (count (truth i))))
+                            best (when (seq free) (apply max-key #(iou box ((truth i) %)) free))
+                            hit? (and best (>= (iou box ((truth i) best)) min-iou))
+                            hits (if hit? (inc hits) hits) n (inc n)]
+                        (-> acc
+                            (assoc :hits hits :n n)
+                            (cond-> hit? (update :claimed conj [i best]))
+                            (update :curve conj {:score score :precision (/ (double hits) n)
+                                                 :recall (if (pos? total) (/ (double hits) total) 0.0)}))))
+                    {:claimed #{} :hits 0 :n 0 :curve []}
+                    ranked))))
+
+(defn average-precision
+  "The area under the precision-recall `curve`, precision at each recall
+  taken as the best at that recall or beyond -- one number balancing
+  finding everything against finding only what is there."
+  [curve]
+  (let [pts (vec curve)
+        best-after (vec (reductions max (rseq (mapv :precision pts))))
+        envelope (fn [i] (best-after (- (count pts) 1 i)))]
+    (reduce + (map (fn [i] (* (envelope i) (- (:recall (pts i)) (if (pos? i) (:recall (pts (dec i))) 0.0))))
+                   (range (count pts))))))

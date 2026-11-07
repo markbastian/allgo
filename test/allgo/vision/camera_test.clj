@@ -1,5 +1,6 @@
 (ns allgo.vision.camera-test
-  (:require [allgo.vision.camera :as camera]
+  (:require [allgo.random :as random]
+            [allgo.vision.camera :as camera]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -51,3 +52,65 @@
     (is (close? [0.8] [(camera/lambert 0.8 [0.0 0.0 1.0] [0.0 0.0 1.0] 1.0 0.0)] 1e-12))
     (is (close? [0.4] [(camera/lambert 0.8 [0.0 0.0 1.0] [(math/sin (/ math/PI 3)) 0.0 0.5] 1.0 0.0)] 1e-12))
     (is (close? [0.08] [(camera/lambert 0.8 [0.0 0.0 1.0] [0.0 0.0 -1.0] 1.0 0.1)] 1e-12))))
+
+(deftest stereopsis-test
+  (testing "the chapter's figures for human eyes: a 6 cm baseline and a disparity of 5 seconds of arc"
+    (let [arcsec (/ math/PI (* 180 3600))]
+      (testing "resolve 0.4 mm at a meter"
+        (is (< (abs (- 0.4 (* 10 (camera/depth-resolution 6.0 100.0 (* 5 arcsec))))) 0.005)))
+      (testing "and 0.036 mm at 30 cm, enough to thread a needle"
+        (is (< (abs (- 0.036 (* 10 (camera/depth-resolution 6.0 30.0 (* 5 arcsec))))) 0.0005)))
+      (testing "the angular disparity is its inverse"
+        (is (< (abs (- (* 5 arcsec) (camera/angular-disparity 6.0 100.0 (camera/depth-resolution 6.0 100.0 (* 5 arcsec))))) 1e-15))))))
+
+(defn- unit [x] (let [n (math/sqrt (reduce + (map * x x)))] (mapv #(/ % n) x)))
+
+(deftest shading-test
+  (let [light (unit [0.5 -0.5 0.7071])
+        matte {:albedo 0.6}
+        shiny {:albedo 0.6 :specular 0.5 :shininess 30}]
+    (testing "Lambert's law, plus the ambient: facing the light, rho (ambient + I0); turned away, rho ambient"
+      (is (< (abs (- (* 0.6 1.1) (camera/shade matte light light [0.0 0.0 1.0] 1.0 0.1))) 1e-12))
+      (is (< (abs (- (* 0.6 0.1) (camera/shade matte (mapv - light) light [0.0 0.0 1.0] 1.0 0.1))) 1e-12)))
+    (testing "a point in shadow gets only the ambient"
+      (is (< (abs (- (* 0.6 0.1) (camera/shade matte light light [0.0 0.0 1.0] 1.0 0.1 :shadowed true))) 1e-12)))
+    (testing "the specularity is brightest where the light's mirror direction is the view: the normal halfway between them"
+      (let [im (camera/sphere-image 81 81 36.0 shiny light 1.0 0.1 0.0)
+            i (apply max-key (:px im) (range (count (:px im))))
+            h (unit (mapv + light [0.0 0.0 1.0]))]
+        (is (<= (abs (- (mod i 81) (+ 40 (* 36 (h 0))))) 1.0))
+        (is (<= (abs (- (quot i 81) (+ 40 (* 36 (h 1))))) 1.0))))
+    (testing "color a channel at a time: a red surface under white light, and a white one under red"
+      (is (close? [0.6 0.0 0.0] (camera/shade {:albedo [0.6 0.0 0.0]} light light [0.0 0.0 1.0] 1.0 0.0) 1e-12))
+      (is (close? [0.6 0.0 0.0] (camera/shade {:albedo 0.6} light light [0.0 0.0 1.0] [1.0 0.0 0.0] 0.0) 1e-12)))))
+
+(deftest color-constancy-test
+  (let [rng (random/rng 1)
+        albedos (vec (repeatedly 40 (fn [] (vec (repeatedly 3 #(+ 0.1 (* 0.8 (rng))))))))
+        light [1.0 0.8 0.5]
+        under (fn [albedos light] {:w (count albedos) :h 1 :px (mapv #(mapv * % light) albedos)})
+        white (/ (reduce + light) 3)]
+    (testing "where the surfaces do average to gray, gray-world finds the light's color and undoes it exactly"
+      (let [balanced (into albedos (map (fn [a] (mapv #(- 1.0 %) a)) albedos))
+            {:keys [illuminant image]} (camera/gray-world (under balanced light))]
+        (is (close? illuminant (mapv #(/ % white) light) 1e-12))
+        (is (every? true? (map #(close? %1 %2 1e-12) (:px image) (:px (under balanced [white white white])))))))
+    (testing "where they only roughly do, it comes close: each channel within 0.04 of the scene under white light"
+      (let [{:keys [image]} (camera/gray-world (under albedos light))]
+        (is (every? true? (map #(close? %1 %2 0.04) (:px image) (:px (under albedos [white white white])))))))))
+
+(def ^:private house
+  (mapv #(mapv double %) [[0 0 0] [2 0 0] [2 0 2] [0 0 2] [0 1.5 0] [2 1.5 0] [2 1.5 2] [0 1.5 2] [1 2.3 0] [1 2.3 2]]))
+
+(deftest pose-test
+  (doseq [[position target] [[[6.0 3.0 -5.0] [1.0 1.0 1.0]] [[-4.0 2.0 7.0] [1.0 0.8 1.0]] [[1.0 9.0 -2.0] [1.0 1.0 1.0]]]]
+    (let [truth (camera/look-at position target [0.0 -1.0 0.0] 300.0 [160.0 120.0])
+          pixels (mapv #(camera/project truth %) house)]
+      (testing "from a known object's exact images, the camera where it was"
+        (let [{:keys [camera rms]} (camera/pose house pixels 300.0 [160.0 120.0])]
+          (is (close? position (:position camera) 1e-8))
+          (is (< rms 1e-8))))
+      (testing "and from images half a pixel out, within 0.15 of it, eight to ten away"
+        (let [rng (java.util.Random. 1)
+              noisy (mapv (fn [p] (mapv #(+ % (* 0.5 (.nextGaussian rng))) p)) pixels)]
+          (is (close? position (:position (:camera (camera/pose house noisy 300.0 [160.0 120.0]))) 0.15)))))))

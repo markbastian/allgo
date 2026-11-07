@@ -1383,6 +1383,7 @@ are the algorithms its text teaches.
 | `allgo.vision.shape`          | Shape from shading (Ikeuchi and Horn's relaxation, the occluding contour fixing it), texture (each texel's slant and tilt; a plane from their sizes) and contour (the ground plane; T-junctions and the depth order they give) |
 | `allgo.vision.structure`      | Structure from motion: Tomasi and Kanade's factorization, a stage a step |
 | `allgo.vision.proposals`      | Selective search, a merge a step; anchors scored for objectness; R-CNN's box regression, an example a step |
+| `allgo.vision.boundaries`     | Pb: half-disk histograms of brightness and texture compared, a boundary's probability learned |
 
 **Reused, not rewritten.** Segmentation keeps its regions in
 `allgo.graph`'s disjoint sets, joining smaller into larger so the trees
@@ -1538,11 +1539,116 @@ a few dozen of some fourteen hundred and find 27 of 30 objects to 0.5
 but only 15 to 0.7, their sizes being fixed; box regression makes that
 29.
 
-**Not implemented here:** image generation and style transfer; the
-deep networks of the chapter's classification, which need far more
-data and computing than a drawn scene; depth from shading integrated
-from the normals; shape from texture on curved surfaces; the paper's
-texture measure in selective search, and a convolutional region
+### The rest of chapter 25
+
+Read now against the 4th edition's own text, the chapter left these.
+
+**Light and color** (`allgo.vision.camera`). `shade` is section
+25.2.4's model of nearly every surface, diffuse with specularities:
+Lambert's term plus the ambient, and Phong's lobe for the specularity,
+a point in shadow getting only the ambient. Albedos and lights may be
+[r g b], Lambert's law then a channel at a time, as section 25.2.5
+models color. On a lit sphere the brightest pixel is within a pixel of
+where the normal bisects the light and the view. Color constancy, which
+the chapter names but gives no method for, is the gray-world estimate
+(Buchsbaum, 1980): the image's mean color taken for the light's. Where
+the surfaces really do average to gray it recovers the light's color
+and undoes it to 1e-12. With forty random albedos, which only roughly
+do, every channel came within 0.035 of the scene under white light.
+
+**Stereopsis.** The chapter's figures for human eyes, a 6 cm baseline
+and 5 seconds of arc, give the depths it quotes: 0.4 mm at a meter and
+0.036 mm at 30 cm (`depth-resolution`, a test).
+
+**A moving camera** (`allgo.vision.flow`). The chapter's flow equations
+for a translating camera; the focus of expansion as the point nearest
+every flow line, by least squares; the time to contact as a point's
+distance from the focus over its speed; and motion parallax's depth
+ratio. On exact flows the focus comes back to 1e-12 and every point's
+time to contact is Z / Tz. Measured, by Lucas-Kanade between two views
+of a textured wall 0.5 nearer, the focus lands within half a pixel of
+the center and the times average 19.1 frames against 19.
+
+**The pose of a known object** (`camera/pose`), which section 25.6.4
+calls straightforward. Scaled orthographic projection gives a linear
+start, in two mirror images in depth; each is polished by Marquardt's
+method (`allgo.numerics.optimize`) on the reprojection error, and the
+better kept. Plain Gauss-Newton (`numerics.regression`) was tried
+first: from the mirrored start some points went behind the camera and
+its system turned singular. From exact images of a house's ten corners
+the camera comes back to 1e-11 from three viewpoints, and with half a
+pixel of noise to within 0.15, eight to ten units away.
+
+**The horizon from pedestrians** (`shape/horizon`). People all one
+height on the ground have heights in the image proportional to how far
+below the horizon their feet are: a line through zero at the horizon.
+The book's two ways round, the detections placing the horizon and the
+horizon ruling out impossible detections, are one fit. Least squares
+alone failed: one false "giant" near the horizon dragged the line more
+than 50 rows off and the trimming then threw out the true people. So
+the start is the consensus line, the one through the pair of detections
+that most others agree with, then refit to its inliers until they
+settle. With half a pixel of noise it puts the horizon within a pixel
+and drops exactly the giant and the dwarf.
+
+**Edges linked into curves** (`edges/link`): neighboring edge pixels
+whose orientations agree. Within 29 degrees each object's outline is
+one curve; within 17, the square's corners break it into its four sides.
+
+**Learned boundaries** (`allgo.vision.boundaries`), section 25.3.4's
+Pb(x, y, theta): at each pixel a disk is cut along a diameter at eight
+orientations, and the two halves' histograms of brightness and of
+gradient orientation are compared by chi-squared. Logistic regression
+(`learning.models`) learns from scenes whose boundaries are known
+(drawn, their labels known) how those differences mean a boundary, and
+Canny's non-maximum suppression across the best orientation thins the
+result. The scenes are regions told apart by texture -- stripes of two
+directions, dots -- at the same mean brightness. On six new scenes,
+59-81% of Canny's edges lay within two pixels of a boundary, the rest
+on stripes, and it found 60-95% of the boundary. Of Pb's, 89-95% lay on
+a boundary, and it found at least 97% of it. Unthinned, Pb's band was
+2.6 times as many pixels as the boundary, at the same precision.
+
+**Normalized cuts** (`segmentation/normalized-cuts`, after Shi and
+Malik, PAMI 2000). The second generalized eigenvector of the graph, then
+the split along it with the least Ncut, recursively. On pixels, by power
+iteration, the second eigenvector needed up to 1,500 multiplications to
+settle on some scenes (5 s a segmentation), and the plain background
+split cheaply through its narrow parts. The chapter's own remedy for
+graph methods, an over-segmentation into superpixels, fixed both: the
+graph-based segmentation at a small scale leaves a few dozen
+superpixels, joined by their shared boundary's length times their
+similarity, and on so small a graph Jacobi gives the eigenvector
+exactly. On six random scenes of two shapes, three regions each time,
+each all one of them. Jacobi is cubic: 40 superpixels take 0.35 s, 200
+took 54 s, so the demo's scenes are kept small.
+
+**Detection, evaluated** (`allgo.vision.detection`): precision and
+recall with detections matched best first, an object claimed once;
+average precision as the area under the curve with precision taken at
+its best at that recall or beyond. A hand-worked case gives 34/45 to
+1e-12. The mined detector's average precision on the test scenes is
+1.0. ROI pooling reduces a box of any shape to a grid of maxima.
+Test-time augmentation averages the scores of a window's shifted and
+mirrored copies. On these scenes it classified every test window right,
+as the plain score already did, so it showed no gain here.
+
+**The demo** gains five modes: *Boundaries* (Canny's edges and Pb's,
+each pixel green if on a boundary); *Normalized cuts* (the superpixels,
+then the regions a cut at a time); *Time to contact* (the flow while
+flying at a wall, the focus and the estimate against the truth);
+*Horizon* (detections, the horizon found, the impossible ones in red);
+*Light and color* (a shiny sphere and patches under orange light, the
+gray-world correction beside the scene under white light, the light
+turning).
+
+**Not implemented here:** image generation and style transfer, paired
+and unpaired image translation, captioning and visual question
+answering, and depth maps predicted from one image -- all networks
+trained on far more data than a drawn scene; the deep networks of the
+chapter's classification, for the same reason; depth from shading
+integrated from the normals; shape from texture on curved surfaces; the
+paper's texture measure in selective search, and a convolutional region
 proposal network sharing the detector's features.
 
 ## Natural language, after Russell & Norvig

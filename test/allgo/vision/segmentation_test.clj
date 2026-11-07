@@ -36,3 +36,19 @@
     (let [labels (seg/k-means noisy 3 (random/rng 2))]
       (is (= 3 (seg/region-count labels)))
       (is (> (purity labels) 0.999)))))
+
+(deftest normalized-cuts-test
+  (doseq [seed (range 1 7)]
+    (let [rng (random/rng seed)
+          shapes [{:kind :rect :box [(+ 2 (random/below rng 4)) (+ 2 (random/below rng 4)) (+ 14 (random/below rng 4)) (+ 20 (random/below rng 5))] :value 0.75}
+                  {:kind :disk :center [(+ 20 (random/below rng 4)) (+ 12 (random/below rng 6))] :radius (+ 5 (random/below rng 2)) :value 0.45}]
+          scene (img/add-noise (img/render 30 28 0.15 shapes) 0.05 rng)
+          truth (img/render 30 28 0 (map-indexed (fn [i s] (assoc s :value (inc i))) shapes))
+          graph (seg/superpixel-graph scene 0.05 8 0.1)
+          labels (seg/normalized-cuts scene {})]
+      (testing "the over-segmentation leaves a few dozen superpixels where there were 840 pixels"
+        (is (<= 20 (count (:nodes graph)) 50)))
+      (testing "and recursive normalized cuts on them find the two shapes and the background, each region all one of them"
+        (is (= 3 (seg/region-count labels)))
+        (is (every? #(= 1 (count (set %)))
+                    (vals (group-by first (map vector (:px labels) (:px truth))))))))))
