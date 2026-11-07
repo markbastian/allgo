@@ -643,7 +643,7 @@
    "id": "vision",
    "group": "AI",
    "label": "Computer Vision",
-   "blurb": "Canny edges, segmentation, optical flow, stereo, and a network that learns to detect, a step at a time",
+   "blurb": "Canny edges and learned boundaries, segmentation and normalized cuts, optical flow and time to contact, stereo, color constancy, and a network that learns to detect, a step at a time",
    "badges": [
     "Interactive"
    ],
