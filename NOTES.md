@@ -1753,6 +1753,60 @@ integrated from the normals; shape from texture on curved surfaces; the
 paper's texture measure in selective search, and a convolutional region
 proposal network sharing the detector's features.
 
+## Ethics and safety, after Russell & Norvig
+
+Chapter 27 of *Artificial Intelligence: A Modern Approach* (4th ed.) is
+mostly argument -- the limits of AI, whether machines can think, the
+ethics of weapons, work and robot rights -- and that is left to the book.
+These are the parts of it that are methods, in a package of their own.
+
+| Namespace                 | What it is                                                                 |
+|---------------------------|----------------------------------------------------------------------------|
+| `allgo.ethics.privacy`    | k-anonymity by generalization, a step a field, with Datafly's suppression; aggregate queries and the differencing attack; the Laplace mechanism; federated averaging; secure aggregation's cancelling masks |
+| `allgo.ethics.fairness`   | Selection, true and false positive rates by group; calibration; calibrated scores whose base rates differ; equal-opportunity thresholds; equal impact's utility threshold; proxy accuracy; SMOTE |
+| `allgo.ethics.safety`     | Fault trees: the top event's probability and the minimal cut sets; FMEA's risk priority; a low-impact coffee fetcher on `decision.mdp`'s value iteration |
+
+**Checked.**
+
+- The section's differencing attack: averages of $81,199 over 13 and
+  $81,234 over 12 give the one 41-year-old's salary, $80,779.
+- Of 300 random records, over 250 are alone in their age, sex and zip
+  code -- the point of Sweeney's 87%. Generalizing to 2-anonymity, ages
+  to decades and zips to tens leave a few records still alone, and the
+  generalization then deletes age outright; Sweeney's Datafly withholds
+  such records instead, and with up to three withheld, the decades stay.
+- The Laplace mechanism's log density moves by at most epsilon when one
+  person joins, at every answer checked, and its counts are right on
+  average.
+- Five users each seeing a corner of the plane: federated averaging of
+  their logistic regressions classifies new points over 95% right, no
+  data leaving a user; one user alone does worse. Secure aggregation's
+  uploads are each far from what they hide and sum exactly.
+- Calibrated scores for groups with base rates 0.3 and 0.6: one
+  threshold gives false positive rates 7% and 56%; thresholds per group
+  that equalize the true positive rates at 0.8 leave the false positive
+  rates 51% and 59% -- Kleinberg et al.'s impossibility, in the numbers.
+  (The section's COMPAS figures are the real system's; these data are
+  drawn.)
+- Zip code predicts the deleted group 89% of the time; income alone,
+  chance.
+- A minority with its own rule and a tenth of the data: one logistic
+  regression gets the majority 97% right and the minority 56%. SMOTE
+  brings the minority to 73% and the majority down to 80% -- one linear
+  model cannot fit both, and oversampling chooses how the error is
+  shared rather than removing it.
+- The fault tree's probability matches the product worked by hand to
+  1e-15, and a cause shared by both branches of an AND is found to be a
+  cut set on its own.
+- The coffee fetcher walks through the vase in its way on the designer's
+  reward; charged for each change it makes to the world, it goes round,
+  two steps longer.
+
+**Left out:** everything the chapter argues rather than computes; the
+de-biasing of data by modeling its sources of bias (Jiang and Nachum,
+2019); assistance games, which the book introduces in chapter 18 and this
+library does not yet have.
+
 ## Natural language, after Russell & Norvig
 
 The rest of chapter 23 of *Artificial Intelligence: A Modern Approach*
