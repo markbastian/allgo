@@ -511,3 +511,225 @@
                                                       c))
                                        :cost dist :heuristic dist})]
         (mapv #(arm-angles n %) cells)))))
+
+;; ---------------------------------------------------------------------------
+;; A polygon robot's configuration space
+
+(defn cspace-obstacle
+  "The configuration-space obstacle of a convex `obstacle` for a convex
+  polygon `robot` that translates without turning, its corners given
+  relative to its reference point: every reference point at which the
+  robot would overlap the obstacle -- the obstacle's Minkowski sum with
+  the robot turned half round, as section 26.5.1's triangle and rectangle
+  show."
+  [robot obstacle]
+  (polygon/minkowski-sum obstacle (mapv #(polygon/scale % -1.0) robot)))
+
+;; ---------------------------------------------------------------------------
+;; Cell decomposition, refined
+
+(defn signed-clearance
+  "How far the robot at `p` is from colliding: its clearance from the
+  walls and the obstacles less its radius, negative by the depth of the
+  collision when it does."
+  ^double [{:keys [bounds obstacles radius] :as world} p]
+  (let [[[x0 y0] [x1 y1]] bounds [x y] p
+        walls (min (- x x0) (- x1 x) (- y y0) (- y1 y))
+        d (clearance world p)
+        inside? (some #(polygon/contains-point? % p) obstacles)]
+    (- (min walls (if inside? (- d) d)) (double (or radius 0.0)))))
+
+(defn- quad-cells [[x y s]]
+  (let [h (/ s 2)] [[x y h] [(+ x h) y h] [x (+ y h) h] [(+ x h) (+ y h) h]]))
+
+(defn- classify [world [x y s]]
+  (let [c (signed-clearance world [(+ x (/ s 2)) (+ y (/ s 2))])
+        half-diagonal (* s (math/sqrt 0.5))]
+    (cond (> c half-diagonal) :free (< c (- half-diagonal)) :blocked :else :mixed)))
+
+(defn- touching? [[ax ay as] [bx by bs]]
+  (let [overlap (fn [a0 a1 b0 b1] (- (min a1 b1) (max a0 b0)))
+        ox (overlap ax (+ ax as) bx (+ bx bs)) oy (overlap ay (+ ay as) by (+ by bs))]
+    (or (and (< (abs ox) 1e-9) (> oy 1e-9)) (and (< (abs oy) 1e-9) (> ox 1e-9)))))
+
+(defn subdivision-seq
+  "Cell decomposition made complete down to `min-size`, as section 26.5.2
+  suggests: the room in cells of side `size`, each free, blocked or mixed
+  -- free if the whole square is clear, blocked if all of it collides,
+  mixed if neither can be said -- and a step splits every mixed cell
+  larger than `min-size` in four. Each state `{:cells :path}`, the cells
+  `[x y side kind]` and the path through the free ones, by A* between
+  touching cells' centers, or nil while there is none."
+  [{:keys [bounds] :as world} start goal size min-size]
+  (let [[[x0 y0] [x1 y1]] bounds
+        within (fn [[x y s] [px py]] (and (<= x px (+ x s)) (<= y py (+ y s))))
+        search (fn [cells]
+                 (let [free (filterv #(= :free (peek %)) cells)
+                       nodes (into [start goal] (map (fn [[x y s]] [(+ x (/ s 2)) (+ y (/ s 2))]) free))
+                       cell-of (fn [p] (first (keep-indexed (fn [i c] (when (within c p) (+ 2 i))) free)))
+                       links (into {} (for [i (range (count free))]
+                                        [(+ 2 i) (vec (keep (fn [j] (when (and (not= i j) (touching? (free i) (free j))) (+ 2 j)))
+                                                            (range (count free))))]))
+                       s (cell-of start) g (cell-of goal)]
+                   (when (and s g)
+                     (let [links (-> links (update s conj 0) (update g conj 1)
+                                     (assoc 0 [s] 1 [g]))]
+                       (graph-path nodes #(get links % []) 0 1)))))
+        state (fn [cells] {:cells cells :path (search cells)})
+        cells0 (vec (for [x (range x0 x1 size) y (range y0 y1 size)
+                          :let [c [x y size]]]
+                      (conj c (classify world c))))]
+    (iterate (fn [{:keys [cells path] :as st}]
+               (if (or path (not-any? (fn [[_ _ s kind]] (and (= kind :mixed) (> s (* 1.5 min-size)))) cells))
+                 st
+                 (state (vec (mapcat (fn [[x y s kind :as c]]
+                                       (if (and (= kind :mixed) (> s (* 1.5 min-size)))
+                                         (map #(conj % (classify world %)) (quad-cells [x y s]))
+                                         [c]))
+                                     cells)))))
+             (state cells0))))
+
+;; ---------------------------------------------------------------------------
+;; A bidirectional RRT
+
+(defn- grow [tree from p]
+  (-> tree (update :nodes conj p) (update :parent conj from)))
+
+(defn- branch [{:keys [nodes parent]} i]
+  (mapv nodes (take-while some? (iterate parent i))))
+
+(defn bidirectional-rrt-seq
+  "The bidirectional RRT of section 26.5.2, a milestone a step: two trees,
+  one rooted at `start` and one at `goal`. Each step draws a random free
+  milestone and finds the nearest node of each tree; if the straight way
+  from both to it is free, it joins the trees and the path is found;
+  otherwise each tree grows by at most `:step` (default 0.5) toward it,
+  where that is free. Each state `{:a :b :path}`."
+  [world start goal rng & {:keys [step] :or {step 0.5}}]
+  (let [nearest (fn [{:keys [nodes]} p] (apply min-key #(polygon/distance (nodes %) p) (range (count nodes))))]
+    (iterate
+     (fn [{:keys [a b path] :as st}]
+       (if path
+         st
+         (let [m (sample-free world rng)
+               ia (nearest a m) ib (nearest b m)]
+           (if (and (segment-free? world ((:nodes a) ia) m) (segment-free? world ((:nodes b) ib) m))
+             (assoc st :path (vec (concat (rseq (branch a ia)) [m] (branch b ib))))
+             (let [extend (fn [tree i]
+                            (let [q ((:nodes tree) i) p (steer q m step)]
+                              (if (and (not= p q) (segment-free? world q p)) (grow tree i p) tree)))]
+               (assoc st :a (extend a ia) :b (extend b ib)))))))
+     {:a {:nodes [start] :parent [nil]} :b {:nodes [goal] :parent [nil]} :path nil})))
+
+;; ---------------------------------------------------------------------------
+;; Hybrid A*
+
+(defn arc
+  "Where a car at pose `[x y heading]` ends up after driving `length`
+  along a turn of curvature `kappa` (1 / radius, positive to the left; 0
+  straight on): the pose, exactly."
+  [[x y th] kappa length]
+  (if (< (abs kappa) 1e-12)
+    [(+ x (* length (math/cos th))) (+ y (* length (math/sin th))) th]
+    (let [th' (+ th (* kappa length))]
+      [(+ x (/ (- (math/sin th') (math/sin th)) kappa))
+       (- y (/ (- (math/cos th') (math/cos th)) kappa))
+       th'])))
+
+(defn hybrid-a-star-seq
+  "Hybrid A* for a car that turns no tighter than `min-radius`, section
+  26.5.2's remedy for paths a robot with momentum cannot follow: A* over
+  cells of side `cell` and `headings` heading bins, but each cell keeps
+  the exact continuous pose that reached it, and a move from it drives
+  the car's own motion -- an arc of length `step`, hard left, straight or
+  hard right -- to wherever that lands. So the path is a sequence of
+  drivable arcs, never a corner. A move is allowed if the robot is free
+  at every tenth of it; the goal is any pose within `tolerance` of
+  `goal`'s position. Each state `{:open :closed :best :path}`, `:best`
+  the cell of each pose reached and `:path` the poses once found."
+  [world start goal {:keys [cell headings step min-radius tolerance]
+                     :or {cell 0.5 headings 16 step 0.7 tolerance 0.5}}]
+  (let [key-of (fn [[x y th]]
+                 [(long (math/floor (/ x cell))) (long (math/floor (/ y cell)))
+                  (mod (long (math/round (/ th (/ (* 2 math/PI) headings)))) headings)])
+        h (fn [[x y]] (polygon/distance [x y] goal))
+        drivable? (fn [pose kappa] (every? #(free? world (subvec (arc pose kappa (* step (/ % 10.0))) 0 2)) (range 1 11)))
+        kappas [(/ 1.0 min-radius) 0.0 (/ -1.0 min-radius)]
+        k0 (key-of start)]
+    (iterate
+     (fn [{:keys [open best path n] :as st}]
+       (if (or path (empty? open))
+         st
+         (let [[[_ _ k :as entry]] (first open)
+               open (dissoc open entry)
+               {:keys [pose g]} (best k)]
+           (if (<= (h pose) tolerance)
+             (assoc st :open open :path (vec (reverse (map (comp :pose best) (take-while some? (iterate (comp :parent best) k))))))
+             (let [moves (for [kappa kappas
+                               :when (drivable? pose kappa)
+                               :let [p (arc pose kappa step) k2 (key-of p)
+                                     g2 (+ g step (if (zero? kappa) 0.0 (* 0.1 step)))]
+                               :when (< g2 (get-in best [k2 :g] ##Inf))]
+                           [k2 {:pose p :g g2 :parent k}])
+                   [open best n] (reduce (fn [[open best n] [k2 node]]
+                                           [(assoc open [(+ (:g node) (h (:pose node))) n k2] true) (assoc best k2 node) (inc n)])
+                                         [open best n] moves)]
+               (assoc st :open open :best best :n n))))))
+     {:open (sorted-map [(h start) 0 k0] true) :best {k0 {:pose start :g 0.0 :parent nil}} :n 1 :path nil})))
+
+(defn hybrid-a-star
+  "The poses of hybrid A*'s path, or nil if the search runs out within
+  `max-steps` (default 20000) expansions."
+  [world start goal opts & {:keys [max-steps] :or {max-steps 20000}}]
+  (:path (first (drop-while #(and (nil? (:path %)) (seq (:open %))) (take max-steps (hybrid-a-star-seq world start goal opts))))))
+
+;; ---------------------------------------------------------------------------
+;; Trajectory optimization
+
+(defn obstacle-cost
+  "The cost field of section 26.5.2's trajectory optimization, from the
+  signed distance d to collision: d's depth plus `epsilon` / 2 inside, (d
+  - epsilon)^2 / (2 epsilon) within `epsilon` outside, falling smoothly to
+  0, and 0 beyond -- as in Ratliff et al.'s CHOMP (ICRA 2009)."
+  ^double [world epsilon p]
+  (let [d (signed-clearance world p)]
+    (cond (neg? d) (+ (- d) (/ epsilon 2.0))
+          (< d epsilon) (/ (* (- d epsilon) (- d epsilon)) (* 2.0 epsilon))
+          :else 0.0)))
+
+(defn trajectory-cost
+  "J = J_obs + lambda J_eff for a path of waypoints, its ends fixed: J_eff
+  the sum of half the squared steps over the step in s, a discrete half
+  integral of |tau'|^2; J_obs the cost field integrated along the path by
+  arc length, so that it is the same however the path is timed."
+  [world path {:keys [epsilon lambda] :or {epsilon 0.5 lambda 1.0}}]
+  (let [n (dec (count path)) ds (/ 1.0 n)
+        legs (map (fn [[a b]] (polygon/distance a b)) (partition 2 1 path))]
+    (+ (* lambda (reduce + (map #(/ (* 0.5 % %) ds) legs)))
+       (reduce + (map (fn [[a b] len] (* len 0.5 (+ (obstacle-cost world epsilon a) (obstacle-cost world epsilon b))))
+                      (partition 2 1 path) legs)))))
+
+(defn trajectory-optimization-seq
+  "Trajectory optimization, a gradient step a step: from `path` --
+  typically the straight line, through whatever is in the way -- each
+  inner waypoint moved by `rate` down the gradient of `trajectory-cost`,
+  taken by central differences. The efficiency term's gradient is the
+  discrete -tau'', which alone pulls the path straight; the obstacle
+  term's pushes it out of the cost field. A local method: it settles on
+  whichever side of an obstacle it starts nearer."
+  [world path {:keys [rate epsilon lambda] :or {rate 0.01 epsilon 0.5 lambda 1.0}}]
+  (iterate (fn [path]
+             (let [eps 1e-5 ds (/ 1.0 (dec (count path)))
+                   cost (memoize #(obstacle-cost world epsilon %))
+                   ;; the terms of J that waypoint i is in: the two legs it ends
+                   local (fn [a p b]
+                           (reduce + (map (fn [[u v]] (let [len (polygon/distance u v)]
+                                                        (+ (* lambda (/ (* 0.5 len len) ds)) (* len 0.5 (+ (cost u) (cost v))))))
+                                          [[a p] [p b]])))
+                   grad (fn [i]
+                          (let [a (path (dec i)) p (path i) b (path (inc i))]
+                            (mapv (fn [k] (/ (- (local a (update p k + eps) b) (local a (update p k - eps) b)) (* 2 eps)))
+                                  [0 1])))]
+               (reduce (fn [p i] (assoc p i (polygon/sub (path i) (polygon/scale (grad i) rate))))
+                       path (range 1 (dec (count path))))))
+           (vec path)))

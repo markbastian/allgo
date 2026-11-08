@@ -89,3 +89,102 @@
   [A B K x0]
   (let [M (lin/mat-sub A (lin/mat-mul B K))]
     (iterate #(lin/mat-vec M %) x0)))
+
+;; ---------------------------------------------------------------------------
+;; Iterative LQR
+
+(defn- jacobian
+  "The partials of `f` (vector to vector) at `x`, by central differences:
+  a matrix, a row per output."
+  [f x]
+  (let [h 1e-6
+        cols (mapv (fn [j] (let [up (f (update x j + h)) down (f (update x j - h))]
+                             (mapv #(/ (- %1 %2) (* 2 h)) up down)))
+                   (range (count x)))]
+    (lin/transpose cols)))
+
+(defn- quad-cost [Q x] (lin/dot x (lin/mat-vec Q x)))
+
+(defn rollout
+  "The states from `x0` under the controls `us`, by `dynamics`, (fn [x u])
+  -> x'."
+  [dynamics x0 us]
+  (vec (reductions dynamics x0 us)))
+
+(defn trajectory-cost
+  "The cost of states `xs` and controls `us`: the sum of (x - goal) Q (x
+  - goal) + u R u over the steps, and (x - goal) Qf (x - goal) at the
+  end."
+  [{:keys [goal Q R Qf]} xs us]
+  (+ (reduce + (map (fn [x u] (+ (quad-cost Q (lin/sub x goal)) (quad-cost R u))) xs us))
+     (quad-cost Qf (lin/sub (peek xs) goal))))
+
+(defn- ilqr-step
+  "One iteration of iterative LQR from the controls `us`: the dynamics
+  linearized and the cost (already quadratic) expanded about their
+  rollout, the LQR problem that gives solved backward for a feedforward
+  change k and a feedback gain K at each step, and the new controls rolled
+  out forward, the change shrunk by halves until the cost falls."
+  [{:keys [dynamics x0 goal Q R Qf mu] :or {mu 1e-6} :as problem} {:keys [us cost]}]
+  (let [xs (rollout dynamics x0 us)
+        n (count us) m (count (first us))
+        two #(lin/mat-scale % 2.0)
+        [ks Ks] (loop [t (dec n) vx (lin/mat-vec (two Qf) (lin/sub (peek xs) goal)) vxx (two Qf) ks () Ks ()]
+                  (if (neg? t)
+                    [(vec ks) (vec Ks)]
+                    (let [x (xs t) u (us t)
+                          A (jacobian #(dynamics % u) x) B (jacobian #(dynamics x %) u)
+                          At (lin/transpose A) Bt (lin/transpose B)
+                          qx (lin/add (lin/mat-vec (two Q) (lin/sub x goal)) (lin/mat-vec At vx))
+                          qu (lin/add (lin/mat-vec (two R) u) (lin/mat-vec Bt vx))
+                          qxx (lin/mat-add (two Q) (lin/mat-mul (lin/mat-mul At vxx) A))
+                          quu (lin/mat-add (lin/mat-add (two R) (lin/mat-mul (lin/mat-mul Bt vxx) B)) (lin/mat-scale (lin/eye m) mu))
+                          qux (lin/mat-mul (lin/mat-mul Bt vxx) A)
+                          inv (lin/inverse quu)
+                          k (lin/scale (lin/mat-vec inv qu) -1.0)
+                          K (lin/mat-scale (lin/mat-mul inv qux) -1.0)
+                          Kt (lin/transpose K)
+                          vx (lin/add (lin/add qx (lin/mat-vec Kt (lin/mat-vec quu k)))
+                                      (lin/add (lin/mat-vec Kt qu) (lin/mat-vec (lin/transpose qux) k)))
+                          vxx (lin/mat-add (lin/mat-add qxx (lin/mat-mul (lin/mat-mul Kt quu) K))
+                                           (lin/mat-add (lin/mat-mul Kt qux) (lin/mat-mul (lin/transpose qux) K)))
+                          vxx (lin/mat-scale (lin/mat-add vxx (lin/transpose vxx)) 0.5)]
+                      (recur (dec t) vx vxx (cons k ks) (cons K Ks)))))
+        forward (fn [alpha]
+                  (let [[xs' us'] (reduce (fn [[xs' us'] t]
+                                            (let [x (peek xs')
+                                                  u (lin/add (lin/add (us t) (lin/scale (ks t) alpha))
+                                                             (lin/mat-vec (Ks t) (lin/sub x (xs t))))]
+                                              [(conj xs' (dynamics x u)) (conj us' u)]))
+                                          [[x0] []] (range n))]
+                    {:us us' :cost (trajectory-cost problem xs' us')}))
+        tried (some (fn [alpha] (let [c (forward alpha)] (when (< (:cost c) cost) c)))
+                    (take 12 (iterate #(* 0.5 %) 1.0)))]
+    (or tried {:us us :cost cost :converged true})))
+
+(defn ilqr-seq
+  "Iterative LQR (section 26.5.4) for `problem` -- `{:dynamics :x0 :goal
+  :Q :R :Qf}`, the dynamics (fn [x u]) -> x', any smooth function, and
+  the quadratic costs of `trajectory-cost` -- from the controls `us`, an
+  iteration a step: each state `{:us :cost}`, the cost never rising,
+  `:converged` once no step lowers it. For linear dynamics the expansion
+  is exact, and the first iteration is the finite-horizon LQR."
+  [problem us]
+  (let [us (vec us)]
+    (iterate #(if (:converged %) % (ilqr-step problem %))
+             {:us us :cost (trajectory-cost problem (rollout (:dynamics problem) (:x0 problem) us) us)})))
+
+(defn mpc-seq
+  "Model predictive control (section 26.6): at every step, plan the next
+  `horizon` controls by `iterations` of iLQR on the `model`'s dynamics
+  from where the plant actually is -- warm-started from the last plan,
+  shifted a step -- apply the first control to the `plant` (fn [x u]) ->
+  x', which may differ from the model, and plan again. Each state `{:x
+  :u :plan}`."
+  [plant {:keys [x0] :as model} horizon iterations]
+  (let [m (count (first (:R model)))]
+    (iterate (fn [{:keys [x plan]}]
+               (let [warm (vec (take horizon (concat (rest plan) (repeat (or (peek plan) (vec (repeat m 0.0)))))))
+                     us (:us (nth (ilqr-seq (assoc model :x0 x) warm) iterations))]
+                 {:x (plant x (first us)) :u (first us) :plan us}))
+             {:x x0 :u nil :plan (vec (repeat horizon (vec (repeat m 0.0))))})))

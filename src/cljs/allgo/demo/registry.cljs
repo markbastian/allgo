@@ -54,6 +54,7 @@
             [allgo.demo.probabilistic :as probabilistic]
             [allgo.demo.ragdoll :as ragdoll]
             [allgo.demo.rigid :as rigid]
+            [allgo.demo.robot-control :as robot-control]
             [allgo.demo.satellite :as satellite]
             [allgo.demo.search :as search]
             [allgo.demo.skinning :as skinning]
@@ -94,6 +95,7 @@
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
    "slam" {:start slam/start! :stop slam/stop!}
+   "robot-control" {:start robot-control/start! :stop robot-control/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}

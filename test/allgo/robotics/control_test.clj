@@ -41,3 +41,29 @@
       (is (every? #(< (abs %) 1e-6) x))
       (is (every? pos? (first K)) "pushing back against displacement and velocity")
       (is (every? #(< (abs %) 1e-9) (map - (flatten P) (flatten P'))) "one more step leaves P where it is"))))
+
+(deftest ilqr-test
+  (testing "linear dynamics and a quadratic cost: the expansion is exact, so one iteration is the optimum"
+    (let [dt 0.1
+          problem {:dynamics (fn [[p v] [u]] [(+ p (* dt v)) (+ v (* dt u))]) :x0 [1.0 0.0] :goal [0.0 0.0]
+                   :Q [[1.0 0.0] [0.0 0.1]] :R [[0.01]] :Qf [[10.0 0.0] [0.0 1.0]]}
+          [c0 c1 c2] (map :cost (control/ilqr-seq problem (repeat 40 [0.0])))]
+      (is (< c1 c0))
+      (is (< (abs (- c1 c2)) (* 1e-9 c1)))))
+  (let [pendulum (fn [m] (fn [[th w] [u]] (let [a (+ (- (* 9.81 (math/sin th))) (* -0.1 w) (/ u m))]
+                                            [(+ th (* 0.05 w)) (+ w (* 0.05 a))])))
+        swing {:dynamics (pendulum 1.0) :x0 [0.0 0.0] :goal [math/PI 0.0]
+               :Q [[0.1 0.0] [0.0 0.01]] :R [[0.001]] :Qf [[100.0 0.0] [0.0 10.0]]}
+        states (vec (take 30 (control/ilqr-seq swing (repeat 60 [0.0]))))
+        plan (:us (peek states))]
+    (testing "a pendulum swung up from hanging: the cost never rises, and the plan ends upright and still"
+      (is (apply >= (map :cost states)))
+      (let [[th w] (peek (control/rollout (:dynamics swing) [0.0 0.0] plan))]
+        (is (< (abs (- th math/PI)) 1e-3))
+        (is (< (abs w) 1e-3))))
+    (testing "the plan run open loop on a pendulum 30% heavier falls short"
+      (let [[th] (peek (control/rollout (pendulum 1.3) [0.0 0.0] plan))]
+        (is (> (abs (- th math/PI)) 1.0))))
+    (testing "model predictive control with the same wrong model, replanning every step, gets it up and holds it there"
+      (let [states (vec (take 101 (control/mpc-seq (pendulum 1.3) swing 40 3)))]
+        (is (every? #(< (abs (- (first (:x %)) math/PI)) 1e-3) (take-last 20 states)))))))

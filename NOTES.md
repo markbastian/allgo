@@ -1167,12 +1167,17 @@ algorithms are the ones their text teaches.
 
 | Namespace                       | What it is                                                                 |
 |---------------------------------|----------------------------------------------------------------------------|
-| `allgo.robotics.motion`         | Configuration space for a disk robot among polygons; the visibility graph, the Voronoi graph, cell decomposition, PRM, RRT and RRT*, shortcutting, potential fields; a two-link arm's configuration space |
+| `allgo.robotics.motion`         | Configuration space for a disk robot among polygons, and a translating polygon's by Minkowski sum; the visibility graph, the Voronoi graph, cell decomposition and its refinement by subdivision, PRM, RRT, bidirectional RRT and RRT*, hybrid A*, trajectory optimization, shortcutting, potential fields; a two-link arm's configuration space |
 | `allgo.robotics.localization`   | Monte Carlo localization, its low-variance resampling, and now EKF localization among landmarks |
 | `allgo.robotics.slam`           | EKF SLAM: the pose and every landmark in one Gaussian                       |
 | `allgo.robotics.fastslam`       | FastSLAM: a particle per path, a little Kalman filter per landmark in each  |
 | `allgo.robotics.graph-slam`     | Graph SLAM: the whole run's poses and landmarks by Gauss-Newton least squares |
-| `allgo.robotics.control`        | PID as a step; LQR by the Riccati recursion                                |
+| `allgo.robotics.control`        | PID as a step; LQR by the Riccati recursion; iterative LQR; model predictive control |
+| `allgo.robotics.tracking`       | Retiming by a trapezoidal profile; a two-link arm's dynamics; feedforward, PD and computed torque control |
+| `allgo.robotics.guarded`        | Guarded moves under motion uncertainty: a peg into a hole                  |
+| `allgo.robotics.humans`         | Predicting a person's goal from noisily rational steps; behavioral cloning and DAgger |
+| `allgo.robotics.terrain`        | Self-supervised learning of drivable ground, a laser teaching a camera     |
+| `allgo.robotics.reactive`       | A hexapod's leg machine and tripod gait; subsumption                       |
 | `allgo.robotics.kinematics`     | Craig's chains and the IK solvers, moved here from `allgo.kinematics`      |
 | `allgo.decision.contract-net`   | The contract net: announcement, marginal-cost bids, award, subcontracting; recontracting by Sandholm's O-, C-, S-, M- and OCSM-contracts; routes by Held and Karp |
 | `allgo.decision.games`          | Normal-form games, dominance and its iterated elimination, Nash equilibria pure and mixed, zero-sum games by linear programming, repeated games, bargaining, the Shapley value, voting, auctions and VCG |
@@ -1276,6 +1281,103 @@ records a lap and then solves it an iteration at a time, dead
 reckoning's drifted path snapping onto the true one. Graph SLAM's lap
 is steered by the truth, since it estimates nothing until the lap is
 over.
+
+**The rest of chapter 26, read against the 4th edition.**
+
+- *A polygon's configuration space* (`motion/cspace-obstacle`): for a
+  robot that translates without turning, the obstacle's Minkowski sum
+  with the robot turned half round, by `geometry.polygon`'s new
+  `minkowski-sum` (edges merged in order of direction). Section
+  26.5.1's right triangle against a rectangle gives a five-sided
+  C-space obstacle, as the section says: the triangle's legs run
+  parallel to two of the rectangle's sides, and parallel edges join.
+- *Subdivision* (`motion/subdivision-seq`), the section's way to make
+  cell decomposition complete: cells free, blocked or mixed by the
+  signed clearance at their centers against half their diagonal, and
+  the mixed ones split in four a step. The passage that metre-free cells
+  miss (the existing test's 0.5 m gap for a 0.1 m robot) is found after
+  four splits.
+- *The bidirectional RRT* of the section's figure: two trees, from each
+  end, joined when a milestone is reachable from both.
+- *Hybrid A** (`motion/hybrid-a-star-seq`): A* over cells and heading
+  bins, but each cell keeps the continuous pose that reached it, and a
+  move drives a car's exact arc -- hard left, straight, hard right --
+  from that pose. The heading changes by exactly step / radius between
+  poses, never a corner. Forward only, as the book describes it: a car
+  started a metre from the square, facing it, with a one-metre turning
+  radius, has no path, and none is found. Hybrid A* as usually built
+  also reverses.
+- *Trajectory optimization* (`motion/trajectory-optimization-seq`),
+  after CHOMP: J = J_obs + lambda J_eff, the cost field from the signed
+  distance integrated by arc length, and gradient descent from the
+  straight line. Through the two posts of the figure, the line comes
+  clear by 0.4-0.7 m; with nothing in the way, a wiggly path straightens
+  onto its chord, the Euler-Lagrange optimum. The gradient was at first
+  central differences of the whole J, 33 ms a step; a waypoint is in
+  only its two legs' terms, so differencing those is the same gradient
+  at a 25th of the cost. Straight through the middle of a large
+  obstacle it stays stuck -- halves of the path pushed out opposite
+  sides, a leg left across it -- the local minimum the section warns of.
+- *Tracking control* (`allgo.robotics.tracking`): retiming by the
+  trapezoidal profile (D / v + v / a, or 2 sqrt(D / a) when too short),
+  a planar two-link arm's dynamics with point masses (as in Craig's
+  *Introduction to Robotics*; energy conserved to 1e-6 under no torque,
+  inverse undoing forward to 1e-9), and the three control laws. Moving
+  between two poses in 2.3 s, with a model a fifth too light: open
+  loop is 2.5 rad off, PD alone 0.38, computed torque 0.04. Even with
+  the exact model, open loop drifts 0.16 rad, its errors unchecked;
+  computed torque with it, 0.0002.
+- *iLQR and MPC* (`allgo.robotics.control`): iterative LQR with the
+  dynamics linearized by differences, the backward Riccati pass for a
+  feedforward and a feedback gain at each step, and a halving line
+  search. On linear dynamics a second iteration changes the cost by
+  under 1e-9 of it. A pendulum swung up from hanging, 60 steps, ends
+  upright to 3e-5 rad. Run open loop on one 30% heavier, the plan ends
+  at 0.8 rad; MPC with the same wrong model, replanning 40 steps ahead
+  every step, holds it upright to 5e-4.
+- *Guarded moves* (`allgo.robotics.guarded`), Figures 26.23-26.25: a
+  peg's motion errs up to 20 degrees. Straight down, stopping at
+  contact, it entered the hole in 57 of 200 trials; down and left to the
+  floor, then down and right sliding along it, it reached the bottom in
+  all 200.
+- *Predicting people* (`allgo.robotics.humans`), equations 26.8-26.9:
+  a person's steps scored by a softmax of -beta Q, Q the step plus the
+  straight-line distance left, and the belief over goals updated by
+  each. Walking right from the middle of a room, the belief in the
+  window rises 0.33, 0.67, 0.89, 0.97 ... to 1.0, the kitchen behind
+  falling to nothing.
+- *DAgger*: lane keeping, a nearest-neighbor learner, two
+  demonstrations. Without noise the cloned policy retraces the
+  demonstrations exactly and DAgger has nothing to add, so the car is
+  buffeted: behavioral cloning's mean offset is then 1.1-3.4 times the
+  expert's on four seeds, and four rounds of DAgger bring it within 1.3.
+- *Self-supervised terrain* (`allgo.robotics.terrain`), section
+  26.4.3's adaptive vision: the laser labels a patch just ahead,
+  `learning.unsupervised`'s EM fits a mixture over those colors, and the
+  camera classifies everything by it. Taught on a road, 99% of road and
+  no grass is drivable; after the robot turns onto grass, 98% of grass
+  too; rocks never. The laser first swept whole rows, roadsides
+  included, and learned grass at once; it sees a patch, not a row.
+- *Reactive control* (`allgo.robotics.reactive`), section 26.9: the
+  leg's machine lifts, swings, sets down and stands, and a blocked
+  swing retracts and lifts 0.05 higher. A 0.27 rock costs four retries.
+  The tripod gait waits for all three legs of a group before the other
+  lifts, so three always stand. The first version counted a group done
+  only when its legs landed on the same tick, and a leg finished early
+  stepped again while a stuck one retried; each group now remembers
+  which legs have stepped. Subsumption is the highest layer with
+  something to say.
+
+**The demos.** Motion Planning gains subdivision, the bidirectional
+RRT, hybrid A* and trajectory optimization. A new Robot Control demo
+has the arm's three controllers side by side, the pendulums open loop
+and under MPC, the peg's trials, the hexapod, a person's goal being
+guessed, and the laser teaching the camera.
+
+**Left out:** coastal navigation and information gain in the cost;
+domain randomization; the game-theoretic coordination of Figure 26.28;
+learning cost functions from demonstrations, which
+`decision.apprenticeship`'s inverse RL already does for MDPs.
 
 **The contract net, later.** `allgo.decision.contract-net` allocates
 tasks among cooperating agents the way chapter 18 describes. It follows

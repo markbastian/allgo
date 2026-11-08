@@ -60,3 +60,13 @@
           [p t] (poly/simplify pts [:a :b :c :d :e :f] 0.5)]
       (is (= [[0.0 0.0] [10.0 0.0] [10.0 10.0] [0.0 10.0]] p))
       (is (= [:a :c :d :f] t)))))
+
+(deftest minkowski-sum-test
+  (testing "two unit squares sum to a square of side 2"
+    (is (= #{[0.0 0.0] [2.0 0.0] [2.0 2.0] [0.0 2.0]}
+           (set (poly/minkowski-sum [[0 0] [1 0] [1 1] [0 1]] [[0 0] [1 0] [1 1] [0 1]])))))
+  (testing "a triangle and a square: parallel edges join, so 3 + 4 - 2 corners"
+    (let [s (poly/minkowski-sum [[0 0] [1 0] [0 1]] [[0 0] [2 0] [2 2] [0 2]])]
+      (is (= 5 (count s)))
+      (is (poly/convex? s))
+      (is (< (abs (- (poly/area s) (+ 4 0.5 2 2))) 1e-12)))))

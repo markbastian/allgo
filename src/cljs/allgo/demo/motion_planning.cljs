@@ -12,10 +12,16 @@
   scatters a roadmap and searches it; RRT grows a tree toward random
   samples until it touches the goal; RRT* keeps growing and rewiring,
   and its path keeps shortening. The potential field slides downhill
-  and can stall. The two-link arm plans in its own configuration space,
+  and can stall. Subdivision splits the mixed cells until a way opens;
+  the bidirectional RRT grows a tree from each end until a milestone
+  joins them; hybrid A* searches cells but drives a car's own arcs
+  between them, so its path can be driven; trajectory optimization bends
+  a straight line out of an obstacle by gradient descent. The two-link
+  arm plans in its own configuration space,
   drawn beside it: dark where the arm would hit something. Click to move
   the goal."
-  (:require [allgo.random :as random]
+  (:require [allgo.geometry.polygon :as polygon]
+            [allgo.random :as random]
             [allgo.robotics.motion :as motion]
             [allgo.search :as search]
             ["lil-gui" :default GUI]
@@ -32,6 +38,10 @@
                [[3.6 6.0] [4.2 6.0] [4.2 8.0] [3.6 8.0]]]})
 
 (def ^:private start [1.0 1.0])
+
+;; trajectory optimization starts from a straight line through an obstacle
+(def ^:private traj-start [3.2 2.2])
+(def ^:private traj-goal [8.0 2.8])
 
 (def ^:private arm (motion/arm [6.0 4.0] [2.2 1.6]))
 (def ^:private arm-world
@@ -57,6 +67,14 @@
       "RRT" (motion/rrt-seq world start goal rng)
       "RRT*" (motion/rrt-seq world start goal rng :star? true)
       "potential field" (reductions conj [] (take 2000 (motion/potential-seq world start goal :influence 0.8 :repulse 0.1)))
+      "subdivision" (motion/subdivision-seq world start goal 1.0 0.1)
+      "bidirectional RRT" (motion/bidirectional-rrt-seq world start goal rng)
+      "hybrid A*" (let [ss (motion/hybrid-a-star-seq world (conj start (/ math/PI 2)) goal {:min-radius 0.8 :step 0.6 :cell 0.4})
+                        [before after] (split-with (comp nil? :path) ss)]
+                    (concat (take 30000 before) (take 1 after)))
+      "trajectory optimization" (take 400 (motion/trajectory-optimization-seq
+                                           world (vec (for [i (range 25)] (polygon/lerp traj-start traj-goal (/ i 24.0))))
+                                           {:epsilon 0.6 :lambda 0.02 :rate 0.05}))
       "two-link arm" (let [grid (motion/arm-cspace arm arm-world arm-n)]
                        (repeat {:cspace grid :plan (motion/arm-plan grid [-3.0 0.0] [0.0 0.6])})))))
 
@@ -199,6 +217,41 @@
                         (str (count nodes) " nodes"
                              (if path (str ", path " (.toFixed (motion/path-length path) 2) " m") ", growing")))
 
+                      "subdivision"
+                      (let [{:keys [cells path]} st]
+                        (doseq [[x y s kind] cells :let [[px0 py0] (px [x (+ y s)])]]
+                          (set! (.-fillStyle ctx) (case kind :free "rgba(120,200,140,0.16)" :blocked "rgba(255,143,112,0.10)" "rgba(255,212,121,0.22)"))
+                          (.fillRect ctx (+ px0 0.5) (+ py0 0.5) (- (* scale s) 1) (- (* scale s) 1)))
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count cells) " cells: green free, red blocked, yellow mixed, split in four each step"
+                             (if path (str "; path " (.toFixed (motion/path-length path) 2) " m") "; no way through the free cells yet")))
+
+                      "bidirectional RRT"
+                      (let [{:keys [a b path]} st
+                            tree! (fn [{:keys [nodes parent]} color] (doseq [[i p] (map-indexed vector parent) :when p] (line! px (nodes p) (nodes i) color 1)))]
+                        (tree! a "rgba(125,255,160,0.5)") (tree! b "rgba(255,143,112,0.5)")
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count (:nodes a)) " + " (count (:nodes b)) " nodes, one tree from the start (green), one from the goal (red)"
+                             (if path (str "; joined, path " (.toFixed (motion/path-length path) 2) " m") "; growing toward each milestone")))
+
+                      "hybrid A*"
+                      (let [{:keys [best path]} st]
+                        (doseq [{:keys [pose]} (vals best)] (dot! px (subvec pose 0 2) 1.5 "rgba(140,170,220,0.5)"))
+                        (when path
+                          (doseq [[a b] (partition 2 1 path)
+                                  :let [k (some (fn [k] (when (< (polygon/distance (subvec (motion/arc a k 0.6) 0 2) (subvec b 0 2)) 1e-9) k)) [1.25 0.0 -1.25])
+                                        pts (map #(subvec (motion/arc a (or k 0.0) (* 0.6 (/ % 8.0))) 0 2) (range 9))]]
+                            (doseq [[u v] (partition 2 1 pts)] (line! px u v "#ffd479" 3))))
+                        (str (count best) " cells reached" (if path (str "; a path of " (dec (count path)) " arcs, none tighter than the car can turn") "; searching")))
+
+                      "trajectory optimization"
+                      (let [path st]
+                        (path! px path "#ffd479")
+                        (doseq [p path] (dot! px p 2.5 "#ffffff"))
+                        (dot! px traj-start 5 "#7dffa0") (dot! px traj-goal 5 "#ff8f70")
+                        (str "from the straight line, a gradient step at a time: " (if (motion/path-free? world path) "clear of the obstacle" "still through it")
+                             "; the efficiency term pulls it straight, the obstacles' cost field pushes it out"))
+
                       "potential field"
                       (let [trail st]
                         (doseq [[a b] (partition 2 1 trail)] (line! px a b "#ffd479" 2))
@@ -272,7 +325,8 @@
                                  (restart!))))))
       (let [gui (GUI. #js {:container container})]
         (.onChange (.add gui controls "method" #js ["visibility graph" "Voronoi graph" "cell decomposition" "PRM" "RRT" "RRT*"
-                                                    "potential field" "two-link arm"])
+                                                    "potential field" "subdivision" "bidirectional RRT" "hybrid A*"
+                                                    "trajectory optimization" "two-link arm"])
                    restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui controls "speed" 1 20 1)

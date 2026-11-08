@@ -116,6 +116,26 @@
                      (>= (cross (sub b a) (sub c b)) (* -1e-9 (distance a b) (distance b c)))))
                  (range n)))))
 
+(defn minkowski-sum
+  "The Minkowski sum of two convex counterclockwise polygons, every a + b:
+  their edges merged in order of direction, starting from the sum of
+  their lowest corners. Edges of the same direction join into one, so the
+  sum has at most as many corners as the two together."
+  [p q]
+  (let [lowest (fn [poly] (let [i (first (sort-by (fn [i] (let [[x y] (nth poly i)] [(double y) (double x)])) (range (count poly))))]
+                            (vec (concat (subvec (vec poly) i) (subvec (vec poly) 0 i)))))
+        edge-vectors (fn [poly] (mapv (fn [[a b]] (sub b a)) (edges poly)))
+        angle (fn [v] (let [a (angle-of v)] (if (neg? a) (+ a (* 2 math/PI)) a)))
+        p (lowest p) q (lowest q)
+        merged (sort-by angle (concat (edge-vectors p) (edge-vectors q)))
+        cs (vec (reductions add (add (first p) (first q)) (butlast merged)))
+        n (count cs)]
+    ;; drop corners where the boundary runs straight on
+    (vec (keep-indexed (fn [i c]
+                         (let [a (cs (mod (dec i) n)) b (cs (mod (inc i) n))]
+                           (when (> (abs (cross (sub c a) (sub b c))) 1e-12) c)))
+                       cs))))
+
 (defn contains-point?
   "Whether `p` is inside the polygon, by counting crossings of a ray."
   [poly [px py]]

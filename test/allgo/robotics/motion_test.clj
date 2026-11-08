@@ -126,3 +126,71 @@
             plan (motion/arm-plan grid [-0.5 0.0] [1.4 0.3])]
         (is (seq plan))
         (is (not-any? #(motion/arm-collides? arm w %) plan))))))
+
+(deftest cspace-obstacle-test
+  (testing "section 26.5.1's triangle robot, translating, against a rectangle: its C-space obstacle has five sides"
+    (let [c (motion/cspace-obstacle [[0.0 0.0] [1.0 0.0] [0.0 1.0]] [[2.0 1.0] [4.0 1.0] [4.0 2.0] [2.0 2.0]])]
+      (is (= #{[2.0 0.0] [4.0 0.0] [4.0 2.0] [1.0 2.0] [1.0 1.0]} (set c)))
+      (testing "-- the reference points where the robot would touch the obstacle"
+        (is (polygon/contains-point? c [1.6 1.6]))
+        (is (not (polygon/contains-point? c [1.2 0.6])))))))
+
+(def ^:private gap
+  {:bounds [[0.0 0.0] [6.0 4.0]] :radius 0.1
+   :obstacles [[[2.9 0.0] [3.1 0.0] [3.1 1.75] [2.9 1.75]] [[2.9 2.25] [3.1 2.25] [3.1 4.0] [2.9 4.0]]]})
+
+(deftest subdivision-test
+  (let [states (vec (take 8 (motion/subdivision-seq gap [1.0 2.0] [5.0 2.0] 1.0 0.05)))
+        found (first (filter :path states))]
+    (testing "metre cells see no way through the passage; splitting the mixed cells in four, and again, finds it"
+      (is (nil? (:path (first states))))
+      (is (some? found))
+      (is (motion/path-free? gap (:path found))))
+    (testing "and only the mixed cells are split: the free and blocked ones stay as they were"
+      (is (< (count (:cells found)) (* 24 (math/pow 4 4)))))))
+
+(deftest bidirectional-rrt-test
+  (testing "two trees, from the start and from the goal, join through a milestone both can reach"
+    (doseq [seed (range 1 6)]
+      (let [{:keys [path a b]} (first (filter :path (motion/bidirectional-rrt-seq room start goal (random/rng seed))))]
+        (is (= start (first path)))
+        (is (= goal (peek path)))
+        (is (motion/path-free? room path))
+        (is (< (+ (count (:nodes a)) (count (:nodes b))) 100))))))
+
+(deftest hybrid-a-star-test
+  (let [w (assoc room :radius 0.2)]
+    (doseq [r [1.0 0.6]]
+      (let [path (motion/hybrid-a-star w [0.0 2.0 (/ math/PI 2)] [4.0 2.0] {:min-radius r :step 0.7})]
+        (testing "a drivable path: the car's heading turns no faster than its tightest circle allows"
+          (is (some? path))
+          (is (every? (fn [[a b]] (<= (abs (- (b 2) (a 2))) (+ 1e-12 (/ 0.7 r)))) (partition 2 1 path))))
+        (testing "each move an arc of the car's own motion, ending where the arc does"
+          (is (every? (fn [[a b]] (some #(< (polygon/distance (subvec (motion/arc a % 0.7) 0 2) (subvec b 0 2)) 1e-9)
+                                        [(/ 1.0 r) 0.0 (/ -1.0 r)]))
+                      (partition 2 1 path))))
+        (testing "free of the square, ending within half a metre of the goal"
+          (is (every? #(motion/free? w (subvec % 0 2)) path))
+          (is (<= (polygon/distance (subvec (peek path) 0 2) [4.0 2.0]) 0.5)))))))
+
+(def ^:private two-posts
+  {:bounds [[0.0 0.0] [10.0 6.0]] :radius 0.0
+   :obstacles [[[3.3 2.9] [3.7 2.9] [3.7 3.3] [3.3 3.3]] [[6.3 2.7] [6.7 2.7] [6.7 3.1] [6.3 3.1]]]})
+
+(deftest trajectory-optimization-test
+  (let [line (vec (for [i (range 31)] [(+ 1.0 (* 8.0 (/ i 30.0))) 3.0]))
+        opts {:epsilon 0.8 :lambda 0.02 :rate 0.05}
+        states (vec (take 201 (motion/trajectory-optimization-seq two-posts line opts)))
+        costs (mapv #(motion/trajectory-cost two-posts % opts) (take-nth 20 states))]
+    (testing "the straight line runs through both posts; the gradient bends it round them, as in the chapter's Figure 26.20"
+      (is (not (motion/path-free? two-posts line)))
+      (is (motion/path-free? two-posts (peek states)))
+      (is (> (reduce min (map #(motion/signed-clearance two-posts %) (peek states))) 0.3)))
+    (testing "and the cost never rises"
+      (is (apply >= costs))))
+  (testing "with nothing in the way, the efficiency term alone pulls a wiggly path straight: its optimum is the line"
+    (let [wiggly (vec (for [i (range 31)] [(+ 1.0 (* 8.0 (/ i 30.0))) (+ 3.0 (* 0.5 (math/sin (* i 0.7))))]))
+          a (first wiggly) b (peek wiggly)
+          off (fn [p] (reduce max (map #(polygon/segment-distance % a b) p)))]
+      (is (> (off wiggly) 0.8))
+      (is (< (off (nth (motion/trajectory-optimization-seq (assoc two-posts :obstacles []) wiggly {:lambda 1.0 :rate 0.016}) 500)) 0.03)))))
