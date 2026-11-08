@@ -262,7 +262,7 @@
    "id": "motion-planning",
    "group": "Robotics",
    "label": "Motion Planning",
-   "blurb": "Visibility and Voronoi graphs, cells, PRM, RRT and RRT*, potential fields, and a two-link arm in configuration space",
+   "blurb": "Visibility and Voronoi graphs, cells and their subdivision, PRM, RRT, bidirectional RRT and RRT*, hybrid A*, trajectory optimization, potential fields, and a two-link arm in configuration space",
    "badges": [
     "Interactive"
    ],
@@ -277,6 +277,16 @@
     "Interactive"
    ],
    "href": "play/?demo=slam"
+  },
+  {
+   "id": "robot-control",
+   "group": "Robotics",
+   "label": "Robot Control",
+   "blurb": "Computed torque on a two-link arm, iLQR and model predictive control, guarded moves into a hole, a hexapod's reflexes, predicting where people are going, and a robot teaching itself what is drivable",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=robot-control"
   },
   {
    "id": "soft-body",
