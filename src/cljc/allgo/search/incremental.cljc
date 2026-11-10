@@ -88,6 +88,20 @@
   (let [best (apply min-key #(+ (edge st start %) (g st %)) (neighbors start))]
     (when (< (+ (edge st start best) (g st best)) inf) best)))
 
+(defn- follow
+  "The plan's state moved on to its next state, or nil at the goal or
+  where it is blocked."
+  [st]
+  (when (not= (:start st) (:goal st))
+    (some->> (next-state st) (assoc st :start))))
+
+(defn planned-path
+  "The states the plan goes through from the robot's position to the
+  goal, as the map now has it -- at most `limit` (default 10000)."
+  ([st] (planned-path st 10000))
+  ([st limit]
+   (mapv :start (take limit (search/step-seq follow st)))))
+
 (defn replan
   "The plan repaired after the robot, now at `position`, learns the edge
   costs `changes`, each `[a b cost]` (both directions): `km` grows by the

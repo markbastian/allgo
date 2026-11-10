@@ -14,6 +14,7 @@
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
             [allgo.demo.bricks :as bricks]
             [allgo.demo.broad-phase :as broad-phase]
+            [allgo.demo.car-paths :as car-paths]
             [allgo.demo.cave :as cave]
             [allgo.demo.city :as city]
             [allgo.demo.city-agents :as city-agents]
@@ -36,6 +37,7 @@
             [allgo.demo.genetic :as genetic]
             [allgo.demo.geometry :as geometry]
             [allgo.demo.gesture :as gesture]
+            [allgo.demo.grid-navigation :as grid-navigation]
             [allgo.demo.grid-world :as grid-world]
             [allgo.demo.hex :as hex]
             [allgo.demo.human-arm :as human-arm]
@@ -47,6 +49,7 @@
             [allgo.demo.local-search :as local-search]
             [allgo.demo.localization :as localization]
             [allgo.demo.lorenz :as lorenz]
+            [allgo.demo.many-robots :as many-robots]
             [allgo.demo.motion-planning :as motion-planning]
             [allgo.demo.motorcycle :as motorcycle]
             [allgo.demo.orbit-determination :as od]
@@ -94,6 +97,9 @@
    "language" {:start language/start! :stop language/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
+   "car-paths" {:start car-paths/start! :stop car-paths/stop!}
+   "grid-navigation" {:start grid-navigation/start! :stop grid-navigation/stop!}
+   "many-robots" {:start many-robots/start! :stop many-robots/stop!}
    "slam" {:start slam/start! :stop slam/stop!}
    "robot-control" {:start robot-control/start! :stop robot-control/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}

@@ -87,7 +87,7 @@
   [free? reserved start goal horizon]
   (let [{:keys [cells swaps parked]} reserved
         taken? (fn [c t] (or (cells [c t]) (when-let [t0 (parked c)] (>= t t0))))
-        later? (fn [c t] (some (fn [[[c' t']]] (and (= c c') (> t' t))) cells))
+        later? (fn [c t] (some (fn [[c' t']] (and (= c c') (> t' t))) cells))
         manhattan (fn [[a b] [c d]] (+ (abs (- a c)) (abs (- b d))))]
     (some->> (search/a-star {:start [start 0]
                              :goal? (fn [[c t]] (and (= c goal) (not (later? c t))))

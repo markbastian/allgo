@@ -47,3 +47,12 @@
       (let [paths (coordination/prioritized free? [east west])]
         (is (some? (first paths)))
         (is (nil? (second paths)))))))
+
+(deftest no-parking-in-the-way-test
+  (testing "a robot planned later may not park where one planned earlier has yet to pass: it waits in the bay until the corridor is clear"
+    (let [free? (fn [[i j]] (or (and (= j 0) (<= 0 i 6)) (= [3 1] [i j])))
+          [a b :as paths] (coordination/prioritized free? [[[0 0] [6 0]] [[3 1] [3 0]]])]
+      (is (= [3 0] (a 3)))
+      (is (= [3 0] (peek b)))
+      (is (> (dec (count b)) 3))
+      (is (= [] (coordination/conflicts paths))))))

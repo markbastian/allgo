@@ -29,3 +29,11 @@
                   (range (count states)))))
     (testing "repairing rather than replanning: under a tenth of the expansions of an A* search from scratch at every move"
       (is (< (* 10 (:expanded (peek states))) (reduce + (map #(count (a-star %)) (range (count states)))))))))
+
+(deftest planned-path-test
+  (testing "the plan read out from the robot's position: start to goal, a move per unit of its cost"
+    (let [st (incremental/plan {:start [0 0] :goal [19 19] :neighbors nbrs :cost (fn [_ _] 1.0) :heuristic manhattan})
+          p (incremental/planned-path st)]
+      (is (= [0 0] (first p)))
+      (is (= [19 19] (peek p)))
+      (is (= (incremental/path-cost st) (double (dec (count p))))))))

@@ -1547,6 +1547,28 @@ connector in the passage.
 corridor with a bay near one end lets the robot nearest the bay step in
 when it is planned second, and finds no plan when the order is swapped.
 
+**Demos.** Motion Planning gains the Halton and visibility PRMs,
+randomized potential fields, the vertical decomposition and its
+boustrophedon sweep, and the lattice planner and kinodynamic RRT for a
+double integrator; three new demos show the rest: Car Paths (Dubins and
+Reeds-Shepp, the goal placed and aimed by dragging), Grid Navigation (D*
+Lite discovering walls, the wavefront and the optimal navigation
+function) and Many Robots (velocity tuning past cars with its s-t
+diagram, the coordination diagram of two robots, prioritized planning in
+a warehouse). Building them found three things wrong. The decomposition
+made empty cells under an obstacle standing on the floor, and the way
+between two doors on one side of a cell grazed the obstacle's corner; it
+now skips them and goes by the cell's center. Prioritized planning let a
+robot park where one planned before it had yet to pass -- its check
+destructured each reservation a level too deep -- and a fleet of eight
+collided; now twenty fleets plan without a collision, and a test pins
+it. And `a-star-seq` runs on after it solves, so a lattice search's
+answer is in its first solved state, not its last; `lattice-result`
+reads it from whichever state it is handed. The lattice has a parity
+too: from rest m - k stays even, so the robot stops only every amax dt^2,
+and a goal tolerance smaller than half that diagonal can make the goal
+unreachable.
+
 **Left out:** cylindrical algebraic decomposition and Canny's roadmap
 (6.4); visibility-based pursuit-evasion (12.4); the general
 time-optimal problem under full manipulator dynamics, beyond speed,

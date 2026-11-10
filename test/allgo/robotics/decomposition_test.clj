@@ -40,3 +40,20 @@
       (is (= (range 8) (sort order)))
       (is (motion/path-free? room path))
       (is (<= (reduce max (map gap probes)) (+ (/ width 2) 1e-5))))))
+
+(deftest walls-on-the-floor-test
+  (let [world {:bounds [[0.0 0.0] [12.0 8.0]] :radius 0.0
+               :obstacles [[[2.0 0.0] [2.6 0.0] [2.6 5.5] [2.0 5.5]]
+                           [[4.5 2.5] [6.5 2.0] [7.0 4.0] [5.0 4.8]]
+                           [[5.0 6.2] [9.0 6.2] [9.0 6.8] [5.0 6.8]]
+                           [[8.5 0.8] [10.0 0.8] [10.0 4.8] [9.4 4.8] [9.4 1.4] [8.5 1.4]]
+                           [[3.6 6.0] [4.2 6.0] [4.2 8.0] [3.6 8.0]]]}
+        cells (decomposition/vertical-decomposition world)]
+    (testing "obstacles standing on the floor or hanging from the ceiling leave no empty cells, and the rest still tile the free space"
+      (is (every? (fn [c] (pos? (polygon/area (decomposition/corners c)))) cells))
+      (is (< (abs (- (reduce + (map #(polygon/area (decomposition/corners %)) cells))
+                     (- 96.0 (reduce + (map polygon/area (:obstacles world))))))
+             1e-9)))
+    (testing "where a cell's two doors lie on one side, the way between them goes by its center, clear of the corner between them"
+      (is (motion/path-free? world (:path (decomposition/boustrophedon world [1.0 1.0] 0.3))))
+      (is (motion/path-free? world (decomposition/path world [1.0 1.0] [11.0 7.2]))))))

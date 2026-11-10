@@ -18,10 +18,21 @@
   between them, so its path can be driven; trajectory optimization bends
   a straight line out of an obstacle by gradient descent. The two-link
   arm plans in its own configuration space,
-  drawn beside it: dark where the arm would hit something. Click to move
-  the goal."
+  drawn beside it: dark where the arm would hit something.
+
+  From LaValle's *Planning Algorithms* (Cambridge University Press,
+  2006): the roadmap grown from the Halton sequence, which leaves no
+  large gap for long; the visibility roadmap, a few guards and the
+  connectors that join them; randomized potential fields, which walk at
+  random when descent stalls; the exact vertical decomposition into
+  trapezoids, and the boustrophedon sweep that covers every one; and a
+  robot with momentum -- a double integrator -- planned on a lattice of
+  its exact motions by A*, or by a kinodynamic RRT. Click to move the
+  goal."
   (:require [allgo.geometry.polygon :as polygon]
             [allgo.random :as random]
+            [allgo.robotics.decomposition :as decomposition]
+            [allgo.robotics.kinodynamic :as kinodynamic]
             [allgo.robotics.motion :as motion]
             [allgo.search :as search]
             ["lil-gui" :default GUI]
@@ -38,6 +49,24 @@
                [[3.6 6.0] [4.2 6.0] [4.2 8.0] [3.6 8.0]]]})
 
 (def ^:private start [1.0 1.0])
+
+;; The exact decomposition is of a point robot's free space.
+(def ^:private point-world (assoc world :radius 0.0))
+
+(def ^:private double-integrator {:amax 0.5 :vmax 1.0 :dt 1.0 :tolerance 0.4 :slow 0.3})
+
+(defn- until-solved
+  "The search states up to and including the one that solves it."
+  [states]
+  (let [[before after] (split-with (complement :solved?) states)]
+    (concat before (take 1 after))))
+
+(defn- arc-points
+  "Points along the arcs of a double integrator's `states` under
+  `controls`, four to an arc."
+  [states controls dt]
+  (into [(subvec (first states) 0 2)]
+        (mapcat (fn [s u] (map #(subvec (kinodynamic/propagate s u (* dt (/ % 4))) 0 2) (range 1 5))) states controls)))
 
 ;; trajectory optimization starts from a straight line through an obstacle
 (def ^:private traj-start [3.2 2.2])
@@ -61,6 +90,23 @@
                                  ;; up to and including the step that reaches the goal
                                  [before after] (split-with (complement :solved?) (motion/cell-seq grid start goal))]
                              (map (fn [st] {:grid grid :search st}) (concat before (take 1 after))))
+      "Halton PRM" (map-indexed (fn [k rm] {:roadmap rm :path (when (and (pos? k) (zero? (mod k 10)))
+                                                                (motion/prm-path world rm start goal))})
+                                (motion/halton-prm-seq world))
+      "visibility PRM" (map-indexed (fn [k rm] (assoc rm :path (when (zero? (mod k 10)) (motion/visibility-roadmap-path world rm start goal))))
+                                    (take 3000 (motion/visibility-prm-seq world rng)))
+      "randomized potential field" (let [[before after] (split-with #(not= goal (:p %))
+                                                                    (take 30000 (motion/randomized-potential-seq world start goal rng :influence 0.8 :repulse 0.1)))]
+                                     (concat before (take 1 after)))
+      "vertical decomposition" (let [cells (decomposition/vertical-decomposition point-world)
+                                     doors (decomposition/adjacency cells)]
+                                 (repeat {:cells cells :doors doors :path (decomposition/path cells doors start goal)}))
+      "boustrophedon coverage" (let [cells (decomposition/vertical-decomposition point-world)
+                                     {:keys [path]} (decomposition/boustrophedon point-world start 0.3)]
+                                 (map (fn [k] {:cells cells :path (subvec path 0 k)}) (range 2 (inc (count path)))))
+      "lattice planner" (map (fn [st] {:search st :plan (kinodynamic/lattice-result start double-integrator st)})
+                             (until-solved (kinodynamic/lattice-seq world start goal double-integrator)))
+      "kinodynamic RRT" (kinodynamic/rrt-seq world start goal rng double-integrator)
       "PRM" (map-indexed (fn [k rm] {:roadmap rm :path (when (and (pos? k) (zero? (mod k 10)))
                                                          (motion/prm-path world rm start goal))})
                          (motion/prm-seq world rng))
@@ -199,6 +245,78 @@
                         (str (count free) " free cells, " (count seen) " reached"
                              (if p (str ", path " (.toFixed (motion/path-length p) 2) " m") ", searching")))
 
+                      "Halton PRM"
+                      (let [{{:keys [nodes edges]} :roadmap} st
+                            path (:last-path @model)]
+                        (doseq [[i j] edges] (line! px (nodes i) (nodes j) "rgba(140,170,220,0.3)" 1))
+                        (doseq [n nodes] (dot! px n 2 "#9fb4d8"))
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count nodes) " Halton samples -- the same every time, each in the largest gap left -- " (count edges) " links"
+                             (if path (str ", path " (.toFixed (motion/path-length path) 2) " m") ", not yet connected")))
+
+                      "visibility PRM"
+                      (let [{:keys [nodes edges guards]} st
+                            path (:last-path @model)
+                            guard? (set guards)]
+                        (doseq [[i j] edges] (line! px (nodes i) (nodes j) "rgba(140,170,220,0.6)" 1.5))
+                        (doseq [[i n] (map-indexed vector nodes)] (dot! px n (if (guard? i) 5 3) (if (guard? i) "#7fd1ff" "#ffd479")))
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count guards) " guards (blue), each seeing what no other does, and " (- (count nodes) (count guards))
+                             " connectors (gold) joining guards that see each other's samples"
+                             (if path (str "; path " (.toFixed (motion/path-length path) 2) " m") "; not yet connected")))
+
+                      "randomized potential field"
+                      (let [{:keys [p walking trail]} st]
+                        (doseq [[a b] (partition 2 1 trail)] (line! px a b "rgba(255,212,121,0.7)" 1.5))
+                        (dot! px p (* scale (:radius world)) "#ffffff")
+                        (cond (= p @goal) (str "arrived after " (count trail) " steps")
+                              (pos? walking) (str "step " (count trail) " -- stalled, walking at random for " walking " more")
+                              :else (str "step " (count trail) " -- descending the potential")))
+
+                      "vertical decomposition"
+                      (let [{:keys [cells doors path]} st]
+                        (doseq [[k c] (map-indexed vector cells)]
+                          (set! (.-lineWidth ctx) 1)
+                          (poly! px (decomposition/corners c) (if (even? k) "rgba(120,200,140,0.26)" "rgba(120,170,255,0.26)") "rgba(180,200,230,0.7)"))
+                        (doseq [d (vals doors)] (dot! px d 2.5 "#9fb4d8"))
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count cells) " trapezoids from a vertical up and down from every corner, " (quot (count doors) 2) " doors between them (a point robot)"
+                             (if path (str "; path " (.toFixed (motion/path-length path) 2) " m through the doors") "; the goal is unreachable")))
+
+                      "boustrophedon coverage"
+                      (let [{:keys [cells path]} st]
+                        (doseq [[k c] (map-indexed vector cells)]
+                          (set! (.-lineWidth ctx) 1)
+                          (poly! px (decomposition/corners c) (if (even? k) "rgba(120,200,140,0.10)" "rgba(120,170,255,0.10)") "rgba(160,180,210,0.35)"))
+                        (doseq [[a b] (partition 2 1 path)] (line! px a b "#ffd479" 2))
+                        (dot! px (peek path) 5 "#ffffff")
+                        (str "each trapezoid swept up and down in strips 0.3 m apart, the cells in depth-first order: "
+                             (.toFixed (motion/path-length path) 1) " m so far"))
+
+                      "lattice planner"
+                      (let [{:keys [search plan]} st
+                            seen (keys (:came-from search))]
+                        (doseq [c seen] (dot! px (subvec (kinodynamic/lattice-state start double-integrator c) 0 2) 1.5 "rgba(140,170,220,0.6)"))
+                        (when plan
+                          (let [pts (arc-points (:states plan) (:controls plan) (:dt double-integrator))]
+                            (path! px pts "#ffd479")
+                            (robot-on! px scale pts path-t)))
+                        (str (count seen) " lattice states reached -- position and velocity, each control full or no acceleration on each axis for a second"
+                             (if plan (str "; at rest at the goal in " (:time plan) " s, the quickest the lattice holds") "; searching")))
+
+                      "kinodynamic RRT"
+                      (let [{:keys [nodes parent control] :as tree} st
+                            plan (kinodynamic/rrt-plan tree)]
+                        (doseq [[i p] (map-indexed vector parent) :when p]
+                          (let [pts (arc-points [(nodes p)] [(control i)] (:dt double-integrator))]
+                            (doseq [[a b] (partition 2 1 pts)] (line! px a b "rgba(140,170,220,0.4)" 1))))
+                        (when plan
+                          (let [pts (arc-points (:states plan) (:controls plan) (:dt double-integrator))]
+                            (path! px pts "#ffd479")
+                            (robot-on! px scale pts path-t)))
+                        (str (count nodes) " states, each the best of nine controls from the nearest toward a random state"
+                             (if plan (str "; slow at the goal after " (* (:dt double-integrator) (count (:controls plan))) " s") "; growing")))
+
                       "PRM"
                       (let [{{:keys [nodes edges]} :roadmap} st
                             path (:last-path @model)]
@@ -305,8 +423,8 @@
                 (js/requestAnimationFrame frame)
                 (advance!)
                 (swap! model update :path-t + 0.05)
-                (when (= "PRM" (.-method controls))
-                  (when-let [p (:path (:st @model))] (swap! model assoc :last-path p)))
+                (when (#{"PRM" "Halton PRM" "visibility PRM"} (.-method controls))
+                  (when-let [p (or (:path (:st @model)) (:path (:roadmap (:st @model))))] (swap! model assoc :last-path p)))
                 (draw!)))
             (resize! []
               (let [cw (.-clientWidth container) ch (.-clientHeight container)]
@@ -324,8 +442,10 @@
                                  (reset! goal [x y])
                                  (restart!))))))
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["visibility graph" "Voronoi graph" "cell decomposition" "PRM" "RRT" "RRT*"
-                                                    "potential field" "subdivision" "bidirectional RRT" "hybrid A*"
+        (.onChange (.add gui controls "method" #js ["visibility graph" "Voronoi graph" "cell decomposition" "vertical decomposition"
+                                                    "boustrophedon coverage" "PRM" "Halton PRM" "visibility PRM" "RRT" "RRT*"
+                                                    "potential field" "randomized potential field" "subdivision" "bidirectional RRT"
+                                                    "hybrid A*" "lattice planner" "kinodynamic RRT"
                                                     "trajectory optimization" "two-link arm"])
                    restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)

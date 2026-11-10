@@ -55,35 +55,59 @@
 ;; ---------------------------------------------------------------------------
 ;; Lattice planning
 
-(defn lattice-plan
-  "The quickest plan on the lattice from rest at `start` to rest at a
-  lattice point within `tolerance` of `goal`: `{:controls :states :time}`,
-  or nil. Each axis' lattice coordinates are integers m and k, the
-  position start + m amax dt^2 / 2 and the velocity k amax dt, and a
-  control a in {-1, 0, 1} takes them to m + 2k + a and k + a -- exact, so
-  the states never drift off the lattice."
-  [world start goal {:keys [amax vmax dt tolerance]}]
-  (let [step (* 0.5 amax dt dt)
-        kmax (long (math/floor (/ vmax (* amax dt))))
-        [sx sy] start
-        ->state (fn [[mx my kx ky]] [(+ sx (* mx step)) (+ sy (* my step)) (* kx amax dt) (* ky amax dt)])
+(defn lattice-state
+  "The state `[x y vx vy]` at lattice coordinates `[mx my kx ky]` from
+  `start`: each axis' position start + m amax dt^2 / 2 and velocity
+  k amax dt."
+  [start {:keys [amax dt]} [mx my kx ky]]
+  (let [step (* 0.5 amax dt dt) [sx sy] start]
+    [(+ sx (* mx step)) (+ sy (* my step)) (* kx amax dt) (* ky amax dt)]))
+
+(defn lattice-search
+  "The A* search, for `allgo.search`, over the lattice from rest at
+  `start` to rest at a lattice point within `tolerance` of `goal`. Its
+  states are lattice coordinates `[mx my kx ky]`, and a control a in
+  {-1, 0, 1} on each axis takes them to m + 2k + a and k + a -- exact, so
+  the states never drift off the lattice. m - k keeps its parity, so the
+  robot comes to rest only at even m, every amax dt^2: a `tolerance`
+  under half that diagonal can leave the goal unreachable. The
+  heuristic is the time to cover the larger axis' distance at top
+  speed."
+  [world start goal {:keys [amax vmax dt tolerance] :as opts}]
+  (let [kmax (long (math/floor (/ vmax (* amax dt))))
+        ->state (partial lattice-state start opts)
         [gx gy] goal
-        dist (fn [[mx my]] (let [[x y] (->state [mx my 0 0])] (math/hypot (- x gx) (- y gy))))
-        h (fn [[mx my] _] (let [[x y] (->state [mx my 0 0])]
-                            (math/ceil (/ (max 0.0 (- (max (abs (- x gx)) (abs (- y gy))) tolerance)) (* vmax dt)))))
-        result (search/a-star {:start [0 0 0 0]
-                               :goal? (fn [[mx my kx ky]] (and (zero? kx) (zero? ky) (<= (dist [mx my]) tolerance)))
-                               :neighbors (fn [[mx my kx ky]]
-                                            (for [ax [-1 0 1] ay [-1 0 1]
-                                                  :let [kx' (+ kx ax) ky' (+ ky ay)]
-                                                  :when (and (<= (abs kx') kmax) (<= (abs ky') kmax)
-                                                             (arc-free? world (->state [mx my kx ky]) [(* ax amax) (* ay amax)] dt))]
-                                              [(+ mx (* 2 kx) ax) (+ my (* 2 ky) ay) kx' ky']))
-                               :heuristic h})]
-    (when result
-      {:states (mapv ->state result)
-       :controls (mapv (fn [[[_ _ kx ky] [_ _ kx' ky']]] [(* (- kx' kx) amax) (* (- ky' ky) amax)]) (partition 2 1 result))
-       :time (* dt (dec (count result)))})))
+        off (fn [[mx my]] (let [[x y] (->state [mx my 0 0])] [(abs (- x gx)) (abs (- y gy))]))]
+    {:start [0 0 0 0]
+     :goal? (fn [[mx my kx ky]] (and (zero? kx) (zero? ky) (<= (apply math/hypot (off [mx my])) tolerance)))
+     :neighbors (fn [[mx my kx ky :as c]]
+                  (for [ax [-1 0 1] ay [-1 0 1]
+                        :let [kx' (+ kx ax) ky' (+ ky ay)]
+                        :when (and (<= (abs kx') kmax) (<= (abs ky') kmax)
+                                   (arc-free? world (->state c) [(* ax amax) (* ay amax)] dt))]
+                    [(+ mx (* 2 kx) ax) (+ my (* 2 ky) ay) kx' ky']))
+     :heuristic (fn [c _] (math/ceil (/ (max 0.0 (- (apply max (off c)) tolerance)) (* vmax dt))))}))
+
+(defn lattice-seq
+  "The lattice search a step at a time: `allgo.search`'s A* states."
+  [world start goal opts]
+  (search/a-star-seq (lattice-search world start goal opts)))
+
+(defn lattice-result
+  "The plan a lattice search state holds, once solved: `{:controls
+  :states :time}`; nil before."
+  [start {:keys [amax dt] :as opts} search-state]
+  (when-let [result (search/path search-state)]
+    {:states (mapv (partial lattice-state start opts) result)
+     :controls (mapv (fn [[[_ _ kx ky] [_ _ kx' ky']]] [(* (- kx' kx) amax) (* (- ky' ky) amax)]) (partition 2 1 result))
+     :time (* dt (dec (count result)))}))
+
+(defn lattice-plan
+  "The quickest plan on the lattice from rest at `start` to rest within
+  `tolerance` of `goal`, `lattice-search`'s: `{:controls :states :time}`,
+  or nil."
+  [world start goal opts]
+  (some->> (lattice-seq world start goal opts) search/goal-state (lattice-result start opts)))
 
 ;; ---------------------------------------------------------------------------
 ;; Kinodynamic RRT

@@ -43,6 +43,8 @@
         sides (concat [floor] crossing [ceiling])]
     (vec (for [[lo hi] (partition 2 1 sides)
                :let [m [xm (* 0.5 (+ (y-at lo xm) (y-at hi xm)))]]
+               ;; an obstacle standing on the floor leaves no room below it
+               :when (> (- (y-at hi xm) (y-at lo xm)) 1e-9)
                :when (not-any? #(polygon/contains-point? % m) obstacles)]
            {:x0 a :x1 b :lower lo :upper hi}))))
 
@@ -111,14 +113,19 @@
 
 (defn path
   "A path from `start` to `goal` through the decomposition: through the
-  door of each cell boundary crossed, so straight inside every cell. Nil
-  if either is in no cell or no cells join them."
+  door of each cell boundary crossed and, between two doors, the cell's
+  center -- two doors can lie on one side of a cell, and the straight
+  way between them along its edge could graze an obstacle's corner. So
+  the path is straight inside every cell and free. Nil if either is in
+  no cell or no cells join them."
   ([world start goal] (let [cells (vertical-decomposition world)] (path cells (adjacency cells) start goal)))
   ([cells doors start goal]
    (when-let [route (some->> [(cell-of cells start) (cell-of cells goal)]
                              (#(when (every? some? %) %))
                              (apply cell-route cells doors))]
-     (vec (concat [start] (map doors (partition 2 1 route)) [goal])))))
+     (let [ds (map doors (partition 2 1 route))
+           centers (map (comp center cells) (rest (butlast route)))]
+       (into [start] (if (seq ds) (interleave ds (concat centers [goal])) [goal]))))))
 
 (defn- sweep
   "Back-and-forth passes over cell `c` in strips no wider than `width`,
