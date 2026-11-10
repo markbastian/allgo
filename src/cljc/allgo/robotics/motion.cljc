@@ -22,14 +22,18 @@
                          complete only down to the cell size
     PRM                  a probabilistic roadmap: free samples joined to
                          their nearest neighbors, a step a sample, then
-                         searched for each query
+                         searched for each query; grown from the Halton
+                         sequence instead, or as the visibility roadmap
+                         of guards and connectors (LaValle, *Planning
+                         Algorithms*, 2006, sections 5.2 and 5.6.2)
     RRT, RRT*            a tree grown toward random samples, a step a
                          sample; RRT* also chooses each new node's parent
                          and rewires its neighbors, so the path it holds
                          shortens toward the optimum as it grows
     potential field      descent on an attraction to the goal and a
                          repulsion from obstacles: fast, and stuck in any
-                         local minimum
+                         local minimum -- unless random walks shake it
+                         loose (LaValle section 5.4.3)
 
   and `shortcut`, which straightens a sampled path. The two-link arm
   shows what configuration space is for: `arm-cspace` marks which pairs
@@ -39,6 +43,7 @@
   (:require [allgo.geometry.delaunay :as delaunay]
             [allgo.geometry.polygon :as polygon]
             [allgo.geometry.quaternion :as q]
+            [allgo.numerics.quasirandom :as quasirandom]
             [allgo.random :as random]
             [allgo.robotics.kinematics.chain :as chain]
             [allgo.search :as search]
@@ -285,18 +290,73 @@
 (defn- nearest-k [nodes p k]
   (take k (sort-by #(polygon/distance (nodes %) p) (range (count nodes)))))
 
+(defn- roadmap-step
+  "Sample `p` added to the roadmap, joined to the nearest `k` it sees."
+  [world k {:keys [nodes edges]} p]
+  (let [i (count nodes)
+        joined (filter #(segment-free? world (nodes %) p) (nearest-k nodes p k))]
+    {:nodes (conj nodes p) :edges (into edges (map (fn [j] [j i]) joined))}))
+
+(defn roadmap-seq
+  "A roadmap growing a sample at a time from `samples`, a seq of points
+  in the room, the colliding ones skipped: each state `{:nodes :edges}`,
+  every new sample joined to whichever of its `k` nearest earlier nodes
+  it can reach straight."
+  [world samples k]
+  (reductions (partial roadmap-step world k) {:nodes [] :edges []} (filter #(free? world %) samples)))
+
 (defn prm-seq
   "A probabilistic roadmap growing a sample at a time: each state
-  `{:nodes :edges}`, every new free sample joined to whichever of its `k`
-  nearest earlier nodes it can reach straight (default 10)."
+  `{:nodes :edges}`, every new free sample, drawn uniformly at random,
+  joined to whichever of its `k` nearest earlier nodes it can reach
+  straight (default 10)."
   ([world rng] (prm-seq world rng 10))
-  ([world rng k]
-   (iterate (fn [{:keys [nodes edges]}]
-              (let [p (sample-free world rng)
-                    i (count nodes)
-                    joined (filter #(segment-free? world (nodes %) p) (nearest-k nodes p k))]
-                {:nodes (conj nodes p) :edges (into edges (map (fn [j] [j i]) joined))}))
-            {:nodes [] :edges []})))
+  ([world rng k] (roadmap-seq world (repeatedly #(sample-free world rng)) k)))
+
+(defn halton-prm-seq
+  "The roadmap grown from the Halton sequence rather than random samples
+  (LaValle, *Planning Algorithms*, Cambridge University Press, 2006,
+  section 5.2.4, `allgo.numerics.quasirandom`'s): the same algorithm,
+  deterministic, with samples that leave no large gap unfilled for long."
+  ([world] (halton-prm-seq world 10))
+  ([world k]
+   (let [[[x0 y0] [x1 y1]] (:bounds world)]
+     (roadmap-seq world (map (fn [i] [(+ x0 (* (- x1 x0) (quasirandom/van-der-corput i 2)))
+                                      (+ y0 (* (- y1 y0) (quasirandom/van-der-corput i 3)))])
+                             (iterate inc 1))
+                  k))))
+
+(defn- visibility-prm-step
+  "One sample of the visibility roadmap: a guard, a connector, or nothing."
+  [world rng {:keys [nodes edges component guards] :as st}]
+  (let [q (sample-free world rng)
+        seen (filter #(segment-free? world (nodes %) q) guards)
+        by-component (group-by component seen)
+        i (count nodes)]
+    (cond
+      (empty? seen) {:nodes (conj nodes q) :edges edges :component (conj component i) :guards (conj guards i)}
+      (> (count by-component) 1)
+      (let [joined (map (comp first val) by-component)
+            merged (set (keys by-component))
+            target (first (sort merged))]
+        {:nodes (conj nodes q)
+         :edges (into edges (map (fn [g] [g i]) joined))
+         :component (conj (mapv #(if (merged %) target %) component) target)
+         :guards guards})
+      :else st)))
+
+(defn visibility-prm-seq
+  "The visibility roadmap of Simeon, Laumond and Nissoux (Advanced
+  Robotics 14, 2000; LaValle section 5.6.2), a sample a step: a sample
+  that sees no guard becomes a guard, the start of a new component; one
+  that sees guards of two or more components becomes a connector, joined
+  to one guard of each, merging them; any other is discarded. The roadmap
+  stays small -- a few guards covering the space, and connectors only
+  where they are needed. Each state `{:nodes :edges :component :guards}`,
+  each node's component in `:component`, the guards' indices in
+  `:guards`."
+  [world rng]
+  (iterate (partial visibility-prm-step world rng) {:nodes [] :edges [] :component [] :guards []}))
 
 (defn prm-path
   "A path from `start` to `goal` through `roadmap`: each joined to its
@@ -311,9 +371,20 @@
          edges' (concat edges (links start n) (links goal (inc n)) direct)]
      (graph-path nodes' (adjacency (count nodes') edges') n (inc n)))))
 
+(defn visibility-roadmap-path
+  "A path from `start` to `goal` through a visibility roadmap, as
+  `prm-path` joins them."
+  [world roadmap start goal]
+  (prm-path world roadmap start goal (count (:nodes roadmap))))
+
 (defn- steer [from to step]
   (let [d (polygon/distance from to)]
     (if (<= d step) to (polygon/lerp from to (/ step d)))))
+
+(defn nearest-node
+  "The index of the node of `nodes` nearest `q` by `distance`."
+  [nodes distance q]
+  (apply min-key #(distance (nodes %) q) (range (count nodes))))
 
 (defn- subtree [parent i]
   (let [children (reduce (fn [m [c p]] (if p (update m p conj c) m)) {} (map-indexed vector parent))]
@@ -321,6 +392,50 @@
       (if-let [[x & more] (seq todo)]
         (recur (concat more (children x)) (conj out x))
         out))))
+
+(defn- rrt-step
+  "One sample of an RRT (or RRT*, with `:star?`), as `rrt-seq` describes."
+  [world goal rng {:keys [step goal-bias star? radius]} {:keys [nodes cost] :as tree}]
+  (let [dist polygon/distance
+        target (if (< (double (rng)) goal-bias) goal (sample-free world rng))
+        near-i (nearest-node nodes dist target)
+        p (steer (nodes near-i) target step)
+        new? (and (not= p (nodes near-i)) (segment-free? world (nodes near-i) p))]
+    (if-not new?
+      tree
+      (let [n (count nodes)
+            r (or radius (max step (* 4.0 step (math/sqrt (/ (math/log (inc n)) (inc n))))))
+            near (if star?
+                   (filter #(and (<= (dist (nodes %) p) r) (segment-free? world (nodes %) p)) (range n))
+                   [near-i])
+            best (apply min-key #(+ (cost %) (dist (nodes %) p)) (cons near-i near))
+            tree (-> tree
+                     (update :nodes conj p)
+                     (update :parent conj best)
+                     (update :cost conj (+ (cost best) (dist (nodes best) p))))
+            ;; RRT*: rewire the neighbors through the new node when it
+            ;; shortens their paths, and their subtrees with them.
+            tree (if-not star?
+                   tree
+                   (reduce (fn [{:keys [cost parent] :as t} j]
+                             (let [c (+ (cost n) (dist p (nodes j)))]
+                               (if (< c (- (cost j) 1e-12))
+                                 (let [delta (- c (cost j))]
+                                   (-> t
+                                       (assoc-in [:parent j] n)
+                                       (update :cost (fn [cs] (reduce #(update %1 %2 + delta) cs (subtree (assoc parent j n) j))))))
+                                 t)))
+                           tree (remove #{best} near)))
+            reached? (and (nil? (:goal tree)) (<= (dist p goal) step)
+                          (or (= p goal) (segment-free? world p goal)))]
+        (cond
+          (= p goal) (assoc tree :goal n)
+          reached? (-> tree
+                       (update :nodes conj goal)
+                       (update :parent conj n)
+                       (update :cost conj (+ ((:cost tree) n) (dist p goal)))
+                       (assoc :goal (inc n)))
+          :else tree)))))
 
 (defn rrt-seq
   "A rapidly-exploring random tree, a sample a step: each state `{:nodes
@@ -336,51 +451,9 @@
   tree fills in, never below the step) gives it the shortest path, and
   those neighbors are rewired through it when that is shorter for them --
   so the path to the goal keeps shortening, toward the optimum."
-  [world start goal rng & {:keys [step goal-bias star? radius]
-                           :or {step 0.5 goal-bias 0.05}}]
-  (let [dist polygon/distance]
-    (iterate
-     (fn [{:keys [nodes cost] :as tree}]
-       (let [target (if (< (double (rng)) goal-bias) goal (sample-free world rng))
-             near-i (apply min-key #(dist (nodes %) target) (range (count nodes)))
-             p (steer (nodes near-i) target step)
-             new? (and (not= p (nodes near-i)) (segment-free? world (nodes near-i) p))]
-         (if-not new?
-           tree
-           (let [n (count nodes)
-                 r (or radius (max step (* 4.0 step (math/sqrt (/ (math/log (inc n)) (inc n))))))
-                 near (if star?
-                        (filter #(and (<= (dist (nodes %) p) r) (segment-free? world (nodes %) p)) (range n))
-                        [near-i])
-                 best (apply min-key #(+ (cost %) (dist (nodes %) p)) (cons near-i near))
-                 tree (-> tree
-                          (update :nodes conj p)
-                          (update :parent conj best)
-                          (update :cost conj (+ (cost best) (dist (nodes best) p))))
-                 ;; RRT*: rewire the neighbors through the new node when it
-                 ;; shortens their paths, and their subtrees with them.
-                 tree (if-not star?
-                        tree
-                        (reduce (fn [{:keys [cost parent] :as t} j]
-                                  (let [c (+ (cost n) (dist p (nodes j)))]
-                                    (if (< c (- (cost j) 1e-12))
-                                      (let [delta (- c (cost j))]
-                                        (-> t
-                                            (assoc-in [:parent j] n)
-                                            (update :cost (fn [cs] (reduce #(update %1 %2 + delta) cs (subtree (assoc parent j n) j))))))
-                                      t)))
-                                tree (remove #{best} near)))
-                 reached? (and (nil? (:goal tree)) (<= (dist p goal) step)
-                               (or (= p goal) (segment-free? world p goal)))]
-             (cond
-               (= p goal) (assoc tree :goal n)
-               reached? (-> tree
-                            (update :nodes conj goal)
-                            (update :parent conj n)
-                            (update :cost conj (+ ((:cost tree) n) (dist p goal)))
-                            (assoc :goal (inc n)))
-               :else tree)))))
-     {:nodes [start] :parent [nil] :cost [0.0] :goal nil})))
+  [world start goal rng & {:as opts}]
+  (iterate (partial rrt-step world goal rng (merge {:step 0.5 :goal-bias 0.05} opts))
+           {:nodes [start] :parent [nil] :cost [0.0] :goal nil}))
 
 (defn tree-path
   "The path from the root to the tree's goal node, or nil."
@@ -388,21 +461,24 @@
   (when goal
     (vec (reverse (map nodes (take-while some? (iterate parent goal)))))))
 
+(defn- shortcut-step
+  "One try at cutting a corner off `path`."
+  [world rng path]
+  (let [n (count path)]
+    (if (< n 3)
+      path
+      (let [i (random/below rng (- n 2))
+            j (+ i 2 (random/below rng (- n i 2)))]
+        (if (segment-free? world (path i) (path j))
+          (into (subvec path 0 (inc i)) (subvec path j))
+          path)))))
+
 (defn shortcut-seq
   "`path` straightened a try at a time: each step picks two points on it
   at random and, if the straight line between them is free, cuts out what
   lies between."
   [world path rng]
-  (iterate (fn [path]
-             (let [n (count path)]
-               (if (< n 3)
-                 path
-                 (let [i (random/below rng (- n 2))
-                       j (+ i 2 (random/below rng (- n i 2)))]
-                   (if (segment-free? world (path i) (path j))
-                     (into (subvec path 0 (inc i)) (subvec path j))
-                     path)))))
-           path))
+  (iterate (partial shortcut-step world rng) path))
 
 ;; ---------------------------------------------------------------------------
 ;; Potential fields
@@ -430,17 +506,50 @@
         (polygon/sub att (polygon/scale away mag)))
       att)))
 
+(defn- descend
+  "A `step` down the potential's gradient from `p`, or `p` where it is
+  flat."
+  [world p goal step opts]
+  (let [g (potential-gradient world p goal opts)]
+    (if (< (polygon/norm g) 1e-12) p (polygon/sub p (polygon/scale (polygon/unit g) step)))))
+
+(defn- randomized-potential-step
+  "A step of descent, or of a random walk once descent has stalled."
+  [world goal rng {:keys [step window walk] :as opts} {:keys [p walking trail] :as st}]
+  (cond
+    (<= (polygon/distance p goal) step) (assoc st :p goal :trail (conj trail goal))
+    (pos? walking)
+    (let [q (polygon/add p (polygon/scale (polygon/heading (* 2 math/PI (rng))) step))
+          q (if (segment-free? world p q) q p)]
+      {:p q :walking (dec walking) :trail (conj trail q)})
+    :else
+    (let [q (descend world p goal step opts)
+          back (nth trail (max 0 (- (count trail) window)))
+          stuck? (and (>= (count trail) window)
+                      (< (- (polygon/distance back goal) (polygon/distance q goal)) step))]
+      {:p q :walking (if stuck? walk 0) :trail (conj trail q)})))
+
+(defn randomized-potential-seq
+  "Randomized potential fields (Barraquand and Latombe, IJRR 10, 1991;
+  LaValle section 5.4.3): descend the potential, a `:step` at a time, and
+  when stuck -- less than a step's progress toward the goal over the last
+  `:window` steps (default 20) -- walk at random for `:walk` free steps
+  (default 400), then descend again. The walks shake the robot out of the
+  local minima a plain field stalls in. Each state `{:p :walking :trail}`,
+  the trail the positions so far."
+  [world start goal rng & {:as opts}]
+  (iterate (partial randomized-potential-step world goal rng (merge {:step 0.05 :window 20 :walk 400} opts))
+           {:p start :walking 0 :trail [start]}))
+
+(defn- potential-step [world goal step opts p]
+  (if (<= (polygon/distance p goal) step) goal (descend world p goal step opts)))
+
 (defn potential-seq
   "Gradient descent on the potential from `start`, a step of length
   `:step` (default 0.05) at a time down the gradient: the positions. It
   arrives, or settles in a local minimum short of the goal."
   [world start goal & {:keys [step] :or {step 0.05} :as opts}]
-  (iterate (fn [p]
-             (if (<= (polygon/distance p goal) step)
-               goal
-               (let [g (potential-gradient world p goal opts)]
-                 (if (< (polygon/norm g) 1e-12) p (polygon/sub p (polygon/scale (polygon/unit g) step))))))
-           start))
+  (iterate (partial potential-step world goal step opts) start))
 
 ;; ---------------------------------------------------------------------------
 ;; A two-link arm in configuration space
@@ -552,6 +661,36 @@
         ox (overlap ax (+ ax as) bx (+ bx bs)) oy (overlap ay (+ ay as) by (+ by bs))]
     (or (and (< (abs ox) 1e-9) (> oy 1e-9)) (and (< (abs oy) 1e-9) (> ox 1e-9)))))
 
+(defn- subdivision-state
+  "The cells and the path through their free ones, by A* between
+  touching cells' centers, or nil."
+  [start goal cells]
+  (let [within (fn [[x y s] [px py]] (and (<= x px (+ x s)) (<= y py (+ y s))))
+        free (filterv #(= :free (peek %)) cells)
+        nodes (into [start goal] (map (fn [[x y s]] [(+ x (/ s 2)) (+ y (/ s 2))]) free))
+        cell-of (fn [p] (first (keep-indexed (fn [i c] (when (within c p) (+ 2 i))) free)))
+        links (into {} (for [i (range (count free))]
+                         [(+ 2 i) (vec (keep (fn [j] (when (and (not= i j) (touching? (free i) (free j))) (+ 2 j)))
+                                             (range (count free))))]))
+        s (cell-of start) g (cell-of goal)]
+    {:cells cells
+     :path (when (and s g)
+             (let [links (-> links (update s conj 0) (update g conj 1)
+                             (assoc 0 [s] 1 [g]))]
+               (graph-path nodes #(get links % []) 0 1)))}))
+
+(defn- subdivision-step
+  "Every mixed cell larger than `min-size` split in four, until there is
+  a path or nothing left to split."
+  [world start goal min-size {:keys [cells path] :as st}]
+  (let [split? (fn [[_ _ s kind]] (and (= kind :mixed) (> s (* 1.5 min-size))))]
+    (if (or path (not-any? split? cells))
+      st
+      (subdivision-state start goal
+                         (vec (mapcat (fn [[x y s :as c]]
+                                        (if (split? c) (map #(conj % (classify world %)) (quad-cells [x y s])) [c]))
+                                      cells))))))
+
 (defn subdivision-seq
   "Cell decomposition made complete down to `min-size`, as section 26.5.2
   suggests: the room in cells of side `size`, each free, blocked or mixed
@@ -562,32 +701,11 @@
   touching cells' centers, or nil while there is none."
   [{:keys [bounds] :as world} start goal size min-size]
   (let [[[x0 y0] [x1 y1]] bounds
-        within (fn [[x y s] [px py]] (and (<= x px (+ x s)) (<= y py (+ y s))))
-        search (fn [cells]
-                 (let [free (filterv #(= :free (peek %)) cells)
-                       nodes (into [start goal] (map (fn [[x y s]] [(+ x (/ s 2)) (+ y (/ s 2))]) free))
-                       cell-of (fn [p] (first (keep-indexed (fn [i c] (when (within c p) (+ 2 i))) free)))
-                       links (into {} (for [i (range (count free))]
-                                        [(+ 2 i) (vec (keep (fn [j] (when (and (not= i j) (touching? (free i) (free j))) (+ 2 j)))
-                                                            (range (count free))))]))
-                       s (cell-of start) g (cell-of goal)]
-                   (when (and s g)
-                     (let [links (-> links (update s conj 0) (update g conj 1)
-                                     (assoc 0 [s] 1 [g]))]
-                       (graph-path nodes #(get links % []) 0 1)))))
-        state (fn [cells] {:cells cells :path (search cells)})
         cells0 (vec (for [x (range x0 x1 size) y (range y0 y1 size)
                           :let [c [x y size]]]
                       (conj c (classify world c))))]
-    (iterate (fn [{:keys [cells path] :as st}]
-               (if (or path (not-any? (fn [[_ _ s kind]] (and (= kind :mixed) (> s (* 1.5 min-size)))) cells))
-                 st
-                 (state (vec (mapcat (fn [[x y s kind :as c]]
-                                       (if (and (= kind :mixed) (> s (* 1.5 min-size)))
-                                         (map #(conj % (classify world %)) (quad-cells [x y s]))
-                                         [c]))
-                                     cells)))))
-             (state cells0))))
+    (iterate (partial subdivision-step world start goal min-size)
+             (subdivision-state start goal cells0))))
 
 ;; ---------------------------------------------------------------------------
 ;; A bidirectional RRT
@@ -598,6 +716,21 @@
 (defn- branch [{:keys [nodes parent]} i]
   (mapv nodes (take-while some? (iterate parent i))))
 
+(defn- bidirectional-rrt-step
+  "One milestone: join the trees through it, or grow each toward it."
+  [world rng step {:keys [a b path] :as st}]
+  (if path
+    st
+    (let [m (sample-free world rng)
+          ia (nearest-node (:nodes a) polygon/distance m)
+          ib (nearest-node (:nodes b) polygon/distance m)]
+      (if (and (segment-free? world ((:nodes a) ia) m) (segment-free? world ((:nodes b) ib) m))
+        (assoc st :path (vec (concat (rseq (branch a ia)) [m] (branch b ib))))
+        (let [extend (fn [tree i]
+                       (let [q ((:nodes tree) i) p (steer q m step)]
+                         (if (and (not= p q) (segment-free? world q p)) (grow tree i p) tree)))]
+          (assoc st :a (extend a ia) :b (extend b ib)))))))
+
 (defn bidirectional-rrt-seq
   "The bidirectional RRT of section 26.5.2, a milestone a step: two trees,
   one rooted at `start` and one at `goal`. Each step draws a random free
@@ -606,20 +739,8 @@
   otherwise each tree grows by at most `:step` (default 0.5) toward it,
   where that is free. Each state `{:a :b :path}`."
   [world start goal rng & {:keys [step] :or {step 0.5}}]
-  (let [nearest (fn [{:keys [nodes]} p] (apply min-key #(polygon/distance (nodes %) p) (range (count nodes))))]
-    (iterate
-     (fn [{:keys [a b path] :as st}]
-       (if path
-         st
-         (let [m (sample-free world rng)
-               ia (nearest a m) ib (nearest b m)]
-           (if (and (segment-free? world ((:nodes a) ia) m) (segment-free? world ((:nodes b) ib) m))
-             (assoc st :path (vec (concat (rseq (branch a ia)) [m] (branch b ib))))
-             (let [extend (fn [tree i]
-                            (let [q ((:nodes tree) i) p (steer q m step)]
-                              (if (and (not= p q) (segment-free? world q p)) (grow tree i p) tree)))]
-               (assoc st :a (extend a ia) :b (extend b ib)))))))
-     {:a {:nodes [start] :parent [nil]} :b {:nodes [goal] :parent [nil]} :path nil})))
+  (iterate (partial bidirectional-rrt-step world rng step)
+           {:a {:nodes [start] :parent [nil]} :b {:nodes [goal] :parent [nil]} :path nil}))
 
 ;; ---------------------------------------------------------------------------
 ;; Hybrid A*
@@ -709,6 +830,23 @@
        (reduce + (map (fn [[a b] len] (* len 0.5 (+ (obstacle-cost world epsilon a) (obstacle-cost world epsilon b))))
                       (partition 2 1 path) legs)))))
 
+(defn- trajectory-optimization-step
+  "Every inner waypoint moved by `rate` down the cost's gradient."
+  [world rate epsilon lambda path]
+  (let [eps 1e-5 ds (/ 1.0 (dec (count path)))
+        cost (memoize #(obstacle-cost world epsilon %))
+        ;; the terms of J that waypoint i is in: the two legs it ends
+        local (fn [a p b]
+                (reduce + (map (fn [[u v]] (let [len (polygon/distance u v)]
+                                             (+ (* lambda (/ (* 0.5 len len) ds)) (* len 0.5 (+ (cost u) (cost v))))))
+                               [[a p] [p b]])))
+        grad (fn [i]
+               (let [a (path (dec i)) p (path i) b (path (inc i))]
+                 (mapv (fn [k] (/ (- (local a (update p k + eps) b) (local a (update p k - eps) b)) (* 2 eps)))
+                       [0 1])))]
+    (reduce (fn [p i] (assoc p i (polygon/sub (path i) (polygon/scale (grad i) rate))))
+            path (range 1 (dec (count path))))))
+
 (defn trajectory-optimization-seq
   "Trajectory optimization, a gradient step a step: from `path` --
   typically the straight line, through whatever is in the way -- each
@@ -718,18 +856,4 @@
   term's pushes it out of the cost field. A local method: it settles on
   whichever side of an obstacle it starts nearer."
   [world path {:keys [rate epsilon lambda] :or {rate 0.01 epsilon 0.5 lambda 1.0}}]
-  (iterate (fn [path]
-             (let [eps 1e-5 ds (/ 1.0 (dec (count path)))
-                   cost (memoize #(obstacle-cost world epsilon %))
-                   ;; the terms of J that waypoint i is in: the two legs it ends
-                   local (fn [a p b]
-                           (reduce + (map (fn [[u v]] (let [len (polygon/distance u v)]
-                                                        (+ (* lambda (/ (* 0.5 len len) ds)) (* len 0.5 (+ (cost u) (cost v))))))
-                                          [[a p] [p b]])))
-                   grad (fn [i]
-                          (let [a (path (dec i)) p (path i) b (path (inc i))]
-                            (mapv (fn [k] (/ (- (local a (update p k + eps) b) (local a (update p k - eps) b)) (* 2 eps)))
-                                  [0 1])))]
-               (reduce (fn [p i] (assoc p i (polygon/sub (path i) (polygon/scale (grad i) rate))))
-                       path (range 1 (dec (count path))))))
-           (vec path)))
+  (iterate (partial trajectory-optimization-step world rate epsilon lambda) (vec path)))

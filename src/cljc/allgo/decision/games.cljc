@@ -28,7 +28,8 @@
   table of payoff pairs. A mixed strategy is a vector of probabilities
   over a player's actions."
   (:require [allgo.numerics.linear-systems :as ls]
-            [allgo.numerics.optimize :as opt]))
+            [allgo.numerics.optimize :as opt]
+            [allgo.search :as search]))
 
 ;; ---------------------------------------------------------------------------
 ;; Normal-form games
@@ -210,16 +211,19 @@
   {[:cooperate :cooperate] [-1 -1] [:cooperate :defect] [-10 0]
    [:defect :cooperate] [0 -10] [:defect :defect] [-5 -5]})
 
+(defn- play-step
+  "A round: each strategy moves on the histories, and is paid."
+  [payoffs s1 s2 {[h1 h2] :histories [t1 t2] :totals}]
+  (let [a1 (s1 h1 h2) a2 (s2 h2 h1)
+        [u1 u2] (payoffs [a1 a2])]
+    {:histories [(conj h1 a1) (conj h2 a2)] :totals [(+ t1 u1) (+ t2 u2)]}))
+
 (defn play-seq
   "Two strategies -- each (fn [own-history other's-history]) -> action --
   playing the stage game `payoffs` round after round: each state
   `{:histories [h1 h2] :totals [t1 t2]}`."
   [payoffs s1 s2]
-  (iterate (fn [{[h1 h2] :histories [t1 t2] :totals}]
-             (let [a1 (s1 h1 h2) a2 (s2 h2 h1)
-                   [u1 u2] (payoffs [a1 a2])]
-               {:histories [(conj h1 a1) (conj h2 a2)] :totals [(+ t1 u1) (+ t2 u2)]}))
-           {:histories [[] []] :totals [0 0]}))
+  (iterate (partial play-step payoffs s1 s2) {:histories [[] []] :totals [0 0]}))
 
 (defn tournament
   "Every pair of `strategies` (a map of name to strategy), each against
@@ -237,6 +241,12 @@
 ;; ---------------------------------------------------------------------------
 ;; Bargaining
 
+(defn- bargaining-step
+  "One more round: player 1 proposes, player 2 would propose next and
+  keep `keep2` of it."
+  [d1 d2 [keep1 keep2]]
+  [(- 1.0 (* d2 keep2)) (- 1.0 (* d1 keep1))])
+
 (defn bargaining-seq
   "Alternating-offers bargaining over a pie of 1 by backward induction,
   with discount factors `d1` and `d2`: the share the player who proposes
@@ -245,12 +255,7 @@
   the other would keep as proposer next round, discounted. It converges
   to Rubinstein's split, (1 - d2) / (1 - d1 d2) for player 1."
   [d1 d2]
-  (map first
-       (iterate (fn [[keep1 keep2]]
-                  ;; one more round: player 1 proposes, player 2 would
-                  ;; propose next and keep keep2 of it
-                  [(- 1.0 (* d2 keep2)) (- 1.0 (* d1 keep1))])
-                [1.0 1.0])))
+  (map first (iterate (partial bargaining-step d1 d2) [1.0 1.0])))
 
 (defn rubinstein
   "The subgame-perfect share of the first proposer, `[share1 share2]`."
@@ -309,21 +314,22 @@
   (let [cs (distinct (apply concat ballots))]
     (first (filter (fn [a] (every? #(or (= a %) (> (prefer-count ballots a %) (prefer-count ballots % a))) cs)) cs))))
 
+(defn- runoff-step
+  "A round: the candidate with fewest first preferences drops, unless
+  one holds a majority; nil then."
+  [ballots in]
+  (when (> (count in) 1)
+    (let [f (frequencies (keep #(first (filter in %)) ballots))
+          total (reduce + (vals f))]
+      (when-not (some #(> (* 2 %) total) (vals f))
+        (disj in (last (sort-by (fn [c] [(- (get f c 0)) (str c)]) in)))))))
+
 (defn runoff-seq
   "Instant runoff, a step a round: each state the candidates still in;
   each round the one with fewest first preferences among those in drops,
   until one holds a majority. Ties drop the candidate last in sort order."
   [ballots]
-  (let [firsts (fn [in] (frequencies (keep #(first (filter in %)) ballots)))]
-    (take-while some?
-                (iterate (fn [in]
-                           (when (and in (> (count in) 1))
-                             (let [f (firsts in)
-                                   total (reduce + (vals f))]
-                               (when-not (some #(> (* 2 %) total) (vals f))
-                                 (let [loser (last (sort-by (fn [c] [(- (get f c 0)) (str c)]) in))]
-                                   (disj in loser))))))
-                         (set (apply concat ballots))))))
+  (search/step-seq (partial runoff-step ballots) (set (apply concat ballots))))
 
 (defn runoff-winner
   "The instant-runoff winner."
@@ -335,18 +341,22 @@
 ;; ---------------------------------------------------------------------------
 ;; Auctions
 
+(defn- english-step
+  "A raise, the bidders it prices out dropping; nil once one or none is
+  left."
+  [values increment {:keys [price in]}]
+  (when (> (count in) 1)
+    (let [price (+ price increment)]
+      {:price price :in (set (filter #(<= price (values %)) in))})))
+
 (defn english-seq
   "An English auction, a step a raise of `increment` from `reserve`:
   bidders with private `values` stay in while the price is at most their
   value. Each state `{:price :in}`, ending when one bidder is left -- who
   wins at about the second-highest value -- or none."
   [values reserve increment]
-  (take-while some?
-              (iterate (fn [{:keys [price in]}]
-                         (when (> (count in) 1)
-                           (let [price (+ price increment)]
-                             {:price price :in (set (filter #(<= price (values %)) in))})))
-                       {:price reserve :in (set (filter #(<= reserve (values %)) (range (count values))))})))
+  (search/step-seq (partial english-step values increment)
+                   {:price reserve :in (set (filter #(<= reserve (values %)) (range (count values))))}))
 
 (defn sealed-bid
   "A sealed-bid auction of one item: `{:winner :price}`, the highest

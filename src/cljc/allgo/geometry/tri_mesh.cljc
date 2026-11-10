@@ -18,7 +18,8 @@
   constraint type of its own, just a distance constraint over a different
   list. Cloth is then stretching and bending at two different compliances
   over the same solver."
-  (:require [allgo.geometry.vec3 :as v]
+  (:require [allgo.geometry.tet-mesh :as tet-mesh]
+            [allgo.geometry.vec3 :as v]
             [clojure.math :as math]))
 
 (defn vertex
@@ -237,13 +238,11 @@
                       tris)]
     (if (zero? (count tris)) 0.0 (/ total (* 3.0 (count tris))))))
 
-(defn translate [mesh [dx dy dz]]
-  (update mesh :verts
-          (fn [verts]
-            (vec (map-indexed (fn [i v]
-                                (+ v (let [axis (long (mod i 3))]
-                                       (cond (zero? axis) dx (= 1 axis) dy :else dz))))
-                              verts)))))
+(defn translate
+  "Shifts every vertex: `allgo.geometry.tet-mesh`'s, the layout being the
+  same."
+  [mesh d]
+  (tet-mesh/translate mesh d))
 
 (defn deform
   "Moves every vertex through `f`, a function of `[x y z]`."
@@ -251,11 +250,9 @@
   (assoc mesh :verts (vec (mapcat f (partition 3 (:verts mesh))))))
 
 (defn bounds
-  "`[[min-x min-y min-z] [max-x max-y max-z]]`."
-  [{:keys [verts]}]
-  (let [pts (partition 3 verts)]
-    [(mapv #(apply min (map (fn [p] (nth p %)) pts)) [0 1 2])
-     (mapv #(apply max (map (fn [p] (nth p %)) pts)) [0 1 2])]))
+  "`[[min-x min-y min-z] [max-x max-y max-z]]`: `allgo.geometry.tet-mesh`'s."
+  [mesh]
+  (tet-mesh/bounds mesh))
 
 (defn corner-vertices
   "The indices of the four extreme corners in the xz plane, which is what

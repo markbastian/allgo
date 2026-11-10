@@ -61,6 +61,11 @@
   [^double x]
   (not (or (NaN? x) (infinite? x))))
 
+(defn sigmoid
+  "The logistic function, 1 / (1 + e^-x): any number to a probability."
+  ^double [^double x]
+  (/ 1.0 (+ 1.0 (math/exp (- x)))))
+
 (defn atanh
   "The inverse hyperbolic tangent, which `clojure.math` does not have."
   ^double [^double x]

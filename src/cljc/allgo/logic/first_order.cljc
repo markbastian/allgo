@@ -26,7 +26,8 @@
                    parents, so a refutation is a proof tree
 
   A substitution is a map from variables to terms."
-  (:require [clojure.string :as str])
+  (:require [allgo.search :as search]
+            [clojure.string :as str])
   #?(:clj (:import (clojure.lang PersistentQueue))))
 
 (def ^:private empty-queue #?(:clj PersistentQueue/EMPTY :cljs #queue []))
@@ -237,10 +238,8 @@
   [kb query]
   (let [facts (vec (map :conclusion (filter #(empty? (:premises %)) kb)))
         rules (filter #(seq (:premises %)) kb)]
-    (take-while some?
-                (iterate (fn [s] (when s (fc-step s)))
-                         {:rules rules :facts facts :seen (set (map canonical facts)) :new [] :todo rules
-                          :round 1 :query query :answers (vec (keep #(unify query % {}) facts))}))))
+    (search/step-seq fc-step {:rules rules :facts facts :seen (set (map canonical facts)) :new [] :todo rules
+                              :round 1 :query query :answers (vec (keep #(unify query % {}) facts))})))
 
 (defn fol-fc-ask
   "Every substitution for `query`'s variables forward chaining proves."
@@ -281,9 +280,7 @@
   Human(m)` in the wrong order sends depth-first search down forever."
   ([kb query] (fol-bc-ask-seq kb query {}))
   ([kb query {:keys [max-depth] :or {max-depth 50}}]
-   (take-while some?
-               (iterate (fn [s] (when s (bc-step s)))
-                        {:rules (vec kb) :stack [[[query] {} 0]] :steps 0 :max-depth max-depth}))))
+   (search/step-seq bc-step {:rules (vec kb) :stack [[[query] {} 0]] :steps 0 :max-depth max-depth})))
 
 (defn fol-bc-ask
   "The substitutions for `query`'s variables backward chaining proves, in
@@ -426,12 +423,10 @@
   [kb query]
   (let [kb-clauses (apply clausal-form kb)
         goal (clausal-form [:not query])]
-    (take-while some?
-                (iterate (fn [s] (when s (resolution-step s)))
-                         {:usable (mapv (fn [c] {:clause c :parents nil}) kb-clauses)
-                          :queue (into empty-queue (map (fn [c] {:clause c :parents nil :goal? true}) goal))
-                          :seen (set (map #(canonical (vec (sort-by str %))) (concat kb-clauses goal)))
-                          :steps 0}))))
+    (search/step-seq resolution-step {:usable (mapv (fn [c] {:clause c :parents nil}) kb-clauses)
+                                      :queue (into empty-queue (map (fn [c] {:clause c :parents nil :goal? true}) goal))
+                                      :seen (set (map #(canonical (vec (sort-by str %))) (concat kb-clauses goal)))
+                                      :steps 0})))
 
 (defn resolution
   "Whether resolution refutes ~`query` from `kb` within `max-steps`

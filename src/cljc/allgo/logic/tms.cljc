@@ -27,6 +27,7 @@
   makes them from definite clauses, each rule a node of its own, and
   `horn` with the rules left as background."
   (:require [allgo.logic.propositional :as pl]
+            [allgo.search :as search]
             [clojure.set :as set]))
 
 (defn rules
@@ -90,16 +91,14 @@
     (seq (:pending st)) (assoc st :phase :support :queue (:pending st) :pending [] :node nil :changed [])
     :else nil))
 
-(defn- run [st] (take-while some? (iterate #(some-> % jtms-step) st)))
-
 (defn enable-seq
   "Asserting `node` -- a premise or an assumption -- a step a node: what
   it and the rest now support comes in. Each state's `:in` the nodes in
   and `:changed` those this step brought in."
   [tms node]
-  (run (-> tms
-           (update :enabled conj node) (update :in conj node)
-           (assoc :phase :in :queue [node] :marked #{} :pending [] :node node :changed [node]))))
+  (search/step-seq jtms-step (-> tms
+                                 (update :enabled conj node) (update :in conj node)
+                                 (assoc :phase :in :queue [node] :marked #{} :pending [] :node node :changed [node]))))
 
 (defn retract-seq
   "Retracting `node`, a step a node: first it and everything that
@@ -110,9 +109,9 @@
   (let [tms (update tms :enabled disj node)]
     (if (supported? tms node)
       [tms]
-      (run (-> tms
-               (update :in disj node)
-               (assoc :phase :out :queue [node] :marked #{} :pending [] :node node :changed [node]))))))
+      (search/step-seq jtms-step (-> tms
+                                     (update :in disj node)
+                                     (assoc :phase :out :queue [node] :marked #{} :pending [] :node node :changed [node]))))))
 
 (defn enable [tms & nodes] (reduce #(-> (last (enable-seq %1 %2)) (dissoc :queue :phase :marked :pending)) tms nodes))
 (defn retract [tms & nodes] (reduce #(-> (last (retract-seq %1 %2)) (dissoc :queue :phase :marked :pending)) tms nodes))
@@ -163,7 +162,7 @@
   `:nogoods` so far. A consequent whose label grows queues every
   justification it is an antecedent of."
   [atms]
-  (take-while some? (iterate #(some-> % atms-step) atms)))
+  (search/step-seq atms-step atms))
 
 (defn labels
   "Each node's label once propagation is done."

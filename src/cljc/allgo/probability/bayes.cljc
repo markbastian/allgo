@@ -120,15 +120,10 @@
 ;; ---------------------------------------------------------------------------
 ;; Sampling
 
-(defn- draw [rng dist]
-  (let [r (double (rng))]
-    (loop [[[v pr] & more] (seq dist) acc 0.0]
-      (if (or (empty? more) (< r (+ acc pr))) v (recur more (+ acc pr))))))
-
 (defn prior-sample
   "PRIOR-SAMPLE: an event drawn from the network's joint distribution."
   [bn rng]
-  (reduce (fn [x var] (assoc x var (draw rng (get-in (:cpt bn) [var (mapv x ((:parents bn) var))]))))
+  (reduce (fn [x var] (assoc x var (random/weighted rng (get-in (:cpt bn) [var (mapv x ((:parents bn) var))]))))
           {} (:variables bn)))
 
 (defn- estimates
@@ -155,7 +150,7 @@
   (reduce (fn [[x w] var]
             (if (contains? e var)
               [(assoc x var (e var)) (* w (p bn var (e var) x))]
-              [(assoc x var (draw rng (get-in (:cpt bn) [var (mapv x ((:parents bn) var))]))) w]))
+              [(assoc x var (random/weighted rng (get-in (:cpt bn) [var (mapv x ((:parents bn) var))]))) w]))
           [{} 1.0] (:variables bn)))
 
 (defn likelihood-weighting-seq
@@ -173,7 +168,7 @@
         dist (normalize (into {} (for [v ((:domains bn) var)
                                        :let [x' (assoc x var v)]]
                                    [v (reduce * (p bn var v x') (map #(p bn % (x' %) x') children))])))]
-    (draw rng dist)))
+    (random/weighted rng dist)))
 
 (defn gibbs-seq
   "GIBBS-ASK's estimate of P(`x` | `e`) after each step: one nonevidence

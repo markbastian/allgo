@@ -21,7 +21,7 @@
   Unlike a one-way recurrent tagger it sees the words after the one it
   tags, as far as the window reaches; unlike a bidirectional one, no
   further."
-  (:require [allgo.language.recurrent :as rec]
+  (:require [allgo.language.tagging :as tagging]
             [allgo.learning.autodiff :as ad]))
 
 (def pad "<pad>")
@@ -72,22 +72,17 @@
   "The tagger trained on `tagged` sentences by Adam, a sentence a step:
   each state `{:model :loss}`."
   [m tagged & {:keys [lr] :or {lr 0.01}}]
-  (rec/adam-seq m tagged loss lr nil))
+  (ad/adam-seq m tagged loss :lr lr))
 
 (defn tag
   "The tags `m` gives `words`."
   [m words]
-  (let [P (into {} (map (fn [[k v]] [k (ad/const v)]) (:params m)))]
+  (let [P (ad/consts (:params m))]
     (mapv (fn [row] ((:tags m) (apply max-key row (range (count row)))))
           (ad/value (logits m P words)))))
 
 (defn accuracy
   "The fraction of the words of `tagged` sentences tagged right, or of
   just those `(only? word i)` picks out."
-  ([m tagged] (accuracy m tagged (constantly true)))
-  ([m tagged only?]
-   (let [rs (for [s tagged
-                  [i [w t] g] (map vector (range) s (tag m (mapv first s)))
-                  :when (only? w i)]
-              (= t g))]
-     (/ (double (count (filter true? rs))) (max 1 (count rs))))))
+  ([m tagged] (tagging/accuracy-of #(tag m %) tagged))
+  ([m tagged only?] (tagging/accuracy-of #(tag m %) tagged only?)))

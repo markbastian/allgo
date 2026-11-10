@@ -133,13 +133,6 @@
    :steer-damping 25.0
    :max-steer 0.55})
 
-(defn- box-inertia [[sx sy sz] m]
-  (let [f (/ (double m) 12.0)
-        sx (double sx) sy (double sy) sz (double sz)]
-    [[(* f (+ (* sy sy) (* sz sz))) 0.0 0.0]
-     [0.0 (* f (+ (* sx sx) (* sz sz))) 0.0]
-     [0.0 0.0 (* f (+ (* sx sx) (* sy sy)))]]))
-
 (defn- wheel-inertia
   "Most of a wheel's mass is out at the rim, so it is nearer a hoop than
   a disk about its axle."
@@ -185,7 +178,7 @@
                :minor tire-radius :shape-pose {:rot idq :pos [0.0 0.0 0.0]}}
          spin [0.0 0.0 -1.0]]
      {:base {:mass frame-mass :com [0.0 0.0 0.0]
-             :inertia (box-inertia [1.3 0.6 0.45] frame-mass)
+             :inertia (rider/box-inertia [1.3 0.6 0.45] frame-mass)
              ;; What hits the ground when it goes over: the engine and the
              ;; tank, not the rider's knee.
              :shape :box :size [0.95 0.32 0.30]
@@ -194,7 +187,7 @@
       [{:parent -1 :joint :revolute :axis [0.0 0.0 1.0]
         :origin {:rot nil :pos pivot}
         :mass swingarm-mass :com (v/scale swingarm 0.5)
-        :inertia (box-inertia [0.6 0.08 0.22] swingarm-mass)}
+        :inertia (rider/box-inertia [0.6 0.08 0.22] swingarm-mass)}
        (merge {:parent 0 :joint :revolute :axis spin
                :origin {:rot nil :pos swingarm}
                :mass wheel-mass :com [0.0 0.0 0.0]
@@ -203,11 +196,11 @@
        {:parent -1 :joint :revolute :axis (steering-axis cfg)
         :origin {:rot nil :pos head}
         :mass steering-mass :com [0.0 0.08 0.0]
-        :inertia (box-inertia [0.2 0.12 0.7] steering-mass)}
+        :inertia (rider/box-inertia [0.2 0.12 0.7] steering-mass)}
        {:parent 2 :joint :prismatic :axis (fork-axis cfg)
         :origin {:rot nil :pos [0.0 0.0 0.0]}
         :mass fork-mass :com (v/scale (fork-axis cfg) (* 0.5 (double fork-length)))
-        :inertia (box-inertia [0.1 0.6 0.25] fork-mass)}
+        :inertia (rider/box-inertia [0.1 0.6 0.25] fork-mass)}
        (merge {:parent 3 :joint :revolute :axis spin
                :origin {:rot nil :pos (front-axle cfg)}
                :mass wheel-mass :com [0.0 0.0 0.0]

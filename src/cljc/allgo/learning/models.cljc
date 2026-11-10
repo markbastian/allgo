@@ -20,11 +20,11 @@
 
   Inputs are vectors of numbers unless a model says otherwise; labels for
   the classifiers here are 0 and 1, or -1 and 1 for the SVM."
-  (:require [allgo.numerics.regression :as regression]
+  (:require [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
+            [allgo.numerics.regression :as regression]
             [allgo.random :as random]
             [clojure.math :as math]))
-
-(defn- dot [a b] (reduce + (map * a b)))
 
 ;; ---------------------------------------------------------------------------
 ;; Linear models
@@ -36,46 +36,52 @@
 
 (defn- with-bias [x] (into [1.0] x))
 
+(defn- gradient-descent-step
+  "An epoch: `w` moved against the mean gradient over the examples."
+  [Xb ys alpha loss-gradient w]
+  (let [g (reduce (fn [acc [x y]] (mapv + acc (loss-gradient w x y))) (vec (repeat (count w) 0.0)) (map vector Xb ys))]
+    (mapv (fn [wi gi] (- wi (* alpha (/ gi (count ys))))) w g)))
+
 (defn gradient-descent-seq
   "The weights after each epoch of batch gradient descent: each step w <-
   w - alpha times the mean gradient of `loss-gradient` (fn [w x y]) over
-  the examples, x with a 1 in front for the bias."
-  [X ys alpha loss-gradient]
-  (let [Xb (mapv with-bias X)
-        n (count ys)]
-    (iterate (fn [w]
-               (let [g (reduce (fn [acc [x y]] (mapv + acc (loss-gradient w x y))) (vec (repeat (count w) 0.0)) (map vector Xb ys))]
-                 (mapv (fn [wi gi] (- wi (* alpha (/ gi n)))) w g)))
-             (vec (repeat (inc (count (first X))) 0.0)))))
+  the examples, x with a 1 in front for the bias -- from zero weights, or
+  from `w0`."
+  ([X ys alpha loss-gradient] (gradient-descent-seq X ys alpha loss-gradient nil))
+  ([X ys alpha loss-gradient w0]
+   (iterate (partial gradient-descent-step (mapv with-bias X) ys alpha loss-gradient)
+            (or w0 (vec (repeat (inc (count (first X))) 0.0))))))
 
-(defn predict-linear [w x] (dot w (with-bias x)))
-
-(defn- sigmoid [z] (/ 1.0 (+ 1.0 (math/exp (- z)))))
+(defn predict-linear [w x] (lin/dot w (with-bias x)))
 
 (defn logistic-regression-seq
-  "Gradient descent on the log loss of the logistic function."
-  [X ys alpha]
-  (gradient-descent-seq X ys alpha (fn [w x y] (let [err (- (sigmoid (dot w x)) y)] (mapv #(* err %) x)))))
+  "Gradient descent on the log loss of the logistic function, from zero
+  weights or from `w0`."
+  ([X ys alpha] (logistic-regression-seq X ys alpha nil))
+  ([X ys alpha w0]
+   (gradient-descent-seq X ys alpha (fn [w x y] (let [err (- (am/sigmoid (lin/dot w x)) y)] (mapv #(* err %) x))) w0)))
 
 (defn predict-logistic
   "P(y = 1 | x) under the logistic model `w`."
   [w x]
-  (sigmoid (dot w (with-bias x))))
+  (am/sigmoid (lin/dot w (with-bias x))))
+
+(defn- perceptron-epoch
+  "The perceptron rule applied to each example in turn."
+  [Xb ys alpha w]
+  (reduce (fn [w [x y]]
+            (let [h (if (>= (lin/dot w x) 0.0) 1 0)]
+              (mapv (fn [wi xi] (+ wi (* alpha (- y h) xi))) w x)))
+          w (map vector Xb ys)))
 
 (defn perceptron-seq
   "The perceptron learning rule, an epoch a step: for each example in
   turn, w <- w + alpha (y - h(x)) x, h the hard threshold. It converges
   when the data are linearly separable, and not otherwise."
   [X ys alpha]
-  (let [Xb (mapv with-bias X)]
-    (iterate (fn [w]
-               (reduce (fn [w [x y]]
-                         (let [h (if (>= (dot w x) 0.0) 1 0)]
-                           (mapv (fn [wi xi] (+ wi (* alpha (- y h) xi))) w x)))
-                       w (map vector Xb ys)))
-             (vec (repeat (inc (count (first X))) 0.0)))))
+  (iterate (partial perceptron-epoch (mapv with-bias X) ys alpha) (vec (repeat (inc (count (first X))) 0.0))))
 
-(defn predict-threshold [w x] (if (>= (dot w (with-bias x)) 0.0) 1 0))
+(defn predict-threshold [w x] (if (>= (lin/dot w (with-bias x)) 0.0) 1 0))
 
 ;; ---------------------------------------------------------------------------
 ;; Nearest neighbors
@@ -96,8 +102,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Support vector machines
 
-(defn linear-kernel [a b] (dot a b))
-(defn polynomial-kernel [degree] (fn [a b] (math/pow (+ 1.0 (dot a b)) degree)))
+(defn linear-kernel [a b] (lin/dot a b))
+(defn polynomial-kernel [degree] (fn [a b] (math/pow (+ 1.0 (lin/dot a b)) degree)))
 (defn gaussian-kernel [gamma] (fn [a b] (math/exp (- (* gamma (reduce + (map #(let [d (- %1 %2)] (* d d)) a b)))))))
 
 (defn- svm-output [{:keys [X ys alphas b kernel]} x]

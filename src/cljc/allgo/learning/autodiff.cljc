@@ -23,7 +23,8 @@
   and training: `adam-step`, and `clip` by the gradients' global norm.
 
   Row vectors throughout: an input is a row, a layer x W + b."
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
 (def ^:private ids (atom 0))
@@ -100,7 +101,7 @@
     (node Y [[a (fn [G] (mapv (fn [g x y] (mapv (fn [gi xi yi] (* gi (df xi yi))) g x y)) G A Y))]])))
 
 (defn tanh [a] (pointwise a math/tanh (fn [_ y] (- 1.0 (* y y)))))
-(defn sigmoid [a] (pointwise a #(/ 1.0 (+ 1.0 (math/exp (- %)))) (fn [_ y] (* y (- 1.0 y)))))
+(defn sigmoid [a] (pointwise a am/sigmoid (fn [_ y] (* y (- 1.0 y)))))
 (defn relu [a] (pointwise a #(max 0.0 %) (fn [x _] (if (pos? x) 1.0 0.0))))
 (defn exp [a] (pointwise a math/exp (fn [_ y] y)))
 
@@ -248,6 +249,36 @@
                                     P)])
                              params))]
     [params {:m m :v v :t t}]))
+
+(defn consts
+  "Every parameter matrix of `params` as a constant: to run a model
+  forward without recording gradients."
+  [params]
+  (into {} (map (fn [[k m]] [k (const m)]) params)))
+
+(defn- adam-example-step
+  "An Adam step on the next example's loss: `[out model optimizer
+  examples-left]`."
+  [loss lr only max-norm prepare [_ m opt [ex & more]]]
+  (let [ex (prepare ex)
+        {:keys [value grads]} (value-and-grad #(loss m % ex) (:params m))
+        grads (if only (select-keys grads only) grads)
+        [params opt] (adam-step (:params m) (clip grads max-norm) opt :lr lr)
+        m (assoc m :params params)]
+    [{:model m :loss value} m opt more]))
+
+(defn adam-seq
+  "A model trained by Adam, an example a step: `m` a map holding its
+  `:params`, `(loss m P example)` the loss as a node of the parameter
+  nodes `P`, and the `examples` taken in turn, again and again, each
+  passed through `:prepare` as it is taken (default identity: a fresh
+  random masking, say). The gradient's global norm is clipped at `:clip`
+  (default 5), and with `:only`, a set of parameter names, the rest are
+  left as they are. Each state `{:model :loss}`, the loss that example's
+  before its step."
+  [m examples loss & {:keys [lr only prepare] max-norm :clip :or {lr 0.01 max-norm 5.0 prepare identity}}]
+  (map first (iterate (partial adam-example-step loss lr only max-norm prepare)
+                      [{:model m :loss nil} m nil (cycle examples)])))
 
 (defn init
   "A `rows` by `cols` matrix of small random weights, scaled by 1 /

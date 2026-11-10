@@ -26,6 +26,7 @@
   symbol, and then decided by `allgo.logic.propositional`'s DPLL."
   (:require [allgo.logic.first-order :as fo]
             [allgo.logic.propositional :as pl]
+            [allgo.search :as search]
             [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------
@@ -205,10 +206,9 @@
   (let [defaults (map #(if (string? %) (default-rule %) %) defaults)
         facts (map #(if (string? %) (fo/parse %) %) facts)
         objs (constants (concat facts (mapcat (juxt :prerequisite :conclusion) defaults)))]
-    (take-while some? (iterate #(some-> % process-step)
-                               (process-step {:facts (propositionalize facts objs)
-                                              :defaults (vec (ground-defaults defaults objs))
-                                              :stack [[]] :extensions []})))))
+    (search/step-seq process-step (process-step {:facts (propositionalize facts objs)
+                                                 :defaults (vec (ground-defaults defaults objs))
+                                                 :stack [[]] :extensions []}))))
 
 (defn extensions
   "Each extension: `{:conclusions :applied :beliefs}`."

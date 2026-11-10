@@ -1888,6 +1888,15 @@
      :convex (step-convex w dt)
      (step-sequential-impulse w dt))))
 
+(defn- settle-step
+  "A step of a sixtieth of a second, every moving body's velocities then
+  damped by 30%."
+  [w]
+  (let [damp (fn [b] (if (rigid/inert? b)
+                       b
+                       (assoc b :vel (v/scale (:vel b) 0.7) :omega (v/scale (:omega b) 0.7))))]
+    (update (step w (/ 1.0 60.0)) :bodies (fn [bs] (mapv damp bs)))))
+
 (defn settled
   "The world a moment after it was placed: every body sunk into the
   contacts below it by as much as they need to hold it up, and each
@@ -1920,11 +1929,5 @@
   placed, and a body already asleep stays so."
   ([w] (settled w 30))
   ([w steps]
-   (let [dt (/ 1.0 60.0)
-         damp (fn [b] (if (rigid/inert? b)
-                        b
-                        (assoc b :vel (v/scale (:vel b) 0.7) :omega (v/scale (:omega b) 0.7))))]
-     (-> (nth (iterate #(update (step % dt) :bodies (fn [bs] (mapv damp bs)))
-                       (assoc w :allow-sleep? false))
-              steps)
-         (assoc :allow-sleep? (:allow-sleep? w))))))
+   (-> (nth (iterate settle-step (assoc w :allow-sleep? false)) steps)
+       (assoc :allow-sleep? (:allow-sleep? w)))))

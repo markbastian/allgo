@@ -640,11 +640,6 @@
                         (aset u k (+ (aget u k) (* s (aget d k)))))))
     nil))
 
-(defn- tangents [n]
-  (let [a (if (< (abs (double (nth n 0))) 0.9) [1.0 0.0 0.0] [0.0 1.0 0.0])
-        t1 (v/normalize (v/cross n a))]
-    [t1 (v/cross n t1)]))
-
 (defn- softness
   "The soft contact's three numbers for a step of `dt`, as
   `allgo.physics.solver` has them (Catto's soft constraints): the rate an
@@ -670,7 +665,7 @@
   (let [dt (double dt)
         {:keys [slop bias-factor max-push-speed soft?]} opts
         n (v/normalize (:normal c))
-        [t1 t2] (tangents n)
+        [t1 t2] (v/perpendiculars n)
         pair? (same-model? (:a c) (:b c))
         along (fn [d]
                 (if pair?

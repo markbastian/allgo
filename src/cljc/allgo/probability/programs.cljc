@@ -18,17 +18,13 @@
   run by the likelihood of the observations, and estimates the
   distribution of whatever the program returns. A distribution is a map
   `{value p}`."
-  (:require [clojure.math :as math]))
-
-(defn- draw [rng dist]
-  (let [r (double (rng))]
-    (loop [[[v p] & more] (seq dist) acc 0.0]
-      (if (or (empty? more) (< r (+ acc p))) v (recur more (+ acc p))))))
+  (:require [allgo.random :as random]
+            [clojure.math :as math]))
 
 (defn sample!
   "A random choice from `dist`."
   [{:keys [rng]} dist]
-  (draw rng dist))
+  (random/weighted rng dist))
 
 (defn observe!
   "Condition the run on `value` having been drawn from `dist`: its

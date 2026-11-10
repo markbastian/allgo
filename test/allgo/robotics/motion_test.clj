@@ -194,3 +194,29 @@
           off (fn [p] (reduce max (map #(polygon/segment-distance % a b) p)))]
       (is (> (off wiggly) 0.8))
       (is (< (off (nth (motion/trajectory-optimization-seq (assoc two-posts :obstacles []) wiggly {:lambda 1.0 :rate 0.016}) 500)) 0.03)))))
+
+(deftest sampling-roadmaps-test
+  (let [a [1.0 0.5] b [5.0 0.5]]
+    (testing "the roadmap grown from the Halton sequence finds the way through the passage, the same every time"
+      (let [found (first (keep #(motion/prm-path gap % a b) (take 50 (motion/halton-prm-seq gap))))]
+        (is (some? found))
+        (is (motion/path-free? gap found))
+        (is (= found (first (keep #(motion/prm-path gap % a b) (take 50 (motion/halton-prm-seq gap))))))))
+    (testing "the visibility roadmap keeps two guards, one each side of the wall, and a connector in the passage"
+      (doseq [seed (range 1 6)]
+        (let [st (nth (motion/visibility-prm-seq gap (random/rng seed)) 400)
+              path (motion/visibility-roadmap-path gap st a b)]
+          (is (= 3 (count (:nodes st))))
+          (is (= 1 (count (distinct (:component st)))))
+          (is (= [0 1] (:guards st)))
+          (is (motion/path-free? gap path)))))))
+
+(deftest randomized-potential-test
+  (testing "random walks shake the robot out of the cup the plain field is trapped in"
+    (let [cup {:bounds [[-1.0 -1.0] [6.0 6.0]] :radius 0.0
+               :obstacles [[[2.0 1.0] [3.0 1.0] [3.0 4.0] [2.0 4.0] [2.0 3.5] [2.5 3.5] [2.5 1.5] [2.0 1.5]]]}
+          goal [5.0 2.5]]
+      (doseq [seed [1 4]]
+        (let [{:keys [trail]} (first (filter #(= goal (:p %)) (take 20000 (motion/randomized-potential-seq cup [0.5 2.5] goal (random/rng seed) :influence 0.5 :repulse 0.05))))]
+          (is (some? trail))
+          (is (motion/path-free? cup trail)))))))

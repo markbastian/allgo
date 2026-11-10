@@ -27,7 +27,8 @@
   :skills #{...} :capacity n}`, a task `{:id :at [x y] :needs skill
   :subtasks [tasks]}`; an agent's route starts at its home and visits its
   tasks in order, and its cost is the route's length."
-  (:require [allgo.geometry.polygon :as polygon])
+  (:require [allgo.geometry.polygon :as polygon]
+            [allgo.search :as search])
   #?(:clj (:import (clojure.lang PersistentQueue))))
 
 (def ^:private empty-queue #?(:clj PersistentQueue/EMPTY :cljs #queue []))
@@ -129,6 +130,14 @@
 
 (defn- all-tasks [tasks] (mapcat (fn [t] (cons t (all-tasks (:subtasks t)))) tasks))
 
+(defn- deliver-next
+  "The next message delivered and handled; nil when none is left."
+  [{:keys [queue] :as st}]
+  (when-let [msg (peek queue)]
+    (-> st (assoc :queue (pop queue) :delivered msg)
+        (update :messages inc)
+        (handle msg))))
+
 (defn contract-net-seq
   "The contract net allocating `tasks`, announced in order by the manager
   `manager` (not itself an agent unless it is one of `agents`), a message
@@ -144,15 +153,7 @@
                 :queue empty-queue :pending (mapv (fn [t] [manager t]) tasks)
                 :open {} :awarded {} :unplaced [] :messages 0}
                next-announcement)]
-    (cons st
-          (->> st
-               (iterate (fn [{:keys [queue] :as st}]
-                          (when-let [msg (peek queue)]
-                            (-> st (assoc :queue (pop queue) :delivered msg)
-                                (update :messages inc)
-                                (handle msg)))))
-               rest
-               (take-while some?)))))
+    (search/step-seq deliver-next st)))
 
 (defn allocate
   "The final state of the contract net on `agents` and `tasks`."
@@ -326,7 +327,7 @@
           :else (assoc st :weighing nil :concluded true))))
 
 (defn- recontract-step
-  [{:keys [pending routes weighing] :as st} cost chunk]
+  [cost chunk {:keys [pending routes weighing] :as st}]
   (let [st (assoc st :moved nil :concluded false)]
     (if weighing
       (weigh st cost chunk)
@@ -390,9 +391,8 @@
                        :replanned true :offer nil :moved nil)]
     (letfn [(pass [st]
               (let [states (->> (assoc st :pending (offers st contracts max-cluster max-ocsm) :replanned false)
-                                (iterate #(some-> % (recontract-step cost chunk)))
-                                rest
-                                (take-while some?))]
+                                (search/step-seq (partial recontract-step cost chunk))
+                                rest)]
                 (when (seq states)
                   (lazy-cat states (when (some :moved states) (pass (last states)))))))]
       (cons st (cons planned (pass planned))))))

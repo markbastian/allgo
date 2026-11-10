@@ -25,7 +25,9 @@
     :gamma        the discount
 
   `grid-mdp` makes one of the chapter's grid worlds; `four-by-three` is
-  its 4 x 3 world as aima-python (MIT) states it.")
+  its 4 x 3 world as aima-python (MIT) states it."
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.search :as search]))
 
 ;; ---------------------------------------------------------------------------
 ;; Grid worlds
@@ -79,20 +81,22 @@
   (let [as (actions s)]
     (+ (reward s) (if (seq as) (* gamma (apply max (map #(q-value mdp s % U) as))) 0.0))))
 
+(defn- value-iteration-step
+  "A sweep of Bellman updates, until the largest change is under `bound`."
+  [{:keys [states] :as mdp} bound {:keys [U delta sweeps]}]
+  (when (or (nil? delta) (> delta bound))
+    (let [U' (into {} (map (fn [s] [s (bellman mdp s U)]) states))]
+      {:U U' :previous U :sweeps (inc (long sweeps))
+       :delta (apply max (map #(abs (- (U' %) (U %))) states))})))
+
 (defn value-iteration-seq
   "Every state of value iteration on `mdp`: `{:U :delta :sweeps}`, a sweep
   of Bellman updates a step from utilities of zero, ending when the
   largest change is under epsilon (1 - gamma) / gamma -- then the
   utilities are within epsilon of the true ones."
   [{:keys [states gamma] :as mdp} epsilon]
-  (let [bound (/ (* epsilon (- 1.0 gamma)) gamma)]
-    (take-while some?
-                (iterate (fn [{:keys [U delta sweeps]}]
-                           (when (or (nil? delta) (> delta bound))
-                             (let [U' (into {} (map (fn [s] [s (bellman mdp s U)]) states))]
-                               {:U U' :previous U :sweeps (inc (long sweeps))
-                                :delta (apply max (map #(abs (- (U' %) (U %))) states))})))
-                         {:U (zipmap states (repeat 0.0)) :delta nil :sweeps 0}))))
+  (search/step-seq (partial value-iteration-step mdp (/ (* epsilon (- 1.0 gamma)) gamma))
+                   {:U (zipmap states (repeat 0.0)) :delta nil :sweeps 0}))
 
 (defn value-iteration
   "The utilities of `mdp`'s states, within `epsilon` of the true ones:
@@ -121,28 +125,32 @@
       (recur (into {} (map (fn [s] [s (+ (reward s) (if (pi s) (* gamma (q-value mdp s (pi s) U)) 0.0))]) states))
              (inc i)))))
 
+(defn- policy-iteration-step
+  "An evaluation of `k` sweeps and an improvement, until no action
+  changes."
+  [{:keys [states actions] :as mdp} k {:keys [pi U changed] :as st}]
+  (when (pos? (long changed))
+    (let [U (policy-evaluation mdp pi U k)
+          [pi changed] (reduce (fn [[pi n] s]
+                                 (let [as (actions s)]
+                                   (if (empty? as)
+                                     [pi n]
+                                     (let [best (apply max-key #(q-value mdp s % U) as)]
+                                       (if (> (q-value mdp s best U) (q-value mdp s (pi s) U))
+                                         [(assoc pi s best) (inc n)]
+                                         [pi n])))))
+                               [pi 0] states)]
+      {:pi pi :U U :changed changed :iterations (inc (long (:iterations st)))})))
+
 (defn policy-iteration-seq
   "Every state of policy iteration on `mdp`: `{:pi :U :changed}`, a step an
   evaluation (`k` sweeps, default 20) and an improvement, from the first
   action in every state, until no action changes."
   ([mdp] (policy-iteration-seq mdp 20))
   ([{:keys [states actions] :as mdp} k]
-   (take-while some?
-               (iterate (fn [{:keys [pi U changed] :as st}]
-                          (when (pos? (long changed))
-                            (let [U (policy-evaluation mdp pi U k)
-                                  [pi changed] (reduce (fn [[pi n] s]
-                                                         (let [as (actions s)]
-                                                           (if (empty? as)
-                                                             [pi n]
-                                                             (let [best (apply max-key #(q-value mdp s % U) as)]
-                                                               (if (> (q-value mdp s best U) (q-value mdp s (pi s) U))
-                                                                 [(assoc pi s best) (inc n)]
-                                                                 [pi n])))))
-                                                       [pi 0] states)]
-                              {:pi pi :U U :changed changed :iterations (inc (long (:iterations st)))})))
-                        {:pi (into {} (for [s states] [s (first (actions s))]))
-                         :U (zipmap states (repeat 0.0)) :changed 1 :iterations 0}))))
+   (search/step-seq (partial policy-iteration-step mdp k)
+                    {:pi (into {} (for [s states] [s (first (actions s))]))
+                     :U (zipmap states (repeat 0.0)) :changed 1 :iterations 0})))
 
 (defn policy-iteration
   "The optimal policy of `mdp`."
@@ -156,8 +164,6 @@
 ;; `:transition` a [a][s][s'] array of P(s' | s, a), `:sensor` a [a][s'][e]
 ;; array of P(e | s', a), `:reward` a [a][s] array of R(s, a), and
 ;; `:gamma`. An alpha vector is a plan's expected utility from each state.
-
-(defn- dot [a b] (reduce + (map * a b)))
 
 (defn update-belief
   "POMDP filtering: the belief after doing `a` in `belief` and perceiving
@@ -192,7 +198,7 @@
    (let [plans (mapv first (vals (group-by :alpha plans)))
          n (count (:alpha (first plans)))
          r (if (> n 3) (max 4 (quot 60 n)) r)
-         best (fn [b] (apply max-key #(dot (:alpha %) b) plans))]
+         best (fn [b] (apply max-key #(lin/dot (:alpha %) b) plans))]
      (vec (distinct (map best (lattice n r)))))))
 
 (defn- deeper
@@ -212,6 +218,21 @@
                                                        ((:alpha (choice e)) s')))))))
                     (range n))})))
 
+(defn pomdp-value
+  "The utility of `belief` under a set of alpha-vector plans."
+  [plans belief]
+  (apply max (map #(lin/dot (:alpha %) belief) plans)))
+
+(defn- pomdp-step
+  "The plans a step deeper, pruned, until the utility at every probe
+  belief changes by less than `bound`."
+  [pomdp probes bound {:keys [plans depth diff]}]
+  (when (or (nil? diff) (>= diff bound))
+    (let [ids (map-indexed (fn [i p] (assoc p :id i)) plans)
+          plans' (prune (deeper pomdp (vec ids)))]
+      {:plans (mapv #(dissoc % :id) plans') :depth (inc (long depth))
+       :diff (apply max (map #(abs (- (pomdp-value plans' %) (pomdp-value plans %))) probes))})))
+
 (defn pomdp-value-iteration-seq
   "Every state of POMDP value iteration: `{:plans :depth}`, the
   undominated conditional plans of each depth, from the empty plan of
@@ -220,19 +241,6 @@
   best alpha at each corner and midpoint of the belief simplex."
   [{:keys [reward gamma] :as pomdp} epsilon]
   (let [n (count (first reward))
-        probes (concat (for [i (range n)] (assoc (vec (repeat n 0.0)) i 1.0)) [(vec (repeat n (/ 1.0 n)))])
-        value (fn [plans b] (apply max (map #(dot (:alpha %) b) plans)))
-        bound (/ (* epsilon (- 1.0 gamma)) gamma)]
-    (take-while some?
-                (iterate (fn [{:keys [plans depth diff]}]
-                           (when (or (nil? diff) (>= diff bound))
-                             (let [ids (map-indexed (fn [i p] (assoc p :id i)) plans)
-                                   plans' (prune (deeper pomdp (vec ids)))]
-                               {:plans (mapv #(dissoc % :id) plans') :depth (inc (long depth))
-                                :diff (apply max (map #(abs (- (value plans' %) (value plans %))) probes))})))
-                         {:plans [{:alpha (vec (repeat n 0.0)) :action nil}] :depth 0 :diff nil}))))
-
-(defn pomdp-value
-  "The utility of `belief` under a set of alpha-vector plans."
-  [plans belief]
-  (apply max (map #(dot (:alpha %) belief) plans)))
+        probes (concat (for [i (range n)] (assoc (vec (repeat n 0.0)) i 1.0)) [(vec (repeat n (/ 1.0 n)))])]
+    (search/step-seq (partial pomdp-step pomdp probes (/ (* epsilon (- 1.0 gamma)) gamma))
+                     {:plans [{:alpha (vec (repeat n 0.0)) :action nil}] :depth 0 :diff nil})))

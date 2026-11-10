@@ -49,12 +49,14 @@
   giving its feature maps flattened, one after another, and a pooling
   layer reading `c` maps of `h` by `w` so. The loss is the squared error,
   or with a sigmoid output, `:cross-entropy`."
-  (:require [allgo.random :as random]
+  (:require [allgo.math :as am]
+            [allgo.numerics.linear :as lin]
+            [allgo.random :as random]
             [clojure.math :as math]))
 
 (defn- g [kind z]
   (case kind
-    :sigmoid (/ 1.0 (+ 1.0 (math/exp (- z))))
+    :sigmoid (am/sigmoid z)
     :tanh (math/tanh z)
     :relu (max 0.0 z)
     :identity z))
@@ -65,8 +67,6 @@
     :tanh (- 1.0 (* a a))
     :relu (if (pos? z) 1.0 0.0)
     :identity 1.0))
-
-(defn- dot [u v] (reduce + (map * u v)))
 
 ;; ---------------------------------------------------------------------------
 ;; Layers
@@ -189,8 +189,8 @@
             (mapv (fn [idx] (let [xs (map a idx)] (if (= op :max) (reduce max xs) (/ (reduce + xs) (count idx)))))
                   (pool-windows layer)))
     :residual (let [{:keys [bw V inner]} layer
-                    h (mapv (fn [row bj] (g inner (+ bj (dot row a)))) W bw)]
-                (mapv (fn [ai row bi] (+ ai bi (dot row h))) a V b))
+                    h (mapv (fn [row bj] (g inner (+ bj (lin/dot row a)))) W bw)]
+                (mapv (fn [ai row bi] (+ ai bi (lin/dot row h))) a V b))
     :batch-norm (standardize layer a (:mean layer) (:var layer))))
 
 (defn forward
@@ -269,7 +269,7 @@
                             (transient (vec (repeat (count a) 0.0)))
                             (map vector (pool-windows layer) delta)))})
     :residual (let [{:keys [bw V inner]} layer
-                    u (mapv (fn [row bj] (+ bj (dot row a))) W bw)
+                    u (mapv (fn [row bj] (+ bj (lin/dot row a))) W bw)
                     h (mapv #(g inner %) u)
                     du (mapv (fn [i ui hi] (* (g' inner ui hi) (reduce + (map (fn [row dj] (* (row i) dj)) V delta))))
                              (range) u h)]
@@ -461,6 +461,12 @@
   ([network x y alpha loss] (sgd-step network x y alpha loss nil))
   ([network x y alpha loss rng] (minibatch-step network [x] [y] {:alpha alpha :loss loss :rng rng})))
 
+(defn- train-epoch
+  "An epoch: the pairs shuffled, and a step on each `batch` of them."
+  [pairs batch {:keys [rng] :as opts} net]
+  (reduce (fn [net chunk] (minibatch-step net (mapv first chunk) (mapv second chunk) opts))
+          net (partition-all batch (random/shuffle rng pairs))))
+
 (defn train-seq
   "Stochastic gradient descent, an epoch a step: the examples shuffled,
   and the weights moved against each minibatch's gradient by `alpha` --
@@ -468,10 +474,5 @@
   `:alpha` (0.1), `:loss` (`:squared`), `:batch` (1), `:lambda` (no
   weight decay), `:rng`."
   [network X Y {:keys [rng batch] :or {batch 1} :as opts}]
-  (let [rng (or rng (random/rng 1))
-        opts (assoc opts :rng rng)
-        pairs (vec (map vector X Y))]
-    (iterate (fn [net]
-               (reduce (fn [net chunk] (minibatch-step net (mapv first chunk) (mapv second chunk) opts))
-                       net (partition-all batch (random/shuffle rng pairs))))
-             network)))
+  (let [rng (or rng (random/rng 1))]
+    (iterate (partial train-epoch (vec (map vector X Y)) batch (assoc opts :rng rng)) network)))

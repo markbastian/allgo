@@ -24,6 +24,7 @@
             [allgo.astro.rotation :as rot]
             [allgo.astro.solar :as solar]
             [allgo.astro.vsop87 :as vsop87]
+            [allgo.geometry.vec3 :as v]
             [allgo.numerics.linear :as lin]
             [clojure.math :as math]))
 
@@ -454,11 +455,6 @@
 
 (def ^:private index (zipmap names (range)))
 
-(defn- dot [a b] (reduce + (map * a b)))
-
-(defn- cross [[a b c] [d e f]]
-  [(- (* b f) (* c e)) (- (* c d) (* a f)) (- (* a e) (* b d))])
-
 (defn- geometry
   "Where `moon`'s shadow is at `mjd-tt`: `:miss`, how far the line from
   the moon away from the Sun passes from Jupiter's center, in a frame
@@ -471,14 +467,14 @@
         s (sun-from-jupiter mjd-tt)
         pole (rot/pole :jupiter mjd-tt)
         [a _ c] (:radii (rot/models :jupiter))
-        stretch (fn [v] (let [k (* (dot v pole) (- (/ a c) 1.0))]
+        stretch (fn [v] (let [k (* (lin/dot v pole) (- (/ a c) 1.0))]
                           (mapv + v (map #(* k %) pole))))
         p (stretch m)
-        d (let [d (stretch (mapv - s)) n (math/sqrt (dot d d))] (mapv #(/ % n) d))
-        t (- (dot p d))]
-    {:miss (math/sqrt (max 0.0 (- (dot p p) (* t t))))
-     :side (dot (cross s m) pole)
-     :sunward? (pos? (dot s m))}))
+        d (let [d (stretch (mapv - s)) n (math/sqrt (lin/dot d d))] (mapv #(/ % n) d))
+        t (- (lin/dot p d))]
+    {:miss (math/sqrt (max 0.0 (- (lin/dot p p) (* t t))))
+     :side (lin/dot (v/cross s m) pole)
+     :sunward? (pos? (lin/dot s m))}))
 
 (defn- root
   "Where `f` changes sign between `a` and `b`, by bisection to about a

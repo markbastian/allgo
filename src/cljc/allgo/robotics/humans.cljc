@@ -19,7 +19,8 @@
                    far, and learns again
 
   Positions are `[x y]`."
-  (:require [clojure.math :as math]))
+  (:require [allgo.learning.models :as models]
+            [clojure.math :as math]))
 
 (defn- dist [[ax ay] [bx by]] (math/hypot (- ax bx) (- ay by)))
 
@@ -60,11 +61,16 @@
 ;; ---------------------------------------------------------------------------
 ;; Imitation
 
+(defn- act
+  "The state after `policy` acts at `x`."
+  [dynamics policy x]
+  (dynamics x (policy x)))
+
 (defn rollout
   "The states from `x0` under `policy` (fn [x]) -> u, by `dynamics` (fn [x
   u]) -> x', for `n` steps."
   [dynamics policy x0 n]
-  (vec (take (inc n) (iterate #(dynamics % (policy %)) x0))))
+  (vec (take (inc n) (iterate (partial act dynamics policy) x0))))
 
 (defn behavioral-cloning
   "A policy fitted by `fit` (fn [states actions]) -> policy to the
@@ -72,6 +78,15 @@
   [dynamics expert fit starts n]
   (let [xs (vec (mapcat #(rollout dynamics expert % n) starts))]
     (fit xs (mapv expert xs))))
+
+(defn- dagger-step
+  "Roll the policy out, label what it visited with the expert's actions,
+  and refit on everything."
+  [dynamics expert fit starts n {:keys [policy states actions]}]
+  (let [visited (vec (mapcat #(rollout dynamics policy % n) starts))
+        states (into states visited)
+        actions (into actions (map expert visited))]
+    {:states states :actions actions :policy (fit states actions)}))
 
 (defn dagger-seq
   "DAgger, an iteration a step: from the expert's demonstrations from
@@ -82,17 +97,11 @@
   [dynamics expert fit starts n]
   (let [xs0 (vec (mapcat #(rollout dynamics expert % n) starts))
         init {:states xs0 :actions (mapv expert xs0) :policy (fit xs0 (mapv expert xs0))}]
-    (iterate (fn [{:keys [policy states actions]}]
-               (let [visited (vec (mapcat #(rollout dynamics policy % n) starts))
-                     states (into states visited)
-                     actions (into actions (map expert visited))]
-                 {:states states :actions actions :policy (fit states actions)}))
-             init)))
+    (iterate (partial dagger-step dynamics expert fit starts n) init)))
 
 (defn nearest-neighbor
   "The 1-nearest-neighbor policy of `states` labeled `actions`: the action
   of the nearest state seen -- exact where it has examples, and no better
   than its nearest example anywhere else."
   [states actions]
-  (let [pairs (mapv vector states actions)]
-    (fn [x] (second (apply min-key (fn [[s]] (reduce + (map #(let [d (- %1 %2)] (* d d)) s x))) pairs)))))
+  (models/knn states actions 1))

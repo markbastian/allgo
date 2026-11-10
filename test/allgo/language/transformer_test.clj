@@ -66,7 +66,7 @@
     (is (= [[0.0 -1e9 -1e9] [0.0 0.0 -1e9] [0.0 0.0 0.0]] (tf/causal-mask 3))))
   (testing "so the decoder's outputs at a position are untouched by the tokens after it"
     (let [m (tf/encoder-decoder (s2s/vocabulary (range 5)) 8 2 16 1 (random/rng 1))
-          P (into {} (map (fn [[k v]] [k (ad/const v)]) (:params m)))
+          P (ad/consts (:params m))
           [H] (tf/encode m P [2 3 4])
           out #(ad/value (first (#'tf/decode m P H %)))
           a (out [0 2 3 4])

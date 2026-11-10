@@ -25,7 +25,9 @@
   GloVe, below, gets at the same vectors from the other side: the table
   of how often each pair of words occurs together, fitted whole."
   (:require [allgo.learning.autodiff :as ad]
+            [allgo.math :as am]
             [allgo.numerics.eigen :as eigen]
+            [allgo.numerics.linear :as lin]
             [allgo.random :as random]
             [clojure.math :as math]))
 
@@ -45,9 +47,6 @@
              :when (not= i j)]
          [(ids i) (ids j)])))
 
-(defn- sigmoid [x] (/ 1.0 (+ 1.0 (math/exp (- x)))))
-(defn- dot [a b] (reduce + (map * a b)))
-
 (defn- noise-table
   "Word indices in proportion to count^(3/4), to draw negatives from."
   [counts]
@@ -59,7 +58,7 @@
   vectors moved along the gradient of the log-sigmoid."
   [{:keys [in out] :as model} w c label lr]
   (let [vw (in w) vc (out c)
-        g (* lr (- label (sigmoid (dot vw vc))))]
+        g (* lr (- label (am/sigmoid (lin/dot vw vc))))]
     (-> model
         (assoc-in [:in w] (mapv #(+ %1 (* g %2)) vw vc))
         (assoc-in [:out c] (mapv #(+ %1 (* g %2)) vc vw)))))
@@ -89,8 +88,8 @@
 (defn word-vector [{:keys [vocab in]} word] (in ((:index vocab) word)))
 
 (defn cosine [a b]
-  (let [na (math/sqrt (dot a a)) nb (math/sqrt (dot b b))]
-    (if (or (zero? na) (zero? nb)) 0.0 (/ (dot a b) (* na nb)))))
+  (let [na (math/sqrt (lin/dot a a)) nb (math/sqrt (lin/dot b b))]
+    (if (or (zero? na) (zero? nb)) 0.0 (/ (lin/dot a b) (* na nb)))))
 
 (defn similarity
   "The cosine of the angle between two words' vectors."
@@ -130,7 +129,7 @@
         {:keys [vectors]} (eigen/jacobi C)
         pc (fn [k] (mapv #(nth % k) vectors))
         [p1 p2] [(pc (dec d)) (pc (- d 2))]]
-    (mapv (fn [x] [(dot x p1) (dot x p2)]) X)))
+    (mapv (fn [x] [(lin/dot x p1) (lin/dot x p2)]) X)))
 
 ;; ---------------------------------------------------------------------------
 ;; GloVe
@@ -196,7 +195,7 @@
               (with-in
                 (reduce (fn [{:keys [w wt b bt gw gwt gb gbt] :as m} [[i j] x]]
                           (let [wi (w i) wj (wt j)
-                                diff (- (+ (dot wi wj) (b i) (bt j)) (math/log x))
+                                diff (- (+ (lin/dot wi wj) (b i) (bt j)) (math/log x))
                                 fd (* (glove-weight x x-max alpha) diff)
                                 [wi' gwi] (adagrad wi (gw i) (mapv #(* fd %) wj) lr)
                                 [wj' gwj] (adagrad wj (gwt j) (mapv #(* fd %) wi) lr)

@@ -131,10 +131,8 @@
   ([p] (ac-3-seq p (:domains p) nil))
   ([{:keys [variables neighbors] :as p} domains arcs]
    (let [arcs (or arcs (for [x variables y (neighbors x)] [x y]))]
-     (take-while some?
-                 (iterate (fn [s] (when s (ac-3-step s)))
-                          (assoc p :domains domains :queue (into empty-queue arcs) :queued (set arcs)
-                                 :checks 0 :failed? false))))))
+     (search/step-seq ac-3-step (assoc p :domains domains :queue (into empty-queue arcs) :queued (set arcs)
+                                       :checks 0 :failed? false)))))
 
 (defn ac-3
   "`p`'s domains made arc consistent, or nil if one comes up empty."
@@ -257,9 +255,9 @@
   (filterv #(pos? (conflicts p assignment % (assignment %))) (:variables p)))
 
 (defn- min-conflicts-step
-  [{:keys [current rng domains] :as state}]
+  [{:keys [current rng domains steps max-steps] :as state}]
   (let [bad (conflicted state current)]
-    (if (empty? bad)
+    (if (or (empty? bad) (>= (long steps) (long max-steps)))
       nil
       (let [var (random/pick rng bad)
             scored (map (fn [x] [x (conflicts state current var x)]) (domains var))
@@ -284,9 +282,7 @@
                                  (assoc a v (random/pick rng (vec (keep (fn [[x c]] (when (= c least) x)) scored))))))
                              {} variables))
          max-steps (or max-steps 100000)]
-     (take-while some?
-                 (iterate (fn [s] (when (and s (< (long (:steps s)) (long max-steps))) (min-conflicts-step s)))
-                          (assoc p :current initial :rng rng :steps 0 :var nil))))))
+     (search/step-seq min-conflicts-step (assoc p :current initial :rng rng :steps 0 :max-steps max-steps :var nil)))))
 
 (defn min-conflicts
   "A solution of `p` by min-conflicts, or nil if `:max-steps` run out."
@@ -356,11 +352,9 @@
   ([p] (tree-solver-seq p (:domains p)))
   ([p domains]
    (let [[order parent] (topological p)]
-     (take-while some?
-                 (iterate (fn [s] (when s (tree-step s)))
-                          (assoc p :order order :parent parent :domains domains :phase :arcs
-                                 :j (dec (count order)) :assignment {} :checks 0
-                                 :solved? false :failed? false))))))
+     (search/step-seq tree-step (assoc p :order order :parent parent :domains domains :phase :arcs
+                                       :j (dec (count order)) :assignment {} :checks 0
+                                       :solved? false :failed? false)))))
 
 (defn tree-solver
   "A solution of a tree-structured `p`, or nil."

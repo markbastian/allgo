@@ -44,6 +44,14 @@
                         (for [v (range (- search) (inc search)) u (range (- search) (inc search))] [u v]))]
     (apply min-key #(ssd a b x y half (% 0) (% 1)) (reverse shifts))))
 
+(defn- lucas-kanade-step
+  "The flow refined by a Gauss-Newton step on `b` warped back by it."
+  [a b pts Ix Iy inverse [u v]]
+  (let [It (mapv (fn [[px py]] (- (img/sample b (+ px u) (+ py v)) (img/at a px py))) pts)
+        bx (- (reduce + (map * Ix It))) by (- (reduce + (map * Iy It)))
+        [du dv] (lin/mat-vec inverse [bx by])]
+    [(+ u du) (+ v dv)]))
+
 (defn lucas-kanade-seq
   "The flow at `(x, y)` from `a` to `b` by Lucas-Kanade over a window of
   half-width `half`, each step a least-squares correction with `b`
@@ -58,12 +66,8 @@
          sxx (reduce + (map * Ix Ix)) sxy (reduce + (map * Ix Iy)) syy (reduce + (map * Iy Iy))
          det (- (* sxx syy) (* sxy sxy))]
      (when (> det 1e-12)
-       (iterate (fn [[u v]]
-                  (let [It (mapv (fn [[px py]] (- (img/sample b (+ px u) (+ py v)) (img/at a px py))) pts)
-                        bx (- (reduce + (map * Ix It))) by (- (reduce + (map * Iy It)))
-                        [du dv] (lin/mat-vec [[(/ syy det) (/ (- sxy) det)] [(/ (- sxy) det) (/ sxx det)]] [bx by])]
-                    [(+ u du) (+ v dv)]))
-                [0.0 0.0])))))
+       (let [inverse [[(/ syy det) (/ (- sxy) det)] [(/ (- sxy) det) (/ sxx det)]]]
+         (iterate (partial lucas-kanade-step a b pts Ix Iy inverse) [0.0 0.0]))))))
 
 (defn lucas-kanade
   "Lucas-Kanade's flow at `(x, y)` after `steps` refinements (default

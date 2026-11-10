@@ -148,32 +148,36 @@
 (defn- run-primitive [step state actions]
   (reduce (fn [s a] (or (step s a) (reduced nil))) state actions))
 
+(defn- hierarchical-step
+  "A plan off the queue: its first HLA refined every way, or, all
+  primitive, checked against the goal; nil once solved or out of plans."
+  [{:keys [init goal? step]} hierarchy {:keys [frontier] :as st}]
+  (when (and (seq frontier) (not (:solution st)))
+    (let [plan (peek frontier)
+          frontier (pop frontier)
+          i (first (keep-indexed (fn [i a] (when (hla? hierarchy a) i)) plan))
+          prefix (if i (subvec plan 0 i) plan)
+          outcome (run-primitive step init prefix)]
+      (cond
+        (nil? outcome) (assoc st :frontier frontier :plan plan)
+        (nil? i) (cond-> (assoc st :frontier frontier :plan plan)
+                   (goal? outcome) (assoc :solution plan))
+        :else
+        (let [hla (plan i)
+              suffix (subvec plan (inc i))]
+          (assoc st :plan plan
+                 :frontier (into frontier (for [r ((hierarchy (first hla)) (vec (rest hla)) outcome)]
+                                            (vec (concat prefix r suffix))))))))))
+
 (defn hierarchical-search-seq
   "HIERARCHICAL-SEARCH, a step a plan taken from the queue: the first HLA in
   it refined every way its hierarchy allows in the state the primitive
   prefix reaches, until a primitive plan reaches a state satisfying
   `goal?`. Each state has the plan popped, `:plan`, and at the end
   `:solution`."
-  [{:keys [init goal? step]} hierarchy top]
-  (take-while some?
-              (iterate (fn [{:keys [frontier] :as st}]
-                         (when (and (seq frontier) (not (:solution st)))
-                           (let [plan (peek frontier)
-                                 frontier (pop frontier)
-                                 i (first (keep-indexed (fn [i a] (when (hla? hierarchy a) i)) plan))
-                                 prefix (if i (subvec plan 0 i) plan)
-                                 outcome (run-primitive step init prefix)]
-                             (cond
-                               (nil? outcome) (assoc st :frontier frontier :plan plan)
-                               (nil? i) (cond-> (assoc st :frontier frontier :plan plan)
-                                          (goal? outcome) (assoc :solution plan))
-                               :else
-                               (let [hla (plan i)
-                                     suffix (subvec plan (inc i))]
-                                 (assoc st :plan plan
-                                        :frontier (into frontier (for [r ((hierarchy (first hla)) (vec (rest hla)) outcome)]
-                                                                   (vec (concat prefix r suffix))))))))))
-                       {:frontier (conj #?(:clj clojure.lang.PersistentQueue/EMPTY :cljs #queue []) [top])})))
+  [problem hierarchy top]
+  (search/step-seq (partial hierarchical-step problem hierarchy)
+                   {:frontier (conj #?(:clj clojure.lang.PersistentQueue/EMPTY :cljs #queue []) [top])}))
 
 (defn hierarchical-search
   "A primitive plan refined from `top`, or nil."

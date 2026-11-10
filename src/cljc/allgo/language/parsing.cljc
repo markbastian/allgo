@@ -23,7 +23,8 @@
   binary rules X -> Y Z with probability p, and lexical rules X -> word.
   A tree is `[label child ...]`, a leaf a string. `e-prob-chomsky` is
   aima-python's (MIT) small grammar of that shape."
-  (:require [allgo.search :as search]
+  (:require [allgo.random :as random]
+            [allgo.search :as search]
             [clojure.math :as math]
             [clojure.string :as str]))
 
@@ -143,12 +144,6 @@
              "young" [[:Adj 0.5]] "old" [[:Adj 0.5]] "will" [[:Modal 0.3]]
              "quickly" [[:Adv 0.5]] "well" [[:Adv 0.5]]}})
 
-(defn- pick-weighted [rng choices]
-  (let [total (reduce + (map second choices))
-        r (* total (double (rng)))]
-    (loop [[[x p] & more] choices acc 0.0]
-      (if (or (empty? more) (< r (+ acc p))) x (recur more (+ acc p))))))
-
 (defn generate-tree
   "A tree sampled from `grammar` from `start` (default :S): each
   nonterminal expanded by one of its rules chosen by probability, each
@@ -160,9 +155,9 @@
          words-of (reduce (fn [m [w tags]] (reduce (fn [m [t p]] (update m t (fnil conj []) [w p])) m tags)) {} lexicon)]
      (letfn [(expand [x]
                (if-let [rs (by-head x)]
-                 (let [[_ y z] (pick-weighted rng (map (fn [r] [r (peek r)]) rs))]
+                 (let [[_ y z] (random/weighted rng (map (fn [r] [r (peek r)]) rs))]
                    [x (expand y) (expand z)])
-                 [x (pick-weighted rng (words-of x))]))]
+                 [x (random/weighted rng (words-of x))]))]
        (expand start)))))
 
 (defn tagged-leaves
@@ -391,6 +386,25 @@
 ;; ---------------------------------------------------------------------------
 ;; Shift-reduce parsing
 
+(defn- shift-reduce-step
+  "Every shift and reduce from each configuration of the beam, the `b`
+  most probable kept."
+  [words lexicon binary b beam]
+  (let [n (count words)]
+    (->> (for [{:keys [stack pos log-p] :as c} beam
+               successor (concat
+                          (when (< pos n)
+                            (for [[x q] (lexicon (words pos))]
+                              (assoc c :stack (conj stack [x (words pos)]) :pos (inc pos) :log-p (+ log-p (math/log q)))))
+                          (when (>= (count stack) 2)
+                            (let [z (peek stack) y (peek (pop stack))]
+                              (for [[x _ _ q] (binary [(first y) (first z)])]
+                                (assoc c :stack (conj (pop (pop stack)) [x y z]) :log-p (+ log-p (math/log q)))))))]
+           successor)
+         (sort-by (comp - :log-p))
+         (take b)
+         vec)))
+
 (defn shift-reduce-seq
   "Shift-reduce parsing by beam search: going through the sentence word
   by word, each configuration -- a stack of constituents, the words not
@@ -403,24 +417,9 @@
   are always compared at the same point. Each state the beam, `[{:stack
   :pos :log-p} ...]`, `:pos` the words read so far."
   [words {:keys [rules lexicon]} b]
-  (let [n (count words)
-        binary (group-by (fn [[_ y z]] [y z]) rules)]
-    (take (* 2 n)
-          (iterate (fn [beam]
-                     (->> (for [{:keys [stack pos log-p] :as c} beam
-                                successor (concat
-                                           (when (< pos n)
-                                             (for [[x q] (lexicon (words pos))]
-                                               (assoc c :stack (conj stack [x (words pos)]) :pos (inc pos) :log-p (+ log-p (math/log q)))))
-                                           (when (>= (count stack) 2)
-                                             (let [z (peek stack) y (peek (pop stack))]
-                                               (for [[x _ _ q] (binary [(first y) (first z)])]
-                                                 (assoc c :stack (conj (pop (pop stack)) [x y z]) :log-p (+ log-p (math/log q)))))))]
-                            successor)
-                          (sort-by (comp - :log-p))
-                          (take b)
-                          vec))
-                   [{:stack [] :pos 0 :log-p 0.0}]))))
+  (take (* 2 (count words))
+        (iterate (partial shift-reduce-step words lexicon (group-by (fn [[_ y z]] [y z]) rules) b)
+                 [{:stack [] :pos 0 :log-p 0.0}])))
 
 (defn shift-reduce-parse
   "The parse a shift-reduce beam of `b` finds for `words`, rooted at

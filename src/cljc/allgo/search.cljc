@@ -242,16 +242,17 @@
              :solved?   false
              :frontier  (put frontier [[start 0]]))))
 
-(defn- run
-  "The seq of search states from `init`: each the step of the one before,
-  until a step finds nothing left to do and returns nil. A solved state
-  that a step is not asked past ends nothing; `goal-state` stops there."
+(defn step-seq
+  "The seq of states from `init`, each `step` of the one before, until a
+  step finds nothing left to do and returns nil. Every algorithm whose
+  step can end it runs this way. A solved search state that a step is
+  not asked past ends nothing; `goal-state` stops there."
   [step init]
-  (take-while some? (iterate (fn [s] (when s (step s))) init)))
+  (take-while some? (iterate #(some-> % step) init)))
 
 (defn- searcher [step frontier]
   (fn [search]
-    (run step (initialize (assoc search :frontier (frontier search))))))
+    (step-seq step (initialize (assoc search :frontier (frontier search))))))
 
 (def breadth-first-seq
   "Every search state of a breadth-first search, one per expansion."
@@ -365,10 +366,10 @@
 (defn- deepening-seq [search bound limit deepen?]
   (let [{:keys [start] :as search} (defaults search)
         root (node start nil 0)]
-    (run deepening-step
-         (assoc search :root root :stack [root] :bound bound
-                :limit limit :next-limit ##Inf :deepen? deepen?
-                :iteration 0 :solved? false :current nil))))
+    (step-seq deepening-step
+              (assoc search :root root :stack [root] :bound bound
+                     :limit limit :next-limit ##Inf :deepen? deepen?
+                     :iteration 0 :solved? false :current nil))))
 
 (defn- depth-bound [_ n] (:depth n))
 
@@ -400,6 +401,22 @@
 ;; ---------------------------------------------------------------------------
 ;; Recursion as a seq
 
+(defn- call-step
+  "One step of a reified recursion: run the frame on top of the stack,
+  then push the call it makes or pop it with its value; nil once the
+  stack is empty."
+  [run-frame {:keys [stack context]}]
+  (when (seq stack)
+    (let [[op x frame' ctx] (run-frame (peek stack) context)
+          context (if (some? ctx) ctx context)
+          stack (pop stack)]
+      (case op
+        :call {:stack (conj stack frame' x) :event :call :context context}
+        :return (if (seq stack)
+                  {:stack (conj (pop stack) (assoc (peek stack) :returned x))
+                   :event :return :context context}
+                  {:stack [] :value x :event :return :context context})))))
+
 (defn call-seq
   "A recursive computation run a step at a time, as a seq of machine
   states `{:stack frames}`. `run-frame` takes the frame on top of the
@@ -415,18 +432,7 @@
   `[:return value nil context']`; nil leaves it as it was."
   ([run-frame root] (call-seq (fn [frame _] (run-frame frame)) root nil))
   ([run-frame root context]
-   (run (fn [{:keys [stack context]}]
-          (when (seq stack)
-            (let [[op x frame' ctx] (run-frame (peek stack) context)
-                  context (if (some? ctx) ctx context)
-                  stack (pop stack)]
-              (case op
-                :call {:stack (conj stack frame' x) :event :call :context context}
-                :return (if (seq stack)
-                          {:stack (conj (pop stack) (assoc (peek stack) :returned x))
-                           :event :return :context context}
-                          {:stack [] :value x :event :return :context context})))))
-        {:stack [root] :event :call :context context})))
+   (step-seq (partial call-step run-frame) {:stack [root] :event :call :context context})))
 
 ;; ---------------------------------------------------------------------------
 ;; Recursive best-first search
@@ -541,16 +547,16 @@
         side (fn [s step-to cost-of]
                {:frontier (put (priority-frontier) [[s 0]]) :costs {s 0} :came-from {s nil}
                 :step-to step-to :cost-of cost-of})]
-    (run bidirectional-step
-         (assoc search
-                :plain? plain?
-                :fwd (side start (:neighbors search) cost)
+    (step-seq bidirectional-step
+              (assoc search
+                     :plain? plain?
+                     :fwd (side start (:neighbors search) cost)
                 ;; Backward, a move from n to s costs what s to n would.
-                :bwd (side goal pred (fn [s n] (cost n s)))
-                :best (if (= start goal) 0 ##Inf)
-                :meet (when (= start goal) start)
-                :solved? false
-                :current nil))))
+                     :bwd (side goal pred (fn [s n] (cost n s)))
+                     :best (if (= start goal) 0 ##Inf)
+                     :meet (when (= start goal) start)
+                     :solved? false
+                     :current nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; Answers

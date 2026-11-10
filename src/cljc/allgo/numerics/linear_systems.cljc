@@ -188,6 +188,12 @@
      (* (matrix-norm A kind) (matrix-norm inv kind))
      ##Inf)))
 
+(defn- refine-step
+  "`x` plus the correction for its residual, solved with `A`'s LU
+  decomposition `d`."
+  [A b d x]
+  (mapv + x (lu-solve d (mapv - b (lin/mat-vec A x)))))
+
 (defn refine
   "`x`, a solution of A x = b, improved by iterative refinement: the
   residual b - A x taken, the correction for it solved with the same
@@ -195,7 +201,7 @@
   ([A b x] (refine A b x 1))
   ([A b x passes]
    (let [d (lu A)]
-     (nth (iterate (fn [x] (mapv + x (lu-solve d (mapv - b (lin/mat-vec A x))))) x) passes))))
+     (nth (iterate (partial refine-step A b d) x) passes))))
 
 ;; ----------------------------------------------------- iterative methods
 
@@ -257,3 +263,26 @@
         bottom (mapv (fn [r i] (into (vec i) r)) Ar Ai)]
     (when-let [x (gauss (into top bottom) (into (vec br) bi))]
       [(subvec x 0 n) (subvec x n)])))
+
+(defn rank
+  "The rank of the matrix `A` (rows of numbers, any shape): Gaussian
+  elimination with partial pivoting, a pivot smaller than `tol` (default
+  1e-10 of the largest entry) counted as zero."
+  ([A] (rank A nil))
+  ([A tol]
+   (let [rows (count A) cols (count (first A))
+         scale (reduce max 1e-300 (map abs (flatten A)))
+         tol (or tol (* 1e-10 scale))]
+     (loop [M (mapv #(mapv double %) A) r 0 c 0]
+       (if (or (= r rows) (= c cols))
+         r
+         (let [p (apply max-key #(abs (get-in M [% c])) (range r rows))]
+           (if (<= (abs (get-in M [p c])) tol)
+             (recur M r (inc c))
+             (let [M (assoc M r (M p) p (M r))
+                   pivot (M r)
+                   M (reduce (fn [M i]
+                               (let [f (/ (get-in M [i c]) (pivot c))]
+                                 (assoc M i (mapv - (M i) (mapv #(* f %) pivot)))))
+                             M (range (inc r) rows))]
+               (recur M (inc r) (inc c))))))))))

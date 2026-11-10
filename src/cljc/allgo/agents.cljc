@@ -40,15 +40,19 @@
             (= :dirty (status location)) (update :score + 10))
     :no-op w))
 
+(defn- run-step
+  "The action carried out, and the program's next choice."
+  [program {:keys [world action memory]}]
+  (let [w (execute world action)
+        [a m] (program memory (percept w))]
+    {:world w :action a :memory m}))
+
 (defn run-seq
   "`agent`, a `[program memory]` pair, acting in `world` for `steps` steps:
   each state `{:world :action :memory}`."
   [[program memory] world steps]
   (take (inc steps)
-        (iterate (fn [{:keys [world action memory]}]
-                   (let [w (execute world action)
-                         [a m] (program memory (percept w))]
-                     {:world w :action a :memory m}))
+        (iterate (partial run-step program)
                  (let [[a m] (program memory (percept world))]
                    {:world world :action a :memory m}))))
 

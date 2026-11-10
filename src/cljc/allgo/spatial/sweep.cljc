@@ -28,7 +28,8 @@
   changed places, not n log n. And it always sweeps x, where sweeping the
   axis the boxes are most spread along is what decides how many candidates
   survive the prune; on a tall thin scene, x is the worst of the three."
-  (:require [allgo.array :as a]))
+  (:require [allgo.array :as a]
+            [allgo.spatial.pairs :as pairs]))
 
 (defn sweep
   "Room for `max-objects` boxes.
@@ -98,17 +99,6 @@
           (recur (inc i)))))
     a))
 
-(defn- overlap?
-  "Do two boxes overlap on all three axes?"
-  [^doubles mins ^doubles maxs ^long i ^long j]
-  (let [a (* 3 i) b (* 3 j)]
-    (and (<= (aget mins a) (aget maxs b))
-         (>= (aget maxs a) (aget mins b))
-         (<= (aget mins (+ a 1)) (aget maxs (+ b 1)))
-         (>= (aget maxs (+ a 1)) (aget mins (+ b 1)))
-         (<= (aget mins (+ a 2)) (aget maxs (+ b 2)))
-         (>= (aget maxs (+ a 2)) (aget mins (+ b 2))))))
-
 (defn overlapping-pairs
   "Every pair of overlapping boxes, each pair once, as `[i j]` with
   `i < j`.
@@ -136,7 +126,7 @@
                   (if (> (aget mins (+ (* 3 jd) a)) hi)
                     acc
                     (recur (inc j)
-                           (if (overlap? mins maxs id jd)
+                           (if (pairs/overlap? mins maxs id jd)
                              (conj! acc [(min id jd) (max id jd)])
                              acc)))))))))))))
 
@@ -148,23 +138,7 @@
   `ids[starts[i] .. starts[i+1])`, each pair recorded once under the
   higher-numbered object."
   [s mins maxs ^long n]
-  (let [pairs (overlapping-pairs s mins maxs n)
-        by-hi (reduce (fn [m [i j]] (update m j (fnil conj []) i)) {} pairs)
-        ^ints starts (a/i32 (inc n))]
-    (loop [i 0 acc (transient []) total 0]
-      (if (= i n)
-        (do (aset starts n (int total))
-            {:starts starts
-             :ids    (let [v (persistent! acc)
-                           ^ints out (a/i32 (count v))]
-                       (dotimes [k (count v)] (aset out k (int (v k))))
-                       out)
-             :pairs  total})
-        (let [_ (aset starts i (int total))
-              partners (sort (get by-hi i))]
-          (recur (inc i)
-                 (reduce conj! acc partners)
-                 (+ total (count partners))))))))
+  (pairs/adjacency (overlapping-pairs s mins maxs n) n))
 
 ;; ---------------------------------------------------------------------------
 ;; Building boxes

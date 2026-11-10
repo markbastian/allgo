@@ -28,7 +28,8 @@
   That shows up as the occasional stretched node, and is the price of
   building a tree by sorting rather than by searching."
   (:require [allgo.array :as a]
-            [allgo.spatial.morton :as morton]))
+            [allgo.spatial.morton :as morton]
+            [allgo.spatial.pairs :as pairs]))
 
 (def ^:private ^:const no-box -1)
 
@@ -150,15 +151,6 @@
 
 (defn query-point [t [x y z]] (query t [x y z] [x y z]))
 
-(defn- overlap?
-  [^doubles mins ^doubles maxs ^long i ^long j]
-  (let [a (* 3 i) b (* 3 j)]
-    (and (<= (aget mins a) (aget maxs b)) (>= (aget maxs a) (aget mins b))
-         (<= (aget mins (+ a 1)) (aget maxs (+ b 1)))
-         (>= (aget maxs (+ a 1)) (aget mins (+ b 1)))
-         (<= (aget mins (+ a 2)) (aget maxs (+ b 2)))
-         (>= (aget maxs (+ a 2)) (aget mins (+ b 2))))))
-
 (defn overlapping-pairs
   "Every pair of overlapping boxes, each pair once, as `[i j]` with
   `i < j`.
@@ -193,7 +185,7 @@
                     (if (leaf? t k)
                       (let [j (aget box k)]
                         (recur stack
-                               (if (and (> j i) (overlap? mins maxs i j))
+                               (if (and (> j i) (pairs/overlap? mins maxs i j))
                                  (conj! acc [i j])
                                  acc)))
                       (recur (conj stack (aget left k) (aget right k)) acc))))))))
@@ -204,18 +196,4 @@
   "Every overlapping pair as a compressed adjacency list, laid out as
   `allgo.spatial.hash/adjacency` lays it out."
   [t mins maxs ^long n]
-  (let [pairs (overlapping-pairs t mins maxs n)
-        by-hi (reduce (fn [m [i j]] (update m j (fnil conj []) i)) {} pairs)
-        ^ints starts (a/i32 (inc n))]
-    (loop [i 0 acc (transient []) total 0]
-      (if (= i n)
-        (do (aset starts n (int total))
-            {:starts starts
-             :ids (let [v (persistent! acc)
-                        ^ints out (a/i32 (count v))]
-                    (dotimes [k (count v)] (aset out k (int (v k))))
-                    out)
-             :pairs total})
-        (let [_ (aset starts i (int total))
-              partners (sort (get by-hi i))]
-          (recur (inc i) (reduce conj! acc partners) (+ total (count partners))))))))
+  (pairs/adjacency (overlapping-pairs t mins maxs n) n))

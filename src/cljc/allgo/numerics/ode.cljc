@@ -123,6 +123,11 @@
            :correct (fn [h ys fs f+] (lin/add (ys 3) (lin/scale (lin-comb [[9.0 f+] [19.0 (fs 3)] [-5.0 (fs 2)] [1.0 (fs 1)]]) (/ h 24.0))))
            :modify [(/ 251.0 270.0) (/ 19.0 270.0)]}})
 
+(defn- rk4-back
+  "A fourth-order Runge-Kutta step of `h` backward from `[t y]`."
+  [f h [t y]]
+  [(- t h) (rk4-step f t y (- h))])
+
 (defn multistep
   "The multistep `method` -- `:heun` (the non-self-starting Heun method,
   second order), `:milne` or `:adams` (fourth order) -- `n` steps of `h`
@@ -138,7 +143,7 @@
          [pm cm] modify
          past (or history
                   (vec (reverse (take (dec need)
-                                      (rest (iterate (fn [[t y]] [(- t h) (rk4-step f t y (- h))]) [t0 (vec y0)]))))))
+                                      (rest (iterate (partial rk4-back f h) [t0 (vec y0)]))))))
          start (conj (mapv (fn [[t y]] [t (vec y)]) past) [t0 (vec y0)])]
      (loop [pts (vec (take-last need start)) out [[t0 (vec y0)]] k 0 last-pc nil]
        (if (= k n)

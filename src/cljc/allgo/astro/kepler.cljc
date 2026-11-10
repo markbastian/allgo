@@ -72,6 +72,22 @@
 (defn mean->true [M e] (eccentric->true (kepler-equation M e) e))
 (defn true->mean [nu e] (eccentric->mean (true->eccentric nu e) e))
 
+(defn ->equinoctial
+  "The nonsingular equinoctial elements `[a af ag chi psi lambda]` of the
+  classical `{:a :e :i :raan :argp :M}`: e and the node folded into the
+  first pair, the inclination's half-angle tangent into the second, the
+  mean longitude last -- finite for circular and equatorial orbits."
+  [{:keys [a e i raan argp M]}]
+  (let [lp (+ raan argp) t (math/tan (* 0.5 i))]
+    [a (* e (math/cos lp)) (* e (math/sin lp)) (* t (math/sin raan)) (* t (math/cos raan)) (+ lp M)]))
+
+(defn equinoctial->
+  "The classical elements of `->equinoctial`'s vector, angles in [0, 2 pi)."
+  [[a af ag chi psi lam]]
+  (let [lp (math/atan2 ag af) node (math/atan2 chi psi)]
+    {:a a :e (math/hypot af ag) :i (* 2.0 (math/atan (math/hypot chi psi)))
+     :raan (am/wrap-2pi node) :argp (am/wrap-2pi (- lp node)) :M (am/wrap-2pi (- lam lp))}))
+
 (defn kepler-bisection
   "Solve Kepler's equation by Sinnott's binary search (Meeus 30, third
   method): fifty-odd halvings of a quarter circle, each fixing one bit of

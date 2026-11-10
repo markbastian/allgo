@@ -38,10 +38,8 @@
   Everything random takes `:rng`, a function of no arguments returning
   numbers in [0, 1) -- `(allgo.random/rng seed)` for a repeatable run."
   (:require [allgo.random :as random]
+            [allgo.search :as search]
             [clojure.math :as math]))
-
-(defn- run [step init]
-  (take-while some? (iterate (fn [s] (when s (step s))) init)))
 
 (defn- start [{:keys [initial value] :as problem}]
   (assoc problem :current initial :current-value (value initial) :steps 0 :done? false))
@@ -107,7 +105,7 @@
                :steepest steepest-step
                :stochastic stochastic-step
                :first-choice first-choice-step)]
-    (run (step-unless-done step) (start (update problem :rng #(or % (random/rng 1)))))))
+    (search/step-seq (step-unless-done step) (start (update problem :rng #(or % (random/rng 1)))))))
 
 (defn random-restart-seq
   "`search-seq` -- any of these -- from the problem's initial state, then
@@ -163,8 +161,8 @@
         (start (-> problem
                    (update :rng #(or % (random/rng 1)))
                    (update :schedule #(or % (exponential-schedule 20.0 0.995 0.001)))))]
-    (run (step-unless-done annealing-step)
-         (assoc s :t 1 :best current :best-value current-value))))
+    (search/step-seq (step-unless-done annealing-step)
+                     (assoc s :t 1 :best current :best-value current-value))))
 
 ;; ---------------------------------------------------------------------------
 ;; Local beam search
@@ -207,8 +205,8 @@
         k (or k 8)
         beam (vec (for [_ (range k) :let [s (random-state rng)]] [s (value s)]))
         [s v] (apply max-key second beam)]
-    (run (step-unless-done beam-step)
-         (assoc problem :rng rng :k k :beam beam :current s :current-value v :steps 0 :done? false))))
+    (search/step-seq (step-unless-done beam-step)
+                     (assoc problem :rng rng :k k :beam beam :current s :current-value v :steps 0 :done? false))))
 
 ;; ---------------------------------------------------------------------------
 ;; The genetic algorithm
@@ -252,13 +250,13 @@
   with probability `:mutation` (default 1/length)."
   [{:keys [population fitness] :as problem}]
   (let [best (apply max-key fitness population)]
-    (run (step-unless-done generation-step)
-         (-> problem
-             (update :rng #(or % (random/rng 1)))
-             (update :mutation #(or % (/ 1.0 (count (first population)))))
-             (update :generations #(or % 1000))
-             (assoc :generation 0 :steps 0 :done? false
-                    :current best :current-value (fitness best))))))
+    (search/step-seq (step-unless-done generation-step)
+                     (-> problem
+                         (update :rng #(or % (random/rng 1)))
+                         (update :mutation #(or % (/ 1.0 (count (first population)))))
+                         (update :generations #(or % 1000))
+                         (assoc :generation 0 :steps 0 :done? false
+                                :current best :current-value (fitness best))))))
 
 (defn random-population
   "`n` individuals of `length` genes drawn from `alphabet`."

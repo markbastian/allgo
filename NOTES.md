@@ -1181,6 +1181,7 @@ algorithms are the ones their text teaches.
 | `allgo.robotics.kinematics`     | Craig's chains and the IK solvers, moved here from `allgo.kinematics`      |
 | `allgo.decision.contract-net`   | The contract net: announcement, marginal-cost bids, award, subcontracting; recontracting by Sandholm's O-, C-, S-, M- and OCSM-contracts; routes by Held and Karp |
 | `allgo.decision.games`          | Normal-form games, dominance and its iterated elimination, Nash equilibria pure and mixed, zero-sum games by linear programming, repeated games, bargaining, the Shapley value, voting, auctions and VCG |
+| `allgo.decision.assistance`     | Assistance games: the off-switch game and the paperclip game by myopic best response |
 
 **Reused, not rewritten.** The arm is an `allgo.robotics.kinematics`
 chain -- Craig's parameters, two revolute joints -- rather than its own
@@ -1379,6 +1380,34 @@ domain randomization; the game-theoretic coordination of Figure 26.28;
 learning cost functions from demonstrations, which
 `decision.apprenticeship`'s inverse RL already does for MDPs.
 
+**Assistance games, later.** `allgo.decision.assistance` has the
+book's two: a robot serving a human whose preferences it does not know,
+both playing for the human's payoff.
+
+- *The off-switch game* (section 16.7.2): from a prior over Harriet's
+  utility for Robbie's plan, the values of acting, switching off, and
+  deferring -- letting her decide, which keeps the plan's upside and cuts
+  off its downside. The section's hotel, uniform on -40 to +60: acting
+  +10, deferring +18; on -60 to +40, acting -10, deferring +8. The two
+  elaborations the section names: a cost for her time comes straight off
+  deferring, and a chance that she decides wrongly shrinks it, below
+  acting's +10 by an error rate of 0.4.
+- *The paperclip game* (section 18.2.5), solved by myopic best response
+  as the section does: from greedy Harriet, Robbie replies 90 paperclips,
+  50 of each or 90 staples; Harriet's reply makes one of each anywhere
+  from 41/92 to 51/92 of a dollar a paperclip, the section's 0.446 to
+  0.554; Robbie's reply to that is unchanged, the equilibrium. A
+  Harriet at 0.45, who alone would make two staples for $1.10, makes one
+  of each and gets $51 rather than $50.60. The grid of thetas first had
+  no point at exactly 0.5, so greedy Harriet was never indifferent and
+  never made one of each, and Robbie had no reply to learn; it now
+  includes its ends, and ties go to the balanced choice, as the
+  section's greedy Harriet's do.
+
+The general game -- reducible to a POMDP over the state and the human's
+preferences -- is left out, as are humans who err in the paperclip
+game.
+
 **The contract net, later.** `allgo.decision.contract-net` allocates
 tasks among cooperating agents the way chapter 18 describes. It follows
 Smith's protocol, with Sandholm's marginal-cost bids. A manager
@@ -1463,9 +1492,106 @@ length from 27.24 m to 23.90 m and the others to 22.99 m. The offers
 are weighed a few milliseconds a frame: with twenty jobs an
 M-contract's offer admits some fourteen thousand contracts.
 
-**Not implemented here:** kinodynamic planning and trajectory
-optimization; data association for landmarks that cannot be told apart;
+**Not implemented here:** data association for landmarks that cannot be told apart;
 Lemke-Howson, for games larger than support enumeration can handle.
+
+## Motion planning, after LaValle
+
+LaValle's *Planning Algorithms* (Cambridge University Press, 2006) was
+read for what Russell & Norvig's chapter 26 leaves out. What was missing
+and is now here, by package rather than by book:
+
+| Namespace                         | What                                                                                    |
+|-----------------------------------|-----------------------------------------------------------------------------------------|
+| `allgo.robotics.dubins`           | Dubins' six words and Reeds-Shepp's closed forms with their symmetries (15.3)           |
+| `allgo.search.incremental`        | D* Lite: replanning as the map is discovered, repairing rather than starting over (12.3) |
+| `allgo.robotics.navigation`       | Navigation functions: the NF1 wavefront, and the optimal one with diagonals (8.2)        |
+| `allgo.numerics.quasirandom`      | van der Corput, Halton, Hammersley, Sukharev; dispersion and star discrepancy (5.2)      |
+| `allgo.spatial.kdtree`            | k-d trees: nearest, k nearest, within a radius (5.5.2)                                   |
+| `allgo.robotics.motion`           | The roadmap from Halton samples, the visibility PRM, randomized potential fields (5.4, 5.6) |
+| `allgo.robotics.decomposition`    | Vertical cell decomposition and boustrophedon coverage (6.2.2, 7.6)                      |
+| `allgo.robotics.coordination`     | Velocity tuning, the coordination diagram, prioritized multi-robot planning (7.1, 7.2)   |
+| `allgo.robotics.kinodynamic`      | A double integrator: lattice planning by A*, and a kinodynamic RRT (14.4)                |
+| `allgo.robotics.tracking`         | The time-optimal speed along a path, by a forward and a backward pass (14.6.3)           |
+| `allgo.robotics.control`          | The Kalman controllability rank and the discrete Lyapunov equation (15.1)                |
+| `allgo.decision.nature`           | Games against nature: minimax, expected cost, regret, Hurwicz, observations (9.2)        |
+
+**Checks.** Each is tested against something independent of it:
+Dubins and Reeds-Shepp paths driven segment by segment end at the goal,
+to 1e-9, over 200 random cases, and a Reeds-Shepp path is never longer
+than a Dubins one; D* Lite's plan after every repair costs what A* from
+scratch finds, at under a tenth of the expansions (400 against 15,639 in
+the test maze); the k-d tree finds what measuring every point finds; the
+cell decomposition's trapezoids sum exactly to the free area; the
+boustrophedon path passes within half a strip of every free probe; the
+lattice plan for 4 m at 1 m/s and 1 m/s^2 takes the analytic 5 s, and
+the time-optimal profile along a line is `retime`'s trapezoid, 7 s for
+10 m at 2 m/s and 1 m/s^2.
+
+**Two slips found on the way.** My first transcription of Reeds and
+Shepp's formula 8.9 was off by a quarter turn; driving its paths to their
+ends caught it, and it is `atan2(2, r)`. And LaValle's Example 9.10 gives
+u1 as the least expected regret under a uniform nature, at 1; u1's is
+4/3, and the action at 1 is u2. The test says so.
+
+**Tuning.** Randomized potential fields need walks long enough to leave
+the basin: with walks of 60 steps one seed in three escaped the test's
+cup within 6,000 steps; with walks of 400, four seeds in five escape
+within 20,000. The
+visibility roadmap's guards are tracked explicitly -- deriving them from
+the components broke when connectors merged two of them -- and in the
+two-room test it keeps just three nodes: a guard each side and the
+connector in the passage.
+
+**Prioritized planning is incomplete, and the test shows it**: a
+corridor with a bay near one end lets the robot nearest the bay step in
+when it is planned second, and finds no plan when the order is swapped.
+
+**Left out:** cylindrical algebraic decomposition and Canny's roadmap
+(6.4); visibility-based pursuit-evasion (12.4); the general
+time-optimal problem under full manipulator dynamics, beyond speed,
+acceleration and curvature bounds.
+
+## One copy of each helper
+
+A pass over the source for duplicated code found the same small helpers
+written privately in many namespaces. Each now has one home, used
+everywhere: the logistic function in `allgo.math`; constant tensors and
+an Adam training loop in `allgo.learning.autodiff` (the five language
+and generative modules had their own); vector arithmetic in
+`allgo.numerics.linear`; the two-dimensional overlap test and adjacency
+in `allgo.spatial.pairs`; perpendicular vectors in
+`allgo.geometry.vec3`; a box's inertia in `allgo.physics.rigid`;
+equinoctial elements in `allgo.astro.kepler`; tagging accuracy in
+`allgo.language.tagging`. Where a module had rewritten an algorithm
+another had -- federated learning's local update, the nearest-neighbor
+imitator, terrain's mixture density -- it now calls the original. The
+Brouwer and general-perturbations propagators keep parallel skeletons on
+purpose: the theories differ.
+
+A second pass found seven private copies of the roulette-wheel draw --
+in Bayes nets, probabilistic programs, the PCFG sampler, the recurrent
+language model, Monte Carlo playouts and reinforcement learning -- now
+`allgo.random/weighted`; the masked language model's training loop,
+now `adam-seq` with a `:prepare` that masks each sentence afresh; the
+linear autoencoder's, now `adam-seq` too; and a second
+`pomdp-value`. The kinodynamic RRT keeps its trees as
+`allgo.robotics.motion`'s do and shares their `nearest-node` and
+`tree-path`.
+
+**Every step function is its own definition.** An algorithm's step is
+a named `defn-`, and its `-seq` is `iterate` (or `reductions`) of it,
+partially applied to whatever is fixed -- never a `fn` written inside
+the `iterate`. Steps that end the run by returning nil go through
+`allgo.search/step-seq`, which replaced fourteen copies of `(take-while
+some? (iterate #(some-> % step) ...))` and the private `run`s in
+`allgo.search` and `allgo.search.local`. What is left inline is
+sequences rather than algorithms: halvings, powers, a ray across the
+wumpus world's grid, a hex ring.
+
+The layout is by subject throughout -- `numerics`, `robotics`,
+`decision` and so on -- with books named in docstrings and here, never
+in a namespace.
 
 ## Computer vision, after Russell & Norvig
 
@@ -1804,8 +1930,7 @@ These are the parts of it that are methods, in a package of their own.
 
 **Left out:** everything the chapter argues rather than computes; the
 de-biasing of data by modeling its sources of bias (Jiang and Nachum,
-2019); assistance games, which the book introduces in chapter 18 and this
-library does not yet have.
+2019); assistance games are in `allgo.decision.assistance`.
 
 ## Natural language, after Russell & Norvig
 

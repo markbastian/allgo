@@ -35,6 +35,11 @@
 
 (def ^:private series (vec (take 300 (iterate #(* 3.9 % (- 1 %)) 0.3))))
 
+(defn- vae-round
+  "A step of the VAE on a minibatch of 32 drawn from `X`, a frame each."
+  [X rng m]
+  (gen/vae-step m (vec (repeatedly 32 (fn [] (random/pick rng X)))) rng 0.005))
+
 (defn- trainer
   "The model's states, a seq, a step each."
   [model X rng]
@@ -42,8 +47,7 @@
     "probabilistic PCA" (gen/ppca-em-seq X 2 rng)
     "linear autoencoder" (gen/linear-autoencoder-seq X 1 rng :lr 0.02)
     "deep autoencoder" (gen/autoencoder-seq (gen/autoencoder 2 24 1 rng) X {:alpha 0.02 :rng rng})
-    "variational autoencoder" (iterate #(gen/vae-step % (vec (repeatedly 32 (fn [] (random/pick rng X)))) rng 0.005)
-                                       (gen/vae 2 32 2 32 0.01 rng))
+    "variational autoencoder" (iterate (partial vae-round X rng) (gen/vae 2 32 2 32 0.01 rng))
     "GAN" (gen/gan-seq (gen/gan 2 2 32 rng) X rng :lr 0.002)
     "autoregressive" (let [[Xs Ys] (gen/windows series 2)]
                        (map (fn [net] {:net net :linear (gen/yule-walker series 2)})

@@ -34,6 +34,7 @@
   to see what each looked at."
   (:require [allgo.language.recurrent :as rec]
             [allgo.language.seq2seq :as s2s]
+            [allgo.language.tagging :as tagging]
             [allgo.learning.autodiff :as ad]
             [clojure.math :as math]))
 
@@ -152,29 +153,12 @@
   (let [[logits] (tag-logits m P (mapv first tagged))]
     (ad/cross-entropy logits (mapv #((:tag-index m) (second %)) tagged))))
 
-(defn- consts [params] (into {} (map (fn [[k v]] [k (ad/const v)]) params)))
-
 (defn tag
   "The tags `m` gives `words`, and its attention: `{:tags :attention}`."
   [m words]
-  (let [[logits att] (tag-logits m (consts (:params m)) words)]
+  (let [[logits att] (tag-logits m (ad/consts (:params m)) words)]
     {:tags (mapv (fn [row] ((:tags m) (apply max-key row (range (count row))))) (ad/value logits))
      :attention att}))
-
-(defn- train
-  "Adam on `loss` over `examples` in turn; only the parameters in
-  `only` (default all) moved -- the rest frozen."
-  [m examples loss lr only]
-  (let [examples (vec examples)]
-    (map first
-         (iterate (fn [[_ m opt k]]
-                    (let [ex (examples (mod k (count examples)))
-                          {:keys [value grads]} (ad/value-and-grad #(loss m % ex) (:params m))
-                          grads (if only (select-keys grads only) grads)
-                          [params opt] (ad/adam-step (:params m) (ad/clip grads 5.0) opt :lr lr)
-                          m (assoc m :params params)]
-                      [{:model m :loss value} m opt (inc k)]))
-                  [{:model m :loss nil} m nil 0]))))
 
 (defn train-tagger-seq
   "The tagger trained on `tagged` sentences, each `[[word tag] ...]`, a
@@ -182,19 +166,13 @@
   of parameter names, the rest stay as they are -- `#{:Wt :bt}` trains
   just the output layer on a pretrained encoder's representations."
   [m tagged & {:keys [lr train-only] :or {lr 0.01}}]
-  (train m tagged tag-loss lr train-only))
+  (ad/adam-seq m tagged tag-loss :lr lr :only train-only))
 
 (defn tag-accuracy
   "The fraction of words `m` tags right, over `tagged` sentences, or over
   just the words `only?` picks out."
-  ([m tagged] (tag-accuracy m tagged (constantly true)))
-  ([m tagged only?]
-   (let [results (for [s tagged
-                       :let [got (:tags (tag m (mapv first s)))]
-                       [[w t] g] (map vector s got)
-                       :when (only? w)]
-                   (= t g))]
-     (/ (double (count (filter true? results))) (max 1 (count results))))))
+  ([m tagged] (tagging/accuracy-of #(:tags (tag m %)) tagged))
+  ([m tagged only?] (tagging/accuracy-of #(:tags (tag m %)) tagged (fn [w _] (only? w)))))
 
 (defn most-frequent-tag
   "The baseline: each word given the tag it most often has in `tagged`,
@@ -235,22 +213,13 @@
   "The masked language model trained on `sentences`, each masked afresh
   at `rate` (default 0.2) every time it comes round: `{:model :loss}`."
   [m sentences rng & {:keys [lr rate] :or {lr 0.01 rate 0.2}}]
-  (let [sentences (vec sentences)]
-    (map first
-         (iterate (fn [[_ m opt k]]
-                    (let [words (sentences (mod k (count sentences)))
-                          [masked positions] (mask-words words rate rng)
-                          {:keys [value grads]} (ad/value-and-grad #(mlm-loss m % [words masked positions]) (:params m))
-                          [params opt] (ad/adam-step (:params m) (ad/clip grads 5.0) opt :lr lr)
-                          m (assoc m :params params)]
-                      [{:model m :loss value} m opt (inc k)]))
-                  [{:model m :loss nil} m nil 0]))))
+  (ad/adam-seq m sentences mlm-loss :lr lr :prepare (fn [words] (into [words] (mask-words words rate rng)))))
 
 (defn fill-in
   "The word `m` puts at each `<mask>` in `masked`."
   [m masked]
   (let [positions (vec (keep-indexed (fn [i w] (when (= w mask-token) i)) masked))
-        P (consts (:params m))
+        P (ad/consts (:params m))
         [X] (encode m P (ids m masked))
         logits (ad/value (ad/add-row (ad/matmul (ad/rows X positions) (:Wm P)) (:bm P)))]
     (mapv (fn [row] ((:words (:vocab m)) (apply max-key row (range (count row))))) logits)))
@@ -316,7 +285,7 @@
   step by Adam: `{:model :loss}`. The rate, by default 0.005, is half
   the taggers': at theirs, reversing strings, it never learned."
   [m pairs & {:keys [lr] :or {lr 0.005}}]
-  (train m pairs translation-loss lr nil))
+  (ad/adam-seq m pairs translation-loss :lr lr))
 
 (defn- next-distribution
   "The distribution over the token after `prefix` (indices, `<s>`
@@ -333,7 +302,7 @@
   `max-len` tokens, by default twice the source's plus 2."
   [{:keys [vocab params] :as m} source & {:keys [beam max-len]}]
   (let [{:keys [index words]} vocab
-        P (consts params)
+        P (ad/consts params)
         [H] (encode m P (mapv index source))
         max-len (or max-len (+ 2 (* 2 (count source))))]
     (if beam

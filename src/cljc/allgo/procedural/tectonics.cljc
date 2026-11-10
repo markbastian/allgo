@@ -52,6 +52,8 @@
   gets the arrangement right -- mountains along margins, trenches beside
   arcs -- and leaves the shapes to the fractal detail laid over it."
   (:require [allgo.geometry.tri-mesh :as tri-mesh]
+            [allgo.geometry.vec3 :as v]
+            [allgo.numerics.linear :as lin]
             [allgo.procedural.fractal :as fractal]
             [allgo.procedural.noise :as noise]
             [allgo.random :as random]
@@ -65,26 +67,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Vectors, as plain triples
-
-(defn- dot ^double [[ax ay az] [bx by bz]]
-  (+ (* (double ax) (double bx)) (* (double ay) (double by)) (* (double az) (double bz))))
-
-(defn- cross [[ax ay az] [bx by bz]]
-  (let [ax (double ax) ay (double ay) az (double az)
-        bx (double bx) by (double by) bz (double bz)]
-    [(- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))]))
-
-(defn- sub [a b] (mapv - a b))
-
-(defn- dot-any
-  "`dot` for vectors of any length: the plates work on a flat map's points
-  as well as the sphere's."
-  ^double [a b]
-  (reduce + (map * a b)))
-
-(defn- unit [v]
-  (let [l (math/sqrt (dot-any v v))]
-    (mapv #(/ (double %) l) v)))
 
 (defn- random-unit [rng]
   (let [z (random/uniform rng -1.0 1.0)
@@ -105,7 +87,7 @@
   (let [{:keys [verts tri-ids]} (tri-mesh/geodesic resolution)
         points (mapv vec (partition 3 verts))
         tris (mapv (fn [[a b c]]
-                     (if (pos? (dot (cross (points a) (points b)) (points c)))
+                     (if (pos? (v/dot (v/cross (points a) (points b)) (points c)))
                        [a b c]
                        [a c b]))
                    (partition 3 tri-ids))
@@ -136,7 +118,7 @@
      :across across
      ;; the angle across one edge, which turns a count of steps into a
      ;; distance on the unit sphere
-     :spacing (math/acos (dot (points 0) (points (first (nth neighbors 0)))))}))
+     :spacing (math/acos (v/dot (points 0) (points (first (nth neighbors 0)))))}))
 
 ;; ---------------------------------------------------------------------------
 ;; The plates
@@ -193,7 +175,7 @@
   plate's pole on the sphere, or carrying it along on a flat map."
   [{:keys [pole spin] :as motion} x]
   (if pole
-    (mapv #(* (double spin) (double %)) (cross pole x))
+    (mapv #(* (double spin) (double %)) (v/cross pole x))
     (:velocity motion)))
 
 (defn- crust
@@ -234,10 +216,10 @@
   nothing. Strength is the closing speed, in the same units as the
   plates' spins."
   [a b va vb]
-  (let [d (unit (sub b a))
-        r (sub va vb)
-        closing (dot-any r d)
-        speed (math/sqrt (dot-any r r))]
+  (let [d (lin/normalize (lin/sub b a))
+        r (lin/sub va vb)
+        closing (lin/dot r d)
+        speed (math/sqrt (lin/dot r r))]
     (cond
       (< speed 1e-12) [:transform 0.0]
       (> closing (* 0.5 speed)) [:converging closing]
@@ -438,9 +420,9 @@
   (loop [t (long t) steps 0]
     (let [[a b c] (nth tris t)
           pa (points a) pb (points b) pc (points c)
-          s0 (dot p (cross pa pb))
-          s1 (dot p (cross pb pc))
-          s2 (dot p (cross pc pa))
+          s0 (v/dot p (v/cross pa pb))
+          s1 (v/dot p (v/cross pb pc))
+          s2 (v/dot p (v/cross pc pa))
           worst (min s0 s1 s2)]
       (if (or (>= worst -1e-12) (> steps 100000))
         t
@@ -459,9 +441,9 @@
       (let [t (walk world p @last-t)
             [a b c :as corners] (nth (:tris world) t)
             {:keys [points]} world
-            wa (dot p (cross (points b) (points c)))
-            wb (dot p (cross (points c) (points a)))
-            wc (dot p (cross (points a) (points b)))
+            wa (v/dot p (v/cross (points b) (points c)))
+            wb (v/dot p (v/cross (points c) (points a)))
+            wc (v/dot p (v/cross (points a) (points b)))
             sum (+ wa wb wc)]
         (vreset! last-t t)
         [corners [(/ wa sum) (/ wb sum) (/ wc sum)]]))))

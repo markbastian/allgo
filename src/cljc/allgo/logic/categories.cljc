@@ -27,7 +27,8 @@
 
   A network is `{:member {object #{categories}} :subset {category
   #{categories}} :links {node {relation value}} :boxed {category
-  {relation value}} :double-boxed {category {relation category}}}`.")
+  {relation value}} :double-boxed {category {relation category}}}`."
+  (:require [allgo.search :as search]))
 
 (defn- up-links [{:keys [member subset]} node]
   (concat (get member node) (get subset node)))
@@ -67,9 +68,8 @@
   nothing below them overrides, by node: one value, or several
   disagreeing ones when the network is ambiguous."
   [net object relation]
-  (let [states (take-while some? (iterate #(some-> % inherit-step)
-                                          (inherit-step {:net net :object object :relation relation
-                                                         :frontier [object] :seen #{object} :found {}})))
+  (let [states (search/step-seq inherit-step (inherit-step {:net net :object object :relation relation
+                                                            :frontier [object] :seen #{object} :found {}}))
         end (last states)]
     (concat (butlast states) [(assoc end :values (decide net (:found end)))])))
 

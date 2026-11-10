@@ -121,6 +121,12 @@
                     (+ (* 168.8034 d) (* 0.736936 d (math/sin N)) (* 0.041 d (math/sin W3)))
                     (+ (* 28.0362 d) (* 0.346898 d (math/cos N)) (* 0.0193 d (math/cos W3))))))
 
+(defn- titan-perihelion
+  "One pass of the coupled longitude of perihelion and g."
+  [W4 d g0 om' psi [_ g]]
+  (let [peri (+ W4 (* 0.37515 d (- (math/sin (* 2 g)) (math/sin (* 2 g0)))))]
+    [peri (- peri om' psi)]))
+
 (defn- titan [{:keys [t4 W3 W4 W5 W6 W7 W8 e1]}]
   (let [L   (+ (* 261.1582 d) (* 22.57697855 d t4) (* 0.074025 d (math/sin W3)))
         i'  (+ (* 27.45141 d) (* 0.295999 d (math/cos W3)))
@@ -132,11 +138,7 @@
         psi (math/atan2 a1 a2)
         s   (math/hypot a1 a2)
         ;; the longitude of perihelion and g are coupled; three passes
-        [peri g] (nth (iterate (fn [[_ g]]
-                                 (let [peri (+ W4 (* 0.37515 d (- (math/sin (* 2 g)) (math/sin (* 2 g0)))))]
-                                   [peri (- peri om' psi)]))
-                               [nil (- W4 om' psi)])
-                      3)
+        [peri g] (nth (iterate (partial titan-perihelion W4 d g0 om' psi) [nil (- W4 om' psi)]) 3)
         e'  (+ 0.029092 (* 0.00019048 (- (math/cos (* 2 g)) (math/cos (* 2 g0)))))
         q   (* 2 (- W5 peri))
         b1  (* si' (math/sin (- om' W8)))

@@ -47,6 +47,7 @@
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.math :as am]
+            [allgo.physics.rigid :as rigid]
             [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
@@ -79,12 +80,12 @@
       (pos? c) q/identity-q
       :else (q/from-axis-angle [1.0 0.0 0.0] math/PI))))
 
-(defn- box-inertia [[sx sy sz] m]
-  (let [f (/ (double m) 12.0)
-        sx (double sx) sy (double sy) sz (double sz)]
-    [[(* f (+ (* sy sy) (* sz sz))) 0.0 0.0]
-     [0.0 (* f (+ (* sx sx) (* sz sz))) 0.0]
-     [0.0 0.0 (* f (+ (* sx sx) (* sy sy)))]]))
+(defn box-inertia
+  "A solid box's inertia tensor about its center, as a 3 x 3 matrix:
+  `allgo.physics.rigid`'s principal moments on the diagonal."
+  [size m]
+  (let [[a b c] (rigid/box-inertia size m)]
+    [[a 0.0 0.0] [0.0 b 0.0] [0.0 0.0 c]]))
 
 (defn- rotate-inertia
   "`R I R^T`: an inertia given about a shape's own axes, turned into the

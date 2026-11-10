@@ -259,6 +259,18 @@
    {:kb physics :t 0 :pos [1 1] :dir :east :arrow? true :plan []
     :safe #{[1 1]} :pits #{} :no-wumpus #{[1 1]} :visited #{} :queries 0}])
 
+(defn- run-step
+  "The agent's action carried out and the next chosen; nil once the game
+  is over or after `limit` actions."
+  [agent limit {:keys [state action memory steps] :as st}]
+  (when (and (not (over? state)) (< (long steps) (long limit)))
+    (let [s (execute state action)
+          p (percept s)]
+      (if (over? s)
+        (assoc st :state s :action nil :percept p :steps (inc (long steps)))
+        (let [[a m] (agent memory p)]
+          {:state s :memory m :action a :percept p :steps (inc (long steps))})))))
+
 (defn run-seq
   "The hybrid agent playing `world`, a step at a time: each state
   `{:state :memory :action :percept}` is the world after the action, what
@@ -270,13 +282,4 @@
          s0 (start w opts)
          p0 (percept s0)
          [a m] (agent memory p0)]
-     (take-while some?
-                 (iterate (fn [{:keys [state action memory steps] :as st}]
-                            (when (and st (not (over? state)) (< (long steps) (long limit)))
-                              (let [s (execute state action)
-                                    p (percept s)]
-                                (if (over? s)
-                                  (assoc st :state s :action nil :percept p :steps (inc (long steps)))
-                                  (let [[a m] (agent memory p)]
-                                    {:state s :memory m :action a :percept p :steps (inc (long steps))})))))
-                          {:state s0 :memory m :action a :percept p0 :steps 0})))))
+     (search/step-seq (partial run-step agent limit) {:state s0 :memory m :action a :percept p0 :steps 0}))))

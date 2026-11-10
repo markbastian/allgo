@@ -114,6 +114,15 @@
   [rng coll]
   (nth coll (below rng (count coll))))
 
+(defn weighted
+  "A value of `choices`, `[value weight]` pairs or a map, drawn with
+  probability its weight's share of the total: a roulette wheel."
+  [rng choices]
+  (let [total (reduce + (map second choices))
+        r (* (double total) (double (rng)))]
+    (loop [[[x w] & more] (seq choices) acc 0.0]
+      (if (or (empty? more) (< r (+ acc w))) x (recur more (+ acc w))))))
+
 (defn shuffle
   "The elements of `coll` in a uniformly random order, as a vector.
   Fisher-Yates, which draws each position's element from those not yet

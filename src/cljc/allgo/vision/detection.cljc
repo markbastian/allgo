@@ -30,6 +30,7 @@
 
   A box is `[x0 y0 x1 y1]`, the corners exclusive at the far side."
   (:require [allgo.learning.neural :as neural]
+            [allgo.search :as search]
             [allgo.vision.image :as img]))
 
 (defn area [[x0 y0 x1 y1]] (* (max 0 (- x1 x0)) (max 0 (- y1 y0))))
@@ -42,17 +43,20 @@
         union (- (+ (area a) (area b)) inter)]
     (if (pos? union) (/ (double inter) union) 0.0)))
 
+(defn- nms-step
+  "The best remaining detection kept, and those overlapping it dropped;
+  nil when none remains."
+  [threshold {:keys [kept remaining]}]
+  (when-let [best (first remaining)]
+    {:kept (conj kept best)
+     :remaining (remove #(> (iou (:box best) (:box %)) threshold) (rest remaining))}))
+
 (defn nms-seq
   "Non-maximum suppression of `detections`, each `{:box :score}`, a window
   a step: each state `{:kept :remaining}`, the best remaining kept and
   those overlapping it by more than `threshold` dropped."
   [detections threshold]
-  (take-while some?
-              (iterate (fn [{:keys [kept remaining]}]
-                         (when-let [best (first remaining)]
-                           {:kept (conj kept best)
-                            :remaining (remove #(> (iou (:box best) (:box %)) threshold) (rest remaining))}))
-                       {:kept [] :remaining (sort-by (comp - :score) detections)})))
+  (search/step-seq (partial nms-step threshold) {:kept [] :remaining (sort-by (comp - :score) detections)}))
 
 (defn non-maximum-suppression [detections threshold]
   (:kept (last (nms-seq detections threshold))))

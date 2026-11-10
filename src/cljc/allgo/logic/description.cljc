@@ -27,7 +27,8 @@
 
   The chapter notes that CLASSIC states no subset links: one category
   falls under another only because their descriptions say so."
-  (:require [clojure.set :as set]))
+  (:require [allgo.search :as search]
+            [clojure.set :as set]))
 
 (def ^:private top {:prims #{} :roles {} :one-of nil})
 
@@ -141,8 +142,7 @@
   so far to the most specific names placed above it, `:name` the one just
   placed and `:equivalent` the names it turned out to mean the same as."
   [tbox & extra]
-  (take-while some? (iterate #(some-> % classify-step)
-                             (classify-step {:tbox tbox :todo (distinct (concat extra (keys tbox))) :parents {}}))))
+  (search/step-seq classify-step (classify-step {:tbox tbox :todo (distinct (concat extra (keys tbox))) :parents {}})))
 
 (defn taxonomy
   "Each name of `tbox` and `extra` with its most specific subsumers."

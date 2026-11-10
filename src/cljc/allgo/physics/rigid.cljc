@@ -76,6 +76,13 @@
          :angular-damping (double angular-damping)}
         (with-rotation rot))))
 
+(defn box-inertia
+  "The principal moments of inertia of a solid box of `size` `[x y z]` and
+  `mass`, about its center: m (y^2 + z^2) / 12 and so on."
+  [[sx sy sz] mass]
+  (let [sx (double sx) sy (double sy) sz (double sz) f (/ (double mass) 12.0)]
+    [(* f (+ (* sy sy) (* sz sz))) (* f (+ (* sx sx) (* sz sz))) (* f (+ (* sx sx) (* sy sy)))]))
+
 (defn box
   "A solid box of `size` `[x y z]`.
 
@@ -87,10 +94,7 @@
         mass (* d sx sy sz)]
     (assoc (body (assoc opts
                         :mass mass
-                        :inertia (when (pos? mass)
-                                   [(* (/ 1.0 12.0) mass (+ (* sy sy) (* sz sz)))
-                                    (* (/ 1.0 12.0) mass (+ (* sx sx) (* sz sz)))
-                                    (* (/ 1.0 12.0) mass (+ (* sx sx) (* sy sy)))])))
+                        :inertia (when (pos? mass) (box-inertia [sx sy sz] mass))))
            :shape :box :size [sx sy sz])))
 
 (defn ball

@@ -1,5 +1,6 @@
 (ns allgo.robotics.control-test
-  (:require [allgo.robotics.control :as control]
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.robotics.control :as control]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -67,3 +68,15 @@
     (testing "model predictive control with the same wrong model, replanning every step, gets it up and holds it there"
       (let [states (vec (take 101 (control/mpc-seq (pendulum 1.3) swing 40 3)))]
         (is (every? #(< (abs (- (first (:x %)) math/PI)) 1e-3) (take-last 20 states)))))))
+
+(deftest system-properties-test
+  (testing "a double integrator pushed by its acceleration is controllable; pushing a decoupled second integrator it is not"
+    (is (control/controllable? [[1.0 0.1] [0.0 1.0]] [[0.0] [0.1]]))
+    (is (not (control/controllable? [[1.0 0.0] [0.0 1.0]] [[1.0] [0.0]]))))
+  (testing "a stable system has a Lyapunov matrix: A^T P A - P = -Q"
+    (let [A [[0.9 0.2] [-0.1 0.8]] Q [[1.0 0.0] [0.0 1.0]]
+          P (control/lyapunov A Q)
+          r (mapv #(mapv - %1 %2) (lin/mat-mul (lin/mat-mul (lin/transpose A) P) A) P)]
+      (is (every? #(< (abs %) 1e-9) (map + (flatten r) (flatten Q))))))
+  (testing "an unstable one has none"
+    (is (nil? (control/lyapunov [[1.1 0.0] [0.0 0.5]] [[1.0 0.0] [0.0 1.0]])))))

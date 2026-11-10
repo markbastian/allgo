@@ -35,23 +35,14 @@
   "[n af ag chi psi L] of SGP4's `:no-kozai :ecco :inclo :nodeo :argpo
   :mo`."
   [{:keys [no-kozai ecco inclo nodeo argpo mo]}]
-  (let [lp (+ nodeo argpo)
-        t (math/tan (* 0.5 inclo))]
-    [no-kozai (* ecco (math/cos lp)) (* ecco (math/sin lp))
-     (* t (math/sin nodeo)) (* t (math/cos nodeo)) (+ lp mo)]))
+  (kepler/->equinoctial {:a no-kozai :e ecco :i inclo :raan nodeo :argp argpo :M mo}))
 
 (defn equinoctial->elements
   "SGP4's `:no-kozai :ecco :inclo :nodeo :argpo :mo` of [n af ag chi psi
   L]."
-  [[n af ag chi psi L]]
-  (let [lp (math/atan2 ag af)
-        node (math/atan2 chi psi)]
-    {:no-kozai n
-     :ecco (math/hypot af ag)
-     :inclo (* 2.0 (math/atan (math/hypot chi psi)))
-     :nodeo (am/wrap-2pi node)
-     :argpo (am/wrap-2pi (- lp node))
-     :mo (am/wrap-2pi (- L lp))}))
+  [x]
+  (let [{:keys [a e i raan argp M]} (kepler/equinoctial-> x)]
+    {:no-kozai a :ecco e :inclo i :nodeo raan :argpo argp :mo M}))
 
 (defn- velocity-of
   "The velocity of observation `o`: its own, or, for positions alone, by

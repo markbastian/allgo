@@ -58,6 +58,14 @@
 
 (defn lerp [a b t] (add-scaled a (sub b a) t))
 
+(defn perpendiculars
+  "Two unit vectors square to the unit `n` and to each other, `[t1 t2]`:
+  any two, the axes a contact's friction acts along."
+  [n]
+  (let [a (if (< (abs (double (nth n 0))) 0.9) [1.0 0.0 0.0] [0.0 1.0 0.0])
+        t1 (normalize (cross n a))]
+    [t1 (cross n t1)]))
+
 (defn zero-vector? [v] (zero? (length-squared v)))
 
 (defn finite?

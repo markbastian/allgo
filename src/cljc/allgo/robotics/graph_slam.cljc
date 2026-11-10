@@ -22,6 +22,7 @@
   the start of the run as well."
   (:require [allgo.numerics.linear :as lin]
             [allgo.robotics.localization :as loc]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 (defn- relative
@@ -168,9 +169,8 @@
         estimate (initial-guess world graph start controls)
         first-state {:graph graph :estimate estimate :error (error graph estimate) :iteration 0 :change ##Inf}]
     (concat [first-state]
-            (->> (iterate #(some-> % gauss-newton-step) first-state)
+            (->> (search/step-seq gauss-newton-step first-state)
                  rest
-                 (take-while some?)
                  (reduce (fn [acc st] (if (< (double (:change st)) tolerance) (reduced (conj acc st)) (conj acc st))) [])))))
 
 (defn graph-slam

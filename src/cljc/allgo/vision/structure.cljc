@@ -36,6 +36,7 @@
   (:require [allgo.geometry.vec3 :as v]
             [allgo.numerics.eigen :as eigen]
             [allgo.numerics.linear :as lin]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 (defn- columns-times
@@ -94,6 +95,15 @@
         R [i1 j1 (v/cross i1 j1)]]
     [(lin/mat-mul M' (lin/transpose R)) (lin/mat-mul R S')]))
 
+(defn- factorization-step
+  "The next stage: centered, factored, made metric; nil after."
+  [{:keys [stage W M S] :as st}]
+  (case stage
+    :measured (assoc st :stage :centered :W (center W) :translation (mapv #(/ (reduce + %) (count %)) W))
+    :centered (let [[M S r] (factor W)] (assoc st :stage :factored :M M :S S :residual r))
+    :factored (let [[M S] (metric M S)] (assoc st :stage :metric :M M :S S))
+    :metric nil))
+
 (defn factorization-seq
   "Tomasi and Kanade's factorization of `frames`, a stage a step: states
   `{:stage :W}`, then with `:M` (2F x 3, frame f's camera axes rows f and
@@ -102,14 +112,7 @@
   [frames]
   (let [F (count frames)
         W (into (mapv (fn [fr] (mapv first fr)) frames) (mapv (fn [fr] (mapv second fr)) frames))]
-    (take-while some?
-                (iterate (fn [{:keys [stage W M S] :as st}]
-                           (case stage
-                             :measured (assoc st :stage :centered :W (center W) :translation (mapv #(/ (reduce + %) (count %)) W))
-                             :centered (let [[M S r] (factor W)] (assoc st :stage :factored :M M :S S :residual r))
-                             :factored (let [[M S] (metric M S)] (assoc st :stage :metric :M M :S S))
-                             :metric nil))
-                         {:stage :measured :W W :frames F}))))
+    (search/step-seq factorization-step {:stage :measured :W W :frames F})))
 
 (defn factorize
   "The shape and motion `frames` show: `{:points [[x y z] ...] :axes [[i

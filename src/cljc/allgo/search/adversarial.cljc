@@ -215,11 +215,7 @@
   (loop [s state]
     (cond
       (terminal? s) s
-      (= :chance (to-move s)) (let [r (double (rng))
-                                    outs (chances s)
-                                    o (loop [[[o p] & more] outs acc 0.0]
-                                        (if (or (empty? more) (< r (+ acc p))) o (recur more (+ acc p))))]
-                                (recur (result s o)))
+      (= :chance (to-move s)) (recur (result s (random/weighted rng (chances s))))
       :else (recur (result s (random/pick rng (vec (actions s))))))))
 
 (defn- ucb
@@ -242,10 +238,7 @@
             (terminal? s) [path s]
             (= :chance (to-move s))
             ;; Chance nodes are passed through by sampling, not choosing.
-            (let [r (double (rng))
-                  o (loop [[[o p] & more] (chances s) acc 0.0]
-                      (if (or (empty? more) (< r (+ acc p))) o (recur more (+ acc p))))
-                  nxt (result s o)]
+            (let [nxt (result s (random/weighted rng (chances s)))]
               (if (contains? tree nxt) (recur nxt (conj path nxt)) [(conj path nxt) nxt]))
             :else
             (let [kids (map #(result s %) (actions s))

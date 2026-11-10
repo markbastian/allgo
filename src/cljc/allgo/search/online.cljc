@@ -26,7 +26,8 @@
     :cost       (fn [state action state']) -> the cost of a move
                 (default 1), for LRTA*
     :h          (fn [state]) -> an estimate of the cost to a goal
-                (default 0), for LRTA*")
+                (default 0), for LRTA*"
+  (:require [allgo.search :as search]))
 
 ;; ---------------------------------------------------------------------------
 ;; Online depth-first search
@@ -92,6 +93,16 @@
 ;; ---------------------------------------------------------------------------
 ;; Running an agent
 
+(defn- run-step
+  "A move and the agent's next choice; nil once it stops or after
+  `limit` steps."
+  [agent result cost limit {:keys [state action memory steps] :as st}]
+  (when (and (not= :stop action) (< (long steps) (long limit)))
+    (let [s' (result state action)
+          [a m] (agent memory s')]
+      {:state s' :action a :memory m :steps (inc (long steps))
+       :cost (+ (:cost st) (cost state action s'))})))
+
 (defn run-seq
   "The agent made by `make-agent` (`online-dfs-agent` or `lrta-star-agent`)
   acting in `problem`, a step at a time: each state `{:state :action
@@ -103,11 +114,4 @@
   (let [[agent memory] (make-agent problem)
         cost (or cost (constantly 1))
         [a m] (agent memory start)]
-    (take-while some?
-                (iterate (fn [{:keys [state action memory steps] :as st}]
-                           (when (and st (not= :stop action) (< (long steps) (long limit)))
-                             (let [s' (result state action)
-                                   [a m] (agent memory s')]
-                               {:state s' :action a :memory m :steps (inc (long steps))
-                                :cost (+ (:cost st) (cost state action s'))})))
-                         {:state start :action a :memory m :steps 0 :cost 0}))))
+    (search/step-seq (partial run-step agent result cost limit) {:state start :action a :memory m :steps 0 :cost 0})))

@@ -23,6 +23,7 @@
   start is a state of its own, as the n-gram models' start marker is: all
   of the prior, never a word's, and its transitions are P(first tag)."
   (:require [allgo.language.ngrams :as ngrams]
+            [allgo.math :as am]
             [allgo.probability.temporal :as temporal]
             [clojure.math :as math]
             [clojure.string :as str]))
@@ -57,16 +58,23 @@
   [{:keys [states words hmm]} sentence]
   (mapv states (:path (temporal/viterbi hmm (mapv #(if (words %) % ngrams/unknown) sentence)))))
 
-(defn accuracy
-  "The fraction of the words of `tagged` sentences tagged right, or of just
-  those `(only? word position)` picks out."
-  ([m tagged] (accuracy m tagged (constantly true)))
-  ([m tagged only?]
+(defn accuracy-of
+  "The fraction of the words of `tagged` sentences, each `[[word tag]
+  ...]`, that `tag-fn` (fn [words]) -> tags gets right, or of just those
+  `(only? word position)` picks out: every tagger's accuracy."
+  ([tag-fn tagged] (accuracy-of tag-fn tagged (constantly true)))
+  ([tag-fn tagged only?]
    (let [rs (for [s tagged
-                  [i [w t] g] (map vector (range) s (tag m (mapv first s)))
+                  [i [w t] g] (map vector (range) s (tag-fn (mapv first s)))
                   :when (only? w i)]
               (= t g))]
      (/ (double (count (filter true? rs))) (max 1 (count rs))))))
+
+(defn accuracy
+  "The fraction of the words of `tagged` sentences the HMM tags right, or
+  of just those `(only? word position)` picks out."
+  ([m tagged] (accuracy-of #(tag m %) tagged))
+  ([m tagged only?] (accuracy-of #(tag m %) tagged only?)))
 
 ;; ---------------------------------------------------------------------------
 ;; Logistic regression
@@ -99,8 +107,6 @@
       (re-find #"[0-9]" w) (conj [:digit])
       (and (re-matches #"[A-Z]+" w) (> n 1)) (conj [:upper]))))
 
-(defn- sigmoid [z] (/ 1.0 (+ 1.0 (math/exp (- z)))))
-
 (defn- score [weights features] (reduce + (map #(get weights % 0.0) features)))
 
 (defn tag-distribution
@@ -109,7 +115,7 @@
   tags."
   [{:keys [tags weights features]} words prior-tags i]
   (let [fs (features words prior-tags i)
-        ps (map #(sigmoid (score (weights %) fs)) tags)
+        ps (map #(am/sigmoid (score (weights %) fs)) tags)
         z (reduce + ps)]
     (zipmap tags (map #(/ % z) ps))))
 
@@ -119,14 +125,14 @@
   before it the true ones -- and for each tag, its weights moved by
   `alpha` up the gradient of the log likelihood, (y - P) times each
   feature, y 1 for the word's tag and 0 for every other."
-  [{:keys [tags features] :as model} tagged alpha]
+  [tagged alpha {:keys [tags features] :as model}]
   (reduce (fn [model sentence]
             (let [words (mapv first sentence) gold (mapv second sentence)]
               (reduce (fn [model i]
                         (let [fs (features words gold i)]
                           (reduce (fn [model t]
                                     (let [w (get-in model [:weights t])
-                                          err (- (if (= t (gold i)) 1.0 0.0) (sigmoid (score w fs)))]
+                                          err (- (if (= t (gold i)) 1.0 0.0) (am/sigmoid (score w fs)))]
                                       (assoc-in model [:weights t] (reduce #(update %1 %2 (fnil + 0.0) (* alpha err)) w fs))))
                                   model tags)))
                       model (range (count words)))))
@@ -141,7 +147,7 @@
   ([tagged] (logistic-tagger-seq tagged book-features 0.1))
   ([tagged features alpha]
    (let [tags (vec (sort (distinct (map second (apply concat tagged)))))]
-     (iterate #(logistic-step % tagged alpha) {:tags tags :features features :weights (zipmap tags (repeat {}))}))))
+     (iterate (partial logistic-step tagged alpha) {:tags tags :features features :weights (zipmap tags (repeat {}))}))))
 
 (defn beam-tag-seq
   "Tagging `words` by beam search, a word a step: each state the `b`

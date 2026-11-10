@@ -317,7 +317,7 @@
 
 (defn- wander
   "A step to a random neighbor that `ok?` allows, or stay put."
-  [rng [i j] ok?]
+  [rng ok? [i j]]
   (let [cands (filter (fn [[a b]] (ok? a b)) (map (fn [[di dj]] [(+ (long i) di) (+ (long j) dj)]) neighbors8))]
     (if (seq cands) (random/pick rng (vec cands)) [i j])))
 
@@ -353,7 +353,7 @@
   (let [{:keys [service reach]} opts
         ok? (fn [a b] (and (inside? w a b) (zero? (aget ^ints water (idx w a b)))
                            (< (aget ^doubles dist (idx w a b)) (double reach))))
-        [i j] (wander rng at ok?)
+        [i j] (wander rng ok? at)
         d (aget ^doubles dist (idx w i j))]
     ;; An unserved patch, near enough to the town to be worth serving.
     (when (and (> d (double service)) (developed-near? world i j 5))
@@ -397,7 +397,7 @@
             (recur i (+ j sj) (+ err di) (conj out [i (+ j sj)]))))))))
 
 (defn- connector [{:keys [w opts rng] :as world} {:keys [at] :as agent}]
-  (let [[i j] (wander rng at (fn [a b] (road? world a b)))]
+  (let [[i j] (wander rng (fn [a b] (road? world a b)) at)]
     (when (< (double (rng)) 0.3)
       (let [r 8
             ti (+ i (- (random/below rng (inc (* 2 r))) r))
@@ -417,7 +417,7 @@
         ok? (fn [a b] (and (inside? w a b) (zero? (aget ^ints water (idx w a b)))
                            (<= (aget ^doubles dist (idx w a b)) (+ 2.0 service))))
         ;; A few steps at a time: developers cover ground.
-        [i j] (nth (iterate #(wander rng % ok?) at) 3)
+        [i j] (nth (iterate (partial wander rng ok?) at) 3)
         k (idx w i j)
         own (if (= kind :residential) residential commercial)
         u (aget ^ints use k)
@@ -495,7 +495,7 @@
     ;; Roaming the edge of town, for land the roads do not serve yet.
     (let [ok? (fn [a b] (and (inside? w a b) (zero? (aget ^ints water (idx w a b)))
                              (< (aget ^doubles dist (idx w a b)) (double (:reach opts)))))
-          [i j] (nth (iterate #(wander rng % ok?) at) 2)
+          [i j] (nth (iterate (partial wander rng ok?) at) 2)
           patches (when (and (> (aget ^doubles dist (idx w i j)) (double (:service opts)))
                              (< (double (rng)) 0.15))
                     (survey world i j))]

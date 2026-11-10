@@ -54,6 +54,20 @@
   [h0]
   {:legs (zipmap legs (repeat {:state :stance :h h0 :retries 0})) :group 0 :done #{} :strides 0 :ticks 0})
 
+(defn- walk-step
+  "A tick of the tripod gait."
+  [terrain h0 dh {:keys [legs group done strides ticks] :as w}]
+  (let [moving (tripods group)
+        stepped (into {} (map (fn [[k leg]]
+                                [k (if (and (moving k) (not (done k)))
+                                     (leg-step leg (terrain k strides) true h0 dh)
+                                     leg)])
+                              legs))
+        done (into done (filter #(= :down (:state (legs %))) moving))]
+    (if (= done moving)
+      {:legs stepped :group (- 1 group) :done #{} :strides (inc strides) :ticks (inc ticks)}
+      (assoc w :legs stepped :done done :ticks (inc ticks)))))
+
 (defn walk-seq
   "The walker under the tripod gait, a tick a step: the current tripod's
   legs run their machines -- each meeting the obstacle `(terrain leg
@@ -63,18 +77,7 @@
   and the other tripod goes. Each state `{:legs :group :done :strides
   :ticks}`."
   [w terrain h0 dh]
-  (iterate (fn [{:keys [legs group done strides ticks] :as w}]
-             (let [moving (tripods group)
-                   stepped (into {} (map (fn [[k leg]]
-                                           [k (if (and (moving k) (not (done k)))
-                                                (leg-step leg (terrain k strides) true h0 dh)
-                                                leg)])
-                                         legs))
-                   done (into done (filter #(= :down (:state (legs %))) moving))]
-               (if (= done moving)
-                 {:legs stepped :group (- 1 group) :done #{} :strides (inc strides) :ticks (inc ticks)}
-                 (assoc w :legs stepped :done done :ticks (inc ticks)))))
-           w))
+  (iterate (partial walk-step terrain h0 dh) w))
 
 (defn subsumption
   "The command of the highest of `layers` -- each (fn [sensors]) ->

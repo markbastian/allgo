@@ -35,7 +35,9 @@
   pair has been tried Ne times."
   (:require [allgo.decision.mdp :as mdp]
             [allgo.learning.neural :as nn]
+            [allgo.numerics.linear :as lin]
             [allgo.random :as random]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 (defn alpha [n] (/ 60.0 (+ 59.0 n)))
@@ -43,10 +45,19 @@
 ;; ---------------------------------------------------------------------------
 ;; Running trials
 
-(defn- sample [rng outcomes]
-  (let [r (double (rng))]
-    (loop [[[p s] & more] outcomes acc 0.0]
-      (if (or (empty? more) (< r (+ acc p))) s (recur more (+ acc p))))))
+(defn- sample
+  "An outcome of `outcomes`, `[p s]` pairs as an MDP's transitions are."
+  [rng outcomes]
+  (random/weighted rng (map (fn [[p s]] [s p]) outcomes)))
+
+(defn- trial-step
+  "A move: the action's outcome sampled and perceived; nil at a
+  terminal state or after `max-moves`."
+  [{:keys [actions transitions reward]} program rng max-moves {:keys [state action] :as st}]
+  (when (and (seq (actions state)) action (< (long (:moves st)) (long max-moves)))
+    (let [s' (sample rng (transitions state action))
+          [a m] (program (:memory st) [s' (reward s')])]
+      {:state s' :reward (reward s') :action a :memory m :moves (inc (long (:moves st)))})))
 
 (defn trial-seq
   "One trial of `agent`, a `[program memory]` pair, in `mdp` from `start`:
@@ -54,23 +65,22 @@
   perceives a terminal state, or after `max-moves` (default 10000) -- an
   agent can learn to like a wall."
   ([mdp agent start rng] (trial-seq mdp agent start rng 10000))
-  ([{:keys [actions transitions reward]} [program memory] start rng max-moves]
+  ([{:keys [reward] :as mdp} [program memory] start rng max-moves]
    (let [[a m] (program memory [start (reward start)])]
-     (take-while some?
-                 (iterate (fn [{:keys [state action] :as st}]
-                            (when (and st (seq (actions state)) action (< (long (:moves st)) (long max-moves)))
-                              (let [s' (sample rng (transitions state action))
-                                    [a m] (program (:memory st) [s' (reward s')])]
-                                {:state s' :reward (reward s') :action a :memory m :moves (inc (long (:moves st)))})))
-                          {:state start :reward (reward start) :action a :memory m :moves 0})))))
+     (search/step-seq (partial trial-step mdp program rng max-moves)
+                      {:state start :reward (reward start) :action a :memory m :moves 0}))))
+
+(defn- trial-memory
+  "The agent's memory after a trial that starts with memory `m`."
+  [mdp program start rng m]
+  (:memory (last (trial-seq mdp [program m] start rng))))
 
 (defn trials
   "The agent's memory after each of `n` trials from `start`, memory carried
   from one to the next."
   [mdp [program memory] start n rng]
   (take (inc n)
-        (iterate (fn [m] (:memory (last (trial-seq mdp [program m] start rng))))
-                 memory)))
+        (iterate (partial trial-memory mdp program start rng) memory)))
 
 ;; ---------------------------------------------------------------------------
 ;; Passive learners
@@ -236,13 +246,11 @@
 ;; ---------------------------------------------------------------------------
 ;; Function approximation
 
-(defn- dot [u v] (reduce + (map * u v)))
-
 (defn linear-utility
   "U^theta(s) = theta . f(s), equation 22.9's form, `features` giving the
   vector f(s)."
   [theta features s]
-  (dot theta (features s)))
+  (lin/dot theta (features s)))
 
 (defn widrow-hoff
   "The Widrow-Hoff rule -- the delta rule, for online least squares --
@@ -250,7 +258,7 @@
   (u - U^theta) f_i, `f` the features of the state and `u` the value
   observed for it."
   [theta f u alpha]
-  (let [err (- u (dot theta f))]
+  (let [err (- u (lin/dot theta f))]
     (mapv (fn [t fi] (+ t (* alpha err fi))) theta f)))
 
 (defn approximate-direct-utility-agent
@@ -279,7 +287,7 @@
   [{:keys [actions gamma]} pi features theta alpha]
   [(fn [{:keys [theta s r]} [s' r']]
      (let [terminal? (empty? (actions s'))
-           u' (if terminal? r' (dot theta (features s')))
+           u' (if terminal? r' (lin/dot theta (features s')))
            theta (if s (widrow-hoff theta (features s) (+ r (* gamma u')) alpha) theta)
            theta (if terminal? (widrow-hoff theta (features s') r' alpha) theta)]
        [(when-not terminal? (pi s'))
@@ -291,7 +299,7 @@
   `approximate-q-agent`: `{:q :learn}`, `learn` the Widrow-Hoff rule
   toward a target."
   [features]
-  {:q (fn [theta s a] (dot theta (features s a)))
+  {:q (fn [theta s a] (lin/dot theta (features s a)))
    :learn (fn [theta s a target alpha] (widrow-hoff theta (features s a) target alpha))})
 
 (defn network-q
@@ -365,6 +373,26 @@
         z (reduce + ws)]
     (into {} (map (fn [a w] [a (/ w z)]) as ws))))
 
+(defn- reinforce-step
+  "One trial under the softmax policy of `theta`, and each preference
+  moved along the return times the log probability's gradient."
+  [{:keys [actions transitions reward gamma] :as mdp} start alpha rng theta]
+  (let [episode (loop [s start out [] k 0]
+                  (if (or (empty? (actions s)) (> k 200))
+                    (conj out [s nil (reward s)])
+                    (let [a (random/weighted rng (softmax-policy mdp theta s))
+                          s' (sample rng (transitions s a))]
+                      (recur s' (conj out [s a (reward s)]) (inc k)))))
+        returns (reverse (reductions (fn [g [_ _ r]] (+ r (* gamma g))) 0.0 (reverse episode)))]
+    (reduce (fn [theta [[s a] g]]
+              (if (nil? a)
+                theta
+                (let [pi (softmax-policy mdp theta s)]
+                  (reduce (fn [theta b]
+                            (update theta [s b] (fnil + 0.0) (* alpha g (- (if (= a b) 1.0 0.0) (pi b)))))
+                          theta (actions s)))))
+            theta (map vector episode returns))))
+
 (defn reinforce-seq
   "Policy search by REINFORCE, which the chapter describes without a
   figure: each step one trial under the softmax policy, then each
@@ -372,24 +400,5 @@
   times the gradient of the log probability of the choice --
   d log pi(a | s) / d theta(s, b) = [a = b] - pi(b | s). Each state is the
   preferences `theta`."
-  [{:keys [actions transitions reward gamma] :as mdp} start alpha rng]
-  (let [choose (fn [dist] (let [r (double (rng))]
-                            (loop [[[a p] & more] (seq dist) acc 0.0]
-                              (if (or (empty? more) (< r (+ acc p))) a (recur more (+ acc p))))))]
-    (iterate (fn [theta]
-               (let [episode (loop [s start out [] k 0]
-                               (if (or (empty? (actions s)) (> k 200))
-                                 (conj out [s nil (reward s)])
-                                 (let [a (choose (softmax-policy mdp theta s))
-                                       s' (sample rng (transitions s a))]
-                                   (recur s' (conj out [s a (reward s)]) (inc k)))))
-                     returns (reverse (reductions (fn [g [_ _ r]] (+ r (* gamma g))) 0.0 (reverse episode)))]
-                 (reduce (fn [theta [[s a] g]]
-                           (if (nil? a)
-                             theta
-                             (let [pi (softmax-policy mdp theta s)]
-                               (reduce (fn [theta b]
-                                         (update theta [s b] (fnil + 0.0) (* alpha g (- (if (= a b) 1.0 0.0) (pi b)))))
-                                       theta (actions s)))))
-                         theta (map vector episode returns))))
-             {})))
+  [mdp start alpha rng]
+  (iterate (partial reinforce-step mdp start alpha rng) {}))

@@ -87,7 +87,7 @@
   "One iteration of Ikeuchi and Horn's: every inner pixel's (f, g) the mean
   of its four neighbors', moved along the gradient of the reflectance by
   `lambda` times the brightness error there."
-  [{:keys [f g] :as st} {:keys [w px]} inner albedo light lambda]
+  [{:keys [w px]} inner albedo light lambda {:keys [f g] :as st}]
   (let [w (long w) lambda (double lambda)
         mean (fn [v ^long i] (* 0.25 (+ (double (v (inc i))) (double (v (dec i))) (double (v (+ i w))) (double (v (- i w))))))
         [f' g'] (reduce (fn [[f' g'] i]
@@ -113,7 +113,7 @@
         start {:f (reduce (fn [v [i [f _]]] (assoc v i f)) (vec (repeat n 0.0)) boundary)
                :g (reduce (fn [v [i [_ g]]] (assoc v i g)) (vec (repeat n 0.0)) boundary)
                :iteration 0}]
-    (iterate #(relax % image inner albedo light lambda) start)))
+    (iterate (partial relax image inner albedo light lambda) start)))
 
 (defn normals
   "The normals of a shading state, an image of `[nx ny nz]` inside `mask`

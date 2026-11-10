@@ -167,6 +167,18 @@
         err (fn [tree] (reduce + (map (fn [e w] (if (= (target e) (classify tree e)) 0.0 w)) examples weights)))]
     (apply min-key err (map stump (reverse attributes)))))
 
+(defn- adaboost-step
+  "A round: a hypothesis from the weighted learner, its weight, and the
+  examples it got right made lighter."
+  [examples target learner {:keys [w hypotheses z]}]
+  (let [h (learner examples w)
+        error (min (- 1.0 1e-10) (max 1e-10 (reduce + (map (fn [e wj] (if (= (target e) (classify h e)) 0.0 wj)) examples w))))
+        w (mapv (fn [e wj] (if (= (target e) (classify h e)) (* wj (/ error (- 1.0 error))) wj)) examples w)
+        total (reduce + w)]
+    {:w (mapv #(/ % total) w)
+     :hypotheses (conj hypotheses h)
+     :z (conj z (math/log (/ (- 1.0 error) error)))}))
+
 (defn adaboost-seq
   "ADABOOST, a round a step: each round a hypothesis from the weighted
   learner (default a decision stump), its weight log((1 - error) /
@@ -176,14 +188,7 @@
   ([examples attributes target values {:keys [learner]}]
    (let [n (count examples)
          learner (or learner #(weighted-stump %1 %2 attributes target values))]
-     (iterate (fn [{:keys [w hypotheses z]}]
-                (let [h (learner examples w)
-                      error (min (- 1.0 1e-10) (max 1e-10 (reduce + (map (fn [e wj] (if (= (target e) (classify h e)) 0.0 wj)) examples w))))
-                      w (mapv (fn [e wj] (if (= (target e) (classify h e)) (* wj (/ error (- 1.0 error))) wj)) examples w)
-                      total (reduce + w)]
-                  {:w (mapv #(/ % total) w)
-                   :hypotheses (conj hypotheses h)
-                   :z (conj z (math/log (/ (- 1.0 error) error)))}))
+     (iterate (partial adaboost-step examples target learner)
               {:w (vec (repeat n (/ 1.0 n))) :hypotheses [] :z []}))))
 
 (defn weighted-majority

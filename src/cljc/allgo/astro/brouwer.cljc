@@ -183,18 +183,6 @@
        (/ (- (* 4.0 (d (* 0.5 eps))) (d eps)) 3.0)
        (/ (- avg (second-order-integrand mu k2 x)) n))))
 
-(defn- ->equinoctial
-  "[a af ag chi psi lambda] of classical elements."
-  [{:keys [a e i raan argp M]}]
-  (let [lp (+ raan argp) t (math/tan (* 0.5 i))]
-    [a (* e (math/cos lp)) (* e (math/sin lp)) (* t (math/sin raan)) (* t (math/cos raan)) (+ lp M)]))
-
-(defn- equinoctial->
-  [[a af ag chi psi lam]]
-  (let [lp (math/atan2 ag af) node (math/atan2 chi psi)]
-    {:a a :e (math/hypot af ag) :i (* 2.0 (math/atan (math/hypot chi psi)))
-     :raan (am/wrap-2pi node) :argp (am/wrap-2pi (- lp node)) :M (am/wrap-2pi (- lam lp))}))
-
 (defn- corrected
   "Elements `el` with the Delaunay corrections applied: L to `L'` in full,
   the others to first order in the nonsingular elements, Lyddane's way;
@@ -208,13 +196,13 @@
         di (if (zero? si) 0.0 (/ (* (math/cos i) dG) (* G si)))
         lp (+ raan argp) dlp (+ dg dh)
         t (math/tan (* 0.5 i)) dt (/ di (* 2.0 (math/pow (math/cos (* 0.5 i)) 2)))
-        [_ af ag chi psi lam] (->equinoctial el)]
-    (equinoctial-> [(+ a da)
-                    (+ af (* de (math/cos lp)) (- (* e (math/sin lp) dlp)))
-                    (+ ag (* de (math/sin lp)) (* e (math/cos lp) dlp))
-                    (+ chi (* dt (math/sin raan)) (* t (math/cos raan) dh))
-                    (+ psi (* dt (math/cos raan)) (- (* t (math/sin raan) dh)))
-                    (+ lam dl dlp)])))
+        [_ af ag chi psi lam] (kepler/->equinoctial el)]
+    (kepler/equinoctial-> [(+ a da)
+                           (+ af (* de (math/cos lp)) (- (* e (math/sin lp) dlp)))
+                           (+ ag (* de (math/sin lp)) (* e (math/cos lp) dlp))
+                           (+ chi (* dt (math/sin raan)) (* t (math/cos raan) dh))
+                           (+ psi (* dt (math/cos raan)) (- (* t (math/sin raan) dh)))
+                           (+ lam dl dlp)])))
 
 (defn short-period-elements
   "The osculating elements of the singly averaged elements `el` -- the
@@ -307,7 +295,7 @@
          el' (corrected mu el L 0.0 dG dl dg dh)
          ;; the mean longitude's change wrapped: `el`'s angles may run on
          ;; past 2 pi, as `propagate` carries them, and `el'`'s are reduced
-         change (update (mapv - (->equinoctial el') (->equinoctial el)) 5 am/wrap-angle)
+         change (update (mapv - (kepler/->equinoctial el') (kepler/->equinoctial el)) 5 am/wrap-angle)
          size (apply max (map abs (rest change)))]
      (when-not (<= size long-period-limit)
        (throw (ex-info (str "Too near the critical inclination for Brouwer's long-period terms: a correction of "
@@ -336,13 +324,13 @@
   a few settle it."
   ([s] (mean-elements mu c/R-earth geo/J2 s))
   ([mu R J2 [r v]]
-   (let [target (->equinoctial (kepler/state->elements mu r v))
+   (let [target (kepler/->equinoctial (kepler/state->elements mu r v))
          miss (fn [x y] (let [d (mapv - x y)] (update d 5 am/wrap-angle)))]
      (loop [guess target k 0]
-       (let [step (miss target (->equinoctial (osculating-elements mu R J2 (equinoctial-> guess))))
+       (let [step (miss target (kepler/->equinoctial (osculating-elements mu R J2 (kepler/equinoctial-> guess))))
              guess' (mapv + guess step)]
          (if (or (>= k 50) (< (apply max (abs (/ (step 0) (guess 0))) (map abs (rest step))) 1e-13))
-           (equinoctial-> guess')
+           (kepler/equinoctial-> guess')
            (recur guess' (inc k))))))))
 
 (defn secular-rates

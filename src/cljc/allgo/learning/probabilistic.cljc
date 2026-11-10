@@ -303,6 +303,21 @@
   [params data]
   (reduce + (map (fn [[x n]] (* (double n) (math/log (second (class-posteriors params x))))) data)))
 
+(defn- naive-bayes-em-step
+  "An E step, each example's posterior over the classes, and an M step,
+  each parameter its expected count over its class's."
+  [data {:keys [params]}]
+  (let [n (double (reduce + (map second data)))
+        posts (map (fn [[x c]] [x c (first (class-posteriors params x))]) data)
+        k (count (:prior params))
+        totals (mapv (fn [j] (reduce + (map (fn [[_ c post]] (* c (post j))) posts))) (range k))
+        params {:prior (mapv #(/ % n) totals)
+                :features (mapv (fn [j]
+                                  (mapv (fn [f] (/ (reduce + (map (fn [[x c post]] (if (x f) (* c (post j)) 0.0)) posts)) (totals j)))
+                                        (range (count (ffirst data)))))
+                                (range k))}]
+    {:params params :log-likelihood (mixture-log-likelihood params data)}))
+
 (defn naive-bayes-em-seq
   "EM for a mixture of naive Bayes models with Boolean features, the class
   hidden: `params` `{:prior [P(class)] :features [[P(feature true |
@@ -312,15 +327,4 @@
   parameter its expected count over its class's. An iteration a step,
   each state `{:params :log-likelihood}`, which never falls."
   [params data]
-  (let [n (double (reduce + (map second data)))
-        state (fn [ps] {:params ps :log-likelihood (mixture-log-likelihood ps data)})]
-    (iterate (fn [{:keys [params]}]
-               (let [posts (map (fn [[x c]] [x c (first (class-posteriors params x))]) data)
-                     k (count (:prior params))
-                     totals (mapv (fn [j] (reduce + (map (fn [[_ c post]] (* c (post j))) posts))) (range k))]
-                 (state {:prior (mapv #(/ % n) totals)
-                         :features (mapv (fn [j]
-                                           (mapv (fn [f] (/ (reduce + (map (fn [[x c post]] (if (x f) (* c (post j)) 0.0)) posts)) (totals j)))
-                                                 (range (count (ffirst data)))))
-                                         (range k))})))
-             (state params))))
+  (iterate (partial naive-bayes-em-step data) {:params params :log-likelihood (mixture-log-likelihood params data)}))

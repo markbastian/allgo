@@ -51,6 +51,32 @@
   [records quasi k]
   (mapcat identity (filter #(< (count %) k) (vals (classes records quasi)))))
 
+(defn- release
+  "The `records` at `levels`, done if at most `suppress` stand out -- and
+  those withheld."
+  [records levels quasi k suppress]
+  (let [out (outliers records quasi k)]
+    (if (<= (count out) suppress)
+      {:records (vec (remove (set out) records)) :levels levels :done true}
+      {:records records :levels levels})))
+
+(defn- anonymize-step
+  "A rung climbed on the field with the most distinct values left, the
+  `original` records generalized to the new levels."
+  [original hierarchies k suppress {:keys [records levels done] :as st}]
+  (if done
+    st
+    (let [quasi (vec (keys hierarchies))
+          open (filter #(< (levels %) (count (hierarchies %))) quasi)
+          f (apply max-key #(count (distinct (map % records))) open)
+          levels (update levels f inc)
+          generalized (mapv (fn [r] (reduce (fn [r f]
+                                              (let [l (levels f)]
+                                                (if (pos? l) (update r f (nth (hierarchies f) (dec l))) r)))
+                                            r quasi))
+                            original)]
+      (release generalized levels quasi k suppress))))
+
 (defn anonymize-seq
   "Generalization until `records` are `k`-anonymous over the fields of
   `hierarchies`, a step a generalization: each field has a ladder of
@@ -63,26 +89,9 @@
   Each state `{:records :levels :done}`, `:records` the ones released."
   ([records hierarchies k] (anonymize-seq records hierarchies k 0))
   ([records hierarchies k suppress]
-   (let [quasi (vec (keys hierarchies))
-         at (fn [levels]
-              (mapv (fn [r] (reduce (fn [r f]
-                                      (let [l (levels f)]
-                                        (if (pos? l) (update r f (nth (hierarchies f) (dec l))) r)))
-                                    r quasi))
-                    records))
-         check (fn [records levels]
-                 (let [out (outliers records quasi k)]
-                   (if (<= (count out) suppress)
-                     {:records (vec (remove (set out) records)) :levels levels :done true}
-                     {:records records :levels levels})))]
-     (iterate (fn [{:keys [records levels done] :as st}]
-                (if done
-                  st
-                  (let [open (filter #(< (levels %) (count (hierarchies %))) quasi)
-                        f (apply max-key #(count (distinct (map % records))) open)
-                        levels (update levels f inc)]
-                    (check (at levels) levels))))
-              (check (vec records) (zipmap quasi (repeat 0)))))))
+   (let [quasi (vec (keys hierarchies))]
+     (iterate (partial anonymize-step records hierarchies k suppress)
+              (release (vec records) (zipmap quasi (repeat 0)) quasi k suppress)))))
 
 (defn anonymize
   "The released records `anonymize-seq` ends with, and the levels it
@@ -147,15 +156,15 @@
   data `[X ys]` from the shared weights `w`: logistic regression,
   `allgo.learning.models`'."
   [w [X ys] alpha steps]
-  (let [Xb (mapv #(into [1.0] %) X)]
-    (nth (iterate (fn [w]
-                    (let [g (reduce (fn [acc [x y]]
-                                      (let [p (models/predict-logistic w (rest x))]
-                                        (mapv + acc (mapv #(* (- p y) %) x))))
-                                    (vec (repeat (count w) 0.0)) (map vector Xb ys))]
-                      (mapv (fn [wi gi] (- wi (* alpha (/ gi (count ys))))) w g)))
-                  w)
-         steps)))
+  (nth (models/logistic-regression-seq X ys alpha w) steps))
+
+(defn- federated-round
+  "Every user's local update of `w`, averaged by how much data each
+  holds."
+  [datasets alpha local-steps w]
+  (let [total (reduce + (map (comp count second) datasets))
+        updates (map #(local-update w % alpha local-steps) datasets)]
+    (apply mapv + (map (fn [u [_ ys]] (mapv #(* % (/ (count ys) (double total))) u)) updates datasets))))
 
 (defn federated-seq
   "Federated averaging (after McMahan et al., \"Communication-Efficient
@@ -165,11 +174,7 @@
   them, weighted by how much data each holds. Each state the shared
   weights."
   [datasets dims alpha local-steps]
-  (let [total (reduce + (map (comp count second) datasets))]
-    (iterate (fn [w]
-               (let [updates (map #(local-update w % alpha local-steps) datasets)]
-                 (apply mapv + (map (fn [u [_ ys]] (mapv #(* % (/ (count ys) (double total))) u)) updates datasets))))
-             (vec (repeat (inc dims) 0.0)))))
+  (iterate (partial federated-round datasets alpha local-steps) (vec (repeat (inc dims) 0.0))))
 
 (defn masked-uploads
   "Secure aggregation's uploads (after Bonawitz et al., \"Practical Secure

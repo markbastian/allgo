@@ -177,6 +177,16 @@
 ;; ---------------------------------------------------------------------------
 ;; Model checking
 
+(defn- tt-entails-step
+  "The `k`th of the `total` models of `syms` checked; nil once a model
+  is a counterexample or every one has been checked."
+  [kb query syms total {:keys [k entails?] :as st}]
+  (when (and (< (long k) total) (not (false? entails?)))
+    (let [m (into {} (map-indexed (fn [i s] [s (odd? (quot k (long (reduce * 1 (repeat i 2)))))]) syms))
+          counter? (and (pl-true? kb m) (not (pl-true? query m)))]
+      (assoc st :k (inc (long k)) :model m :checked (inc (long k))
+             :entails? (if counter? false (if (= (inc (long k)) total) true nil))))))
+
 (defn tt-entails-seq
   "Every state of TT-ENTAILS?: one model of the symbols of `kb` and
   `query` a step, until one makes the KB true and the query false. The
@@ -184,17 +194,9 @@
   `:checked` how many."
   [kb query]
   (let [syms (vec (symbols kb query))
-        n (count syms)
-        total (long (reduce * 1 (repeat n 2)))
-        model-of (fn [k] (into {} (map-indexed (fn [i s] [s (odd? (quot k (long (reduce * 1 (repeat i 2)))))]) syms)))]
-    (take-while some?
-                (iterate (fn [{:keys [k entails?] :as st}]
-                           (when (and (< (long k) total) (not (false? entails?)))
-                             (let [m (model-of k)
-                                   counter? (and (pl-true? kb m) (not (pl-true? query m)))]
-                               (assoc st :k (inc (long k)) :model m :checked (inc (long k))
-                                      :entails? (if counter? false (if (= (inc (long k)) total) true nil))))))
-                         {:k 0 :checked 0 :entails? (when (zero? total) (boolean (pl-true? query {})))}))))
+        total (long (reduce * 1 (repeat (count syms) 2)))]
+    (search/step-seq (partial tt-entails-step kb query syms total)
+                     {:k 0 :checked 0 :entails? (when (zero? total) (boolean (pl-true? query {})))})))
 
 (defn tt-entails?
   "Whether `kb` entails `query`, by checking every model."
@@ -244,13 +246,11 @@
   round makes nothing new -- it is not. `:entails?` is set at the end."
   [kb query]
   (let [clauses (cnf kb [:not query])]
-    (take-while some?
-                (iterate (fn [s] (when s (resolution-step s)))
-                         {:clauses clauses :new #{} :round 1 :steps 0
-                          :pairs (for [i (range (count clauses)) j (range (inc i) (count clauses))
-                                       :let [a (clauses i) b (clauses j)]
-                                       :when (some #(contains? b (negate %)) a)]
-                                   [a b])}))))
+    (search/step-seq resolution-step {:clauses clauses :new #{} :round 1 :steps 0
+                                      :pairs (for [i (range (count clauses)) j (range (inc i) (count clauses))
+                                                   :let [a (clauses i) b (clauses j)]
+                                                   :when (some #(contains? b (negate %)) a)]
+                                               [a b])})))
 
 (defn pl-resolution
   "Whether `kb` entails `query`, by resolution refutation."
@@ -269,6 +269,24 @@
         {:premise (if (keyword? p) #{p} (set (rest p))) :conclusion c})
       {:premise #{} :conclusion s})))
 
+(defn- pl-fc-step
+  "A symbol off the agenda, and the clauses it completes adding their
+  conclusions; nil once the answer is known."
+  [kb q {:keys [agenda count inferred] :as st}]
+  (when (nil? (:entails? st))
+    (if-let [p (peek agenda)]
+      (let [st (assoc st :agenda (pop agenda) :popped p)]
+        (cond
+          (= p q) (assoc st :entails? true)
+          (inferred p) st
+          :else
+          (let [hit (filter #(contains? (:premise (kb %)) p) (range (clojure.core/count kb)))
+                count (reduce (fn [c i] (update c i dec)) count hit)
+                ready (filter #(zero? (count %)) hit)]
+            (assoc st :inferred (conj inferred p) :count count
+                   :agenda (into (:agenda st) (map #(:conclusion (kb %)) ready))))))
+      (assoc st :entails? false))))
+
 (defn pl-fc-entails-seq
   "Every state of PL-FC-ENTAILS? on definite clauses `kb` (as `definite`
   makes them) and the symbol `q`: one symbol off the agenda a step,
@@ -276,24 +294,10 @@
   agenda is empty -- false."
   [kb q]
   (let [kb (vec kb)]
-    (take-while some?
-                (iterate (fn [{:keys [agenda count inferred] :as st}]
-                           (when (nil? (:entails? st))
-                             (if-let [p (peek agenda)]
-                               (let [st (assoc st :agenda (pop agenda) :popped p)]
-                                 (cond
-                                   (= p q) (assoc st :entails? true)
-                                   (inferred p) st
-                                   :else
-                                   (let [hit (filter #(contains? (:premise (kb %)) p) (range (clojure.core/count kb)))
-                                         count (reduce (fn [c i] (update c i dec)) count hit)
-                                         ready (filter #(zero? (count %)) hit)]
-                                     (assoc st :inferred (conj inferred p) :count count
-                                            :agenda (into (:agenda st) (map #(:conclusion (kb %)) ready))))))
-                               (assoc st :entails? false))))
-                         {:agenda (into empty-queue (map :conclusion (filter #(empty? (:premise %)) kb)))
-                          :count (mapv #(clojure.core/count (:premise %)) kb)
-                          :inferred #{}}))))
+    (search/step-seq (partial pl-fc-step kb q)
+                     {:agenda (into empty-queue (map :conclusion (filter #(empty? (:premise %)) kb)))
+                      :count (mapv #(clojure.core/count (:premise %)) kb)
+                      :inferred #{}})))
 
 (defn pl-fc-entails?
   "Whether definite clauses `kb` entail the symbol `q`, by forward
@@ -463,10 +467,8 @@
   ([clauses {:keys [p max-flips rng]}]
    (let [rng (or rng (random/rng 1))
          syms (distinct (map symbol-of (mapcat identity clauses)))]
-     (take-while some?
-                 (iterate (fn [s] (when s (walksat-step s)))
-                          {:clauses (vec clauses) :rng rng :p (or p 0.5) :max-flips (or max-flips 10000)
-                           :flips 0 :model (into {} (map (fn [s] [s (< (double (rng)) 0.5)]) syms))})))))
+     (search/step-seq walksat-step {:clauses (vec clauses) :rng rng :p (or p 0.5) :max-flips (or max-flips 10000)
+                                    :flips 0 :model (into {} (map (fn [s] [s (< (double (rng)) 0.5)]) syms))}))))
 
 (defn walksat
   "A model satisfying `clauses`, or nil if the flips run out -- which

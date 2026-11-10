@@ -30,7 +30,9 @@
   bidirectional or not; a bidirectional language model whose states give
   each word an embedding of its context, as ELMo's do; and a probe, a
   softmax layer trained on frozen features, to see what those hold."
-  (:require [allgo.learning.autodiff :as ad]
+  (:require [allgo.language.tagging :as tagging]
+            [allgo.learning.autodiff :as ad]
+            [allgo.random :as random]
             [clojure.math :as math]))
 
 (def start "<s>")
@@ -98,26 +100,16 @@
   the loss that sentence's before its step. The sentences are taken in
   turn, again and again; shuffle them first."
   [m sentences & {:keys [lr clip] :or {lr 0.01 clip 5.0}}]
-  (let [sentences (vec sentences)]
-    (map first
-         (iterate (fn [[_ m opt k]]
-                    (let [s (sentences (mod k (count sentences)))
-                          {:keys [value grads]} (ad/value-and-grad #(loss m % s) (:params m))
-                          [params opt] (ad/adam-step (:params m) (ad/clip grads clip) opt :lr lr)
-                          m (assoc m :params params)]
-                      [{:model m :loss value} m opt (inc k)]))
-                  [{:model m :loss nil} m nil 0]))))
+  (ad/adam-seq m sentences loss :lr lr :clip clip))
 
 (defn- distribution [m P st t]
   (let [[h c] (step (:cell m) P (ad/row (:E P) t) st)]
     [(ad/softmax (first (ad/value (ad/add-row (ad/matmul h (:Wy P)) (:by P))))) [h c]]))
 
-(defn- consts [params] (into {} (map (fn [[k v]] [k (ad/const v)]) params)))
-
 (defn next-distribution
   "The model's distribution over the word after `prefix`, `{word p}`."
   [{:keys [vocab hidden params] :as m} prefix]
-  (let [P (consts params)
+  (let [P (ad/consts params)
         t (pop (ids vocab prefix))
         [p] (reduce (fn [[_ st] tok] (distribution m P st tok)) [nil (initial-state hidden)] t)]
     (zipmap (:words vocab) p)))
@@ -127,12 +119,11 @@
   `max-len` words; `temperature` (default 1) divides the logs of the
   probabilities, below 1 sharpening toward the likeliest word."
   [{:keys [vocab hidden params] :as m} rng & {:keys [temperature max-len] :or {temperature 1.0 max-len 20}}]
-  (let [P (consts params) words (:words vocab)]
+  (let [P (ad/consts params) words (:words vocab)]
     (loop [st (initial-state hidden) t ((:index vocab) start) out []]
       (let [[p st] (distribution m P st t)
             p (ad/softmax (mapv #(/ (math/log (max 1e-300 %)) temperature) p))
-            r (double (rng))
-            nxt (loop [i 0 acc 0.0] (if (or (= i (dec (count p))) (< r (+ acc (p i)))) i (recur (inc i) (+ acc (p i)))))]
+            nxt (random/weighted rng (map-indexed vector p))]
         (if (or (= (words nxt) end) (>= (count out) max-len))
           out
           (recur st nxt (conj out (words nxt))))))))
@@ -141,7 +132,7 @@
   "The natural log of the probability the model gives `sentence`, the
   end included."
   [{:keys [vocab hidden params] :as m} sentence]
-  (let [P (consts params) t (ids vocab sentence)]
+  (let [P (ad/consts params) t (ids vocab sentence)]
     (first (reduce (fn [[lp st] [a b]] (let [[p st] (distribution m P st a)] [(+ lp (math/log (max 1e-300 (p b)))) st]))
                    [0.0 (initial-state hidden)] (partition 2 1 t)))))
 
@@ -231,45 +222,24 @@
   [m P tagged]
   (ad/cross-entropy (tag-logits m P (mapv first tagged)) (mapv #((:tag-index m) (second %)) tagged)))
 
-(defn adam-seq
-  "Adam on `(loss m P example)` over `examples` in turn, clipped at 5,
-  `only` the named parameters moved if given: `{:model :loss}` each step,
-  the loss that example's before its step."
-  [m examples loss lr only]
-  (let [examples (vec examples)]
-    (map first
-         (iterate (fn [[_ m opt k]]
-                    (let [ex (examples (mod k (count examples)))
-                          {:keys [value grads]} (ad/value-and-grad #(loss m % ex) (:params m))
-                          grads (if only (select-keys grads only) grads)
-                          [params opt] (ad/adam-step (:params m) (ad/clip grads 5.0) opt :lr lr)
-                          m (assoc m :params params)]
-                      [{:model m :loss value} m opt (inc k)]))
-                  [{:model m :loss nil} m nil 0]))))
-
 (defn train-tagger-seq
   "The tagger trained on `tagged` sentences, a sentence a step: each state
   `{:model :loss}`. With `:train-only`, a set of parameter names, the rest
   stay as they are."
   [m tagged & {:keys [lr train-only] :or {lr 0.01}}]
-  (adam-seq m tagged tag-loss lr train-only))
+  (ad/adam-seq m tagged tag-loss :lr lr :only train-only))
 
 (defn tag
   "The tags `m` gives `words`."
   [m words]
   (mapv (fn [row] ((:tags m) (apply max-key row (range (count row)))))
-        (ad/value (tag-logits m (consts (:params m)) words))))
+        (ad/value (tag-logits m (ad/consts (:params m)) words))))
 
 (defn tag-accuracy
   "The fraction of words of `tagged` sentences tagged right, or of just
   those `only?` picks out -- by word and position, `(only? word i)`."
-  ([m tagged] (tag-accuracy m tagged (constantly true)))
-  ([m tagged only?]
-   (let [rs (for [s tagged
-                  [i [w t] g] (map vector (range) s (tag m (mapv first s)))
-                  :when (only? w i)]
-              (= t g))]
-     (/ (double (count (filter true? rs))) (max 1 (count rs))))))
+  ([m tagged] (tagging/accuracy-of #(tag m %) tagged))
+  ([m tagged only?] (tagging/accuracy-of #(tag m %) tagged only?)))
 
 ;; ---------------------------------------------------------------------------
 ;; Classifying whole sentences
@@ -306,12 +276,12 @@
   "The classifier trained on `examples`, each `[words class]`, an example
   a step: `{:model :loss}`."
   [m examples & {:keys [lr] :or {lr 0.01}}]
-  (adam-seq m examples class-loss lr nil))
+  (ad/adam-seq m examples class-loss :lr lr))
 
 (defn classify
   "The class `m` gives `words`."
   [m words]
-  (let [row (first (ad/value (class-logits m (consts (:params m)) words)))]
+  (let [row (first (ad/value (class-logits m (ad/consts (:params m)) words)))]
     ((:classes m) (apply max-key row (range (count row))))))
 
 (defn class-accuracy
@@ -358,7 +328,7 @@
   "The bidirectional language model trained on unlabeled `sentences`, a
   sentence a step: `{:model :loss}`."
   [m sentences & {:keys [lr] :or {lr 0.01}}]
-  (adam-seq m sentences bilm-loss lr nil))
+  (ad/adam-seq m sentences bilm-loss :lr lr))
 
 (defn contextual
   "The contextual embedding of each of `words`: its own embedding beside
@@ -367,7 +337,7 @@
   each sentence, as its company differs. ELMo learns a weighting of its
   layers for each task; here they are kept side by side."
   [m words]
-  (let [[_ xs fwd bwd] (bilm-states m (consts (:params m)) words)]
+  (let [[_ xs fwd bwd] (bilm-states m (ad/consts (:params m)) words)]
     (mapv (fn [i] (vec (mapcat #(first (ad/value (% i))) [xs fwd bwd])))
           (range 1 (inc (count words))))))
 
@@ -398,7 +368,7 @@
   "The probe trained on `examples`, each `[features tags]` for a sentence
   -- a row of features and a tag per word -- a sentence a step."
   [m examples & {:keys [lr] :or {lr 0.01}}]
-  (adam-seq m examples probe-loss lr nil))
+  (ad/adam-seq m examples probe-loss :lr lr))
 
 (defn probe-tags
   "The tags the probe gives the rows of `features`."

@@ -16,17 +16,7 @@
 
   An image is `{:w :h :px}`, `:px` row by row from the top, each pixel
   `[r g b]`; the bottom rows are nearest."
-  (:require [allgo.learning.unsupervised :as unsupervised]
-            [clojure.math :as math]))
-
-(defn- log-density
-  "The log of the mixture `{:weights :means :vars}`'s density at `x`."
-  [{:keys [weights means vars]} x]
-  (math/log (max 1e-300 (reduce + (map (fn [w mu var]
-                                         (* w (reduce * (map (fn [xi m v] (/ (math/exp (- (/ (* (- xi m) (- xi m)) (* 2 v))))
-                                                                             (math/sqrt (* 2 math/PI v))))
-                                                             x mu var))))
-                                       weights means vars)))))
+  (:require [allgo.learning.unsupervised :as unsupervised]))
 
 (defn laser-examples
   "The colors of the pixels of `image` in the `patch`, `[x0 y0 x1 y1]`,
@@ -43,13 +33,13 @@
   from all of it do not."
   [examples k steps rng & {:keys [quantile] :or {quantile 0.02}}]
   (let [mixture (nth (unsupervised/em-gmm-seq examples k rng) steps)
-        scores (vec (sort (map #(log-density mixture %) examples)))]
+        scores (vec (sort (map #(unsupervised/mixture-log-density mixture %) examples)))]
     {:mixture mixture :threshold (scores (long (* quantile (dec (count scores)))))}))
 
 (defn drivable?
   "Whether `model` takes the color `c` for drivable ground."
   [{:keys [mixture threshold]} c]
-  (>= (log-density mixture c) threshold))
+  (>= (unsupervised/mixture-log-density mixture c) threshold))
 
 (defn classify
   "The image as booleans: drivable or not, by color, all the way out."

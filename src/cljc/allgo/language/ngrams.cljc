@@ -98,6 +98,21 @@
   (let [ps (predictions (:n m) sequences)]
     (math/exp (- (/ (reduce + (for [[ctx t] ps] (math/log (probability m smoothing ctx t)))) (count ps))))))
 
+(defn- interpolation-state
+  "The weights and the held-out log likelihood they give."
+  [table lambdas]
+  {:lambdas lambdas
+   :log-likelihood (reduce + (map (fn [row] (math/log (reduce + (map * lambdas row)))) table))})
+
+(defn- interpolation-em-step
+  "Each weight made its order's share of the held-out tokens."
+  [table {:keys [lambdas]}]
+  (let [shares (reduce (fn [acc row]
+                         (let [parts (map * lambdas row) total (reduce + parts)]
+                           (mapv + acc (map #(/ % total) parts))))
+                       (vec (repeat (count lambdas) 0.0)) table)]
+    (interpolation-state table (mapv #(/ % (count table)) shares))))
+
 (defn interpolation-seq
   "The interpolation weights fitted to `held-out` sequences by EM, an
   iteration a step, from equal weights: the E step asks, of each held-out
@@ -111,16 +126,8 @@
         ps (vec (predictions n held-out))
         ;; each held-out token's estimate at each order, the uniform
         ;; first, computed once
-        table (mapv (fn [[ctx t]] (into [(/ 1.0 (count (:vocab m)))] (map (fn [k] (mle m (subvec ctx (- (dec n) k)) t)) (range n)))) ps)
-        state (fn [ls] {:lambdas ls
-                        :log-likelihood (reduce + (map (fn [row] (math/log (reduce + (map * ls row)))) table))})]
-    (iterate (fn [{:keys [lambdas]}]
-               (let [shares (reduce (fn [acc row]
-                                      (let [parts (map * lambdas row) total (reduce + parts)]
-                                        (mapv + acc (map #(/ % total) parts))))
-                                    (vec (repeat (inc n) 0.0)) table)]
-                 (state (mapv #(/ % (count table)) shares))))
-             (state (vec (repeat (inc n) (/ 1.0 (inc n))))))))
+        table (mapv (fn [[ctx t]] (into [(/ 1.0 (count (:vocab m)))] (map (fn [k] (mle m (subvec ctx (- (dec n) k)) t)) (range n)))) ps)]
+    (iterate (partial interpolation-em-step table) (interpolation-state table (vec (repeat (inc n) (/ 1.0 (inc n))))))))
 
 (defn with-unknown
   "`sequences` with words replaced by `<UNK>`, so that the model learns

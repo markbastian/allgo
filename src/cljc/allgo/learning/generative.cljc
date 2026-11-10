@@ -134,12 +134,10 @@
   [X m rng & {:keys [lr] :or {lr 0.01}}]
   (let [mu (mean-of X)
         Xc (ad/const (mapv #(lin/sub % mu) X))]
-    (map #(assoc (:params %) :mean mu :loss (:loss %))
-         (iterate (fn [{:keys [params opt]}]
-                    (let [{:keys [value grads]} (ad/value-and-grad #(linear-reconstruction-loss % Xc) params)
-                          [params opt] (ad/adam-step params grads opt :lr lr)]
-                      {:params params :opt opt :loss value}))
-                  {:params {:W (ad/init m (count (first X)) rng)} :opt nil}))))
+    (map (fn [{:keys [model loss]}] (assoc (:params model) :mean mu :loss loss))
+         (ad/adam-seq {:params {:W (ad/init m (count (first X)) rng)}} [Xc]
+                      (fn [_ P X] (linear-reconstruction-loss P X))
+                      :lr lr :clip ##Inf))))
 
 (defn linear-encode [{:keys [W mean]} x] (lin/mat-vec W (lin/sub x mean)))
 (defn linear-decode [{:keys [W mean]} z] (lin/add mean (lin/mat-vec (lin/transpose W) z)))
@@ -228,12 +226,16 @@
         [params opt] (ad/adam-step params grads opt :lr lr)]
     (assoc model :params params :opt opt)))
 
+(defn- vae-epoch
+  "An epoch: the data shuffled, and a step on each `batch` of it."
+  [X rng batch lr m]
+  (reduce #(vae-step %1 (vec %2) rng lr) m (partition-all batch (random/shuffle rng X))))
+
 (defn vae-seq
   "The variational autoencoder trained on `X`, an epoch a step, the data
   shuffled and taken `batch` at a time."
   [model X rng & {:keys [batch lr] :or {batch 32 lr 0.005}}]
-  (iterate (fn [m] (reduce #(vae-step %1 (vec %2) rng lr) m (partition-all batch (random/shuffle rng X))))
-           model))
+  (iterate (partial vae-epoch X rng batch lr) model))
 
 (defn elbo
   "The variational lower bound on log P(x), estimated with `samples`
@@ -241,20 +243,20 @@
   [{:keys [params noise-var]} x rng samples]
   (let [k (count (first (:bm params)))
         X (ad/const (vec (repeat samples x)))
-        [node c] (elbo-node (into {} (map (fn [[n m]] [n (ad/const m)]) params)) noise-var X (ad/const (noise-rows rng samples k)))]
+        [node c] (elbo-node (ad/consts params) noise-var X (ad/const (noise-rows rng samples k)))]
     (/ (+ (ffirst (ad/value node)) c) samples)))
 
 (defn vae-encode
   "Q(z) for `x`: `{:mean :var}`."
   [{:keys [params]} x]
-  (let [P (into {} (map (fn [[n m]] [n (ad/const m)]) params))
+  (let [P (ad/consts params)
         [Mu Lv] (q-nodes P (ad/const [x]))]
     {:mean (first (ad/value Mu)) :var (mapv math/exp (first (ad/value Lv)))}))
 
 (defn vae-decode
   "The mean of P(x | z)."
   [{:keys [params]} z]
-  (first (ad/value (decoder-node (into {} (map (fn [[n m]] [n (ad/const m)]) params)) (ad/const [z])))))
+  (first (ad/value (decoder-node (ad/consts params) (ad/const [z])))))
 
 (defn vae-sample
   "A new x: z from its prior N(0, I), decoded -- the mean of P(x | z)."
@@ -304,6 +306,11 @@
 
 (defn deep-ar-predict [network window] (first (nn/predict network window)))
 
+(defn- ar-step
+  "The window slid on a value: the prediction from it, and noise."
+  [predict sd rng w]
+  (conj (subvec w 1) (+ (predict w) (if rng (random/gaussian rng 0.0 sd) 0.0))))
+
 (defn ar-generate-seq
   "A new series from an AR model, a value a step: from `init`, the first
   `k` values, each next one `predict` of the `k` before it -- `(partial
@@ -312,8 +319,7 @@
   ([predict init] (ar-generate-seq predict init 0.0 nil))
   ([predict init sd rng]
    (concat init
-           (map peek (rest (iterate (fn [w] (conj (subvec w 1) (+ (predict w) (if rng (random/gaussian rng 0.0 sd) 0.0))))
-                                    (vec init)))))))
+           (map peek (rest (iterate (partial ar-step predict sd rng) (vec init)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Generative adversarial networks
@@ -328,8 +334,6 @@
     {:kz kz
      :generator {:G1 (ad/init kz hidden rng) :g1 (row hidden) :G2 (ad/init hidden d rng) :g2 (row d)}
      :discriminator {:D1 (ad/init d hidden rng) :d1 (row hidden) :D2 (ad/init hidden 1 rng) :d2 (row 1)}}))
-
-(defn- consts [P] (into {} (map (fn [[n m]] [n (ad/const m)]) P)))
 
 (defn- generator-node [G Z] (affine G :G2 :g2 (ad/tanh (affine G :G1 :g1 Z))))
 
@@ -348,29 +352,33 @@
   which pushes hardest where the discriminator is surest)."
   [{:keys [kz generator discriminator d-opt g-opt] :as model} X rng lr]
   (let [n (count X)
-        fake (ad/value (generator-node (consts generator) (ad/const (noise-rows rng n kz))))
+        fake (ad/value (generator-node (ad/consts generator) (ad/const (noise-rows rng n kz))))
         {dg :grads} (ad/value-and-grad #(ad/cross-entropy (real-or-fake % (ad/const (into (vec X) fake)))
                                                           (into (vec (repeat n 1)) (repeat n 0)))
                                        discriminator)
         [discriminator d-opt] (ad/adam-step discriminator dg d-opt :lr lr :b1 0.5)
         Z (ad/const (noise-rows rng n kz))
-        D (consts discriminator)
+        D (ad/consts discriminator)
         {gg :grads} (ad/value-and-grad #(ad/cross-entropy (real-or-fake D (generator-node % Z)) (vec (repeat n 1))) generator)
         [generator g-opt] (ad/adam-step generator gg g-opt :lr lr :b1 0.5)]
     (assoc model :generator generator :discriminator discriminator :d-opt d-opt :g-opt g-opt)))
 
+(defn- gan-round
+  "A round of the game on a minibatch of `batch` drawn from `v`."
+  [v rng batch lr model]
+  (gan-step model (vec (repeatedly batch (fn [] (random/pick rng v)))) rng lr))
+
 (defn gan-seq
   "The game played on `X`, a minibatch of `batch` drawn at random a step."
   [model X rng & {:keys [batch lr] :or {batch 64 lr 0.002}}]
-  (let [v (vec X)]
-    (iterate #(gan-step % (vec (repeatedly batch (fn [] (random/pick rng v)))) rng lr) model)))
+  (iterate (partial gan-round (vec X) rng batch lr) model))
 
 (defn gan-sample
   "`n` new x from the generator."
   [{:keys [kz generator]} rng n]
-  (ad/value (generator-node (consts generator) (ad/const (noise-rows rng n kz)))))
+  (ad/value (generator-node (ad/consts generator) (ad/const (noise-rows rng n kz)))))
 
 (defn discriminate
   "The discriminator's probability that each of `X` is real."
   [{:keys [discriminator]} X]
-  (mapv #(second (ad/softmax %)) (ad/value (real-or-fake (consts discriminator) (ad/const (vec X))))))
+  (mapv #(second (ad/softmax %)) (ad/value (real-or-fake (ad/consts discriminator) (ad/const (vec X))))))

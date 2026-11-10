@@ -1979,13 +1979,6 @@
    :bias-factor 0.2
    :max-push-speed 3.0})
 
-(defn- tangents
-  "Two unit directions across `n`, any two."
-  [n]
-  (let [a (if (< (abs (double (nth n 0))) 0.9) [1.0 0.0 0.0] [0.0 1.0 0.0])
-        t1 (v/normalize (v/cross n a))]
-    [t1 (v/cross n t1)]))
-
 (defn limited?
   "Whether any joint has a limit to be checked at all."
   [model]
@@ -2265,7 +2258,7 @@
                            other (:other c)
                            frame (frame-of model q root-state i frames)
                            n (v/normalize (:normal c))
-                           [t1 t2] (tangents n)
+                           [t1 t2] (v/perpendiculars n)
                            ;; A contact against the world pushes one
                            ;; body; a contact between two of the model's
                            ;; own parts pushes both, and what it

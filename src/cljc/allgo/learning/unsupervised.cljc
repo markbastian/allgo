@@ -19,22 +19,52 @@
 (defn- sq-dist [a b] (reduce + (map #(let [d (- %1 %2)] (* d d)) a b)))
 (defn- mean [xs] (let [n (count xs)] (apply mapv (fn [& vs] (/ (reduce + vs) n)) xs)))
 
+(defn- k-means-step
+  "Each point assigned its nearest center, and each center moved to the
+  mean of its points."
+  [points {:keys [centers]}]
+  (let [k (count centers)
+        assignment (mapv (fn [p] (apply min-key #(sq-dist p (centers %)) (range k))) points)
+        groups (group-by assignment (range (count points)))
+        centers (mapv (fn [c] (if-let [is (groups c)] (mean (map points is)) (centers c))) (range k))]
+    {:centers centers :assignment assignment
+     :cost (reduce + (map (fn [p a] (sq-dist p (centers a))) points assignment))}))
+
 (defn k-means-seq
   "k-means on `points` from `k` of them chosen at random: each state
   `{:centers :assignment :cost}`, cost the sum of squared distances to
   the centers -- which never rises."
   [points k rng]
   (let [points (vec points)]
-    (iterate (fn [{:keys [centers]}]
-               (let [assignment (mapv (fn [p] (apply min-key #(sq-dist p (centers %)) (range k))) points)
-                     groups (group-by assignment (range (count points)))
-                     centers (mapv (fn [c] (if-let [is (groups c)] (mean (map points is)) (centers c))) (range k))]
-                 {:centers centers :assignment assignment
-                  :cost (reduce + (map (fn [p a] (sq-dist p (centers a))) points assignment))}))
+    (iterate (partial k-means-step points)
              {:centers (vec (take k (random/shuffle rng points))) :assignment nil :cost nil})))
 
 (defn- gaussian-density [x mu var]
   (reduce * (map (fn [xi m v] (/ (math/exp (- (/ (* (- xi m) (- xi m)) (* 2 v)))) (math/sqrt (* 2 math/PI v)))) x mu var)))
+
+(defn mixture-log-density
+  "The log of the density at `x` of a mixture `{:weights :means :vars}`,
+  as `em-gmm-seq` fits one."
+  [{:keys [weights means vars]} x]
+  (math/log (max 1e-300 (reduce + (map (fn [w mu var] (* w (gaussian-density x mu var))) weights means vars)))))
+
+(defn- em-gmm-step
+  "An E step, each point's responsibilities, and an M step, the weights,
+  means and variances they give."
+  [points {:keys [weights means vars]}]
+  (let [k (count weights) n (count points) d (count (first points))
+        resp (mapv (fn [x] (let [ps (mapv (fn [c] (* (weights c) (gaussian-density x (means c) (vars c)))) (range k))
+                                 total (reduce + ps)]
+                             (if (pos? total) (mapv #(/ % total) ps) (vec (repeat k (/ 1.0 k))))))
+                   points)
+        nk (mapv (fn [c] (reduce + (map #(% c) resp))) (range k))
+        means (mapv (fn [c] (mapv (fn [j] (/ (reduce + (map (fn [x r] (* (r c) (nth x j))) points resp)) (max 1e-12 (nk c)))) (range d))) (range k))
+        vars (mapv (fn [c] (mapv (fn [j] (+ 1e-6 (/ (reduce + (map (fn [x r] (let [v (- (nth x j) ((means c) j))] (* (r c) v v))) points resp))
+                                                    (max 1e-12 (nk c)))))
+                                 (range d)))
+                   (range k))
+        mixture {:weights (mapv #(/ % n) nk) :means means :vars vars}]
+    (assoc mixture :log-likelihood (reduce + (map #(mixture-log-density mixture %) points)))))
 
 (defn em-gmm-seq
   "EM for a mixture of `k` Gaussians with diagonal covariances, from
@@ -43,22 +73,7 @@
   [points k rng]
   (let [points (vec points) n (count points) d (count (first points))
         all-var (mapv (fn [j] (/ (reduce + (map #(let [v (- (nth % j) (nth (mean points) j))] (* v v)) points)) n)) (range d))]
-    (iterate (fn [{:keys [weights means vars]}]
-               (let [;; E-step: each point's responsibilities.
-                     resp (mapv (fn [x] (let [ps (mapv (fn [c] (* (weights c) (gaussian-density x (means c) (vars c)))) (range k))
-                                              total (reduce + ps)]
-                                          (if (pos? total) (mapv #(/ % total) ps) (vec (repeat k (/ 1.0 k))))))
-                                points)
-                     ;; M-step.
-                     nk (mapv (fn [c] (reduce + (map #(% c) resp))) (range k))
-                     means (mapv (fn [c] (mapv (fn [j] (/ (reduce + (map (fn [x r] (* (r c) (nth x j))) points resp)) (max 1e-12 (nk c)))) (range d))) (range k))
-                     vars (mapv (fn [c] (mapv (fn [j] (+ 1e-6 (/ (reduce + (map (fn [x r] (let [v (- (nth x j) ((means c) j))] (* (r c) v v))) points resp))
-                                                                 (max 1e-12 (nk c)))))
-                                              (range d)))
-                                (range k))
-                     weights (mapv #(/ % n) nk)]
-                 {:weights weights :means means :vars vars
-                  :log-likelihood (reduce + (map (fn [x] (math/log (reduce + (map (fn [c] (* (weights c) (gaussian-density x (means c) (vars c)))) (range k))))) points))}))
+    (iterate (partial em-gmm-step points)
              {:weights (vec (repeat k (/ 1.0 k))) :means (vec (take k (random/shuffle rng points)))
               :vars (vec (repeat k all-var)) :log-likelihood nil})))
 

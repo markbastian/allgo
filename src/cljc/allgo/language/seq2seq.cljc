@@ -84,17 +84,7 @@
   "The model trained on `pairs` of `[source target]`, a pair a step by
   Adam: each state `{:model :loss}`."
   [m pairs & {:keys [lr clip] :or {lr 0.01 clip 5.0}}]
-  (let [pairs (vec pairs)]
-    (map first
-         (iterate (fn [[_ m opt k]]
-                    (let [[s t] (pairs (mod k (count pairs)))
-                          {:keys [value grads]} (ad/value-and-grad #(loss m % s t) (:params m))
-                          [params opt] (ad/adam-step (:params m) (ad/clip grads clip) opt :lr lr)
-                          m (assoc m :params params)]
-                      [{:model m :loss value} m opt (inc k)]))
-                  [{:model m :loss nil} m nil 0]))))
-
-(defn- consts [params] (into {} (map (fn [[k v]] [k (ad/const v)]) params)))
+  (ad/adam-seq m pairs (fn [m P [s t]] (loss m P s t)) :lr lr :clip clip))
 
 (defn- prefix-distribution
   "After the decoder has read `prefix` (target ids, `<s>` first): the
@@ -112,7 +102,7 @@
   step, at most `max-len` (default twice the source plus 2): `{:target
   :attention}`, the attention a row of weights per output token."
   [{:keys [vocab params] :as m} source & {:keys [max-len]}]
-  (let [P (consts params) [H st] (encode m P (ids vocab source))
+  (let [P (ad/consts params) [H st] (encode m P (ids vocab source))
         max-len (or max-len (+ 2 (* 2 (count source))))
         end ((:index vocab) rec/end)]
     (loop [prefix [((:index vocab) rec/start)]]
@@ -144,6 +134,6 @@
   "The target `m` writes for `source` by a beam search of `width`, at
   most `max-len` long (default twice the source plus 2)."
   [{:keys [vocab params] :as m} source width & {:keys [max-len]}]
-  (let [P (consts params) [H st] (encode m P (ids vocab source))]
+  (let [P (ad/consts params) [H st] (encode m P (ids vocab source))]
     (beam-search vocab #(first (prefix-distribution m P H st %)) width
                  (or max-len (+ 2 (* 2 (count source)))))))

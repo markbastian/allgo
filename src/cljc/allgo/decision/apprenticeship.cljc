@@ -71,6 +71,25 @@
   (let [per (map (fn [traj] (reduce lin/add (map-indexed (fn [t [s]] (lin/scale (features s) (math/pow gamma t))) traj))) demos)]
     (lin/scale (reduce lin/add per) (/ 1.0 (count demos)))))
 
+(defn- matching-policy
+  "The reward weights toward `mu-expert` from `mu-bar`, their optimal
+  policy and its feature expectations, added to those found."
+  [mdp features mu-expert start mu-bar policies mus]
+  (let [theta (lin/sub mu-expert mu-bar)
+        pi (optimal-policy (with-reward mdp features theta))
+        mu (feature-expectations mdp pi features start)]
+    {:mu-bar mu-bar :theta theta :t (lin/length theta) :policy pi :mu mu
+     :policies (conj policies pi) :mus (conj mus mu)}))
+
+(defn- feature-matching-step
+  "mu-bar moved toward mu-expert along the line to the newest mu, and
+  the policy for the weights that leaves."
+  [mdp features mu-expert start {:keys [mu-bar mu policies mus]}]
+  (let [d (lin/sub mu mu-bar)
+        dd (lin/dot d d)
+        mu-bar (if (pos? dd) (lin/add mu-bar (lin/scale d (/ (lin/dot d (lin/sub mu-expert mu-bar)) dd))) mu-bar)]
+    (matching-policy mdp features mu-expert start mu-bar policies mus)))
+
 (defn feature-matching-seq
   "Inverse reinforcement learning by feature matching, a step at a time,
   toward the expert's feature expectations `mu-expert`, from the policy
@@ -86,20 +105,9 @@
   which the expert's reward still beats the policies found: when it is
   small, one of them is about as good as the expert."
   [mdp features mu-expert pi0 start]
-  (let [mu-of #(feature-expectations mdp % features start)
-        step (fn [mu-bar policies mus]
-               (let [theta (lin/sub mu-expert mu-bar)
-                     pi (optimal-policy (with-reward mdp features theta))
-                     mu (mu-of pi)]
-                 {:mu-bar mu-bar :theta theta :t (lin/length theta) :policy pi :mu mu
-                  :policies (conj policies pi) :mus (conj mus mu)}))
-        mu0 (mu-of pi0)]
-    (iterate (fn [{:keys [mu-bar mu policies mus]}]
-               (let [d (lin/sub mu mu-bar)
-                     dd (lin/dot d d)
-                     mu-bar (if (pos? dd) (lin/add mu-bar (lin/scale d (/ (lin/dot d (lin/sub mu-expert mu-bar)) dd))) mu-bar)]
-                 (step mu-bar policies mus)))
-             (step mu0 [pi0] [mu0]))))
+  (let [mu0 (feature-expectations mdp pi0 features start)]
+    (iterate (partial feature-matching-step mdp features mu-expert start)
+             (matching-policy mdp features mu-expert start mu0 [pi0] [mu0]))))
 
 (defn closest-policy
   "Of the policies feature matching has found, the one whose feature

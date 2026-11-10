@@ -119,7 +119,7 @@
               (reset! model {:rng (random/rng (.-seed controls)) :st (initial (.-method controls))}))
             (advance! []
               (swap! model (fn [{:keys [rng st] :as m}]
-                             (assoc m :st (nth (iterate #(step (.-method controls) rng %) st)
+                             (assoc m :st (nth (iterate (partial step (.-method controls) rng) st)
                                                 ;; a solve at its own pace, whatever the speed
                                                (if (:solve st) 1 (.-speed controls)))))))
             (ellipse! [px scale [x y] [[a b] [_ d]] color]

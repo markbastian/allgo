@@ -25,7 +25,8 @@
   `orientation-histograms` counts, in each cell of a grid, the gradient
   orientations weighted by their magnitude -- the descriptor the chapter
   builds image features from."
-  (:require [allgo.vision.image :as img]
+  (:require [allgo.search :as search]
+            [allgo.vision.image :as img]
             [clojure.math :as math]))
 
 (defn- neighbors8 [[x y]]
@@ -48,6 +49,13 @@
                    m
                    0.0)))))
 
+(defn- hysteresis-step
+  "The `weak?` pixels touching the last ring joined; nil when none did."
+  [weak? {:keys [edges frontier]}]
+  (when (seq frontier)
+    (let [new (set (for [p frontier q (neighbors8 p) :when (and (not (edges q)) (weak? q))] q))]
+      {:edges (into edges new) :frontier new})))
+
 (defn hysteresis-seq
   "Edge growth from the pixels of `thinned` above `high` into touching
   pixels above `low`, a ring a step: each state `{:edges :frontier}`,
@@ -56,12 +64,7 @@
   (let [{:keys [w h]} thinned
         strong (set (for [y (range h) x (range w) :when (> (img/at thinned x y) high)] [x y]))
         weak? (fn [[x y]] (and (< -1 x w) (< -1 y h) (> (img/at thinned x y) low)))]
-    (take-while some?
-                (iterate (fn [{:keys [edges frontier]}]
-                           (when (seq frontier)
-                             (let [new (set (for [p frontier q (neighbors8 p) :when (and (not (edges q)) (weak? q))] q))]
-                               {:edges (into edges new) :frontier new})))
-                         {:edges strong :frontier strong}))))
+    (search/step-seq (partial hysteresis-step weak?) {:edges strong :frontier strong})))
 
 (defn canny-seq
   "Canny's edge detector on `image` a stage at a time: `{:stage :image}`
@@ -110,6 +113,27 @@
   [a b]
   (let [d (mod (- a b) math/PI)] (min d (- math/PI d))))
 
+(defn- start-curve
+  "A new curve begun at the first unlinked pixel, if any is left."
+  [curves left]
+  (if-let [p (first left)]
+    {:curves curves :curve #{p} :frontier #{p} :left (disj left p)}
+    {:curves curves :curve nil :frontier nil :left left}))
+
+(defn- link-step
+  "The curve grown a ring of like-oriented neighbors, or, when it stops,
+  the next begun; nil when every pixel is linked."
+  [orient max-turn {:keys [curves curve frontier left]}]
+  (let [angle (fn [[x y]] (img/at orient x y))]
+    (cond
+      (seq frontier)
+      (let [new (set (for [p frontier q (neighbors8 p)
+                           :when (and (left q) (<= (turn (angle p) (angle q)) max-turn))]
+                       q))]
+        {:curves curves :curve (into curve new) :frontier new :left (reduce disj left new)})
+      curve (start-curve (conj curves curve) left)
+      :else nil)))
+
 (defn link-seq
   "Edge pixels linked into curves, as the chapter links them: two
   neighboring edge pixels belong to the same curve when their
@@ -118,22 +142,7 @@
   from an unlinked pixel, and the next curve starts when it stops: each
   state `{:curves :curve :frontier :left}`."
   [edges orient max-turn]
-  (let [angle (fn [[x y]] (img/at orient x y))
-        start (fn [curves left]
-                (if-let [p (first left)]
-                  {:curves curves :curve #{p} :frontier #{p} :left (disj left p)}
-                  {:curves curves :curve nil :frontier nil :left left}))]
-    (take-while some?
-                (iterate (fn [{:keys [curves curve frontier left]}]
-                           (cond
-                             (seq frontier)
-                             (let [new (set (for [p frontier q (neighbors8 p)
-                                                  :when (and (left q) (<= (turn (angle p) (angle q)) max-turn))]
-                                              q))]
-                               {:curves curves :curve (into curve new) :frontier new :left (reduce disj left new)})
-                             curve (start (conj curves curve) left)
-                             :else nil))
-                         (start [] (into (sorted-set) edges))))))
+  (search/step-seq (partial link-step orient max-turn) (start-curve [] (into (sorted-set) edges))))
 
 (defn link
   "The curves `link-seq` finds, largest first: a vector of sets of `[x

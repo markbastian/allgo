@@ -52,7 +52,8 @@
   shore: on ten thousand cells the longest river is some half a dozen
   cells and most are two. Long rivers need a long, shallow basin, which
   is a thing erosion makes and plates alone do not."
-  (:require [clojure.math :as math]))
+  (:require [allgo.geometry.vec3 :as v]
+            [clojure.math :as math]))
 
 (def defaults
   {:sea-level 0.0
@@ -71,18 +72,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Vectors and tables
-
-(defn- dot ^double [[ax ay az] [bx by bz]]
-  (+ (* (double ax) (double bx)) (* (double ay) (double by)) (* (double az) (double bz))))
-
-(defn- cross [[ax ay az] [bx by bz]]
-  (let [ax (double ax) ay (double ay) az (double az)
-        bx (double bx) by (double by) bz (double bz)]
-    [(- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))]))
-
-(defn- unit [v]
-  (let [l (math/sqrt (dot v v))]
-    (if (< l 1e-12) [0.0 0.0 0.0] (mapv #(/ (double %) l) v))))
 
 (defn- interpolate
   "The piecewise-linear `table`, `[[x y] ...]` sorted by x, at `x`."
@@ -138,8 +127,8 @@
   westerlies."
   [p]
   (let [lat (latitude p)
-        east (unit (cross p [0.0 1.0 0.0]))
-        north (cross east p)
+        east (v/normalize (v/cross p [0.0 1.0 0.0]))
+        north (v/cross east p)
         u (interpolate zonal (math/to-degrees (abs lat)))
         v (* -0.3 (math/sin (* 6.0 (abs lat))) (math/signum lat))]
     (mapv + (map #(* u (double %)) east) (map #(* v (double %)) north))))
@@ -159,8 +148,8 @@
   [points neighbors winds]
   (mapv (fn [i]
           (let [p (points i)
-                w (unit (winds i))
-                ws (mapv (fn [j] (max 0.0 (dot (unit (mapv - p (points j))) w)))
+                w (v/normalize (winds i))
+                ws (mapv (fn [j] (max 0.0 (v/dot (v/normalize (mapv - p (points j))) w)))
                          (nth neighbors i))
                 total (reduce + ws)]
             (if (< total 1e-9)
