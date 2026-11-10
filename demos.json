@@ -262,11 +262,41 @@
    "id": "motion-planning",
    "group": "Robotics",
    "label": "Motion Planning",
-   "blurb": "Visibility and Voronoi graphs, cells and their subdivision, PRM, RRT, bidirectional RRT and RRT*, hybrid A*, trajectory optimization, potential fields, and a two-link arm in configuration space",
+   "blurb": "Visibility and Voronoi graphs, cells, their subdivision and the exact vertical decomposition, boustrophedon coverage, PRMs random, Halton and visibility, RRT, bidirectional RRT and RRT*, hybrid A*, lattice planning and a kinodynamic RRT for a robot with momentum, trajectory optimization, potential fields plain and randomized, and a two-link arm in configuration space",
    "badges": [
     "Interactive"
    ],
    "href": "play/?demo=motion-planning"
+  },
+  {
+   "id": "car-paths",
+   "group": "Robotics",
+   "label": "Car Paths",
+   "blurb": "Dubins' shortest paths for a car that only drives forward, and Reeds and Shepp's for one that also reverses: place and aim the goal",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=car-paths"
+  },
+  {
+   "id": "grid-navigation",
+   "group": "Robotics",
+   "label": "Grid Navigation",
+   "blurb": "D* Lite repairing its plan as walls come into view, and navigation functions -- the wavefront and the optimal one -- that tell every cell which way to go",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=grid-navigation"
+  },
+  {
+   "id": "many-robots",
+   "group": "Robotics",
+   "label": "Many Robots",
+   "blurb": "Velocity tuning past moving cars, the coordination diagram of two robots whose paths cross, and prioritized planning for a fleet in a warehouse",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=many-robots"
   },
   {
    "id": "slam",
