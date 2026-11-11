@@ -15,8 +15,20 @@
   rock blocks its swing. Predicting people: a person crossing a room, the
   robot's belief over where they are going growing from their steps.
   Terrain: a laser's verdicts on the ground just ahead teaching a camera
-  what drivable looks like, road first and then grass."
-  (:require [allgo.random :as random]
+  what drivable looks like, road first and then grass.
+
+  From LaValle's *Planning Algorithms* (Cambridge University Press,
+  2006): the time-optimal speed along a winding road (section 14.6.3),
+  as fast as the top speed, the braking and the grip in the bends allow
+  -- full throttle or full brakes everywhere it is not at a limit; and
+  two tests of a linear system (section 15.1): Lyapunov's, an energy
+  that falls along every trajectory, its level sets crossed only
+  inward, and Kalman's controllability, the states one bounded push
+  after another can reach -- a widening parallelogram when the system is
+  controllable, a line when it is not."
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as linear-systems]
+            [allgo.random :as random]
             [allgo.robotics.control :as control]
             [allgo.robotics.guarded :as guarded]
             [allgo.robotics.humans :as humans]
@@ -56,6 +68,27 @@
     {:image {:w 40 :h 30 :px (vec (for [y (range 30) x (range 40)] (mapv #(random/gaussian rng % 0.03) (ground-colors (kind x y)))))}
      :kind kind :flat? (fn [x y] (not= :rock (kind x y)))}))
 
+;; the time-optimal speed's road, a point every few centimetres
+(def ^:private road
+  (vec (for [i (range 1201) :let [t (* 12.0 (/ i 1200.0))]]
+         [t (+ (* 1.6 (math/sin (* 0.7 t))) (* 0.5 (math/sin (* 2.1 t))))])))
+(def ^:private limits {:vmax 4.0 :amax 1.5 :alat 2.0})
+
+(def ^:private stable [[0.9 0.2] [-0.1 0.8]])
+(def ^:private unstable [[1.02 0.2] [-0.2 1.0]])
+
+(defn- zonotope
+  "The states reachable from rest in `k` steps of x' = A x + B u, |u| <= 1,
+  B a single column: the Minkowski sum of the segments +-A^i B, as its
+  polygon's corners."
+  [A B k]
+  (let [gens (map (fn [[[x] [y]]] (if (or (neg? y) (and (zero? y) (neg? x))) [(- x) (- y)] [x y]))
+                  (take k (iterate (partial lin/mat-mul A) B)))
+        sorted (sort-by (fn [[x y]] (math/atan2 y x)) gens)
+        start (reduce (fn [[a b] [x y]] [(- a x) (- b y)]) [0.0 0.0] sorted)
+        up (reductions (fn [[a b] [x y]] [(+ a (* 2 x)) (+ b (* 2 y))]) start sorted)]
+    (vec (concat up (rest (reductions (fn [[a b] [x y]] [(- a (* 2 x)) (- b (* 2 y))]) (last up) sorted))))))
+
 (defn- init [method]
   (let [rng (random/rng (.-seed controls))]
     (case method
@@ -94,6 +127,10 @@
                                   (concat (repeat 4 [0.0 0.5]) (repeat 8 [0.35355 0.35355]) (repeat 3 [0.5 0.0]))))
             steps (map (fn [[a b]] [a (mapv - b a)]) (partition 2 1 walk))]
         {:walk walk :beliefs (vec (humans/belief-seq room-goals steps steps8 2.0)) :tick 0})
+      "time-optimal speed"
+      (assoc (track/speed-profile road limits) :tick 0)
+      "controllability and Lyapunov"
+      {:tick 0}
       "terrain"
       (let [frames [(ground rng 12 28) (ground rng 0 2)]
             models (vec (map :model (terrain/adapt-seq frames [15 25 25 30] 2 20 2000 rng)))]
@@ -134,7 +171,92 @@
                              "peg in hole" (draw-peg! cw ch)
                              "hexapod" (draw-hexapod! cw ch)
                              "predicting people" (draw-people! cw ch)
-                             "terrain" (draw-terrain! cw ch))))))
+                             "terrain" (draw-terrain! cw ch)
+                             "time-optimal speed" (draw-speed! cw ch)
+                             "controllability and Lyapunov" (draw-systems! cw ch))))))
+            (draw-speed! [cw ch]
+              (let [{:keys [s v t tick]} @model
+                    total (peek t)
+                    now (mod (* 0.01 tick) (+ total 1.0))
+                    k (min (dec (count t)) (count (take-while #(< % now) t)))
+                    sx (/ (- cw 80) 12.0) mid (* 0.3 ch)
+                    px (fn [[x y]] [(+ 40 (* sx x)) (- mid (* sx 0.45 y))])
+                    {:keys [vmax alat]} limits
+                    fastest (reduce max v)
+                    cap (mapv (fn [[a b c]] (let [kk (track/curvature a b c)] (if (pos? kk) (min vmax (math/sqrt (/ alat kk))) vmax)))
+                              (partition 3 1 road))
+                    [gx gy gw gh] [40 (* 0.58 ch) (- cw 80) (* 0.3 ch)]
+                    gpx (fn [si vi] [(+ gx (* gw (/ si (peek s)))) (- (+ gy gh) (* gh (/ vi (+ vmax 0.5))))])]
+                ;; the road, colored by speed
+                (doseq [i (range 0 (dec (count road)) 4)]
+                  (line! (px (road i)) (px (road (min (dec (count road)) (+ i 4))))
+                         (str "hsl(" (- 220 (* 220 (/ (v i) fastest))) ",80%,60%)") 5))
+                (dot! (px (road k)) 9 "#ffffff")
+                ;; speed against distance: the cap from the bends, and the profile under it
+                (set! (.-fillStyle ctx) "#161b25") (.fillRect ctx gx gy gw gh)
+                (doseq [i (range 0 (count cap) 4)]
+                  (dot! (gpx (s (inc i)) (cap i)) 1.2 "rgba(255,143,112,0.7)"))
+                (doseq [i (range 0 (- (count v) 4) 4)]
+                  (line! (gpx (s i) (v i)) (gpx (s (+ i 4)) (v (+ i 4))) "#ffd479" 2))
+                (dot! (gpx (s k) (v k)) 5 "#ffffff")
+                (text! "speed against distance: coral the most each bend allows, gold the time-optimal profile" gx (- gy 8) "#9fb4d8" 11)
+                (let [slowest (reduce min cap)]
+                  (str "across in " (.toFixed total 1) " s at up to " vmax " m/s; driven at the tightest bend's " (.toFixed slowest 2)
+                       " m/s throughout it would take " (.toFixed (/ (peek s) slowest) 1) " s"
+                       "\nfull throttle to the top speed or the next bend's limit, full brakes into each bend -- a forward pass and a backward pass, the lesser of the two"))))
+            (draw-systems! [cw ch]
+              (let [{:keys [tick]} @model
+                    unstable? (even? (.-seed controls))
+                    A (if unstable? unstable stable)
+                    P (control/lyapunov A [[1.0 0.0] [0.0 1.0]])
+                    ;; left: trajectories and the level sets of V
+                    s (min (/ cw 5.5) (/ ch 3.2)) lc [(* 0.27 cw) (* 0.5 ch)]
+                    lpx (fn [[x y]] [(+ (lc 0) (* s x)) (- (lc 1) (* s y))])
+                    n (min 80 (quot tick 2))
+                    starts (for [a (range 8)] [(math/cos (* a (/ math/PI 4))) (math/sin (* a (/ math/PI 4)))])
+                    step (fn [[x y]] [(+ (* (get-in A [0 0]) x) (* (get-in A [0 1]) y)) (+ (* (get-in A [1 0]) x) (* (get-in A [1 1]) y))])]
+                (when P
+                  (doseq [level [0.5 1.0 2.0 4.0 8.0]]
+                    ;; x P x = level along each direction
+                    (let [pts (for [i (range 73) :let [a (* 2 math/PI (/ i 72)) d [(math/cos a) (math/sin a)]
+                                                       q (+ (* (get-in P [0 0]) (d 0) (d 0)) (* 2 (get-in P [0 1]) (d 0) (d 1)) (* (get-in P [1 1]) (d 1) (d 1)))
+                                                       r (math/sqrt (/ level q))]]
+                                [(* r (d 0)) (* r (d 1))])]
+                      (doseq [[a b] (partition 2 1 pts)] (line! (lpx a) (lpx b) "rgba(160,180,210,0.35)" 1)))))
+                (.save ctx)
+                (.beginPath ctx) (.rect ctx 0 0 (* 0.55 cw) ch) (.clip ctx)
+                (doseq [x0 starts]
+                  (let [traj (take (inc n) (iterate step x0))]
+                    (doseq [[a b] (partition 2 1 traj)
+                            :when (< (max (abs (b 0)) (abs (b 1))) 2.6)]
+                      (line! (lpx a) (lpx b) "#ffd479" 1.5))))
+                (.restore ctx)
+                (text! (if P "x' = A x: V = x P x (faint levels) falls along every trajectory" "x' = A x unstable: no P, the trajectories escape")
+                       20 (- (lc 1) (* 1.5 s)) "#9fb4d8" 11)
+                ;; right: the reachable sets
+                (let [k (inc (mod (quot tick 6) 40))
+                      cases [["a double integrator, pushed" [[1.0 0.1] [0.0 1.0]] [[0.0] [0.1]]]
+                             ["two integrators, one pushed" [[1.0 0.0] [0.0 1.0]] [[0.1] [0.0]]]]]
+                  (doseq [[i [label A B]] (map-indexed vector cases)
+                          :let [c [(* 0.75 cw) (+ (* 0.3 ch) (* i 0.4 ch))]
+                                poly (zonotope A B k)
+                                ;; each axis scaled to the set's own extent, so its shape shows as it grows
+                                ex (reduce max 1e-9 (map (fn [[x]] (abs x)) poly))
+                                ey (reduce max 1e-9 (map (fn [[_ y]] (abs y)) poly))
+                                rpx (fn [[x y]] [(+ (c 0) (* (/ (* 0.2 cw) ex) x)) (- (c 1) (* (/ (* 0.15 ch) ey) y))])
+                                ok (control/controllable? A B)]]
+                    (set! (.-fillStyle ctx) (if ok "rgba(125,255,160,0.25)" "rgba(255,143,112,0.25)"))
+                    (set! (.-strokeStyle ctx) (if ok "#7dffa0" "#ff8f70")) (set! (.-lineWidth ctx) 2)
+                    (.beginPath ctx)
+                    (doseq [[j p] (map-indexed vector poly) :let [[x y] (rpx p)]] (if (zero? j) (.moveTo ctx x y) (.lineTo ctx x y)))
+                    (.closePath ctx) (.fill ctx) (.stroke ctx)
+                    (dot! c 3 "#ffffff")
+                    (text! (str label ": " (if ok "controllable" "not controllable") ", rank "
+                                (linear-systems/rank (control/controllability-matrix A B)))
+                           (- (c 0) 150) (- (c 1) (* 0.17 ch)) (if ok "#7dffa0" "#ff8f70") 11)))
+                (str (if P "stable: A^T P A - P = -I solved by summing (A^T)^k A^k" "unstable: the sum diverges, so there is no Lyapunov function")
+                     "  |  right: every state reachable from rest in " (inc (mod (quot tick 6) 40)) " steps of a push of at most 1 (each axis scaled to fit)"
+                     "\nseed odd: a stable system, even: an unstable one; a system is controllable when [B, AB, ...] has full rank -- the reachable set then fills the plane")))
             (draw-arms! [cw ch]
               (let [{:keys [arms tick]} @model
                     k (mod (* 5 tick) (count (first arms)))
@@ -264,7 +386,8 @@
                   (set! (.-width canvas) cw)
                   (set! (.-height canvas) ch))))]
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["computed torque" "MPC" "peg in hole" "hexapod" "predicting people" "terrain"]) restart!)
+        (.onChange (.add gui controls "method" #js ["computed torque" "MPC" "peg in hole" "hexapod" "predicting people" "terrain"
+                                                    "time-optimal speed" "controllability and Lyapunov"]) restart!)
         (.onChange (.add gui controls "seed" 1 50 1) restart!)
         (.add gui controls "speed" 1 10 1)
         (.add gui #js {:restart restart!} "restart"))

@@ -227,6 +227,16 @@
    "href": "play/?demo=broad-phase"
   },
   {
+   "id": "kd-tree",
+   "group": "Spatial Queries",
+   "label": "k-d Tree",
+   "blurb": "Nearest, k nearest and within-radius queries on a k-d tree, the splits drawn and the few points each search measures lit",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=kd-tree"
+  },
+  {
    "id": "arm",
    "group": "Robotics",
    "label": "Inverse Kinematics",
@@ -312,7 +322,7 @@
    "id": "robot-control",
    "group": "Robotics",
    "label": "Robot Control",
-   "blurb": "Computed torque on a two-link arm, iLQR and model predictive control, guarded moves into a hole, a hexapod's reflexes, predicting where people are going, and a robot teaching itself what is drivable",
+   "blurb": "Computed torque on a two-link arm, iLQR and model predictive control, guarded moves into a hole, a hexapod's reflexes, predicting where people are going, a robot teaching itself what is drivable, the time-optimal speed along a winding road, and Lyapunov's and Kalman's tests of a linear system",
    "badges": [
     "Interactive"
    ],
@@ -708,6 +718,16 @@
     "Interactive"
    ],
    "href": "play/?demo=language"
+  },
+  {
+   "id": "sampling",
+   "group": "Orbits & Numerics",
+   "label": "Sampling",
+   "blurb": "Random points against Halton's, Hammersley's and Sukharev's, a point at a time, each panel's largest gap drawn and dispersion and discrepancy charted",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=sampling"
   }
  ]
 }

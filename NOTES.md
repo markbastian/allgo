@@ -1576,6 +1576,16 @@ too: from rest m - k stays even, so the robot stops only every amax dt^2,
 and a goal tolerance smaller than half that diagonal can make the goal
 unreachable.
 
+The rest have demos too: Sampling sets random points against Halton's,
+Hammersley's and Sukharev's, a point at a time, with each panel's largest
+empty square and the dispersion and discrepancy charted; k-d Tree draws
+the splits and lights the points a query measures -- the searches now
+report them, `:measured` in the result's metadata; and Robot Control
+gains the time-optimal speed along a winding road, with the cap from its
+bends, and Lyapunov's and Kalman's tests side by side -- the level sets
+of V crossed only inward, and the set one bounded push after another
+reaches, an area when the system is controllable and a line when not.
+
 **Left out:** cylindrical algebraic decomposition and Canny's roadmap
 (6.4); visibility-based pursuit-evasion (12.4); the general
 time-optimal problem under full manipulator dynamics, beyond speed,

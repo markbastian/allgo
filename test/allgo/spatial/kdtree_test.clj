@@ -20,4 +20,12 @@
     (testing "the k nearest, in order"
       (is (every? (fn [q] (= (take 5 (sort-by #(sq-dist % q) points)) (kd/k-nearest tree q 5))) (take 20 queries))))
     (testing "every point within a radius"
-      (is (every? (fn [q] (= (set (filter #(<= (sq-dist % q) 0.01) points)) (set (kd/within tree q 0.1)))) (take 20 queries))))))
+      (is (every? (fn [q] (= (set (filter #(<= (sq-dist % q) 0.01) points)) (set (kd/within tree q 0.1)))) (take 20 queries))))
+    (testing "each search reports the points it measured, the answers among them, each at most once"
+      (doseq [q (take 20 queries)
+              result [(kd/nearest tree q) (kd/k-nearest tree q 5) (kd/within tree q 0.1)]
+              :let [measured (:measured (meta result))
+                    found (if (number? (second result)) [(first result)] result)]]
+        (is (every? (set measured) found))
+        (is (= (count measured) (count (set measured))))
+        (is (< (count measured) (count points)))))))

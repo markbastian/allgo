@@ -43,6 +43,7 @@
             [allgo.demo.human-arm :as human-arm]
             [allgo.demo.island :as island]
             [allgo.demo.joints :as joints]
+            [allgo.demo.kd-tree :as kd-tree]
             [allgo.demo.kepler :as kepler]
             [allgo.demo.knowledge :as knowledge]
             [allgo.demo.language :as language]
@@ -58,6 +59,7 @@
             [allgo.demo.ragdoll :as ragdoll]
             [allgo.demo.rigid :as rigid]
             [allgo.demo.robot-control :as robot-control]
+            [allgo.demo.sampling :as sampling]
             [allgo.demo.satellite :as satellite]
             [allgo.demo.search :as search]
             [allgo.demo.skinning :as skinning]
@@ -108,6 +110,7 @@
    "skinning" {:start skinning/start! :stop skinning/stop!}
    "cloth"    {:start cloth/start!    :stop cloth/stop!}
    "broad-phase" {:start broad-phase/start! :stop broad-phase/stop!}
+   "kd-tree" {:start kd-tree/start! :stop kd-tree/stop!}
    "fluid"    {:start fluid/start!    :stop fluid/stop!}
    "flip"     {:start flip/start!     :stop flip/stop!}
    "fire"     {:start fire/start!     :stop fire/stop!}
@@ -147,4 +150,5 @@
    "three-body" {:start three-body/start! :stop three-body/stop!}
    "satellite" {:start satellite/start! :stop satellite/stop!}
    "orbit-determination" {:start od/start! :stop od/stop!}
-   "solar-system" {:start solar/start! :stop solar/stop!}})
+   "solar-system" {:start solar/start! :stop solar/stop!}
+   "sampling" {:start sampling/start! :stop sampling/stop!}})
