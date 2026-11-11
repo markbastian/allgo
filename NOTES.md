@@ -1404,6 +1404,13 @@ both playing for the human's payoff.
   includes its ends, and ties go to the balanced choice, as the
   section's greedy Harriet's do.
 
+The demo Decisions Under Uncertainty shows both games beside LaValle's
+games against nature: the off-switch game's three values as the prior,
+Harriet's time cost and her error rate change, with the error rate at
+which acting overtakes deferring (0.31 for the hotel, where 18 - 26e
+= 10); and the paperclip game a round of best response at a time, its
+signal band from 0.446 to 0.554 appearing in the second round.
+
 The general game -- reducible to a POMDP over the state and the human's
 preferences -- is left out, as are humans who err in the paperclip
 game.

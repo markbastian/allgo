@@ -650,6 +650,16 @@
    "href": "play/?demo=contract-net"
   },
   {
+   "id": "uncertain-decisions",
+   "group": "AI",
+   "label": "Decisions Under Uncertainty",
+   "blurb": "Games against nature -- minimax, expected cost, regret and Hurwicz over a distribution you drag -- and assistance games: the off-switch game and the paperclip game's signals",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=uncertain-decisions"
+  },
+  {
    "id": "probabilistic",
    "group": "AI",
    "label": "Learning Probabilistic Models",

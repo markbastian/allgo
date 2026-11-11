@@ -70,6 +70,7 @@
             [allgo.demo.terrain-webgl :as terrain]
             [allgo.demo.textures :as textures]
             [allgo.demo.three-body :as three-body]
+            [allgo.demo.uncertain-decisions :as uncertain-decisions]
             [allgo.demo.vision :as vision]
             [allgo.demo.volumes :as volumes]
             [allgo.demo.water :as water]
@@ -93,6 +94,7 @@
    "vision" {:start vision/start! :stop vision/stop!}
    "knowledge" {:start knowledge/start! :stop knowledge/stop!}
    "contract-net" {:start contract-net/start! :stop contract-net/stop!}
+   "uncertain-decisions" {:start uncertain-decisions/start! :stop uncertain-decisions/stop!}
    "probabilistic" {:start probabilistic/start! :stop probabilistic/stop!}
    "language" {:start language/start! :stop language/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
