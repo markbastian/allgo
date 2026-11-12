@@ -309,6 +309,16 @@
    "href": "play/?demo=many-robots"
   },
   {
+   "id": "pursuit-evasion",
+   "group": "Robotics",
+   "label": "Pursuit-Evasion",
+   "blurb": "Hide-and-seek with a proof: a pursuer searches its information space for a path that leaves an evader nowhere to hide, or shows there is none",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=pursuit-evasion"
+  },
+  {
    "id": "slam",
    "group": "Robotics",
    "label": "SLAM",

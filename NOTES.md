@@ -1523,6 +1523,7 @@ and is now here, by package rather than by book:
 | `allgo.robotics.kinodynamic`      | A double integrator: lattice planning by A*, and a kinodynamic RRT (14.4)                |
 | `allgo.robotics.tracking`         | The time-optimal speed along a path, by a forward and a backward pass (14.6.3)           |
 | `allgo.robotics.control`          | The Kalman controllability rank and the discrete Lyapunov equation (15.1)                |
+| `allgo.robotics.pursuit`          | Visibility-based pursuit-evasion: the information-space search for a pursuer (12.4)       |
 | `allgo.decision.nature`           | Games against nature: minimax, expected cost, regret, Hurwicz, observations (9.2)        |
 
 **Checks.** Each is tested against something independent of it:
@@ -1588,8 +1589,45 @@ bends, and Lyapunov's and Kalman's tests side by side -- the level sets
 of V crossed only inward, and the set one bounded push after another
 reaches, an area when the system is controllable and a line when not.
 
+**Pursuit-evasion, later.** `allgo.robotics.pursuit` is section 12.4's
+hide-and-seek: one pursuer that sees along straight lines, an evader of
+any speed, and a plan that proves the region empty. The pursuer's
+knowledge is its place and which components of its shadow might hide the
+evader; it changes only at the four critical events -- a component
+appears (cleared), disappears, splits (each part keeping its label) or
+merges (contaminated if either was, the one that undoes work). The book's
+complete algorithm cuts the region into cells along inflection and
+bitangent rays and searches a directed graph of a cell and a labeling of
+its components. Here the cells are a lattice of probes half a meter
+apart: the shadow from a point is the probes it cannot see, its
+components joined through neighboring probes, and a step carries the
+labels across by overlap. The lattice cannot tell a thin sliver of
+shadow from a gap, so a component touching a contaminated probe is
+contaminated too: a plan may be longer than it need be, never wrong. The
+graph is revealed as it is searched, breadth first, so a plan has the
+fewest steps.
+
+Checked: every plan, replayed with four times the steps on a lattice
+twice as fine, leaves nothing contaminated; Figure 12.38's lesson, that a
+loop crossing no critical boundary changes nothing while one into a
+corridor and back clears it; the exact visibility polygon's area in a
+square, from the corner of an L, and from the end of its leg, the leg and
+the wedge past the inner corner. Example 12.7's unsolvable case is three
+corridors off a hub, each bending twice: the test finds the condition
+the book gives -- three places whose V(V(p)) share no probe -- and the
+search exhausts every information state, from anywhere, without a plan;
+with two corridors it finds one. On the 632 probes of a hall with five
+rooms the search expands some 3,000 vertices; computing the shadows,
+about 2 ms each on the JVM, is most of the time.
+
+The demo, Pursuit-Evasion, searches the information space a few
+milliseconds a frame, then walks the plan, naming each critical event; a
+drive mode lets you drag the pursuer, and with three hooks shows the
+three hiding places' V(V(p)).
+
 **Left out:** cylindrical algebraic decomposition and Canny's roadmap
-(6.4); visibility-based pursuit-evasion (12.4); the general
+(6.4); pursuit-evasion's exact critical-ray cells and several pursuers;
+the general
 time-optimal problem under full manipulator dynamics, beyond speed,
 acceleration and curvature bounds.
 

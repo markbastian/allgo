@@ -56,6 +56,7 @@
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.planet :as planet]
             [allgo.demo.probabilistic :as probabilistic]
+            [allgo.demo.pursuit-evasion :as pursuit-evasion]
             [allgo.demo.ragdoll :as ragdoll]
             [allgo.demo.rigid :as rigid]
             [allgo.demo.robot-control :as robot-control]
@@ -104,6 +105,7 @@
    "car-paths" {:start car-paths/start! :stop car-paths/stop!}
    "grid-navigation" {:start grid-navigation/start! :stop grid-navigation/stop!}
    "many-robots" {:start many-robots/start! :stop many-robots/stop!}
+   "pursuit-evasion" {:start pursuit-evasion/start! :stop pursuit-evasion/stop!}
    "slam" {:start slam/start! :stop slam/stop!}
    "robot-control" {:start robot-control/start! :stop robot-control/stop!}
    "soft-body" {:start soft-body/start! :stop soft-body/stop!}
