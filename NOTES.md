@@ -1409,7 +1409,9 @@ games against nature: the off-switch game's three values as the prior,
 Harriet's time cost and her error rate change, with the error rate at
 which acting overtakes deferring (0.31 for the hotel, where 18 - 26e
 = 10); and the paperclip game a round of best response at a time, its
-signal band from 0.446 to 0.554 appearing in the second round.
+signal band from 0.446 to 0.554 appearing in the second round. A toggle
+shows the regret matrix in place of the costs -- Example 9.10's, with the
+best action against each of nature's choices, regret 0, in green.
 
 The general game -- reducible to a POMDP over the state and the human's
 preferences -- is left out, as are humans who err in the paperclip

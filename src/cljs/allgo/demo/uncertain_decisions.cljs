@@ -29,7 +29,7 @@
             [clojure.math :as math]))
 
 (def ^:private ^js controls
-  #js {:scene "games against nature" :seed 1 :alpha 0.5
+  #js {:scene "games against nature" :seed 1 :alpha 0.5 :regrets false
        :lo -40 :hi 60 :cost 0 :error 0})
 
 (def ^:private colors {:u1 "#7fd1ff" :u2 "#ffd479" :u3 "#ff8f70"})
@@ -125,9 +125,9 @@
                     z (reduce + (map p possible))
                     expect-of (fn [a] (reduce + (map (fn [t] (* (get-in costs [a t]) (/ (p t) z))) possible)))]
                 ;; the table
-                (text! "action" tx ty "#9fb4d8")
+                (text! (if (.-regrets controls) "regret" "action") tx ty (if (.-regrets controls) "#7dffa0" "#9fb4d8"))
                 (doseq [[k t] (map-indexed vector natures)]
-                  (text! (str (name t) (when (ruled-out t) " (ruled out)")) (+ tx (* col (inc k))) ty (if (ruled-out t) "#5b6884" "#9fb4d8")))
+                  (text! (str (name t) (when (ruled-out t) " out")) (+ tx (* col (inc k))) ty (if (ruled-out t) "#5b6884" "#9fb4d8")))
                 (doseq [[k h] (map-indexed vector ["worst" "expected" "regret" "Hurwicz"])]
                   (text! h (+ tx (* col (+ 4 k))) ty "#9fb4d8"))
                 (doseq [[r a] (map-indexed vector actions)
@@ -136,8 +136,18 @@
                                                      (.fillRect ctx (- (+ tx (* col k)) 6) (- y 18) (- col 6) 26)))]]
                   (pick worst 4) (pick expected 5) (pick regret 6) (pick hurwicz 7)
                   (text! (name a) tx y (colors a) "bold 13px ui-monospace,Menlo,monospace")
-                  (doseq [[k t] (map-indexed vector natures)]
-                    (text! (str (get-in costs [a t])) (+ tx (* col (inc k))) y (if (ruled-out t) "#3a4458" "#c9d2e0")))
+                  (doseq [[k t] (map-indexed vector natures)
+                          :let [x (+ tx (* col (inc k)))]]
+                    (if (and (.-regrets controls) regrets)
+                      ;; each cost less the least any action costs against that choice of nature's
+                      (if (ruled-out t)
+                        (text! "-" x y "#3a4458")
+                        (let [r (get-in regrets [a t])]
+                          (when (zero? r)
+                            (set! (.-fillStyle ctx) "rgba(125,255,160,0.15)")
+                            (.fillRect ctx (- x 6) (- y 18) (- col 6) 26))
+                          (text! (str r) x y (if (zero? r) "#7dffa0" "#c9d2e0"))))
+                      (text! (str (get-in costs [a t])) x y (if (ruled-out t) "#3a4458" "#c9d2e0"))))
                   (when (seq possible)
                     (let [cs (map #(get-in costs [a %]) possible)]
                       (text! (str (reduce max cs)) (+ tx (* col 4)) y "#c9d2e0")
@@ -185,7 +195,9 @@
                             " (P = " (apply str (interpose ", " (map #(.toFixed (/ (p %) z) 2) possible))) ")"
                             "  |  minimax regret " (name (first regret)) "  |  Hurwicz at " (.toFixed alpha 2) " " (name (first hurwicz)))
                        "every choice of nature's ruled out")
-                     "\ngold: each criterion's choice  triangle: the expected-cost choice at every distribution  click a column head: rule it out")))
+                     (if (.-regrets controls)
+                       "\nthe regret matrix: each cost less the best any action does against that choice of nature's -- green the best, regret 0; gold: each criterion's choice"
+                       "\ngold: each criterion's choice  triangle: the expected-cost choice at every distribution  click a column head: rule it out"))))
             ;; ---- the off-switch game ----------------------------------------
             (draw-off-switch! []
               (let [cw (vw) ch (vh)
@@ -327,7 +339,8 @@
             ;; each scene's own sliders, the rest hidden
             own {"games against nature" [(.onChange (.add gui controls "seed" 1 50 1)
                                                     #(swap! state assoc :costs (cost-table (.-seed controls)) :ruled-out #{}))
-                                         (.add gui controls "alpha" 0 1 0.01)]
+                                         (.add gui controls "alpha" 0 1 0.01)
+                                         (.name (.add gui controls "regrets") "show regrets")]
                  "off-switch game" [(.add gui controls "lo" -100 100 1) (.add gui controls "hi" -100 100 1)
                                     (.add gui controls "cost" 0 30 0.5) (.add gui controls "error" 0 0.5 0.01)]
                  "paperclip game" [(.add gui #js {:replay #(swap! state assoc :t 0.0)} "replay")]}
