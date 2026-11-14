@@ -59,3 +59,21 @@
       (is (dl/instance-of? tbox abox :Father :Al))
       (is (not (dl/instance-of? tbox abox [:all :Son :Unemployed] :Al)))
       (is (dl/instance-of? tbox abox [:all :Son :Married] :Al)))))
+
+(deftest same-as
+  (let [tbox {:Company [:and :Organization [:at-least 1 :ceo]]
+              :OneBoss [:and :Company [:same-as [:ceo] [:president]]]}]
+    (testing "SameAs(Path, Path): a company whose CEO is its president is a company, not the other way round"
+      (is (dl/subsumes? tbox :Company :OneBoss))
+      (is (not (dl/subsumes? tbox :OneBoss :Company))))
+    (testing "equal paths stay equal extended alike: the CEO's spouse is the president's"
+      (is (dl/subsumes? tbox [:same-as [:ceo :spouse] [:president :spouse]] :OneBoss))
+      (is (not (dl/subsumes? tbox :OneBoss [:same-as [:ceo :spouse] [:president :spouse]]))))
+    (testing "and equality is transitive and symmetric"
+      (is (dl/subsumes? tbox [:same-as [:c] [:a]] [:and [:same-as [:a] [:b]] [:same-as [:b] [:c]]]))
+      (is (not (dl/subsumes? tbox [:same-as [:c] [:d]] [:and [:same-as [:a] [:b]] [:same-as [:b] [:c]]]))))
+    (testing "an individual is one when the fillers along both paths agree"
+      (let [abox {:acme {:prims [:Organization] :fills {:ceo [:wile] :president [:wile]}}
+                  :initech {:prims [:Organization] :fills {:ceo [:bill] :president [:peter]}}}]
+        (is (dl/instance-of? tbox abox :OneBoss :acme))
+        (is (not (dl/instance-of? tbox abox :OneBoss :initech)))))))

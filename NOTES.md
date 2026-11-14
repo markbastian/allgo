@@ -561,8 +561,35 @@ Under alpha-beta a move cut short at the root has only an upper bound
 for a score, and the context marks it (the demo writes it with a ≤).
 Monte Carlo picks the move with the most playouts, where figure 5.11's
 pseudocode says the highest average, which a lucky move with few
-playouts can top; UCB1's constant is sqrt 2. Its tree is keyed by state,
-so transpositions share statistics.
+playouts can top; UCB1's constant is sqrt 2. Keyed by state, as the
+figure has it, transpositions share statistics.
+
+**Hidden information: one search, two ways to name a node.** Monte
+Carlo searching the state it is handed plays a game of hidden cards as
+though it could see them -- "cheating UCT" in the literature. Information
+set MCTS (Cowling, Powley and Whitehouse, *IEEE TCIAIG* 2012, the
+single-observer form) differs from figure 5.11 in what names a node: not
+the state reached but the actions that reached it, so that one tree
+serves every world consistent with what the player knows. Each playout
+first deals such a world by the game's optional `:determinize`; UCB1's
+exploration counts how often an action was *available*, since in some
+worlds it is not legal; and chance is sampled where it falls rather than
+made a node. With nothing hidden every child is available whenever its
+parent is visited, so that UCB1 is the textbook one -- the two searches
+are one, and `monte-carlo-seq` takes `:node-key :state` or `:path`,
+defaulting to `:path` exactly when the game has `:determinize`. Keyed by
+state, transpositions share statistics; keyed by path, a game whose
+chance has too many outcomes to tell apart still searches well. The
+book's §5.6 describes the simpler "averaging over clairvoyance" and its
+flaw, strategy fusion; ISMCTS is the published answer, and it is not in
+the book's figures. Two options carry knowledge in: `:policy`, weights
+for the moves playouts make, and `:cutoff`, plies or a predicate, after
+which the game's `:evaluate` scores the position. The tests check what
+the method is for: on a game of guessing a hidden coin, it passes for
+the sure small gain, while the same search shown the coin calls it; an
+action legal in half the worlds is counted available half the time; and
+keyed by path it takes the same wins and blocks at tic-tac-toe and
+Connect Four as keyed by state.
 
 **Not implemented here:** multiplayer games' vectors of utilities, and
 forward pruning (beam search on moves, ProbCut), which the chapter
@@ -895,9 +922,36 @@ chapter makes is a test where it could be checked.
 The new demo, *Deep Generative Models*, shows all of these on 2-D data
 and on the logistic map. The classifiers demo gains a wide network with
 weight decay, a deep network with batch normalization, and a residual
-network. Left out: momentum and learning-rate schedules, which 21.4
-mentions only as considerations; 21.7.2's transfer learning; and
-unsupervised translation, which points ahead to chapter 25.
+network. Left out: unsupervised translation, which points ahead to
+chapter 25.
+
+**Momentum, schedules and transfer, later.** 21.4 names momentum, a
+running average of past gradients, and a learning rate that decreases
+over time; 21.7.2 teaches transfer, copying the first layers of a
+network trained for one task and freezing them under a new head. All
+three are now options of `learning.neural`'s trainer:
+- `:momentum`: a velocity kept on each layer;
+- `:alpha` as a function of the epoch, with `step-decay`,
+  `exponential-decay` and `inverse-time-decay`;
+- `transfer`, which copies and freezes, and `unfreeze`.
+
+Checks:
+- On a regression whose second input is a tenth the scale of the first,
+  momentum 0.9 ends forty epochs with a twentieth of plain descent's
+  loss.
+- On noisy targets, the decaying rates end below a quarter of a constant
+  rate's error.
+- A network trained on "inside the circle", its hidden layer frozen
+  under a new head, learns "outside it" from twenty examples to above
+  0.9 accuracy, averaged over five draws of the examples. That is at
+  least five points better than the same network trained afresh on
+  them.
+
+Transfer between tasks that share less was tried: radius 0.75 from
+radius 0.6. It helped little and not reliably, because the features a
+circle needs at one radius are not those at another. That is the
+section's own caveat, that transfer needs tasks that share their
+features.
 
 **The rest of chapter 22, from the 4th edition's text.** As with chapter
 21, each claim that could be checked is a test.
@@ -1088,13 +1142,30 @@ U and returns U when δ is small enough, so the answer is the utilities
 before the last sweep. Returning U' instead was 6e-4 off aima-python's
 values; returning U, as the book does, matches them exactly.
 
-**POMDP plans pruned on a lattice of beliefs.** The book prunes dominated
-conditional plans; doing that exactly takes a linear program per plan,
-and ours was slow and failed on degenerate ones. Instead a plan is kept
-only if it is best at some belief of a lattice (200 points a side for two
-states), which keeps every plan that matters except on slivers between
-lattice points (a coarser lattice past three states). Each depth's plans are worth what expectimax lookahead
-over beliefs says, to 1e-9 at every belief tried.
+**POMDP plans pruned exactly, later.** The book prunes dominated
+conditional plans, which takes a linear program per plan. Ours first
+failed on degenerate problems, so plans were kept if best at some belief
+of a lattice: exact up to the spacing for two states, an approximation
+past that. `optimize/linear-program` is now robust to degeneracy:
+- an artificial variable still basic at zero after phase one is pivoted
+  out, or its redundant row dropped;
+- ties in the ratio test go to the lowest index to a tolerance, so
+  Bland's rule holds despite rounding.
+
+It solves a redundant equality, a degenerate vertex, and Beale's classic
+cycling example (minimum -5/4).
+
+So `prune` is exact:
+- duplicates and plans dominated state by state go first;
+- each remaining plan is kept if a linear program finds a belief where it
+  beats every plan still kept by some margin;
+- plans are removed one at a time, so that of a set tying over a region
+  one survives.
+
+Each depth's plans are worth what expectimax over beliefs says, to 1e-9,
+for the two-state example and for a three-state one where the lattice
+was approximate. No dropped plan ever beats the kept ones on a fine grid
+of beliefs.
 
 **Reinforcement learners that finish.** The learners follow the book --
 α = 60/(59 + n), exploration f(u, n) with Ne = 5 and R+ = 2 -- with three
@@ -1154,8 +1225,100 @@ world; Classifiers runs ten learners on five two-dimensional datasets,
 drawing their regions; Localization runs MCL with the scan and the
 particles.
 
-**Not implemented here:** the book's chapter 15 programs themselves;
-exact POMDP pruning by linear programming; GraphPlan, which the 4th
+**Chapter 15's examples, later.** The 4th edition's text, read since,
+teaches its examples in prose and figures, not pseudocode. The figures'
+models are here, each checked against an exact answer where the book
+gives no numbers:
+
+- *Skill ratings* (15.1.2), `probability.rating`. The relational model
+  (skill, performance, win), team performance the sum of the players',
+  inferred by TrueSkill's assumed density filtering: each game folded in
+  by matching the truncated Gaussian's two moments.
+  - For one game between Gaussian ratings, this is the exact posterior.
+    It matches integration on a grid to 1e-4, and the win probability to
+    1e-6.
+  - An upset moves ratings more than three times as far as the expected
+    result.
+  - From 3,000 two-on-two games with the teams reshuffled, eight players
+    are sorted in the order of their true skills, each within 2.5.
+  - The error function and normal distribution it needed are now in
+    `numerics.special`, written from the series and continued fraction,
+    and match quadrature to 3e-16.
+- *Data association* (15.3.1), `probability.association`. Two aircraft
+  whose paths cross, blips without labels. The three approaches the
+  section gives:
+  - the nearest-neighbor filter;
+  - the most probable assignment, by the Hungarian method, now
+    `graph/min-cost-assignment`, checked against every permutation;
+  - a Rao-Blackwellized particle filter over association histories, a
+    Kalman filter per track (the filter now split into `kalman-forecast`
+    and `kalman-correct`).
+
+  Checks:
+  - On three scans the particles match the exact posterior, every
+    history enumerated, to 0.03.
+  - Over ten crossings a single assignment sometimes strays, while the
+    particles never do and have the least error.
+  - With false alarms and missed detections the nearest-neighbor filter
+    loses its tracks. The most probable assignment, with a column per
+    track for going unseen and blips put down to clutter, does better,
+    and the particles best of all.
+
+  Two bugs found on the way: zero false alarms times the log of zero
+  clutter made every explanation NaN, and the clutter cost went in with
+  its sign reversed, so the Hungarian method found the *least* probable
+  assignment.
+- *Citation matching* (15.2.3), `probability.identity`. An open-universe
+  model: citations fall into papers by the Chinese restaurant process,
+  each paper's words summed out word by word. The posterior over
+  groupings is exact by enumeration (the Bell numbers of them), and
+  sampled by Gibbs sweeps, which match it to 0.02.
+  - The section's own two Lashkari citations are the same paper with
+    probability 0.9998, from their author and title fields.
+  - The whole strings, venue and all, give 0.004: the section's point
+    that text similarity fails and the model must parse.
+  - Collective disambiguation: an ambiguous pair at 0.87 rises past 0.99
+    when a third citation sharing words with both is added.
+- *Seismic monitoring* (15.2.3), `probability.seismic`. NET-VISA's
+  structure on a ring of twelve stations: events of unknown number,
+  detections with probability falling with distance, arrival times, and
+  false alarms nine in ten. The one-event posterior is exact on a grid.
+  The bulletin takes the most probable event, removes the detections it
+  explains, and repeats.
+  - Two events are found and placed among the false alarms.
+  - A denser network places an event more tightly.
+  - From noise alone, chance alignments of a few detections suggest weak
+    events below magnitude 4.5. Real bulletins answer this by requiring
+    several defining stations, and so does this one, three by default.
+    Requiring nothing, and expecting two events a window, the bulletin
+    kept finding phantoms until the detections ran out.
+- *Reading text* (15.4), `probability.reading`. Figures 15.11 and 15.15's
+  generative programs:
+  - a Poisson count of letters, independent or bigram;
+  - a 5 by 7 bitmap font of my own;
+  - noise of uniform variance.
+
+  Inference is MCMC over traces: Gibbs over each letter, a data-driven
+  birth or death of the last letter, and the noise on a grid. The first
+  sampler grew a letter at a time with uniform proposals and had read
+  "unce" after 25 sweeps. With the new letter drawn from its conditional,
+  three runs of 25 read figure 15.13's "uncertainty".
+
+  Without blur the posterior is also exact: per position for independent
+  letters, by the forward algorithm and Viterbi for the bigram model. The
+  bigram model is estimated from 496 common English words. Checks:
+  - The exact posterior matches summing over every text and noise.
+  - MCMC matches the exact posterior to 0.05.
+  - On fifteen held-out words at noise 0.8 the bigram model's total edit
+    distance is 20 against independent letters' 32: figure 15.14's
+    lesson.
+
+  In the browser the alphabet came out wrong: `(int \a)` is not a code
+  point when characters are strings. It is now a literal string.
+
+The demo Open-Universe Models runs all five a step at a time.
+
+**Not implemented here:** GraphPlan, which the 4th
 edition dropped; partial-order planning; and the deep learning chapter's
 recurrent networks, attention and anything that needs a GPU.
 
@@ -1375,10 +1538,37 @@ has the arm's three controllers side by side, the pendulums open loop
 and under MPC, the peg's trials, the hexapod, a person's goal being
 guessed, and the laser teaching the camera.
 
-**Left out:** coastal navigation and information gain in the cost;
-domain randomization; the game-theoretic coordination of Figure 26.28;
-learning cost functions from demonstrations, which
-`decision.apprenticeship`'s inverse RL already does for MDPs.
+**Coastal navigation and domain randomization, later.**
+- `robotics.coastal` plans over the robot's belief, a cell and how
+  uncertain the robot is there. The spread grows a step at a time by dead
+  reckoning and falls to zero within range of a landmark. A step costs one
+  plus a weight times the spread: uncertainty in the cost, of which the
+  coastal heuristic is the simplest case. A goal may demand precision.
+
+  In a hall with landmarks along the top wall only:
+  - the shortest way along the floor arrives as lost as can be;
+  - a dock needing a spread of at most six sends the plan up to the
+    landmarks and down at the end;
+  - a dock needing five has no plan, the nearest landmark being six steps
+    away;
+  - weighting the spread keeps the robot by the landmarks at under half
+    the shortest way's mean spread.
+- `robotics.randomization`: sim-to-real transfer by domain randomization.
+  A delayed, force-limited mass is driven by u = -k1 x - k2 v, the gains
+  found by Nelder-Mead on the mean rollout cost.
+  - Searched in the nominal simulation, the gains are the better on the
+    nominal robot.
+  - On robots lighter than modeled they overshoot and shake: costs five
+    and more times the gains searched over thirty simulations of random
+    mass and friction.
+  - Their worst case over the masses is likewise far the worse.
+
+  The first try, with a short delay and a tight force limit, showed no
+  difference, because nothing in it made the nominal optimum fragile.
+
+**Left out:** the game-theoretic coordination of Figure 26.28; learning
+cost functions from demonstrations, which `decision.apprenticeship`'s
+inverse RL already does for MDPs.
 
 **Assistance games, later.** `allgo.decision.assistance` has the
 book's two: a robot serving a human whose preferences it does not know,
@@ -2526,11 +2716,12 @@ teaches.
 | Namespace                    | What it is                                                                  |
 |------------------------------|-----------------------------------------------------------------------------|
 | `allgo.logic.categories`     | Semantic networks: MemberOf and SubsetOf, boxed and double-boxed links, inheritance with overriding, reified events; Disjoint, ExhaustiveDecomposition, Partition |
-| `allgo.logic.description`    | CLASSIC without SameAs: normal forms, structural subsumption, incoherence, classification into a taxonomy, membership of individuals |
+| `allgo.logic.description`    | CLASSIC: normal forms, structural subsumption, SameAs by path rewriting, incoherence, classification into a taxonomy, membership of individuals |
 | `allgo.logic.events`         | The event calculus's T, Happens, Initiates, Terminates, Clipped, Restored; processes; the interval relations; the time scale and Date |
-| `allgo.logic.modal`          | Possible worlds and accessibility, K_a with nesting and quantifiers, checked by labeling; reflexive, transitive and symmetric frames |
+| `allgo.logic.modal`          | Possible worlds and accessibility, K_a with nesting and quantifiers, checked by labeling; reflexive, transitive and symmetric frames; necessity and possibility |
+| `allgo.logic.temporal`       | Linear temporal logic, X F G U and R, decided exactly on lasso behaviors; bounded model checking of transition systems |
 | `allgo.logic.defaults`       | Circumscription, plain and prioritized, as preferred models; default logic's extensions |
-| `allgo.logic.tms`            | A JTMS and an ATMS                                                          |
+| `allgo.logic.tms`            | A JTMS, with out-lists and their stable labelings, and an ATMS              |
 
 **Steps again.** Inheritance a node a step up the links; labeling a
 subsentence a step; the event calculus a time point a step; models one
@@ -2603,10 +2794,49 @@ under a JTMS -- the chapter's example, the consequences ours --
 Athletics moving from Bucharest to Sibiu, with the car's ATMS labels
 beside it.
 
+**The rest of chapter 10, later, from the 4th edition's text.**
+- *Linear temporal logic* (10.4.1), `logic.temporal`. X, F, G, U, and
+  release, one of the derived operators the section mentions.
+  - A behavior is a lasso, a prefix and a loop forever, on which every
+    formula is decided exactly by labeling its positions: Until as a
+    least fixed point, Release and Always as greatest.
+  - Six identities hold on 400 random behaviors: F as true U, G as not F
+    not, the release duality, the one-step unfoldings, and F G as not G
+    F not.
+  - Bounded model checking of a transition system finds that the naive
+    mutual-exclusion protocol lets both processes in, that taking turns
+    keeps them apart (over every behavior of up to twelve states), and
+    that taking turns does not promise a process its turn when the other
+    may idle forever.
+  - That last needed the system to allow stuttering. Without it every
+    step moves a process, starvation is impossible, and no
+    counterexample was found.
+- *Possibility and necessity* (10.4.1), in `logic.modal` beside
+  knowledge. They have an accessibility relation of their own, every
+  world possible from every other unless given. Checks:
+  - necessarily 2 + 2 = 4, possibly an author is sitting;
+  - each is the other's dual;
+  - "necessarily P implies P" fails where the relation is not reflexive.
+- *CLASSIC's SameAs* (3rd edition, figure 12.7), `logic.description`. A
+  role-value map whose equalities are closed under extension by roles:
+  the CEO's spouse is the president's if the CEO is the president.
+  Entailment is decided by rewriting path prefixes. Checks:
+  - subsumption both ways;
+  - congruence, symmetry and transitivity;
+  - an individual's membership checked by following its told fillers
+    along both paths.
+- *Out-lists* in the JTMS. Doyle's nonmonotonic justifications, the
+  chapter's "Tweety flies unless he is abnormal". Labelings are the
+  stable ones: guesses of which out-list nodes are in that the reduced
+  justifications reproduce. Checks:
+  - a bird flies;
+  - a penguin, abnormal, does not;
+  - retracting the penguin gives flight back;
+  - an odd loop, A unless A, has no labeling, and an even loop has two.
+
 **Not implemented here:** the ontology of measures, and of stuff and
-things, which the chapter gives as axioms rather than procedures;
-CLASSIC's SameAs; nonmonotonic justifications (out-lists) in the JTMS;
-and the 3rd edition's internet shopping agent, which the 4th dropped.
+things, which the chapter gives as axioms rather than procedures; and
+the 3rd edition's internet shopping agent, which the 4th dropped.
 
 ## A spatial index for the triangulation
 

@@ -21,6 +21,19 @@
            explanations: the car won't start because the battery is
            dead, or because the tank is empty
 
+  A JTMS justification may also have an out-list, `:out #{nodes}`: it
+  holds while its antecedents are in *and* those nodes are out -- Doyle's
+  nonmonotonic justifications, the chapter's \"Tweety flies unless he is
+  abnormal.\" Then a node's being in can depend on another's being out, a
+  network may have no consistent labeling or several, and the incremental
+  algorithm no longer applies. `labelings` gives every well-founded one:
+  a guess of which out-list nodes are in, kept when the least set the
+  justifications support -- those whose out-lists the guess leaves out,
+  their out-lists then dropped -- is that guess again (a stable model,
+  as Gelfond and Lifschitz put it). A network with out-lists is
+  relabeled so on every change: its unique labeling, or with several the
+  first, `:labelings` saying how many there were.
+
   Both run a step at a time: a node, or a justification, off a queue.
   Sentences are any values -- keywords here, `:P` and `:P=>Q` -- and a
   justification `{:antecedents #{nodes} :consequent node}`; `rules`
@@ -58,7 +71,7 @@
   {:justifications (vec justifications) :enabled #{} :in #{}})
 
 (defn- supported? [{:keys [justifications in]} n]
-  (some #(and (= n (:consequent %)) (every? in (:antecedents %))) justifications))
+  (some #(and (= n (:consequent %)) (every? in (:antecedents %)) (not-any? in (:out %))) justifications))
 
 (defn- consequents-of [{:keys [justifications]} n]
   (distinct (map :consequent (filter #(contains? (:antecedents %) n) justifications))))
@@ -113,8 +126,45 @@
                                      (update :in disj node)
                                      (assoc :phase :out :queue [node] :marked #{} :pending [] :node node :changed [node]))))))
 
-(defn enable [tms & nodes] (reduce #(-> (last (enable-seq %1 %2)) (dissoc :queue :phase :marked :pending)) tms nodes))
-(defn retract [tms & nodes] (reduce #(-> (last (retract-seq %1 %2)) (dissoc :queue :phase :marked :pending)) tms nodes))
+(defn- closure-step
+  "Bring in every node a justification of `justs` now supports; nil once
+  none is new."
+  [justs in]
+  (let [in' (into in (keep #(when (every? in (:antecedents %)) (:consequent %))) justs)]
+    (when (not= in in') in')))
+
+(defn- least-labeling
+  "The least set containing `enabled` and closed under `justs`."
+  [justs enabled]
+  (last (search/step-seq (partial closure-step justs) (set enabled))))
+
+(defn labelings
+  "Every well-founded labeling of a JTMS whose justifications may have
+  out-lists, as sets of the nodes in."
+  [{:keys [justifications enabled]}]
+  (let [out-nodes (vec (distinct (mapcat :out justifications)))
+        guesses (reduce (fn [gs n] (concat gs (map #(conj % n) gs))) [#{}] out-nodes)]
+    (distinct (for [guess guesses
+                    :let [reduct (for [j justifications :when (not-any? guess (:out j))] (dissoc j :out))
+                          in (least-labeling reduct enabled)]
+                    :when (= guess (set (filter in out-nodes)))]
+                in))))
+
+(defn- nonmonotonic? [{:keys [justifications]}] (some (comp seq :out) justifications))
+
+(defn- relabel [tms]
+  (let [ls (labelings tms)]
+    (assoc tms :in (or (first ls) (set (:enabled tms))) :labelings (count ls))))
+
+(defn enable [tms & nodes]
+  (if (nonmonotonic? tms)
+    (relabel (update tms :enabled into nodes))
+    (reduce #(-> (last (enable-seq %1 %2)) (dissoc :queue :phase :marked :pending)) tms nodes)))
+
+(defn retract [tms & nodes]
+  (if (nonmonotonic? tms)
+    (relabel (update tms :enabled #(reduce disj % nodes)))
+    (reduce #(-> (last (retract-seq %1 %2)) (dissoc :queue :phase :marked :pending)) tms nodes)))
 (defn in? [tms node] (contains? (:in tms) node))
 
 ;; ---------------------------------------------------------------------------

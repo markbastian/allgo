@@ -1,5 +1,6 @@
 (ns allgo.decision.mdp-test
   (:require [allgo.decision.mdp :as mdp]
+            [allgo.numerics.linear :as lin]
             [clojure.test :refer [deftest is testing]]))
 
 ;; The 4 x 3 world of Russell and Norvig, *Artificial Intelligence: A
@@ -53,3 +54,43 @@
             k (range 21)
             :let [b [(/ k 20.0) (- 1.0 (/ k 20.0))]]]
       (is (< (abs (- (mdp/pomdp-value plans b) (lookahead pomdp b depth))) 1e-9) [depth b]))))
+
+(def ^:private three-state
+  "A POMDP of three states, two actions and two percepts, made up: no
+  lattice of beliefs prunes it exactly, a linear program does."
+  {:transition [[[0.7 0.2 0.1] [0.1 0.8 0.1] [0.2 0.2 0.6]]
+                [[0.3 0.3 0.4] [0.5 0.25 0.25] [0.1 0.1 0.8]]]
+   :sensor [[[0.9 0.1] [0.4 0.6] [0.2 0.8]]
+            [[0.6 0.4] [0.6 0.4] [0.1 0.9]]]
+   :reward [[4 -2 1] [-1 3 2]]
+   :gamma 0.9})
+
+(defn- lookahead-n
+  "Expectimax over beliefs to depth `d`, for any number of states."
+  [{:keys [transition sensor reward gamma] :as p} b d]
+  (if (zero? d)
+    0.0
+    (let [n (count b)]
+      (apply max (for [a (range (count reward))]
+                   (+ (reduce + (map * b (reward a)))
+                      (* gamma (reduce + (for [e (range (count (get-in sensor [0 0])))
+                                               :let [pe (reduce + (for [s (range n) s2 (range n)]
+                                                                    (* (b s) (get-in transition [a s s2]) (get-in sensor [a s2 e]))))]
+                                               :when (pos? pe)]
+                                           (* pe (lookahead-n p (mdp/update-belief p b a e) (dec d))))))))))))
+
+(deftest exact-pruning
+  (testing "with three states, the pruned plans are worth what expectimax says at every belief tried"
+    (let [rng (java.util.Random. 5)
+          beliefs (for [_ (range 30)] (let [w (repeatedly 3 #(.nextDouble rng)) z (reduce + w)] (mapv #(/ % z) w)))]
+      (doseq [{:keys [plans depth]} (take 4 (mdp/pomdp-value-iteration-seq three-state 0.1))
+              b beliefs]
+        (is (< (abs (- (mdp/pomdp-value plans b) (lookahead-n three-state b depth))) 1e-9) [depth b]))))
+  (testing "a plan is kept exactly when some belief prefers it: each kept one is the best somewhere, and none dropped ever beats every kept one"
+    (let [plans (:plans (nth (mdp/pomdp-value-iteration-seq three-state 0.1) 3))
+          grid (for [i (range 41) j (range (- 41 i))] [(/ i 40.0) (/ j 40.0) (/ (- 40 i j) 40.0)])
+          deeper (#'mdp/deeper three-state (vec (map-indexed (fn [i p] (assoc p :id i)) plans)))
+          kept (mdp/prune deeper)]
+      (is (< (count kept) (count (distinct (map :alpha deeper)))) "some were dropped")
+      (doseq [b grid]
+        (is (< (- (apply max (map #(lin/dot (:alpha %) b) deeper)) (mdp/pomdp-value kept b)) 1e-9))))))

@@ -145,19 +145,34 @@
 ;; ---------------------------------------------------------------------------
 ;; Kalman filtering
 
+(defn kalman-forecast
+  "The Gaussian `[mean cov]` carried through x' = F x + noise of
+  covariance Q: the Kalman filter's prediction."
+  [{:keys [F Q]} [mean cov]]
+  [(lin/mat-vec F mean)
+   (lin/mat-add (lin/mat-mul (lin/mat-mul F cov) (lin/transpose F)) Q)])
+
+(defn kalman-observation
+  "What the forecast `[mean cov]` expects to observe through z = H x +
+  noise of covariance R: `[H mean, S]`, S the innovation covariance."
+  [{:keys [H R]} [mean cov]]
+  [(lin/mat-vec H mean) (lin/mat-add (lin/mat-mul (lin/mat-mul H cov) (lin/transpose H)) R)])
+
+(defn kalman-correct
+  "The forecast `[mean cov]` corrected by the observation `z`: the Kalman
+  filter's update."
+  [{:keys [H] :as model} [mean cov] z]
+  (let [[expected S] (kalman-observation model [mean cov])
+        K (lin/mat-mul (lin/mat-mul cov (lin/transpose H)) (lin/spd-inverse S))]
+    [(lin/add mean (lin/mat-vec K (lin/sub z expected)))
+     (lin/mat-mul (lin/mat-sub (lin/eye (count mean)) (lin/mat-mul K H)) cov)]))
+
 (defn kalman-step
   "One step of the Kalman filter: the Gaussian `[mean cov]` predicted
   through x' = F x + noise of covariance Q, and corrected by the
   observation z = H x + noise of covariance R."
-  [{:keys [F Q H R]} [mean cov] z]
-  (let [mean- (lin/mat-vec F mean)
-        cov- (lin/mat-add (lin/mat-mul (lin/mat-mul F cov) (lin/transpose F)) Q)
-        S (lin/mat-add (lin/mat-mul (lin/mat-mul H cov-) (lin/transpose H)) R)
-        K (lin/mat-mul (lin/mat-mul cov- (lin/transpose H)) (lin/spd-inverse S))
-        innovation (lin/sub z (lin/mat-vec H mean-))
-        mean' (lin/add mean- (lin/mat-vec K innovation))
-        cov' (lin/mat-mul (lin/mat-sub (lin/eye (count mean)) (lin/mat-mul K H)) cov-)]
-    [mean' cov']))
+  [model belief z]
+  (kalman-correct model (kalman-forecast model belief) z))
 
 (defn kalman-seq
   "The Kalman filter's `[mean cov]` after each observation, from the prior

@@ -12,8 +12,8 @@
     POMDP value        POMDP-VALUE-ITERATION (figure 17.16): utility as a
     iteration          set of conditional plans, each an alpha vector; a
                        step the plans one action deeper, those no belief
-                       prefers removed -- checked over a fine lattice of
-                       beliefs, see `prune`
+                       prefers removed -- each asked by a linear program,
+                       see `prune`
 
   An MDP is a map:
 
@@ -27,6 +27,7 @@
   `grid-mdp` makes one of the chapter's grid worlds; `four-by-three` is
   its 4 x 3 world as aima-python (MIT) states it."
   (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.optimize :as opt]
             [allgo.search :as search]))
 
 ;; ---------------------------------------------------------------------------
@@ -175,31 +176,46 @@
         total (reduce + updated)]
     (if (pos? total) (mapv #(/ % total) updated) predicted)))
 
-(defn- lattice
-  "Every belief over `n` states whose probabilities are multiples of
-  1/`r`: the corners of the simplex, its midpoints, and a fine net
-  between."
-  [n r]
-  (letfn [(parts [k left]
-            (if (= k 1)
-              [[left]]
-              (for [i (range (inc left)) rest (parts (dec k) (- left i))] (cons i rest))))]
-    (mapv (fn [p] (mapv #(/ (double %) r) p)) (parts n r))))
+(defn- witness-margin
+  "How much better than every plan in `others` the plan `alpha` can be at
+  some belief: the linear program maximizing d over beliefs b and d >= 0,
+  b . alpha >= b . alpha' + d for each other alpha', the b summing to
+  one. Zero if no belief prefers it strictly."
+  [alpha others]
+  (if (empty? others)
+    ##Inf
+    (let [n (count alpha)
+          A (vec (concat (for [o others] (conj (mapv - o alpha) 1.0))
+                         [(conj (vec (repeat n 1.0)) 0.0)]))
+          b (vec (concat (repeat (count others) 0.0) [1.0]))
+          kinds (vec (concat (repeat (count others) :<=) [:=]))
+          {:keys [value status]} (opt/linear-program (conj (vec (repeat n 0.0)) -1.0) A b {:kinds kinds})]
+      (if status 0.0 (- value)))))
+
+(defn- dominated?
+  "Whether `a` is no better than `b` at every state."
+  [a b]
+  (every? true? (map <= a b)))
+
+(defn- prune-step
+  "One plan considered: dropped if no belief prefers it strictly to the
+  plans still kept."
+  [kept i]
+  (let [alpha (:alpha (kept i))
+        others (keep (fn [[j p]] (when (not= i j) (:alpha p))) kept)]
+    (if (> (witness-margin alpha others) 1e-9) kept (dissoc kept i))))
 
 (defn prune
-  "REMOVE-DOMINATED-PLANS, approximately: the plans, `{:alpha :action
-  ...}`, that are the best at some belief of a lattice of spacing 1/`r`
-  (default 200). Exact pruning asks a linear program of each plan whether
-  any belief prefers it; over hundreds of plans that was slow here, and
-  failed, so this checks a net of beliefs instead -- exact up to the
-  spacing for two states, an approximation beyond."
-  ([plans] (prune plans 200))
-  ([plans r]
-   (let [plans (mapv first (vals (group-by :alpha plans)))
-         n (count (:alpha (first plans)))
-         r (if (> n 3) (max 4 (quot 60 n)) r)
-         best (fn [b] (apply max-key #(lin/dot (:alpha %) b) plans))]
-     (vec (distinct (map best (lattice n r)))))))
+  "REMOVE-DOMINATED-PLANS, exactly: the plans, `{:alpha :action ...}`,
+  each the best at some belief. Duplicates and plans dominated state by
+  state go first; then each remaining plan is asked by a linear program
+  whether any belief prefers it to the plans still kept -- one at a time,
+  so that of plans tying over a region one survives."
+  [plans]
+  (let [plans (mapv first (vals (group-by :alpha plans)))
+        survivors (vec (remove (fn [p] (some #(and (not= (:alpha %) (:alpha p)) (dominated? (:alpha p) (:alpha %))) plans)) plans))
+        kept (reduce prune-step (into (sorted-map) (map-indexed vector survivors)) (range (count survivors)))]
+    (vec (vals kept))))
 
 (defn- deeper
   "Every plan one step deeper: an action, then for each percept one of

@@ -135,3 +135,84 @@
             direct (adv/alpha-beta c4 s {:depth 5 :order? true})]
         (is (= 5 (:depth end)))
         (is (< (abs (- (:value direct) (:value end))) 1e-12))))))
+
+;; ---------------------------------------------------------------------------
+;; Monte Carlo by line of play, and under hidden information (ISMCTS)
+
+(deftest monte-carlo-by-path-test
+  (testing "keyed by line of play rather than state, it still takes a win and blocks a loss"
+    (let [ttt games/tic-tac-toe
+          win (games/play ttt [0 3 1 4])
+          block (games/play ttt [0 3 8 4])]
+      (is (= 2 (:best (adv/monte-carlo ttt win 2000 {:node-key :path}))))
+      (is (= 5 (:best (adv/monte-carlo ttt block 2000 {:node-key :path}))))))
+  (testing "cut off and evaluated, on Connect Four"
+    (let [c4 games/connect-four]
+      (is (= 0 (:best (adv/monte-carlo c4 (games/play c4 [0 1 0 1 0 1]) 1500 {:node-key :path :cutoff 6}))))
+      (is (= 0 (:best (adv/monte-carlo c4 (games/play c4 [0 1 0 1 0]) 1500 {:node-key :path :cutoff 6}))))))
+  (testing "never loses to a random player at tic-tac-toe"
+    (let [ttt games/tic-tac-toe]
+      (doseq [k (range 1 11)]
+        (let [rng (random/rng k)
+              end (loop [s (:initial ttt)]
+                    (if ((:terminal? ttt) s)
+                      s
+                      (recur ((:result ttt) s
+                                            (if (= :x (:to-move s))
+                                              (:best (adv/monte-carlo ttt s 400 {:rng rng :node-key :path}))
+                                              (random/pick rng ((:actions ttt) s)))))))]
+          (is (not= :o (:winner end)) k)))))
+  (testing "the same seed, the same search"
+    (let [s (games/play games/connect-four [3 3])
+          run #(adv/monte-carlo games/connect-four s 300 {:rng (random/rng 5) :cutoff 4 :node-key :path})]
+      (is (= (run) (run))))))
+
+(def ^:private coin-game
+  "A coin lies hidden under O's hand; X may guess it, for +1 if right and
+  -1 if wrong, or pass, for a sure +0.2. Guessing is worth nothing to a
+  player who cannot see the coin, and everything to one who can."
+  (let [value {:pass 0.2}]
+    {:to-move :to-move
+     :actions (fn [{:keys [done]}] (if done [] [:heads :tails :pass]))
+     :result (fn [s a] (assoc s :done a :to-move :o))
+     :terminal? (comp some? :done)
+     :utility (fn [{:keys [coin done]} player]
+                (let [u (get value done (if (= done coin) 1.0 -1.0))]
+                  (if (= player :x) u (- u))))
+     :determinize (fn [s _player rng] (assoc s :coin (random/pick rng [:heads :tails])))}))
+
+(deftest monte-carlo-does-not-peek-test
+  (let [s {:coin :tails :to-move :x :done nil}]
+    (testing "a game with :determinize is searched by line of play unless told otherwise"
+      (is (= :path (:node-key (first (adv/monte-carlo-seq coin-game s)))))
+      (is (= :state (:node-key (first (adv/monte-carlo-seq (dissoc coin-game :determinize) s))))))
+    (testing "searching what X knows, X passes"
+      (is (= :pass (:best (adv/monte-carlo coin-game s 2000)))))
+    (testing "searching the true state -- cheating -- X calls the coin"
+      (is (= :tails (:best (adv/monte-carlo (dissoc coin-game :determinize) s 2000)))))
+    (testing "and the values say why: a guess is worth about nothing blind"
+      (let [{:keys [moves]} (adv/monte-carlo coin-game s 4000)]
+        (is (< (abs (:q (moves :heads))) 0.2))
+        (is (< (abs (:q (moves :tails))) 0.2))))))
+
+(def ^:private sometimes-game
+  "X may always :wait (worth 0), and may :strike (worth +0.5) only when
+  the hidden die is even -- which X cannot see."
+  {:to-move :to-move
+   :actions (fn [{:keys [done die]}] (cond done [] (even? die) [:wait :strike] :else [:wait]))
+   :result (fn [s a] (assoc s :done a))
+   :terminal? (comp some? :done)
+   :utility (fn [{:keys [done]} p] (let [u (if (= done :strike) 0.5 0.0)] (if (= p :x) u (- u))))
+   :determinize (fn [s _ rng] (assoc s :die (inc (random/below rng 6))))})
+
+(deftest monte-carlo-availability-test
+  (let [st (nth (adv/monte-carlo-seq sometimes-game {:die 2 :to-move :x :done nil} {}) 2000)
+        {:keys [moves best]} (adv/monte-carlo-choice st)]
+    (testing "an action legal in about half the worlds was available about half the time"
+      (is (< 800 (:avail (moves :strike)) 1200))
+      (is (= 2000 (:avail (moves :wait)))))
+    (testing "every count is no more than its availability"
+      (doseq [[_ {:keys [n avail]}] moves] (is (<= n avail))))
+    (testing "and where it is legal it is the better move, so it is the most played of its chances"
+      (is (> (:q (moves :strike)) (:q (moves :wait))))
+      (is (= :wait best) "wait is always there, so it is played in every world where strike is not"))))

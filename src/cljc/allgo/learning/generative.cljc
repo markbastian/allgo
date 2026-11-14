@@ -38,6 +38,7 @@
             [allgo.learning.neural :as nn]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
+            [allgo.probability.gaussian :as gaussian]
             [allgo.random :as random]
             [clojure.math :as math]))
 
@@ -50,14 +51,6 @@
 (defn- trace [M] (reduce + (map-indexed (fn [i row] (row i)) M)))
 
 (defn- gaussians [rng n] (vec (repeatedly n #(random/gaussian rng 0.0 1.0))))
-
-(defn- gaussian-log-density
-  "log N(x; mu, C), C symmetric positive definite."
-  [mu C x]
-  (let [L (lin/cholesky C) r (lin/sub x mu)]
-    (* -0.5 (+ (* (count x) (math/log (* 2.0 math/PI)))
-               (* 2.0 (reduce + (map-indexed (fn [i row] (math/log (row i))) L)))
-               (lin/dot r (lin/cholesky-solve C r))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Probabilistic PCA
@@ -96,7 +89,7 @@
   "log P(x) under the model, equation 21.16: N(x; mean, W W^T + sigma^2
   I). Data the model finds very improbable are potential anomalies."
   [model x]
-  (gaussian-log-density (:mean model) (ppca-covariance model) x))
+  (gaussian/log-density (:mean model) (ppca-covariance model) x))
 
 (defn ppca-log-likelihood [model X] (reduce + (map #(ppca-log-density model %) X)))
 
@@ -266,7 +259,7 @@
   bound is below: N(x; bo, Wo^T Wo + noise I)."
   [{:keys [params noise-var]} x]
   (let [{:keys [Wo bo]} params]
-    (gaussian-log-density (first bo) (lin/mat-add (lin/mat-mul (lin/transpose Wo) Wo) (lin/mat-scale (lin/eye (count x)) noise-var)) x)))
+    (gaussian/log-density (first bo) (lin/mat-add (lin/mat-mul (lin/transpose Wo) Wo) (lin/mat-scale (lin/eye (count x)) noise-var)) x)))
 
 ;; ---------------------------------------------------------------------------
 ;; Autoregressive models

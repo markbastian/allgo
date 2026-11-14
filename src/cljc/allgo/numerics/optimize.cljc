@@ -423,8 +423,28 @@
                                    (when (> a 1e-12) [(/ (peek (T i)) a) (basis i) i])))
                          (range (dec (count T))))]
           (when (seq rows)
-            (let [[_ _ r] (first (sort rows))]
+            ;; the least ratio, ties -- to a tolerance, rounding being
+            ;; what it is -- going to the lowest-indexed basic variable
+            (let [least (reduce min (map first rows))
+                  [_ _ r] (first (sort-by second (filter #(<= (first %) (+ least (* 1e-11 (max 1.0 (abs least))))) rows)))]
               (recur (pivot T r c) (assoc basis r c)))))))))
+
+(defn- drive-out-artificials
+  "After phase one, an artificial variable still basic -- at zero, the
+  problem being feasible -- pivoted out on any column of its row below
+  `limit` with a nonzero entry; a row with none is redundant, a linear
+  combination of the others, and is dropped. Otherwise dropping the
+  artificial columns would leave a row whose basic variable is gone,
+  as degenerate problems do."
+  [T basis limit]
+  (reduce (fn [[T basis] i]
+            (if (< (basis i) limit)
+              [T basis]
+              (if-let [c (first (filter #(> (abs (get-in T [i %])) 1e-9) (range limit)))]
+                [(pivot T i c) (assoc basis i c)]
+                [(assoc T i nil) (assoc basis i nil)])))
+          [T basis]
+          (range (count basis))))
 
 (defn linear-program
   "The linear program: minimize c . x subject to the rows of `A` against
@@ -468,8 +488,11 @@
        (and (pos? na) (> (abs (peek (peek T1))) 1e-9)) {:status :infeasible}
        :else
        (let [T1 (if (pos? na) (pop T1) T1)
-             ;; drop the artificial columns
              keep-cols (+ n ns)
+             [T1 basis1] (drive-out-artificials T1 basis1 keep-cols)
+             T1 (vec (remove nil? T1)) basis1 (vec (remove nil? basis1))
+             m (count T1)
+             ;; drop the artificial columns
              T1 (mapv #(conj (subvec % 0 keep-cols) (peek %)) T1)
              obj (vec (concat c (repeat ns 0.0) [0.0]))
              ;; the objective row, reduced by the basic columns

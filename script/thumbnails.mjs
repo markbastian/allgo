@@ -44,7 +44,7 @@ const SETTLE = { fire: 12000, dla: 15000, erosion: 12000, flip: 9000,
                  knowledge: 4000, "contract-net": 40000, probabilistic: 9000,
                  "grid-navigation": 9000, "many-robots": 8000, "car-paths": 4000, sampling: 20000,
                  "pursuit-evasion": 45000, "canny-roadmap": 12000,
-                 "algebraic-decomposition": 12000 };
+                 "algebraic-decomposition": 12000, "open-universe": 12000 };
 const DEFAULT_SETTLE = 6000;
 
 // How far to zoom toward the middle, for the demos whose subject is small

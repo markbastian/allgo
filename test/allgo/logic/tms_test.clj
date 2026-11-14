@@ -64,3 +64,22 @@
   (testing "minimal environments: a sentence explained by A alone is not also by A and B"
     (let [a (tms/atms [:A :B] [] (tms/horn "A => X" "A & B => X"))]
       (is (= #{#{:A}} ((tms/labels a) :X))))))
+
+(deftest out-lists
+  (let [birds (tms/jtms [{:antecedents #{:bird} :out #{:abnormal} :consequent :flies}
+                         {:antecedents #{:penguin} :consequent :abnormal}
+                         {:antecedents #{:penguin} :consequent :bird}])]
+    (testing "Tweety flies unless he is abnormal: a bird flies"
+      (is (tms/in? (tms/enable birds :bird) :flies)))
+    (testing "learning more takes a belief away -- a penguin is a bird, but abnormal, and does not fly"
+      (let [t (tms/enable birds :bird :penguin)]
+        (is (tms/in? t :abnormal))
+        (is (not (tms/in? t :flies)))))
+    (testing "and retracting that gives it back"
+      (is (tms/in? (tms/retract (tms/enable birds :bird :penguin) :penguin) :flies))))
+  (testing "a node in only if it is out has no consistent labeling; two each in unless the other is have two"
+    (is (empty? (tms/labelings (tms/enable (tms/jtms [{:antecedents #{} :out #{:a} :consequent :a}]) :start))))
+    (let [t (tms/enable (tms/jtms [{:antecedents #{} :out #{:b} :consequent :a}
+                                   {:antecedents #{} :out #{:a} :consequent :b}]) :start)]
+      (is (= #{#{:start :a} #{:start :b}} (set (tms/labelings t))))
+      (is (= 2 (:labelings t))))))

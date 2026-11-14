@@ -2,19 +2,22 @@
   "Description logic: Russell and Norvig, *Artificial Intelligence: A
   Modern Approach*, 4th edition, chapter 10 (chapter 12 of the 3rd
   edition, whose text this follows) -- the subset of the CLASSIC language
-  its figure gives, less SameAs.
+  its figure gives.
 
     concepts        `:Thing`, a concept name (a keyword), `[:and c ...]`,
                     `[:all role c]`, `[:at-least n role]`, `[:at-most n
                     role]`, `[:fills role individual ...]`, `[:one-of
-                    individual ...]`; a TBox maps defined names to their
+                    individual ...]`, `[:same-as path path]`, a path a
+                    vector of roles -- the fillers reached along one the
+                    same as along the other; a TBox maps defined names to their
                     definitions -- `{:Bachelor [:and :Unmarried :Adult
                     :Male]}` -- and names it does not define are primitive
     normal form     a concept expanded and its constraints gathered: the
                     primitives it needs, for each role the least and most
                     fillers allowed, the fillers it must have and the
                     concept every filler must be, and the individuals it
-                    may be one of. A concept whose constraints conflict --
+                    may be one of, and the path equalities it states. A
+                    concept whose constraints conflict --
                     at least three sons and at most two -- is incoherent
     subsumption     C subsumes D when every D is a C: structurally, when
                     each of C's constraints follows from D's, which takes
@@ -26,11 +29,20 @@
                     told of it, its role fillers taken as all it has
 
   The chapter notes that CLASSIC states no subset links: one category
-  falls under another only because their descriptions say so."
+  falls under another only because their descriptions say so.
+
+  SameAs is a role-value map: `[:same-as [:ceo] [:president]]`, a
+  company whose CEO is its president. Equal paths stay equal extended by
+  the same roles -- the CEO's spouse is the president's -- so whether a
+  concept's equalities entail another's is decided by rewriting: from one
+  path, replace a prefix that an equality names by its other side, and
+  see whether the second path is reached (searching paths no longer than
+  the two and the longest equality together). Entailment here is from
+  the stated equalities alone."
   (:require [allgo.search :as search]
             [clojure.set :as set]))
 
-(def ^:private top {:prims #{} :roles {} :one-of nil})
+(def ^:private top {:prims #{} :roles {} :one-of nil :same-as #{}})
 
 (defn- role-constraint [] {:at-least 0 :at-most nil :fills #{} :all nil})
 
@@ -51,10 +63,11 @@
             {:prims (into (:prims a) (:prims b))
              :roles (merge-with merge-role (:roles a) (:roles b))
              :one-of (cond (nil? (:one-of a)) (:one-of b) (nil? (:one-of b)) (:one-of a)
-                           :else (set/intersection (:one-of a) (:one-of b)))})]
+                           :else (set/intersection (:one-of a) (:one-of b)))
+             :same-as (into (set (:same-as a)) (:same-as b))})]
     (both a b)))
 
-(defn- with-role [role f] {:prims #{} :roles {role (f (role-constraint))} :one-of nil})
+(defn- with-role [role f] (assoc top :roles {role (f (role-constraint))}))
 
 (defn normalize
   "The normal form of concept `c` under `tbox`: `{:prims #{names} :roles
@@ -73,7 +86,9 @@
         :at-least (let [[n role] args] (with-role role #(assoc % :at-least n)))
         :at-most (let [[n role] args] (with-role role #(assoc % :at-most n)))
         :fills (let [[role & inds] args] (with-role role #(assoc % :fills (set inds) :at-least (count (set inds)))))
-        :one-of (assoc top :one-of (set args))))))
+        :one-of (assoc top :one-of (set args))
+        :same-as (let [[p q] args]
+                   (if (= p q) top (assoc top :same-as #{#{(vec p) (vec q)}})))))))
 
 (defn incoherent?
   "Whether nothing can be a normal-form concept `n`: a role allowed fewer
@@ -87,9 +102,32 @@
                   (and all (seq fills) (some? (:one-of all)) (not (set/subset? fills (:one-of all))))))
             (:roles n))))
 
+(defn- rewrite-neighbors
+  "The paths one rewrite from `path` by the equalities `eqs`: a prefix
+  that one side of an equality names replaced by the other side, no
+  longer than `limit`."
+  [eqs limit path]
+  (distinct (for [eq eqs
+                  :let [[a b] (vec eq)]
+                  [from to] [[a b] [b a]]
+                  :when (and (<= (count from) (count path)) (= from (subvec path 0 (count from))))
+                  :let [p (into to (subvec path (count from)))]
+                  :when (<= (count p) limit)]
+              p)))
+
+(defn- entails-same?
+  "Whether the path equalities `eqs` entail that `p` and `q` reach the
+  same fillers."
+  [eqs [p q]]
+  (or (= p q)
+      (let [limit (+ (max (count p) (count q)) (reduce max 0 (map #(reduce max (map count %)) eqs)))]
+        (boolean (search/goal-state
+                  (search/breadth-first-seq {:start p :goal? #(= % q) :neighbors (partial rewrite-neighbors eqs limit)}))))))
+
 (defn- subsumes-normal? [c d]
   (or (incoherent? d)
       (and (set/subset? (:prims c) (:prims d))
+           (every? #(entails-same? (:same-as d) (vec %)) (:same-as c))
            (or (nil? (:one-of c)) (and (some? (:one-of d)) (set/subset? (:one-of d) (:one-of c))))
            (every? (fn [[role rc]]
                      (let [rd (merge (role-constraint) (get-in d [:roles role]))
@@ -149,9 +187,15 @@
   [tbox & extra]
   (:parents (last (apply classify-seq tbox extra))))
 
+(defn- reached
+  "The individuals reached from `inds` along `path` by the told fillers."
+  [abox inds path]
+  (reduce (fn [inds role] (set (mapcat #(get-in abox [% :fills role]) inds))) (set inds) path))
+
 (defn- instance-normal? [abox n ind]
   (let [{:keys [prims fills]} (get abox ind)]
     (and (set/subset? (:prims n) (set prims))
+         (every? (fn [eq] (let [[p q] (vec eq)] (= (reached abox [ind] p) (reached abox [ind] q)))) (:same-as n))
          (or (nil? (:one-of n)) (contains? (:one-of n) ind))
          (every? (fn [[role {:keys [at-least at-most all] rf :fills}]]
                    (let [have (set (get fills role))]

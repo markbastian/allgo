@@ -3,8 +3,10 @@
   the Legendre functions -- associated, and the derivatives of the
   polynomials that Pines's gravity formulation is written in -- and the
   gamma and incomplete beta functions that statistics needs, with
-  Student's t distribution built on them."
-  (:require [clojure.math :as math]))
+  Student's t distribution built on them; and the error function, with
+  the normal distribution built on it."
+  (:require [allgo.search :as search]
+            [clojure.math :as math]))
 
 (defn bessel-i
   "The modified Bessel function of the first kind, I_n(x), for integer n >=
@@ -124,3 +126,65 @@
       (let [m (* 0.5 (+ lo hi))]
         (if (or (> i 200) (< (- hi lo) 1e-13)) m
             (if (neg? (f m)) (recur m hi (inc i)) (recur lo m (inc i))))))))
+
+;; ------------------------------------------------------- error function
+
+(defn- erf-series-step
+  "The next term of erf's series with every term positive, x e^(-x^2)
+  times the sum of (2x^2)^n / (1 3 5 ... (2n+1)), and the sum so far."
+  [x2 {:keys [term sum n] :as state}]
+  (when (> (abs term) (* 1e-17 (abs sum)))
+    (let [term (/ (* term 2.0 x2) (+ (* 2.0 n) 3.0))]
+      (assoc state :term term :sum (+ sum term) :n (inc n)))))
+
+(defn- erf-series [x]
+  (let [{:keys [sum]} (last (search/step-seq (partial erf-series-step (* x x)) {:term x :sum x :n 0}))]
+    (* (/ 2.0 (math/sqrt math/PI)) (math/exp (- (* x x))) sum)))
+
+(defn- erfc-fraction-step
+  "One step of Lentz's method on the continued fraction x + (1/2)/(x +
+  1/(x + (3/2)/(x + ...))), the k-th partial numerator k/2."
+  [x {:keys [f c d k] :as state}]
+  (let [a (* 0.5 k)
+        d (let [d (+ x (* a d))] (/ 1.0 (if (zero? d) 1e-300 d)))
+        c (let [c (+ x (/ a c))] (if (zero? c) 1e-300 c))
+        delta (* c d)]
+    (when (> (abs (- delta 1.0)) 1e-16)
+      (assoc state :f (* f delta) :c c :d d :k (inc k)))))
+
+(defn- erfc-fraction
+  "erfc of x >= 2.5: e^(-x^2) / (sqrt(pi) times the continued fraction)."
+  [x]
+  (let [{:keys [f]} (last (take 500 (search/step-seq (partial erfc-fraction-step x) {:f x :c x :d 0.0 :k 1})))]
+    (/ (math/exp (- (* x x))) (* (math/sqrt math/PI) f))))
+
+(defn erfc
+  "The complementary error function, 1 - erf(x): by the continued
+  fraction from x = 2.5 on, keeping its tiny values' relative precision,
+  and by erf's series below."
+  [x]
+  (cond (>= x 2.5) (erfc-fraction x)
+        (>= x 0.0) (- 1.0 (erf-series x))
+        (> x -2.5) (+ 1.0 (erf-series (- x)))
+        :else (- 2.0 (erfc-fraction (- x)))))
+
+(defn erf
+  "The error function, 2/sqrt(pi) times the integral of e^(-t^2) from 0
+  to x: by its series with every term positive near the origin, by erfc's
+  continued fraction beyond 2.5."
+  [x]
+  (cond (>= x 2.5) (- 1.0 (erfc-fraction x))
+        (<= x -2.5) (- (erfc-fraction (- x)) 1.0)
+        (neg? x) (- (erf-series (- x)))
+        :else (erf-series x)))
+
+(defn normal-pdf
+  "The standard normal density at `x`."
+  [x]
+  (/ (math/exp (* -0.5 x x)) (math/sqrt (* 2.0 math/PI))))
+
+(defn normal-cdf
+  "The probability that a standard normal is below `x`, from erfc, so
+  that the far tails keep their relative precision."
+  [x]
+  (* 0.5 (erfc (- (/ x (math/sqrt 2.0))))))

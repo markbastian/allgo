@@ -55,6 +55,7 @@
             [allgo.demo.many-robots :as many-robots]
             [allgo.demo.motion-planning :as motion-planning]
             [allgo.demo.motorcycle :as motorcycle]
+            [allgo.demo.open-universe :as open-universe]
             [allgo.demo.orbit-determination :as od]
             [allgo.demo.planet :as planet]
             [allgo.demo.probabilistic :as probabilistic]
@@ -101,6 +102,7 @@
    "contract-net" {:start contract-net/start! :stop contract-net/stop!}
    "uncertain-decisions" {:start uncertain-decisions/start! :stop uncertain-decisions/stop!}
    "probabilistic" {:start probabilistic/start! :stop probabilistic/stop!}
+   "open-universe" {:start open-universe/start! :stop open-universe/stop!}
    "language" {:start language/start! :stop language/stop!}
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}

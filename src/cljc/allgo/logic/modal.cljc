@@ -22,7 +22,15 @@
 
   The frame conditions the chapter's axioms need are here too: K_a P =>
   P holds in every model whose accessibility is reflexive, K_a P => K_a
-  K_a P in every transitive one."
+  K_a P in every transitive one.
+
+  Beside knowledge, the possibility and necessity of the 4th edition's
+  section 10.4.1: `[:necessarily p]`, true in a world when p is true in
+  every world possible from it, and `[:possibly p]`, when p is true in
+  some -- possibly one of the authors is sitting down right now;
+  necessarily 2 + 2 = 4. Their accessibility is the model's
+  `:possible` relation, every world possible from every other unless one
+  is given."
   (:require [allgo.logic.first-order :as fo]))
 
 (defn model
@@ -31,9 +39,11 @@
   tell from it, `domain` the objects quantifiers range over. With
   `:reflexive? true` (the default) every world is also accessible from
   itself, as the chapter's diagrams take for granted."
-  [worlds access & {:keys [domain reflexive?] :or {reflexive? true}}]
+  [worlds access & {:keys [domain reflexive? possible] :or {reflexive? true}}]
   {:worlds (into {} (map (fn [[w atoms]] [w (set atoms)])) worlds)
    :domain (vec domain)
+   :possible (into {} (for [w (keys worlds)]
+                        [w (if possible (set (get possible w)) (set (keys worlds)))]))
    :access (into {} (for [[a rel] access]
                       [a (into {} (for [w (keys worlds)]
                                     [w (cond-> (set (get rel w)) reflexive? (conj w))]))]))})
@@ -50,11 +60,12 @@
                         (expand domain (fo/subst (zipmap vs objs) body)))]
         (into [(if (= q :forall) :and :or)] instances))
       :knows (let [[_ a p] s] [:knows a (expand domain p)])
+      (:necessarily :possibly) [(first s) (expand domain (second s))]
       (:not :and :or :implies :iff) (into [(first s)] (map #(expand domain %) (rest s)))
       s)
     s))
 
-(defn- atom? [s] (or (keyword? s) (and (vector? s) (not (#{:not :and :or :implies :iff :knows} (first s))))))
+(defn- atom? [s] (or (keyword? s) (and (vector? s) (not (#{:not :and :or :implies :iff :knows :necessarily :possibly} (first s))))))
 
 (defn- subsentences
   "Every subsentence of `s`, innermost first, each once."
@@ -63,7 +74,7 @@
               [s]
               (concat (mapcat subsentences (if (= :knows (first s)) [(nth s 2)] (rest s))) [s]))))
 
-(defn- label [{:keys [worlds access]} labels s]
+(defn- label [{:keys [worlds access possible]} labels s]
   (let [ws (set (keys worlds))
         of #(labels %)]
     (if (atom? s)
@@ -76,7 +87,9 @@
           :implies (into #{} (filter #(or (not ((of (first args)) %)) ((of (second args)) %))) ws)
           :iff (into #{} (filter #(= (contains? (of (first args)) %) (contains? (of (second args)) %))) ws)
           :knows (let [[a p] args, rel (access a)]
-                   (into #{} (filter #(every? (of p) (rel %))) ws)))))))
+                   (into #{} (filter #(every? (of p) (rel %))) ws))
+          :necessarily (into #{} (filter #(every? (of (first args)) (possible %))) ws)
+          :possibly (into #{} (filter #(some (of (first args)) (possible %))) ws))))))
 
 (defn check-seq
   "Model checking `s` in `m` by labeling, a step a subsentence, innermost

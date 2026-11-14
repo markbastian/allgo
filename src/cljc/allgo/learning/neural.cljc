@@ -36,6 +36,17 @@
                   hidden unit (`:keep p`) and input unit (`:keep-input`)
                   kept with probability p and its output multiplied by
                   1/p, or else zero; at test time no dropout
+    momentum      section 21.4's \"running average of the gradients of
+                  past minibatches\": each parameter moved by a velocity,
+                  v <- beta v + g, w <- w - alpha v (`:momentum beta`),
+                  the velocity kept on the layer between steps
+    schedules     its \"learning rate that decreases over time\": `:alpha`
+                  a function of the epoch, as `step-decay`,
+                  `exponential-decay` and `inverse-time-decay` make
+    transfer      section 21.7.2: a network trained for one task, its
+                  first layers copied under a new head for another and
+                  frozen (`:frozen? true`), so that training moves only
+                  the layers above
 
   A network is a vector of layers:
 
@@ -357,21 +368,28 @@
 (defn- apply-gradients
   "Every parameter moved against its gradient by `alpha` -- a weight's
   with weight decay's 2 lambda w added -- and a batch-norm layer's
-  running mean and variance moved toward its minibatch's."
-  [network grads alpha lambda]
+  running mean and variance moved toward its minibatch's. With
+  `momentum` beta, each parameter moves instead by its velocity, beta
+  times the last plus the gradient, kept on the layer under `:velocity`.
+  A layer `:frozen?` is left as it is."
+  [network grads alpha lambda momentum]
   (mapv (fn [layer gr]
-          (reduce-kv (fn [layer gk G]
-                       (if-let [pk (parameter-of gk)]
-                         (update layer pk #(tree-map (if (and lambda (weights pk))
-                                                       (fn [p gi] (- p (* alpha (+ gi (* 2.0 lambda p)))))
-                                                       (fn [p gi] (- p (* alpha gi))))
-                                                     % G))
-                         layer))
-                     (if-let [mu (:batch-mean gr)]
-                       (let [rho (:rho layer) run (fn [old new] (mapv #(+ (* rho %1) (* (- 1.0 rho) %2)) old new))]
-                         (-> layer (update :mean run mu) (update :var run (:batch-var gr))))
-                       layer)
-                     gr))
+          (if (:frozen? layer)
+            layer
+            (reduce-kv (fn [layer gk G]
+                         (if-let [pk (parameter-of gk)]
+                           (let [G (if (and lambda (weights pk)) (tree-map (fn [gi p] (+ gi (* 2.0 lambda p))) G (layer pk)) G)
+                                 V (if momentum
+                                     (if-let [v (get-in layer [:velocity gk])] (tree-map (fn [vi gi] (+ (* momentum vi) gi)) v G) G)
+                                     G)]
+                             (cond-> (update layer pk #(tree-map (fn [p vi] (- p (* alpha vi))) % V))
+                               momentum (assoc-in [:velocity gk] V)))
+                           layer))
+                       (if-let [mu (:batch-mean gr)]
+                         (let [rho (:rho layer) run (fn [old new] (mapv #(+ (* rho %1) (* (- 1.0 rho) %2)) old new))]
+                           (-> layer (update :mean run mu) (update :var run (:batch-var gr))))
+                         layer)
+                       gr)))
         network grads))
 
 (defn- example-loss [a y kind]
@@ -444,14 +462,15 @@
 (defn minibatch-step
   "One step of stochastic gradient descent on the minibatch `X` `Y`: the
   network moved against the minibatch's mean gradient by `alpha`, with
-  weight decay `lambda` if given. Given `rng`, a network with dropout
+  weight decay `lambda` and momentum `momentum` if given. Given `rng`, a
+  network with dropout
   takes the step as a thinned network, its units deactivated by fresh
   `dropout-masks` -- the same ones for the whole minibatch."
-  [network X Y {:keys [alpha loss rng lambda] :or {alpha 0.1 loss :squared}}]
+  [network X Y {:keys [alpha loss rng lambda momentum] :or {alpha 0.1 loss :squared}}]
   (if (and rng (dropout? network))
     (let [{:keys [input layers]} (dropout-masks network rng)]
-      (apply-gradients network (batch-gradients network (if input (mapv #(mapv * % input) X) X) Y loss layers) alpha lambda))
-    (apply-gradients network (batch-gradients network X Y loss) alpha lambda)))
+      (apply-gradients network (batch-gradients network (if input (mapv #(mapv * % input) X) X) Y loss layers) alpha lambda momentum))
+    (apply-gradients network (batch-gradients network X Y loss) alpha lambda momentum)))
 
 (defn sgd-step
   "One stochastic gradient step on one example: `minibatch-step` on a
@@ -462,17 +481,50 @@
   ([network x y alpha loss rng] (minibatch-step network [x] [y] {:alpha alpha :loss loss :rng rng})))
 
 (defn- train-epoch
-  "An epoch: the pairs shuffled, and a step on each `batch` of them."
-  [pairs batch {:keys [rng] :as opts} net]
-  (reduce (fn [net chunk] (minibatch-step net (mapv first chunk) (mapv second chunk) opts))
-          net (partition-all batch (random/shuffle rng pairs))))
+  "Epoch `epoch`: the pairs shuffled, and a step on each `batch` of them,
+  the learning rate `alpha` or, if it is a function, `alpha` of the
+  epoch."
+  [pairs batch {:keys [rng alpha] :as opts} net epoch]
+  (let [opts (cond-> opts (fn? alpha) (assoc :alpha (alpha epoch)))]
+    (reduce (fn [net chunk] (minibatch-step net (mapv first chunk) (mapv second chunk) opts))
+            net (partition-all batch (random/shuffle rng pairs)))))
 
 (defn train-seq
   "Stochastic gradient descent, an epoch a step: the examples shuffled,
   and the weights moved against each minibatch's gradient by `alpha` --
   with dropout, each step through a newly thinned network. Options
-  `:alpha` (0.1), `:loss` (`:squared`), `:batch` (1), `:lambda` (no
-  weight decay), `:rng`."
+  `:alpha` (0.1, or a function of the epoch from 0), `:loss`
+  (`:squared`), `:batch` (1), `:lambda` (no weight decay), `:momentum`
+  (none), `:rng`."
   [network X Y {:keys [rng batch] :or {batch 1} :as opts}]
   (let [rng (or rng (random/rng 1))]
-    (iterate (partial train-epoch (vec (map vector X Y)) batch (assoc opts :rng rng)) network)))
+    (reductions (partial train-epoch (vec (map vector X Y)) batch (assoc opts :rng rng)) network (range))))
+
+(defn step-decay
+  "A learning rate starting at `alpha`, multiplied by `factor` every
+  `every` epochs."
+  [alpha factor every]
+  (fn [epoch] (* alpha (math/pow factor (quot epoch every)))))
+
+(defn exponential-decay
+  "A learning rate alpha e^(-k epoch)."
+  [alpha k]
+  (fn [epoch] (* alpha (math/exp (- (* k epoch))))))
+
+(defn inverse-time-decay
+  "A learning rate alpha / (1 + k epoch), the decay stochastic
+  approximation's convergence guarantees ask for."
+  [alpha k]
+  (fn [epoch] (/ alpha (+ 1.0 (* k epoch)))))
+
+(defn transfer
+  "A network for a new task from one trained on another: its first
+  `keep` layers, frozen if `freeze?`, under the layers `head`."
+  [trained keep head freeze?]
+  (into (mapv #(cond-> (dissoc % :velocity) freeze? (assoc :frozen? true)) (subvec (vec trained) 0 keep))
+        head))
+
+(defn unfreeze
+  "`network` with every layer free to train again."
+  [network]
+  (mapv #(dissoc % :frozen?) network))

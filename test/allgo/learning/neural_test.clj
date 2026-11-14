@@ -195,3 +195,55 @@
         (is (< (abs (- (nn/weight-penalty net 0.1) (* 0.1 (reduce + (for [l net r (:W l) w r] (* w w)))))) 1e-15))
         (is (= (nth (nn/train-seq net X Y {:alpha 0.01}) 2)
                (nth (nn/train-seq net X Y {:alpha 0.01 :lambda 0.0}) 2)))))))
+
+(deftest momentum
+  (testing "section 21.4: momentum, a running average of past gradients, speeds descent along a shallow valley -- a regression whose second input is a tenth the scale of the first"
+    (let [rng (random/rng 1)
+          X (vec (repeatedly 100 (fn [] [(- (* 2 (rng)) 1) (* 0.1 (- (* 2 (rng)) 1))])))
+          Y (mapv (fn [[a b]] [(+ (* 2.0 a) (* 30.0 b))]) X)
+          net0 [(nn/dense 2 1 :identity (random/rng 2))]
+          after (fn [opts] (nn/loss (nth (nn/train-seq net0 X Y (merge {:rng (random/rng 3) :batch 10 :alpha 0.1} opts)) 40) X Y :squared))]
+      (is (< (* 20 (after {:momentum 0.9})) (after {}))))))
+
+(deftest learning-rate-schedules
+  (testing "section 21.4: a learning rate that decreases over time settles where a constant one keeps jumping about the noise"
+    (let [rng (random/rng 4)
+          X (vec (repeatedly 200 (fn [] [(- (* 2 (rng)) 1)])))
+          Y (mapv (fn [[a]] [(+ (* 1.5 a) (random/gaussian rng 0.0 0.3))]) X)
+          Xt (mapv (fn [i] [(- (/ i 50.0) 1)]) (range 101))
+          Yt (mapv (fn [[a]] [(* 1.5 a)]) Xt)
+          net0 [(nn/dense 1 8 :tanh (random/rng 5)) (nn/dense 8 1 :identity (random/rng 6))]
+          error (fn [alpha] (nn/loss (nth (nn/train-seq net0 X Y {:rng (random/rng 7) :alpha alpha}) 30) Xt Yt :squared))
+          constant (error 0.2)]
+      (is (< (* 4 (error (nn/step-decay 0.2 0.5 5))) constant))
+      (is (< (* 4 (error (nn/inverse-time-decay 0.2 0.5))) constant))
+      (is (== 0.05 ((nn/step-decay 0.2 0.5 5) 10)) "halved every five epochs")
+      (is (== 0.1 ((nn/inverse-time-decay 0.2 0.5) 2))))))
+
+(deftest transfer-learning
+  (testing "section 21.7.2: the first layer of a network trained on one task, copied and frozen under a new head, learns a related task from twenty examples that a network starting afresh cannot"
+    (let [rng (random/rng 8)
+          points (fn [n] (vec (repeatedly n (fn [] [(- (* 2 (rng)) 1) (- (* 2 (rng)) 1)]))))
+          inside? (fn [[x y]] (< (+ (* x x) (* y y)) 0.36))
+          XA (points 500) YA (mapv #(vector (if (inside? %) 1.0 0.0)) XA)
+          test-points (points 400)
+          accuracy (fn [net f] (/ (count (filter #(= (> (first (nn/predict net %)) 0.5) (f %)) test-points)) 400.0))
+          task-a (nth (nn/train-seq [(nn/dense 2 12 :tanh (random/rng 9)) (nn/dense 12 1 :sigmoid (random/rng 10))]
+                                    XA YA {:rng (random/rng 11) :alpha 0.5 :momentum 0.9 :batch 10 :loss :cross-entropy})
+                      200)
+          outside? (complement inside?)
+          ;; task B, outside the circle, from twenty examples -- five draws
+          ;; of them, each learned both ways
+          runs (for [_ (range 5)
+                     :let [XB (points 20) YB (mapv #(vector (if (inside? %) 0.0 1.0)) XB)
+                           train-b (fn [net] (nth (nn/train-seq net XB YB {:rng (random/rng 13) :alpha 0.5 :momentum 0.9 :batch 5 :loss :cross-entropy}) 100))]]
+                 {:transferred (train-b (nn/transfer task-a 1 [(nn/dense 12 1 :sigmoid (random/rng 12))] true))
+                  :afresh (train-b [(nn/dense 2 12 :tanh (random/rng 14)) (nn/dense 12 1 :sigmoid (random/rng 15))])})
+          mean (fn [k] (/ (reduce + (map #(accuracy (k %) outside?) runs)) (count runs)))]
+      (is (> (accuracy task-a inside?) 0.95) "task A learned")
+      (is (> (mean :transferred) 0.9))
+      (is (> (mean :transferred) (+ 0.05 (mean :afresh))))
+      (testing "the frozen layer did not move"
+        (is (every? #(= (get-in task-a [0 :W]) (get-in (:transferred %) [0 :W])) runs)))
+      (testing "and unfreezing frees it"
+        (is (not-any? :frozen? (nn/unfreeze (:transferred (first runs)))))))))

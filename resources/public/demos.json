@@ -710,6 +710,16 @@
    "href": "play/?demo=probabilistic"
   },
   {
+   "id": "open-universe",
+   "group": "AI",
+   "label": "Open-Universe Models",
+   "blurb": "Probability over unknown objects: skill ratings from team games, tracking blips with no labels, matching citations, finding earthquakes among false alarms, and reading noisy text by MCMC",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=open-universe"
+  },
+  {
    "id": "classifiers",
    "group": "AI",
    "label": "Classifiers",

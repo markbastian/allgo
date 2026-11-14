@@ -85,3 +85,17 @@
     (let [steps (md/check-seq top-left [:knows :Lois (knows-whether :Superman :I)])]
       (is (= :I (:sentence (first steps))))
       (is (= #{:w0 :w1 :w2 :w3} (:worlds (last steps)))))))
+
+(deftest possibility-and-necessity
+  (let [m (md/model {:w1 #{:arithmetic :sitting} :w2 #{:arithmetic} :w3 #{:arithmetic :sitting}} {})]
+    (testing "section 10.4.1: necessarily 2 + 2 = 4, true in every world; possibly an author is sitting, true in some"
+      (is (md/valid? m [:necessarily :arithmetic]))
+      (is (md/valid? m [:possibly :sitting]))
+      (is (not (md/valid? m [:necessarily :sitting]))))
+    (testing "each the other's dual: necessarily P is not possibly not P"
+      (doseq [p [:arithmetic :sitting [:not :sitting]]]
+        (is (= (md/worlds-where m [:necessarily p]) (md/worlds-where m [:not [:possibly [:not p]]]))))))
+  (testing "with a relation of their own, the frame conditions as for knowledge: necessarily P => P where it is reflexive"
+    (let [m (md/model {:w1 #{:p} :w2 #{}} {} :possible {:w1 [:w1] :w2 [:w1]})]
+      (is (md/holds? m :w2 [:necessarily :p]))
+      (is (not (md/holds? m :w2 [:implies [:necessarily :p] :p])) "w2 does not see itself"))))

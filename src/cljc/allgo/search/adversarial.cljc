@@ -18,6 +18,12 @@
                       step one playout, down the tree by UCB1 to a new
                       node and then at random to the end of the game, the
                       result counted all the way back up
+                      -- or, for a game of hidden information, ISMCTS
+                      (Cowling, Powley and Whitehouse 2012): each playout
+                      in a world dealt at random among those the player
+                      cannot tell apart, all sharing one tree keyed by
+                      actions, so that it searches what the player knows
+                      rather than peeking at the true state
 
   Minimax, alpha-beta and expectiminimax are recursive; they run on
   `allgo.search/call-seq`, a step each node visited or valued, so that
@@ -41,6 +47,9 @@
                  utilities, so that a real win always outranks a guess
     :chances     (fn [state]) -> `[[outcome probability] ...]` at a chance
                  node, each outcome passed to `:result`
+    :determinize (fn [state player rng]) -> optional, for Monte Carlo:
+                 a state `player` cannot tell from `state`, its hidden
+                 parts dealt at random
 
   Minimax and alpha-beta assume two players and a zero sum: the value is
   the utility to the player to move at the root, and the other one
@@ -208,80 +217,166 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Monte Carlo tree search
+;;
+;; One search for perfect and hidden information alike. What tells the
+;; two apart is what names a node: the state reached (closed loop, the
+;; book's figure 5.11) or the actions that reached it (open loop, which
+;; information set MCTS needs). Everything else -- UCB1, expansion,
+;; simulation, backing up -- is the same, and with no hidden information
+;; the two agree but for transpositions.
 
-(defn- playout-to-end
-  "Moves at random from `state` to the end of the game: SIMULATION."
-  [{:keys [to-move actions result terminal? chances]} rng state]
-  (loop [s state]
+(defn- choose
+  "An action from `acts` for `state`: by `policy`'s weights if there is
+  one, else uniformly."
+  [rng policy state acts]
+  (if policy
+    (random/weighted rng (map (juxt identity #(policy state %)) acts))
+    (random/pick rng acts)))
+
+(defn- cut? [cutoff start state plies]
+  (cond (nil? cutoff) false
+        (number? cutoff) (>= (long plies) (long cutoff))
+        :else (cutoff start state plies)))
+
+(defn- simulate
+  "SIMULATION from `start`: by the policy, through chance by sampling,
+  until the game ends, no move is left, or the cutoff says stop."
+  [{:keys [to-move actions result terminal? chances]} rng policy cutoff start]
+  (loop [s start plies 0]
     (cond
       (terminal? s) s
-      (= :chance (to-move s)) (recur (result s (random/weighted rng (chances s))))
-      :else (recur (result s (random/pick rng (vec (actions s))))))))
+      (cut? cutoff start s plies) s
+      (= :chance (to-move s)) (recur (result s (random/weighted rng (chances s))) plies)
+      :else (let [acts (vec (actions s))]
+              (if (empty? acts) s (recur (result s (choose rng policy s acts)) (inc plies)))))))
 
 (defn- ucb
-  "UCB1: the average utility of `child` to the player who moved into it,
-  plus `c` times how little it has been tried beside its parent."
-  [tree parent-n child c]
-  (let [{:keys [n w]} (tree child)]
-    (+ (/ w n) (* c (math/sqrt (/ (math/log parent-n) n))))))
+  "UCB1, with exploration measured against how often the action was
+  *available* -- under hidden information, in some sampled worlds it is
+  not legal at all. With nothing hidden every child is available
+  whenever its parent is visited, and this is the textbook UCB1."
+  [{:keys [n w avail]} c]
+  (+ (/ (double w) (long n)) (* (double c) (math/sqrt (/ (math/log (long (or avail n))) (long n))))))
+
+(defn- child
+  "The node `a` leads to from `s`, reached by `path`: `[key state]`. Keyed
+  by state, the state is worked out to name it; keyed by path it is
+  worked out only if the search goes there, so `state` may be nil."
+  [result node-key path s a]
+  (if (= node-key :state)
+    (let [s' (result s a)] [s' s'])
+    [(conj path a) nil]))
 
 (defn- playout-step
-  "One PLAYOUT: down the tree by UCB1 while every move from a node has a
-  node of its own; then one new node, a random game from it to the end,
-  and the result added to every node on the way, each from the view of
-  the player who chose to move into it."
-  [{:keys [game tree root rng c] :as mcts}]
-  (let [{:keys [to-move actions result terminal? utility chances]} game
-        [path leaf]
-        (loop [s root path [root]]
+  "One PLAYOUT. Deal a world the searching player cannot tell from the
+  real one (just the real one, with nothing hidden); go down the tree by
+  UCB1 among the actions legal in that world while each has a node; add
+  one node, simulate from it, and credit the result to every node on the
+  way, each from the view of the player who chose to move into it --
+  counting, at every node passed, which of its children were available.
+  Chance is sampled where it falls, never a node of its own."
+  [{:keys [game tree root player rng c policy cutoff node-key] :as mcts}]
+  (let [{:keys [to-move actions result terminal? utility evaluate chances determinize]} game
+        world (if determinize (determinize root player rng) root)
+        root-key (if (= node-key :state) root [])
+        [ks movers seen leaf]
+        (loop [s world path [] ks [root-key] movers [] seen []]
           (cond
-            (terminal? s) [path s]
+            (terminal? s) [ks movers seen s]
             (= :chance (to-move s))
-            ;; Chance nodes are passed through by sampling, not choosing.
-            (let [nxt (result s (random/weighted rng (chances s)))]
-              (if (contains? tree nxt) (recur nxt (conj path nxt)) [(conj path nxt) nxt]))
+            (recur (result s (random/weighted rng (chances s))) path ks movers seen)
             :else
-            (let [kids (map #(result s %) (actions s))
-                  fresh (vec (remove #(contains? tree %) kids))]
-              (if (seq fresh)
-                (let [k (random/pick rng fresh)] [(conj path k) k])
-                (let [n (:n (tree s))
-                      best (apply max-key #(ucb tree n % c) kids)]
-                  (recur best (conj path best)))))))
-        end (playout-to-end game rng leaf)
-        tree (first
-              (reduce (fn [[t last-mover] [parent node]]
-                        ;; A chance node's outcome is credited to whoever
-                        ;; moved into the chance node.
-                        (let [mover (if (= :chance (to-move parent)) last-mover (to-move parent))
-                              u (if (some? mover) (utility end mover) 0.0)]
-                          [(update t node (fn [{:keys [n w] :or {n 0 w 0.0}}] {:n (inc n) :w (+ w u)}))
-                           mover]))
-                      [(update tree root (fn [{:keys [n] :or {n 0}}] {:n (inc n) :w 0.0})) nil]
-                      (partition 2 1 path)))]
-    (assoc mcts :tree tree :playouts (inc (long (:playouts mcts))) :path path)))
+            (let [acts (vec (actions s))
+                  kids (mapv (fn [a] (into [a] (child result node-key path s a))) acts)
+                  have (filterv #(contains? tree (nth % 1)) kids)
+                  fresh (filterv #(not (contains? tree (nth % 1))) kids)
+                  seen (conj seen (mapv #(nth % 1) have))
+                  movers (conj movers (to-move s))
+                  step (fn [[a k s']] [(conj path a) (conj ks k) (or s' (result s a))])]
+              (cond
+                (empty? acts) [ks (pop movers) (pop seen) s]
+                (seq fresh)
+                (let [by-action (into {} (map (juxt first identity)) fresh)
+                      [_ ks' s'] (step (by-action (choose rng policy s (mapv first fresh))))]
+                  [ks' movers seen s'])
+                :else
+                (let [[path' ks' s'] (step (apply max-key #(ucb (tree (nth % 1)) c) have))]
+                  (recur s' path' ks' movers seen))))))
+        end (simulate game rng policy cutoff leaf)
+        value (memoize (fn [p] (if (or (terminal? end) (nil? evaluate)) (utility end p) (evaluate end p))))
+        tree (reduce (fn [t i]
+                       (let [t (reduce (fn [t k] (update-in t [k :avail] (fnil inc 0))) t (seen i))]
+                         (update t (ks (inc i))
+                                 (fn [{:keys [n w avail]}]
+                                   {:n (inc (long (or n 0)))
+                                    :w (+ (double (or w 0.0)) (double (value (movers i))))
+                                    :avail (or avail 1)}))))
+                     (update-in tree [root-key :n] inc)
+                     (range (count movers)))]
+    (assoc mcts :tree tree :playouts (inc (long (:playouts mcts))) :path ks)))
 
 (defn monte-carlo-seq
-  "Every state of a Monte Carlo tree search from `state`, one per playout:
-  `{:tree :playouts :path}`, the tree a map from each state in it to its
-  playouts `:n` and their total utility `:w` to the player who moved into
-  it. `:c` is UCB1's exploration constant (default sqrt 2), `:rng` the
-  randomness (default seed 1). Unbounded: take as many as there is time
-  for."
+  "Every state of a Monte Carlo tree search for the player to move in
+  `state`, one per playout. Unbounded: take as many as there is time for.
+
+  Figure 5.11 as it stands is UCB1 down a tree keyed by state, random
+  playouts to the end, the result counted back up. Under hidden
+  information that search cheats -- it plays the state it was handed, as
+  though it could see every hand -- so the game may have
+
+    :determinize (fn [state player rng]) -> a state `player` cannot tell
+                 from `state`, its hidden parts -- the cards in other
+                 hands, the order of the deck -- dealt at random among
+                 those consistent with what they have seen
+
+  and then each playout first deals such a world, and the tree is keyed
+  by the actions that reach a node, so that every world shares it and its
+  statistics average over what the player cannot know: information set
+  MCTS (Cowling, Powley and Whitehouse 2012, the single-observer form).
+  An action legal in only some worlds is explored against how often it
+  was available.
+
+  Options:
+
+    :node-key  :state, a node per state, so transpositions share their
+               statistics; or :path, a node per line of play, which hidden
+               information needs and which also suits games whose chance
+               has too many outcomes to tell apart. Default :path if the
+               game has :determinize, else :state.
+    :policy    (fn [state action]) -> a positive weight; the tree's new
+               moves and the playouts' moves are drawn in proportion.
+               Default uniform. A little knowledge here makes playouts
+               look like games rather than noise.
+    :cutoff    stop a playout early and score it with the game's
+               `:evaluate`: a number of plies, or (fn [start state plies])
+               -> true to stop, `start` being where the playout began.
+    :rng       the randomness (default seed 1); :c UCB1's constant
+               (default sqrt 2).
+
+  Each state is `{:tree :playouts :path ...}`, the tree a map from each
+  node's key to `{:n :w :avail}` -- playouts through it, their total
+  utility to the player who moved into it, and how often it could have
+  been chosen -- and `:path` the keys the last playout went through."
   ([game state] (monte-carlo-seq game state {}))
-  ([game state {:keys [rng c]}]
-   (iterate playout-step {:game game :root state :tree {state {:n 0 :w 0.0}} :playouts 0
-                          :rng (or rng (random/rng 1)) :c (or c (math/sqrt 2.0))})))
+  ([game state {:keys [rng c policy cutoff node-key]}]
+   (let [node-key (or node-key (if (:determinize game) :path :state))]
+     (iterate playout-step {:game game :root state :player ((:to-move game) state)
+                            :tree {(if (= node-key :state) state []) {:n 0 :w 0.0}}
+                            :playouts 0 :rng (or rng (random/rng 1)) :c (or c (math/sqrt 2.0))
+                            :policy policy :cutoff cutoff :node-key node-key}))))
 
 (defn monte-carlo-choice
   "The move from the root of a Monte Carlo search's state with the most
   playouts -- the most robust measure of the best, since a move is only
-  played often if it kept looking good -- with each move's
-  `{:n :q}`, playouts and average utility to the player to move."
-  [{:keys [game tree root]}]
+  played often if it kept looking good -- with each move's `{:n :q
+  :avail}`: playouts, average utility to the player to move, and how
+  often it was available."
+  [{:keys [game tree root node-key]}]
   (let [{:keys [actions result]} game
-        stats (into {} (for [a (actions root) :let [{:keys [n w]} (tree (result root a))]]
-                         [a {:n (or n 0) :q (if (and n (pos? n)) (/ w n) 0.0)}]))]
+        stats (into {} (for [a (actions root)
+                             :let [{:keys [n w avail]} (tree (first (child result node-key [] root a)))]]
+                         [a {:n (or n 0) :q (if (and n (pos? (long n))) (/ (double w) (long n)) 0.0)
+                             :avail (or avail 0)}]))]
     {:best (when (seq stats) (key (apply max-key (comp :n val) stats)))
      :moves stats}))
 
