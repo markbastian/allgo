@@ -354,30 +354,57 @@
 
 ;; ------------------------------------------------------ non-singular form
 
-(defn equinoctial
-  "Equinoctial elements, which have no singularity at zero eccentricity or
-  zero inclination.
+(defn- solve-equinoctial-kepler
+  "The eccentric longitude F of mean longitude `lam`: Kepler's equation
+  in equinoctial form, lam = F + ag cos F - af sin F, by Newton's method."
+  [af ag lam]
+  (loop [F lam k 0]
+    (let [d (/ (- (+ (- F (* af (math/sin F))) (* ag (math/cos F))) lam)
+               (- 1.0 (* af (math/cos F)) (* ag (math/sin F))))]
+      (if (or (< (abs d) 1e-15) (> k 50)) (- F d) (recur (- F d) (inc k))))))
 
-  Eccentricity and the argument of periapsis are folded into a vector
-  (h, k) that simply goes to zero on a circular orbit rather than leaving an
-  angle undefined; inclination and node likewise into (p, q). This is the
-  form perturbation work and orbit determination use, because a filter
-  cannot estimate an angle that does not exist."
-  [{:keys [a e i raan argp nu]}]
-  (let [lam (am/wrap-2pi (+ raan argp nu))]
-    {:a a
-     :h (* e (math/sin (+ raan argp)))
-     :k (* e (math/cos (+ raan argp)))
-     :p (* (math/tan (* 0.5 i)) (math/sin raan))
-     :q (* (math/tan (* 0.5 i)) (math/cos raan))
-     :lambda lam}))
+(defn equinoctial-frame
+  "The equinoctial frame's axes `[f g w]` of node vector `chi` `psi`: f
+  and g in the orbit plane, w along its normal."
+  [chi psi]
+  (let [s2 (+ 1.0 (* chi chi) (* psi psi))]
+    [[(/ (+ (- 1.0 (* chi chi)) (* psi psi)) s2) (/ (* 2.0 chi psi) s2) (/ (* -2.0 chi) s2)]
+     [(/ (* 2.0 chi psi) s2) (/ (- (+ 1.0 (* chi chi)) (* psi psi)) s2) (/ (* 2.0 psi) s2)]
+     [(/ (* 2.0 chi) s2) (/ (* -2.0 psi) s2) (/ (- 1.0 (* chi chi) (* psi psi)) s2)]]))
 
-(defn from-equinoctial
-  "Classical elements back from equinoctial form."
-  [{:keys [a h k p q lambda]}]
-  (let [e    (math/sqrt (+ (* h h) (* k k)))
-        i    (* 2.0 (math/atan (math/sqrt (+ (* p p) (* q q)))))
-        raan (if (and (zero? p) (zero? q)) 0.0 (am/wrap-2pi (math/atan2 p q)))
-        argp (am/wrap-2pi (- (if (and (zero? h) (zero? k)) 0.0 (math/atan2 h k)) raan))]
-    {:a a :e e :i i :raan raan :argp argp
-     :nu (am/wrap-2pi (- lambda raan argp))}))
+(defn equinoctial->state
+  "The state `[r v]` of prograde equinoctial elements `[a af ag chi psi
+  lambda]`, `->equinoctial`'s vector, straight from them -- no classical
+  element is formed, so none is undefined on the way."
+  [mu [a af ag chi psi lam]]
+  (let [F (solve-equinoctial-kepler af ag lam)
+        b (/ 1.0 (+ 1.0 (math/sqrt (- 1.0 (* af af) (* ag ag)))))
+        n (math/sqrt (/ mu (* a a a)))
+        cf (math/cos F) sf (math/sin F)
+        r (* a (- 1.0 (* af cf) (* ag sf)))
+        X (* a (+ (* (- 1.0 (* ag ag b)) cf) (* af ag b sf) (- af)))
+        Y (* a (+ (* (- 1.0 (* af af b)) sf) (* af ag b cf) (- ag)))
+        Xd (/ (* n a a (- (* af ag b cf) (* (- 1.0 (* ag ag b)) sf))) r)
+        Yd (/ (* n a a (- (* (- 1.0 (* af af b)) cf) (* af ag b sf))) r)
+        [f g] (equinoctial-frame chi psi)
+        comb (fn [u w] (mapv #(+ (* u %1) (* w %2)) f g))]
+    [(comb X Y) (comb Xd Yd)]))
+
+(defn state->equinoctial
+  "The prograde equinoctial elements `[a af ag chi psi lambda]` of the
+  state `r` `v`, the inverse of `equinoctial->state`, straight from it."
+  [mu r v]
+  (let [rm (v3/length r)
+        [wx wy wz] (v3/normalize (v3/cross r v))
+        chi (/ wx (+ 1.0 wz)) psi (/ (- wy) (+ 1.0 wz))
+        [f g] (equinoctial-frame chi psi)
+        a (/ 1.0 (- (/ 2.0 rm) (/ (v3/dot v v) mu)))
+        evec (v3/sub (v3/scale r (- (/ (v3/dot v v) mu) (/ 1.0 rm))) (v3/scale v (/ (v3/dot r v) mu)))
+        af (v3/dot evec f) ag (v3/dot evec g)
+        X (v3/dot r f) Y (v3/dot r g)
+        b (/ 1.0 (+ 1.0 (math/sqrt (- 1.0 (* af af) (* ag ag)))))
+        e2 (math/sqrt (- 1.0 (* af af) (* ag ag)))
+        sf (+ ag (/ (- (* (- 1.0 (* ag ag b)) Y) (* af ag b X)) (* a e2)))
+        cf (+ af (/ (- (* (- 1.0 (* af af b)) X) (* af ag b Y)) (* a e2)))
+        F (math/atan2 sf cf)]
+    [a af ag chi psi (+ (- F (* af (math/sin F))) (* ag (math/cos F)))]))

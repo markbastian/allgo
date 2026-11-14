@@ -18,11 +18,11 @@
   States are `[r v]`, km and km/s; `accel` is `(fn [t r v])`, the
   acceleration, two-body included."
   (:require [allgo.astro.variational :as var]
-            [allgo.numerics.core :as core]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
-            [allgo.numerics.rk :as rk]
+            [allgo.numerics.ode.core :as core]
+            [allgo.numerics.ode.rk :as rk]
             [allgo.probability.temporal :as tm]))
 
 (defn- flat [r v] (vec (concat r v)))

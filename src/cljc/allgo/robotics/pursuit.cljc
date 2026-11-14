@@ -37,6 +37,7 @@
   the shadow's components as sorted vectors of probes, and the set of
   indices of the components that might hide the evader."
   (:require [allgo.geometry.polygon :as polygon]
+            [allgo.graph :as graph]
             [allgo.search :as search]
             [clojure.math :as math]))
 
@@ -123,15 +124,9 @@
   "The shadow from point `p`, the region it cannot see, as its connected
   components: each a sorted vector of probes, ordered by their first."
   [{:keys [probes neighbors] :as env} p]
-  (let [seen (visible env p)
-        hidden-neighbors (fn [k] (remove seen (neighbors k)))
-        fill (fn [k] (-> (search/breadth-first-seq {:start k :goal? (constantly false) :neighbors hidden-neighbors})
-                         last :came-from keys sort vec))]
-    ;; each probe not yet in a component starts the next
-    (second (reduce (fn [[found comps :as acc] k]
-                      (if (found k) acc (let [c (fill k)] [(into found c) (conj comps c)])))
-                    [#{} []]
-                    (remove seen (range (count probes)))))))
+  (let [seen (visible env p)]
+    (mapv (comp vec sort)
+          (graph/components-by (remove seen (range (count probes))) (fn [k] (remove seen (neighbors k)))))))
 
 (defn contaminated-probes
   "The probes that might hide the evader in information state `s`."

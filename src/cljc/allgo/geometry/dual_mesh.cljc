@@ -59,6 +59,7 @@
   assembly, which is one pass over the triangles and is now the larger
   half of building a mesh."
   (:require [allgo.geometry.delaunay :as delaunay]
+            [allgo.geometry.polygon :as polygon]
             [allgo.math :as am]
             [clojure.math :as math]))
 
@@ -320,14 +321,6 @@
 ;; separates, and a coastline would start overlapping land two cells
 ;; inland. The quad is the guarantee that it cannot.
 
-(defn- lerp [[ax ay] [bx by] t]
-  [(+ ax (* (double t) (- bx ax)))
-   (+ ay (* (double t) (- by ay)))])
-
-(defn- dist [[ax ay] [bx by]]
-  (let [dx (- (double bx) ax) dy (- (double by) ay)]
-    (math/sqrt (+ (* dx dx) (* dy dy)))))
-
 (defn- subdivide
   "The points strictly between `a` and `c`, wandering inside quad
   `a b c d`.
@@ -339,26 +332,26 @@
   the original -- which is the containment the whole scheme relies on,
   and it holds by construction rather than by clamping."
   [a b c d min-length rng]
-  (if (or (< (dist a c) min-length) (< (dist b d) min-length))
+  (if (or (< (polygon/distance a c) min-length) (< (polygon/distance b d) min-length))
     []
     (let [;; Where the quad gets cut. Away from the ends, or the wiggle
           ;; degenerates into a kink at a corner.
           p (+ 0.2 (* 0.6 (rng)))
           q (+ 0.2 (* 0.6 (rng)))
-          e (lerp a d p)
-          f (lerp b c p)
-          g (lerp a b q)
-          i (lerp d c q)
-          h (lerp e f q)
+          e (polygon/lerp a d p)
+          f (polygon/lerp b c p)
+          g (polygon/lerp a b q)
+          i (polygon/lerp d c q)
+          h (polygon/lerp e f q)
           ;; Allowed slightly past the ends, so the child quads are not
           ;; strictly nested and the path does not visibly taper toward
           ;; the middle of every edge.
           s (+ 0.6 (* 0.8 (rng)))
           t (+ 0.6 (* 0.8 (rng)))]
       (-> []
-          (into (subdivide a (lerp b g s) h (lerp d e t) min-length rng))
+          (into (subdivide a (polygon/lerp b g s) h (polygon/lerp d e t) min-length rng))
           (conj h)
-          (into (subdivide h (lerp c f s) c (lerp d i t) min-length rng))))))
+          (into (subdivide h (polygon/lerp c f s) c (polygon/lerp d i t) min-length rng))))))
 
 (defn- edge-path
   "One edge's wandering path, from its first corner to its second."
@@ -376,7 +369,7 @@
             c1 (:point (centers d1))
             ;; Halfway to each center: the quad is the cell pair's shared
             ;; neighborhood, not the cells themselves.
-            half (fn [v c] (lerp v c 0.5))
+            half (fn [v c] (polygon/lerp v c 0.5))
             first-half (into [p0] (conj (subdivide p0 (half p0 c0) midpoint (half p0 c1)
                                                    min-length rng)
                                         midpoint))

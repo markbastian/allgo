@@ -26,68 +26,16 @@
   `accel` is the perturbing acceleration alone, `(fn [t r v])`, km/s^2;
   times seconds."
   (:require [allgo.astro.constants :as c]
+            [allgo.astro.kepler :as kepler]
             [allgo.math :as am]
             [allgo.numerics.differentiation :as diff]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.ode.rk :as rk]
             [clojure.math :as math]))
 
 (def ^:private mu c/GM-earth)
 
 ;; ------------------------------------------------ equinoctial elements
-
-(defn- solve-kepler
-  "The eccentric longitude F of mean longitude `lam`: lam = F + ag cos F - af sin F."
-  [af ag lam]
-  (loop [F lam k 0]
-    (let [d (/ (- (+ (- F (* af (math/sin F))) (* ag (math/cos F))) lam)
-               (- 1.0 (* af (math/cos F)) (* ag (math/sin F))))]
-      (if (or (< (abs d) 1e-15) (> k 50)) (- F d) (recur (- F d) (inc k))))))
-
-(defn elements->state
-  "The state `[r v]` of equinoctial elements [a af ag chi psi lambda]
-  (prograde: chi = tan(i/2) sin raan, psi = tan(i/2) cos raan; af, ag the
-  eccentricity vector along the equinoctial axes; lambda the mean
-  longitude)."
-  ([x] (elements->state mu x))
-  ([mu [a af ag chi psi lam]]
-   (let [F (solve-kepler af ag lam)
-         b (/ 1.0 (+ 1.0 (math/sqrt (- 1.0 (* af af) (* ag ag)))))
-         n (math/sqrt (/ mu (* a a a)))
-         cf (math/cos F) sf (math/sin F)
-         r (* a (- 1.0 (* af cf) (* ag sf)))
-         X (* a (+ (* (- 1.0 (* ag ag b)) cf) (* af ag b sf) (- af)))
-         Y (* a (+ (* (- 1.0 (* af af b)) sf) (* af ag b cf) (- ag)))
-         Xd (/ (* n a a (- (* af ag b cf) (* (- 1.0 (* ag ag b)) sf))) r)
-         Yd (/ (* n a a (- (* (- 1.0 (* af af b)) cf) (* af ag b sf))) r)
-         s2 (+ 1.0 (* chi chi) (* psi psi))
-         f [(/ (+ (- 1.0 (* chi chi)) (* psi psi)) s2) (/ (* 2.0 chi psi) s2) (/ (* -2.0 chi) s2)]
-         g [(/ (* 2.0 chi psi) s2) (/ (- (+ 1.0 (* chi chi)) (* psi psi)) s2) (/ (* 2.0 psi) s2)]
-         comb (fn [u w] (mapv #(+ (* u %1) (* w %2)) f g))]
-     [(comb X Y) (comb Xd Yd)])))
-
-(defn state->elements
-  "[a af ag chi psi lambda] of the state `[r v]`, the inverse of
-  `elements->state`."
-  ([s] (state->elements mu s))
-  ([mu [r v]]
-   (let [rm (lin/length r)
-         h (let [[x y z] r [vx vy vz] v] [(- (* y vz) (* z vy)) (- (* z vx) (* x vz)) (- (* x vy) (* y vx))])
-         hm (lin/length h)
-         [wx wy wz] (lin/scale h (/ 1.0 hm))
-         chi (/ wx (+ 1.0 wz)) psi (/ (- wy) (+ 1.0 wz))
-         s2 (+ 1.0 (* chi chi) (* psi psi))
-         f [(/ (+ (- 1.0 (* chi chi)) (* psi psi)) s2) (/ (* 2.0 chi psi) s2) (/ (* -2.0 chi) s2)]
-         g [(/ (* 2.0 chi psi) s2) (/ (- (+ 1.0 (* chi chi)) (* psi psi)) s2) (/ (* 2.0 psi) s2)]
-         a (/ 1.0 (- (/ 2.0 rm) (/ (lin/dot v v) mu)))
-         evec (lin/sub (lin/scale r (- (/ (lin/dot v v) mu) (/ 1.0 rm))) (lin/scale v (/ (lin/dot r v) mu)))
-         af (lin/dot evec f) ag (lin/dot evec g)
-         X (lin/dot r f) Y (lin/dot r g)
-         b (/ 1.0 (+ 1.0 (math/sqrt (- 1.0 (* af af) (* ag ag)))))
-         e2 (math/sqrt (- 1.0 (* af af) (* ag ag)))
-         sf (+ ag (/ (- (* (- 1.0 (* ag ag b)) Y) (* af ag b X)) (* a e2)))
-         cf (+ af (/ (- (* (- 1.0 (* af af b)) X) (* af ag b Y)) (* a e2)))
-         F (math/atan2 sf cf)]
-     [a af ag chi psi (+ (- F (* af (math/sin F))) (* ag (math/cos F)))])))
 
 ;; ------------------------------------------------------------ averaging
 
@@ -96,9 +44,9 @@
   `t`: Gauss's equations, as the elements' partials in the velocity times
   the acceleration -- the partials by central differences."
   [accel mu t x]
-  (let [[r v] (elements->state mu x)
+  (let [[r v] (kepler/equinoctial->state mu x)
         d (accel t r v)
-        J (diff/jacobian (fn [v'] (let [y (state->elements mu [r v'])]
+        J (diff/jacobian (fn [v'] (let [y (kepler/state->equinoctial mu r v')]
                                     ;; the mean longitude continuous across the step
                                     (update y 5 #(+ (x 5) (am/wrap-angle (- % (x 5)))))))
                          v {:steps [1e-7 1e-7 1e-7] :richardson? false})]
@@ -186,26 +134,20 @@
      (loop [t t0 x x0 k 0]
        (if (= k steps)
          x
-         (let [k1 (f t x)
-               k2 (f (+ t (* 0.5 h)) (lin/add x (lin/scale k1 (* 0.5 h))))
-               k3 (f (+ t (* 0.5 h)) (lin/add x (lin/scale k2 (* 0.5 h))))
-               k4 (f (+ t h) (lin/add x (lin/scale k3 h)))]
-           (recur (+ t h) (lin/add x (lin/scale (lin/add (lin/add k1 (lin/scale k2 2.0)) (lin/add (lin/scale k3 2.0) k4))
-                                                (/ h 6.0)))
-                  (inc k))))))))
+         (recur (+ t h) (first (rk/tableau-step rk/rk4 (:c rk/rk4) f t x h)) (inc k)))))))
 
 (defn osculating
   "The osculating state of mean elements `x` at `t`: the mean elements
   plus their short-periodic variations."
   ([accel t x] (osculating accel mu t x))
-  ([accel mu t x] (elements->state mu (lin/add x (short-periodic accel mu t x 64)))))
+  ([accel mu t x] (kepler/equinoctial->state mu (lin/add x (short-periodic accel mu t x 64)))))
 
 (defn mean-elements
   "The mean elements whose osculating state at `t` is `s`, by fixed-point
   iteration."
   ([accel t s] (mean-elements accel mu t s))
   ([accel mu t s]
-   (let [target (state->elements mu s)]
+   (let [target (kepler/state->equinoctial mu (first s) (second s))]
      (loop [x target k 0]
        (let [x' (lin/sub target (short-periodic accel mu t x 64))
              x' (update x' 5 #(+ (x 5) (am/wrap-angle (- % (x 5)))))]

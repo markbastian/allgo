@@ -10,7 +10,7 @@
   more accurate method is the one that has drifted further."
   (:require [allgo.demo.error-chart :as chart]
             [allgo.demo.fps :as fps]
-            [allgo.numerics :as num]
+            [allgo.numerics.ode :as num]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))

@@ -12,23 +12,21 @@
                     `allgo.probability.temporal`: smoothing gives the
                     expected transitions and emissions, which become the
                     new model"
-  (:require [allgo.probability.temporal :as temporal]
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.probability.temporal :as temporal]
             [allgo.random :as random]
             [clojure.math :as math]))
-
-(defn- sq-dist [a b] (reduce + (map #(let [d (- %1 %2)] (* d d)) a b)))
-(defn- mean [xs] (let [n (count xs)] (apply mapv (fn [& vs] (/ (reduce + vs) n)) xs)))
 
 (defn- k-means-step
   "Each point assigned its nearest center, and each center moved to the
   mean of its points."
   [points {:keys [centers]}]
   (let [k (count centers)
-        assignment (mapv (fn [p] (apply min-key #(sq-dist p (centers %)) (range k))) points)
+        assignment (mapv (fn [p] (apply min-key #(lin/distance-squared p (centers %)) (range k))) points)
         groups (group-by assignment (range (count points)))
-        centers (mapv (fn [c] (if-let [is (groups c)] (mean (map points is)) (centers c))) (range k))]
+        centers (mapv (fn [c] (if-let [is (groups c)] (lin/mean (map points is)) (centers c))) (range k))]
     {:centers centers :assignment assignment
-     :cost (reduce + (map (fn [p a] (sq-dist p (centers a))) points assignment))}))
+     :cost (reduce + (map (fn [p a] (lin/distance-squared p (centers a))) points assignment))}))
 
 (defn k-means-seq
   "k-means on `points` from `k` of them chosen at random: each state
@@ -72,7 +70,7 @@
   :log-likelihood}` -- the log likelihood never falls."
   [points k rng]
   (let [points (vec points) n (count points) d (count (first points))
-        all-var (mapv (fn [j] (/ (reduce + (map #(let [v (- (nth % j) (nth (mean points) j))] (* v v)) points)) n)) (range d))]
+        all-var (mapv (fn [j] (/ (reduce + (map #(let [v (- (nth % j) (nth (lin/mean points) j))] (* v v)) points)) n)) (range d))]
     (iterate (partial em-gmm-step points)
              {:weights (vec (repeat k (/ 1.0 k))) :means (vec (take k (random/shuffle rng points)))
               :vars (vec (repeat k all-var)) :log-likelihood nil})))

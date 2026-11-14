@@ -20,7 +20,9 @@
   {e [...]}}`: P(X0), T[i][j] = P(X_t = j | X_t-1 = i), and for each
   observation the vector P(e | X = i). `umbrella` is the chapter's
   umbrella world as aima-python (MIT) states it."
-  (:require [allgo.numerics.linear :as lin]))
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.linear-systems :as ls]
+            [allgo.probability.bayes :as bayes]))
 
 (def umbrella
   "The umbrella world: rain persists with probability 0.7, and the
@@ -30,8 +32,6 @@
    :transition [[0.7 0.3] [0.3 0.7]]
    :sensor {true [0.9 0.2] false [0.1 0.8]}})
 
-(defn- normalize [v] (let [s (reduce + v)] (mapv #(/ % s) v)))
-
 (defn- predict
   "The distribution one step on: sum over i of f(i) T[i][j]."
   [{:keys [transition]} f]
@@ -40,7 +40,7 @@
 (defn forward
   "FORWARD: the filtered distribution after observing `e`, from `f`."
   [hmm f e]
-  (normalize (mapv * ((:sensor hmm) e) (predict hmm f))))
+  (bayes/normalize (mapv * ((:sensor hmm) e) (predict hmm f))))
 
 (defn backward
   "BACKWARD: the backward message one step earlier, b'(i) = sum over j of
@@ -65,7 +65,7 @@
       (if (zero? i)
         (vec sv)
         (recur (dec i) (backward hmm b (nth evidence (dec i)))
-               (cons (normalize (mapv * (fv i) b)) sv))))))
+               (cons (bayes/normalize (mapv * (fv i) b)) sv))))))
 
 (defn- diag [v] (vec (map-indexed (fn [i x] (assoc (vec (repeat (count v) 0.0)) i x)) v)))
 
@@ -77,7 +77,7 @@
   the lag; the forward message runs d steps behind."
   [{:keys [prior transition sensor] :as hmm} evidence d]
   (let [T transition
-        T-inv (lin/inverse T)
+        T-inv (ls/inverse T)
         n (count prior)]
     (map :smoothed
          (rest (reductions
@@ -88,13 +88,13 @@
                                        (let [old (first window)
                                              f (forward hmm f old)
                                              window (vec (rest window))
-                                             O-old-inv (lin/inverse (diag (sensor old)))]
+                                             O-old-inv (lin/spd-inverse (diag (sensor old)))]
                                          [f (lin/mat-mul (lin/mat-mul (lin/mat-mul O-old-inv T-inv) B) (lin/mat-mul T O)) window])
                                        [f (lin/mat-mul B (lin/mat-mul T O)) window])
                         t' (inc t)]
                     {:t t' :f f :B B :window window
                      :smoothed (when (> t' (inc d))
-                                 (normalize (mapv * f (lin/mat-vec B (vec (repeat n 1.0))))))}))
+                                 (bayes/normalize (mapv * f (lin/mat-vec B (vec (repeat n 1.0))))))}))
                 {:t 1 :f prior :B (lin/eye n) :window []}
                 evidence)))))
 
@@ -153,7 +153,7 @@
   (let [mean- (lin/mat-vec F mean)
         cov- (lin/mat-add (lin/mat-mul (lin/mat-mul F cov) (lin/transpose F)) Q)
         S (lin/mat-add (lin/mat-mul (lin/mat-mul H cov-) (lin/transpose H)) R)
-        K (lin/mat-mul (lin/mat-mul cov- (lin/transpose H)) (lin/inverse S))
+        K (lin/mat-mul (lin/mat-mul cov- (lin/transpose H)) (lin/spd-inverse S))
         innovation (lin/sub z (lin/mat-vec H mean-))
         mean' (lin/add mean- (lin/mat-vec K innovation))
         cov' (lin/mat-mul (lin/mat-sub (lin/eye (count mean)) (lin/mat-mul K H)) cov-)]

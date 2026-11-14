@@ -19,23 +19,22 @@
                    far, and learns again
 
   Positions are `[x y]`."
-  (:require [allgo.learning.models :as models]
+  (:require [allgo.geometry.polygon :as polygon]
+            [allgo.learning.models :as models]
             [clojure.math :as math]))
-
-(defn- dist [[ax ay] [bx by]] (math/hypot (- ax bx) (- ay by)))
 
 (defn step-likelihoods
   "P(u | x, goal) for each of `actions`, displacements `[dx dy]`: a
   softmax of -`beta` Q(x, u; goal), Q the step's length plus the distance
   from where it lands to the goal. Larger beta, more nearly optimal."
   [x goal actions beta]
-  (let [q (fn [[dx dy :as u]] (+ (dist [0 0] u) (dist [(+ (x 0) dx) (+ (x 1) dy)] goal)))
+  (let [q (fn [[dx dy :as u]] (+ (polygon/distance [0 0] u) (polygon/distance [(+ (x 0) dx) (+ (x 1) dy)] goal)))
         ws (map #(math/exp (- (* beta (q %)))) actions)
         z (reduce + ws)]
     (zipmap actions (map #(/ % z) ws))))
 
 (defn- nearest-action [actions u]
-  (apply min-key #(dist % u) actions))
+  (apply min-key #(polygon/distance % u) actions))
 
 (defn belief-seq
   "The belief over `goals` (a map of goal to position) as the person's

@@ -11,9 +11,8 @@
   the splitting plane is nearer than the best found so far.
 
   Points are vectors of numbers; a tree is `{:point :axis :left :right}`
-  or nil, each node holding the point it splits at.")
-
-(defn- sq-dist [a b] (reduce + (map #(let [d (- %1 %2)] (* d d)) a b)))
+  or nil, each node holding the point it splits at."
+  (:require [allgo.numerics.linear :as lin]))
 
 (defn build
   "The k-d tree of `points`."
@@ -38,7 +37,7 @@
                  (if (nil? node)
                    best
                    (let [_ (vswap! measured conj point)
-                         d2 (sq-dist point q)
+                         d2 (lin/distance-squared point q)
                          best (if (< d2 best-d2) [point d2] best)
                          diff (- (nth q axis) (nth point axis))
                          [near far] (if (neg? diff) [left right] [right left])
@@ -55,7 +54,7 @@
                  (if (nil? node)
                    best
                    (let [_ (vswap! measured conj point)
-                         best (vec (take k (sort-by second (conj best [point (sq-dist point q)]))))
+                         best (vec (take k (sort-by second (conj best [point (lin/distance-squared point q)]))))
                          diff (- (nth q axis) (nth point axis))
                          [near far] (if (neg? diff) [left right] [right left])
                          best (search near best)
@@ -74,7 +73,7 @@
                    (vswap! measured conj point)
                    (let [diff (- (nth q axis) (nth point axis))
                          [near far] (if (neg? diff) [left right] [right left])]
-                     (concat (when (<= (sq-dist point q) r2) [point])
+                     (concat (when (<= (lin/distance-squared point q) r2) [point])
                              (search near)
                              (when (<= (* diff diff) r2) (search far))))))
         ;; realized before the measured points are read

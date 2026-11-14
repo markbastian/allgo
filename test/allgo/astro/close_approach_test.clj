@@ -8,7 +8,7 @@
             [allgo.astro.kepler :as kep]
             [allgo.astro.universal :as u]
             [allgo.geometry.vec3 :as v3]
-            [allgo.numerics.roots :as roots]
+            [allgo.numerics.optimize :as opt]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private mu c/GM-earth)
@@ -45,7 +45,7 @@
           ts (range 0.0 86400.0 1.0)
           truth (for [[x y z] (partition 3 1 ts)
                       :when (and (< (dist y) (dist x)) (<= (dist y) (dist z)))]
-                  (roots/minimize dist x z {:tol 1e-6}))
+                  (opt/golden-minimize dist x z {:tol 1e-6}))
           found (ca/close-approaches eph-a eph-b 0.0 86400.0 300.0)]
       (is (= (count truth) (count found)))
       (doseq [[t {ft :t miss :miss}] (map vector truth found)]

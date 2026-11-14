@@ -148,26 +148,35 @@
   remaining singularity at i = 180 degrees (or 0) out of the way."
   ([s] (state->equinoctial c/GM-earth s))
   ([mu [r v]]
-   (let [{:keys [a e i raan argp nu M]} (state->classical mu [r v])
-         fr (if (> i (/ math/PI 2)) -1.0 1.0)
-         t (math/pow (math/tan (* 0.5 i)) fr)]
-     {:a a :n (math/sqrt (/ mu (* a a a)))
-      :af (* e (math/cos (+ argp (* fr raan)))) :ag (* e (math/sin (+ argp (* fr raan))))
-      :chi (* t (math/sin raan)) :psi (* t (math/cos raan))
-      :meanlon (am/wrap-2pi (+ M argp (* fr raan)))
-      :truelon (am/wrap-2pi (+ nu argp (* fr raan))) :fr fr})))
+   (if (pos? (nth (v3/cross r v) 2))
+     ;; prograde: `kepler`'s conversion, straight from the state
+     (let [[a af ag chi psi lam] (kepler/state->equinoctial mu r v)
+           [f g] (kepler/equinoctial-frame chi psi)]
+       {:a a :n (math/sqrt (/ mu (* a a a))) :af af :ag ag :chi chi :psi psi
+        :meanlon (am/wrap-2pi lam) :truelon (am/wrap-2pi (math/atan2 (v3/dot r g) (v3/dot r f))) :fr 1.0})
+     ;; retrograde: through the classical elements, with Vallado's factor
+     (let [{:keys [a e i raan argp nu M]} (state->classical mu [r v])
+           fr -1.0
+           t (math/pow (math/tan (* 0.5 i)) fr)]
+       {:a a :n (math/sqrt (/ mu (* a a a)))
+        :af (* e (math/cos (+ argp (* fr raan)))) :ag (* e (math/sin (+ argp (* fr raan))))
+        :chi (* t (math/sin raan)) :psi (* t (math/cos raan))
+        :meanlon (am/wrap-2pi (+ M argp (* fr raan)))
+        :truelon (am/wrap-2pi (+ nu argp (* fr raan))) :fr fr}))))
 
 (defn equinoctial->state
   "The state from `{:a :af :ag :chi :psi :meanlon :fr}`."
   ([el] (equinoctial->state c/GM-earth el))
   ([mu {:keys [a af ag chi psi meanlon fr] :or {fr 1.0}}]
-   (let [e (math/hypot af ag)
-         raan (math/atan2 chi psi)
-         i (* 2.0 (math/atan (math/pow (math/hypot chi psi) fr)))
-         lonper (math/atan2 ag af)
-         argp (- lonper (* fr raan))
-         M (- meanlon lonper)]
-     (kepler/elements->state mu {:a a :e e :i i :raan raan :argp argp :M (am/wrap-2pi M)}))))
+   (if (pos? fr)
+     (kepler/equinoctial->state mu [a af ag chi psi meanlon])
+     (let [e (math/hypot af ag)
+           raan (math/atan2 chi psi)
+           i (* 2.0 (math/atan (math/pow (math/hypot chi psi) fr)))
+           lonper (math/atan2 ag af)
+           argp (- lonper (* fr raan))
+           M (- meanlon lonper)]
+       (kepler/elements->state mu {:a a :e e :i i :raan raan :argp argp :M (am/wrap-2pi M)})))))
 
 ;; ------------------------------------------------------- satellite frames
 

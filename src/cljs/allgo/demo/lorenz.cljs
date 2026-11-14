@@ -5,10 +5,10 @@
   Lorenz is chaotic at the classical parameters, so any error is amplified
   rather than averaged away: drop the order or stretch the step and the
   trajectory does not merely blur, it leaves for a different part of the
-  attractor. Every method from `allgo.numerics` is on the menu, and
+  attractor. Every method from `allgo.numerics.ode` is on the menu, and
   the readout reports what the integrator is doing while it does it."
   (:require [allgo.demo.fps :as fps]
-            [allgo.numerics :as num]
+            [allgo.numerics.ode :as num]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))

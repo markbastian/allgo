@@ -209,7 +209,7 @@
         U (mapv #(lin/sub % um) pixels)
         A (reduce lin/mat-add (map (fn [p] (mapv (fn [a] (mapv #(* a %) p)) p)) P))
         B (reduce lin/mat-add (map (fn [u p] (mapv (fn [a] (mapv #(* a %) p)) u)) U P))
-        [m1 m2] (lin/mat-mul B (lin/inverse A))
+        [m1 m2] (lin/mat-mul B (lin/spd-inverse A))
         s (/ (+ (lin/length m1) (lin/length m2)) 2.0)
         r1 (lin/normalize m1)
         r2 (lin/normalize (lin/sub m2 (lin/scale r1 (lin/dot m2 r1))))]

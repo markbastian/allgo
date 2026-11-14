@@ -1,16 +1,15 @@
 (ns allgo.numerics.roots
-  "Finding where a function vanishes, where a condition changes, and
-  where a function peaks: bisection and fixed-point iteration (Meeus,
-  *Astronomical Algorithms*, chapter 5), event location and golden-section
-  search -- the slow, sure methods, for when a bracket is known -- and the
+  "Finding where a function vanishes and where a condition changes:
+  bisection and fixed-point iteration (Meeus, *Astronomical Algorithms*,
+  chapter 5) and event location -- the slow, sure methods, for when a
+  bracket is known -- and the
   rest of the classical root finders (Chapra and Canale, *Numerical
   Methods for Engineers*, chapters 5 and 6): incremental search, false
   position, Newton-Raphson and its version for multiple roots, the secant
   and modified secant methods, Brent's method, and Newton's method and
   fixed-point iteration for systems."
   (:require [allgo.numerics.differentiation :as d]
-            [allgo.numerics.linear-systems :as ls]
-            [clojure.math :as math]))
+            [allgo.numerics.linear-systems :as ls]))
 
 (defn bisect
   "A root of `f` between `lo` and `hi`, where it changes sign, by halving
@@ -50,12 +49,14 @@
 
 (defn crossing
   "The instant, to within `tol`, between `a` (where `(pred a)`) and `b`
-  (where not) that `pred` changes."
+  (where not) that `pred` changes -- or as near as doubles go, when `tol`
+  is finer than they are there. The last place found where `pred` still
+  holds, so the answer is always on a's side of the change."
   [pred a b tol]
   (loop [a a b b]
-    (if (<= (abs (- b a)) tol)
-      (* 0.5 (+ a b))
-      (let [m (* 0.5 (+ a b))]
+    (let [m (* 0.5 (+ a b))]
+      (if (or (<= (abs (- b a)) tol) (= m a) (= m b))
+        a
         (if (pred m) (recur m b) (recur a m))))))
 
 (defn transitions
@@ -69,31 +70,6 @@
                  (let [pa (pred a) pb (pred b)]
                    (when (not= pa pb)
                      [(crossing #(= pa (pred %)) a b tol) pa])))))))
-
-(def ^:private golden (/ (- (math/sqrt 5.0) 1.0) 2.0))
-
-(defn minimize
-  "The `x` between `a` and `b` where `f`, which has a single minimum there,
-  is least, by golden-section search: until the bracket is narrower than
-  `:tol`, or after `:max-iter` narrowings."
-  ([f a b] (minimize f a b {}))
-  ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 10000}}]
-   (loop [a a b b i 0]
-     (if (or (> i max-iter) (< (abs (- b a)) tol))
-       (* 0.5 (+ a b))
-       (let [x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
-         (if (< (f x1) (f x2)) (recur a x2 (inc i)) (recur x1 b (inc i))))))))
-
-(defn maximize
-  "The `x` between `a` and `b` where `f`, which has a single maximum there,
-  is greatest, by golden-section search; options as `minimize`'s."
-  ([f a b] (maximize f a b {}))
-  ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 10000}}]
-   (loop [a a b b i 0]
-     (if (or (> i max-iter) (< (abs (- b a)) tol))
-       (* 0.5 (+ a b))
-       (let [x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
-         (if (< (f x1) (f x2)) (recur x1 b (inc i)) (recur a x2 (inc i))))))))
 
 ;; ------------------------------------------------ bracketing, continued
 

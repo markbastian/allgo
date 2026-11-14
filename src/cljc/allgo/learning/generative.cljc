@@ -41,12 +41,10 @@
             [allgo.random :as random]
             [clojure.math :as math]))
 
-(defn- mean-of [X] (let [n (count X)] (mapv #(/ % n) (apply mapv + X))))
-
 (defn covariance
   "The data's covariance matrix about their mean, over n."
   [X]
-  (let [mu (mean-of X) C (mapv #(lin/sub % mu) X)]
+  (let [mu (lin/mean X) C (mapv #(lin/sub % mu) X)]
     (lin/mat-scale (lin/mat-mul (lin/transpose C) C) (/ 1.0 (count X)))))
 
 (defn- trace [M] (reduce + (map-indexed (fn [i row] (row i)) M)))
@@ -92,7 +90,7 @@
   [X m rng]
   (let [S (covariance X) d (count S)]
     (iterate (partial ppca-em-step S)
-             {:mean (mean-of X) :W (vec (repeatedly d (fn [] (gaussians rng m)))) :var 1.0})))
+             {:mean (lin/mean X) :W (vec (repeatedly d (fn [] (gaussians rng m)))) :var 1.0})))
 
 (defn ppca-log-density
   "log P(x) under the model, equation 21.16: N(x; mean, W W^T + sigma^2
@@ -132,7 +130,7 @@
   Adam on the whole data set, a step at a time: `{:mean :W :loss}`, W
   `m` by `d`, the data centered on their mean first, as PCA does."
   [X m rng & {:keys [lr] :or {lr 0.01}}]
-  (let [mu (mean-of X)
+  (let [mu (lin/mean X)
         Xc (ad/const (mapv #(lin/sub % mu) X))]
     (map (fn [{:keys [model loss]}] (assoc (:params model) :mean mu :loss loss))
          (ad/adam-seq {:params {:W (ad/init m (count (first X)) rng)}} [Xc]

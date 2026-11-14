@@ -23,8 +23,8 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.universal :as universal]
             [allgo.geometry.vec3 :as v3]
-            [allgo.numerics.core :as core]
-            [allgo.numerics.rk :as rk]
+            [allgo.numerics.ode.core :as core]
+            [allgo.numerics.ode.rk :as rk]
             [clojure.math :as math]))
 
 (defn f-of-q

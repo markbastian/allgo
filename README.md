@@ -20,8 +20,8 @@ discipline:
 | `allgo.procedural` | Noise, fractals and shaping functions; caves, dungeons, diamond-square and TIN terrain, hydraulic erosion, DLA; islands with settlements, roads and names; planets and their atmospheres |
 | `allgo.geometry`   | Vectors and quaternions, Delaunay triangulation, the Delaunay/Voronoi dual mesh, 3D Voronoi cells, GJK/EPA, hex grids, triangle and tetrahedral meshes                       |
 | `allgo.spatial`    | Spatial hashing, sweep and prune, Morton codes, a bounding volume hierarchy, k-d trees                                                                                         |
-| `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent, SATPlan; first-order unification, chaining and resolution; knowledge representation -- semantic networks, description logic, the event calculus, modal logic, default reasoning, truth maintenance |
-| `allgo.planning`   | Classical planning over ground actions, hierarchical and angelic search, job-shop scheduling                                                                                 |
+| `allgo.logic`      | Propositional logic -- model checking, resolution, chaining, DPLL, WalkSAT -- the wumpus world's hybrid agent; first-order unification, chaining and resolution; knowledge representation -- semantic networks, description logic, the event calculus, modal logic, default reasoning, truth maintenance |
+| `allgo.planning`   | Classical planning over ground actions, SATPlan, hierarchical and angelic search, job-shop scheduling                                                                                 |
 | `allgo.decision`   | Expected utility and the value of information; MDPs by value and policy iteration, POMDPs; reinforcement learning -- ADP, TD, Q-learning, SARSA, REINFORCE, function approximation (linear and deep Q, experience replay), reward shaping, hierarchical RL by partial programs, imitation learning and inverse RL by feature matching; game theory, voting and auctions; games against nature -- minimax, expected cost, regret and Hurwicz; assistance games -- the off-switch and paperclip games; the contract net, with Sandholm's one-task, swap, cluster, M- and OCSM-contracts for recontracting |
 | `allgo.probability`| Bayesian networks, exact and by sampling; HMMs, Viterbi, particle and Kalman filters; probabilistic programs                                                                |
 | `allgo.learning`   | Decision trees, AdaBoost, random forests; linear and logistic regression, SVMs, k nearest neighbors, naive Bayes; Bayesian, MAP and ML learning, beta and Dirichlet priors, Bayesian linear regression, Bayes net structure by hill climbing, kernel and nearest-neighbor densities; k-means, EM for Gaussian and naive Bayes mixtures, Baum-Welch; neural networks by back-propagation, with pooling, residual layers, batch normalization, weight decay and dropout; probabilistic PCA, autoencoders, a variational autoencoder, autoregressive models and a GAN; reverse-mode differentiation |
@@ -50,7 +50,7 @@ root namespaces by tests at the root.
 
 Where a namespace follows a book, it says so. The main ones:
 
-- **Montenbruck & Gill, *Satellite Orbits***: `allgo.numerics` and
+- **Montenbruck & Gill, *Satellite Orbits***: `allgo.numerics.ode` and
   `allgo.astro`. Planetary and lunar positions follow Vallado,
   *Fundamentals of Astrodynamics and Applications*. Everything
   astrodynamical is expressed in EME2000, so the pieces can be

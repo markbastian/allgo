@@ -59,9 +59,15 @@
   [{:keys [parents cpt]} var value event]
   (get-in cpt [var (mapv event (parents var)) value] 0.0))
 
-(defn normalize [dist]
-  (let [total (reduce + (vals dist))]
-    (if (pos? total) (into {} (map (fn [[k v]] [k (/ v total)]) dist)) dist)))
+(defn normalize
+  "`dist` scaled to sum to one: a map of outcomes to weights, or a vector
+  of weights. Unchanged if the weights sum to nothing."
+  [dist]
+  (if (map? dist)
+    (let [total (reduce + (vals dist))]
+      (if (pos? total) (into {} (map (fn [[k v]] [k (/ v total)]) dist)) dist))
+    (let [total (reduce + dist)]
+      (if (pos? total) (mapv #(/ % total) dist) dist))))
 
 ;; ---------------------------------------------------------------------------
 ;; Exact inference

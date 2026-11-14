@@ -12,7 +12,7 @@
             [allgo.astro.geopotential :as geo]
             [allgo.astro.time :as atime]
             [allgo.demo.fps :as fps]
-            [allgo.numerics :as num]
+            [allgo.numerics.ode :as num]
             ["lil-gui" :default GUI]
             ["three" :as THREE]
             ["three/examples/jsm/controls/OrbitControls.js" :refer [OrbitControls]]))

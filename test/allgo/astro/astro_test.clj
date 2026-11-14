@@ -15,8 +15,8 @@
             [allgo.astro.tides :as tid]
             [allgo.astro.time :as t]
             [allgo.astro.variational :as var]
-            [allgo.numerics :as num]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.ode :as num]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- close? [a b tol] (< (abs (double (- a b))) tol))
@@ -1173,16 +1173,18 @@
   ;; exist, and a circular orbit's argument of periapsis does not.
   (doseq [[label el] orbit-cases]
     (testing label
-      (let [back (kep/from-equinoctial (kep/equinoctial el))]
+      (let [el (assoc el :M (kep/true->mean (:nu el) (:e el)))
+            eq (kep/->equinoctial el)
+            back (kep/equinoctial-> eq)]
         (is (close? (:a el) (:a back) 1e-9))
         (is (close? (:e el) (:e back) 1e-12))
         (is (close? (:i el) (:i back) 1e-12))
-        (doseq [[k x] (kep/equinoctial el)]
+        (doseq [[k x] (map vector [:a :af :ag :chi :psi :lambda] eq)]
           (is (and (== x x) (not= x ##Inf)) (str "equinoctial " k " is finite"))))))
   (testing "and on a circular orbit the eccentricity vector simply vanishes"
-    (let [eq (kep/equinoctial {:a 7000.0 :e 0.0 :i 0.9 :raan 1.2 :argp 0.0 :nu 0.7})]
-      (is (close? 0.0 (:h eq) 1e-15))
-      (is (close? 0.0 (:k eq) 1e-15)))))
+    (let [[_ af ag] (kep/->equinoctial {:a 7000.0 :e 0.0 :i 0.9 :raan 1.2 :argp 0.0 :M 0.7})]
+      (is (close? 0.0 af 1e-15))
+      (is (close? 0.0 ag 1e-15)))))
 
 ;; ------------------------------------------------------------ observations
 
@@ -1425,7 +1427,7 @@
         (is (close? a b 1e-12)))))
   (testing "and an inverse that really is one"
     (let [A [[4.0 2.0 0.6] [2.0 5.0 1.0] [0.6 1.0 3.0]]
-          I (lin/mat-mul A (lin/inverse A))]
+          I (lin/mat-mul A (lin/spd-inverse A))]
       (doseq [i (range 3) j (range 3)]
         (is (close? (if (= i j) 1.0 0.0) (nth (nth I i) j) 1e-12)))))
   (testing "a system the data does not determine is refused, not fudged"

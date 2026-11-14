@@ -46,8 +46,10 @@
   along `:view`."
   (:require [allgo.geometry.rotation :as rotation]
             [allgo.geometry.vec3 :as v]
+            [allgo.graph :as graph]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.multivariate :as mv]
+            [allgo.numerics.roots :as roots]
             [allgo.search :as search]))
 
 ;; ---------------------------------------------------------------------------
@@ -214,20 +216,12 @@
 ;; ---------------------------------------------------------------------------
 ;; Critical points and junctions
 
-(defn- newton-3-next
-  "One Newton step on three equations `F`, Jacobian `J`."
-  [F J p]
-  (let [d (lin/solve-3 (J p) (mapv - (F p)))]
-    (when (every? #(and (number? %) (< (abs %) 1e3)) d)
-      (v/add p d))))
-
 (defn- solve-3
-  "The root of three equations Newton's method reaches from `p`, or nil."
+  "The root of three equations `F`, Jacobian `J`, Newton's method reaches
+  from `p`, or nil."
   [F J p]
-  (->> (search/step-seq (partial newton-3-next F J) p)
-       (take 31)
-       (filter #(< (reduce max (map abs (F %))) 1e-10))
-       first))
+  (when-let [q (roots/newton-system F J p {:max-iter 30})]
+    (when (< (reduce max (map abs (F q))) 1e-10) q)))
 
 (defn- extremes
   "The points of the polyline where the coordinate along `dir` turns."
@@ -381,12 +375,7 @@
 (defn components
   "The connected components of the roadmap's graph, as sets of nodes."
   [{:keys [graph]}]
-  (let [fill (fn [n] (-> (search/breadth-first-seq {:start n :goal? (constantly false) :neighbors #(keys (graph %))})
-                         last :came-from keys set))]
-    (second (reduce (fn [[seen comps :as acc] n]
-                      (if (seen n) acc (let [c (fill n)] [(into seen c) (conj comps c)])))
-                    [#{} []]
-                    (keys graph)))))
+  (graph/components-by (keys graph) #(keys (graph %))))
 
 (defn route
   "The shortest way along the roadmap from query `i` to query `j`, as

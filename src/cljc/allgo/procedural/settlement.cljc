@@ -45,10 +45,10 @@
   No population, no economy, no politics, no history. Azgaar's generator
   has all of those and they are what make it a *fantasy* map generator;
   this stops at the geography people impose on land."
-  (:require [allgo.graph :as graph]
+  (:require [allgo.geometry.polygon :as polygon]
+            [allgo.graph :as graph]
             [allgo.procedural.naming :as naming]
-            [allgo.search :as search]
-            [clojure.math :as math]))
+            [allgo.search :as search]))
 
 (def defaults
   {:towns 14
@@ -146,10 +146,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Getting about
 
-(defn- distance [[ax ay] [bx by]]
-  (let [dx (- (double bx) ax) dy (- (double by) ay)]
-    (math/sqrt (+ (* dx dx) (* dy dy)))))
-
 (defn travel
   "`(fn [from to])`, the cost of moving between two neighboring cells.
 
@@ -163,7 +159,7 @@
     (let [a (centers from)
           b (centers to)
           climb (abs (- (double (:elevation b)) (double (:elevation a))))]
-      (* (distance (:point a) (:point b))
+      (* (polygon/distance (:point a) (:point b))
          (+ 1.0
             (* 14.0 climb)
             (- 1.0 (get biome-appeal (:biome b) 0.5)))))))
@@ -237,7 +233,7 @@
           taken
           (recur (conj taken
                        (apply max-key
-                              (fn [id] (reduce min (map #(distance (pts id) (pts %)) taken)))
+                              (fn [id] (reduce min (map #(polygon/distance (pts id) (pts %)) taken)))
                               (remove (set taken) ids)))))))))
 
 (defn assign-cultures
@@ -290,7 +286,7 @@
         pairs (for [a towns b towns :when (< (long a) (long b))] #{a b})
         tree (graph/minimum-spanning-tree
               (set towns) (set pairs)
-              (fn [e] (let [[a b] (vec e)] (distance (pts a) (pts b)))))
+              (fn [e] (let [[a b] (vec e)] (polygon/distance (pts a) (pts b)))))
         traffic (reduce
                  (fn [acc e]
                    (let [[a b] (vec e)
@@ -302,7 +298,7 @@
                                  ;; Straight-line distance never exceeds
                                  ;; the cost, whose multiplier is at least
                                  ;; one -- so A* stays optimal.
-                                 :heuristic (fn [x g] (distance (pts x) (pts g)))})]
+                                 :heuristic (fn [x g] (polygon/distance (pts x) (pts g)))})]
                      (if (nil? route)
                        acc
                        (reduce (fn [acc [u v]]

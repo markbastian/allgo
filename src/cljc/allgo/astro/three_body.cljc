@@ -20,7 +20,7 @@
   hopeless."
   (:require [allgo.array :as a]
             [allgo.geometry.vec3 :as v3]
-            [allgo.numerics :as num]
+            [allgo.numerics.ode :as num]
             [allgo.random :as random]
             [clojure.math :as math]))
 

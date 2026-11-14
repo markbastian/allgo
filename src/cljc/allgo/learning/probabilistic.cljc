@@ -30,21 +30,21 @@
 
   Networks are `allgo.probability.bayes`'s: `{:variables :parents :domains
   :cpt}`. Data are events, maps from variables to values."
-  (:require [allgo.numerics.special :as special]
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.special :as special]
+            [allgo.probability.bayes :as bayes]
             [allgo.random :as random]
             [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------------------
 ;; Bayesian learning
 
-(defn- normalize [ps] (let [t (reduce + ps)] (mapv #(/ % t) ps)))
-
 (defn posterior-seq
   "Bayesian learning over `hypotheses`, each a function giving P(datum |
   h), from `prior`, a vector of their probabilities: the posterior
   after each of `data` in turn, the prior first."
   [hypotheses prior data]
-  (reductions (fn [post d] (normalize (mapv #(* %1 (%2 d)) post hypotheses))) (vec prior) data))
+  (reductions (fn [post d] (bayes/normalize (mapv #(* %1 (%2 d)) post hypotheses))) (vec prior) data))
 
 (defn predict
   "P(x | d), each hypothesis's prediction weighted by its posterior."
@@ -264,8 +264,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Nonparametric density estimation
 
-(defn- distance [a b] (math/sqrt (reduce + (map #(let [d (- %1 %2)] (* d d)) a b))))
-
 (defn- ball-volume
   "The volume of a ball of radius `r` in `d` dimensions."
   [d r]
@@ -275,7 +273,7 @@
   "The density at `x` by its `k` nearest of `points`: k over N times the
   volume of the smallest ball round x that holds them."
   [points k x]
-  (let [r (nth (sort (map #(distance x %) points)) (dec (long k)))]
+  (let [r (nth (sort (map #(lin/distance x %) points)) (dec (long k)))]
     (/ (double k) (* (count points) (ball-volume (count x) r)))))
 
 (defn kernel-density
@@ -284,7 +282,7 @@
   [points w x]
   (let [d (count x) w (double w)
         norm (math/pow (* w w 2.0 math/PI) (/ d 2.0))]
-    (/ (reduce + (map #(math/exp (- (/ (let [r (distance x %)] (* r r)) (* 2.0 w w)))) points))
+    (/ (reduce + (map #(math/exp (- (/ (let [r (lin/distance x %)] (* r r)) (* 2.0 w w)))) points))
        (* (count points) norm))))
 
 ;; ---------------------------------------------------------------------------

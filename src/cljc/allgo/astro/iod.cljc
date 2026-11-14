@@ -23,6 +23,7 @@
             [allgo.math :as am]
             [allgo.numerics.interpolation :as interp]
             [allgo.numerics.linear :as lin]
+            [allgo.numerics.optimize :as opt]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
@@ -270,20 +271,17 @@
       (let [x (math/sqrt (/ y c2))]
         {:t (/ (+ (* x x x c3) (* A (math/sqrt y))) (math/sqrt mu)) :y y}))))
 
-(defn- bisect-psi [f lo hi dt increasing?]
-  (loop [lo lo hi hi i 0]
-    (let [mid (* 0.5 (+ lo hi))
-          t (:t (f mid))]
-      (cond
-        (or (> i 200) (< (- hi lo) 1e-12)) mid
-        (nil? t) (if increasing? (recur mid hi (inc i)) (recur lo mid (inc i)))
-        (= (< t dt) increasing?) (recur mid hi (inc i))
-        :else (recur lo mid (inc i))))))
+(defn- bisect-psi
+  "The psi between `lo` and `hi` whose time of flight is `dt`, the time
+  rising with psi when `increasing?`, falling otherwise."
+  [f lo hi dt increasing?]
+  (roots/crossing (fn [psi] (let [t (:t (f psi))] (if (nil? t) increasing? (= (< t dt) increasing?))))
+                  lo hi 1e-12))
 
 (defn- min-psi
   "The psi of least time of flight in the band of `revs` revolutions."
   [f lo hi]
-  (roots/minimize #(or (:t (f %)) ##Inf) lo hi {:tol 0.0 :max-iter 200}))
+  (opt/golden-minimize #(or (:t (f %)) ##Inf) lo hi {:tol 0.0 :max-iter 200}))
 
 (defn lambert
   "The velocities `[v1 v2]` that carry a body from `r1` to `r2` in `dt`

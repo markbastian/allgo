@@ -31,7 +31,7 @@
   (:require [allgo.astro.cr3bp :as cr3bp]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
-            [allgo.numerics.rk :as rk]
+            [allgo.numerics.ode.rk :as rk]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------- the flow and its STM
@@ -54,8 +54,8 @@
     [[uxx uxy uxz] [uxy uyy uyz] [uxz uyz uzz]]))
 
 ;; The flow is integrated by Dormand and Prince's 5(4) pair -- the same
-;; tableau as `allgo.numerics.rk/dopri54`, the same error norm and step
-;; law as `allgo.numerics.core` -- but on primitive arrays, the forty-two
+;; tableau as `allgo.numerics.ode.rk/dopri54`, the same error norm and step
+;; law as `allgo.numerics.ode.core` -- but on primitive arrays, the forty-two
 ;; equations of the state and its transition matrix written straight into
 ;; a buffer: the generic integrator's vectors cost twenty times as much
 ;; here, where continuation and correction fly thousands of periods.

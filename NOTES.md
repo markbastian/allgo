@@ -629,7 +629,7 @@ package of its own:
 |-------------------------------|-----------------------------------------------------------------------------|
 | `allgo.logic.propositional`   | Sentences and a parser, CNF, TT-ENTAILS?, PL-RESOLUTION, forward and backward chaining, DPLL, WalkSAT |
 | `allgo.logic.wumpus`          | The wumpus world and the hybrid agent                                       |
-| `allgo.logic.satplan`         | SATPlan: a STRIPS-like problem to CNF for each plan length, solved by DPLL  |
+| `allgo.planning.satplan`      | SATPlan: a STRIPS-like problem to CNF for each plan length, solved by DPLL  |
 
 Its tests are under `test/allgo/logic/`.
 
@@ -742,7 +742,7 @@ examples of chapter 19 are inlined in their test.
 | Namespace                          | Chapters | What it is                                                                 |
 |------------------------------------|----------|----------------------------------------------------------------------------|
 | `allgo.agents`                     | 2        | The vacuum world; table-driven, reflex, simple reflex and model-based agents |
-| `allgo.planning`                   | 11       | Classical planning by A* over ground actions; air cargo, spare tire, blocks world; hierarchical and angelic search; job-shop scheduling |
+| `allgo.planning.classical`         | 11       | Classical planning by A* over ground actions; air cargo, spare tire, blocks world; hierarchical and angelic search; job-shop scheduling |
 | `allgo.decision.utility`           | 12, 16   | Expected utility, the decision-theoretic agent, the value of information, the information-gathering agent |
 | `allgo.probability.bayes`          | 13       | Bayesian networks: enumeration, variable elimination, prior, rejection and likelihood-weighted sampling, Gibbs |
 | `allgo.probability.temporal`       | 14       | HMMs: filtering, forward-backward, fixed-lag smoothing, Viterbi, particle filtering; the Kalman filter |
@@ -1810,6 +1810,103 @@ wumpus world's grid, a hex ring.
 The layout is by subject throughout -- `numerics`, `robotics`,
 `decision` and so on -- with books named in docstrings and here, never
 in a namespace.
+
+**A third pass**, for numerical methods written twice.
+
+*Private copies replaced by the shared function:*
+- a central-difference Jacobian in `robotics.control`, now
+  `numerics.differentiation/jacobian`;
+- `optimize/newton-1d`, which is `roots/newton` on the derivative;
+- a hand-rolled Newton iteration in `astro.close-approach`, now
+  `roots/newton`;
+- a three-equation Newton step in `robotics.canny`, now
+  `roots/newton-system`;
+- the polynomial bisection in `numerics.algebraic`, now `roots/bisect`;
+- the predicate bisections in `robotics.clearance` and Lambert's
+  solver in `astro.iod`, now `roots/crossing`;
+- an inline fourth-order Runge-Kutta loop in `astro.semianalytic`, now
+  the RK4 tableau;
+- three copies of connected components by breadth-first fill (Canny's
+  roadmap, the cylindrical decomposition, pursuit-evasion's shadows),
+  now `graph/components-by`;
+- seven private 2-D and n-D distances and lerps, two probability-vector
+  normalizations and two row means, now `polygon/distance`,
+  `linear/distance-squared`, `probability.bayes/normalize` (which now
+  takes a vector or a map) and `linear/mean`.
+
+The shared `polygon/distance` and `linear/distance-squared` built a
+throwaway vector on every call, so they were rewritten not to before
+the copies were pointed at them.
+
+*Changes to shared functions:*
+- `roots/crossing` now stops where doubles run out, as well as at its
+  tolerance, so it cannot loop forever when the tolerance is finer than
+  the doubles there. It returns the last point where its predicate
+  holds, the side its callers need.
+- Golden-section search moved from `roots` to `optimize`, as
+  `golden-minimize` and `golden-maximize`.
+
+*A bug the renaming found.* `linear/inverse` is the inverse of a
+symmetric positive definite matrix by Cholesky, and is now named
+`spd-inverse`. The HMM's fixed-lag smoothing used it to invert a
+transition matrix, which need not be symmetric. Cholesky reads only half
+the matrix and so returns a wrong inverse silently. The umbrella world's
+symmetric transitions hid it. It now uses
+`linear-systems/inverse`.
+
+*Two methods written once per book.*
+- Chapra's fourth-order Adams predictor-corrector, in
+  `numerics.ode.classical`, now takes its coefficients from
+  `numerics.ode.multistep`, which derives them for any order. Its
+  driver stays: it iterates the corrector to convergence with Milne's
+  modifiers, not a single PECE pass.
+- The equinoctial elements had four implementations in two conventions:
+  - `kepler`'s classical-elements vector, kept;
+  - a map in `kepler` with the eccentricity components swapped and the
+    true longitude, used by one test, removed;
+  - Vallado's form in `states`;
+  - `semianalytic`'s copy of the state conversion.
+
+  The direct conversion from position and velocity, which forms no
+  classical element and so is defined for circular and equatorial
+  orbits, now lives in `kepler` as `state->equinoctial` and
+  `equinoctial->state`. `semianalytic` uses it, and so does `states` for
+  prograde orbits, keeping the classical route only for Vallado's
+  retrograde factor.
+
+*Layout.*
+- The ODE integrators were split by book: Montenbruck & Gill's in
+  `numerics.rk`, `rkn`, `multistep`, `extrapolation` and
+  `gauss-jackson`, with the dispatcher at the top as `allgo.numerics`;
+  Chapra's in `numerics.ode`. They are now one package: the dispatcher
+  is `allgo.numerics.ode`, the rest `allgo.numerics.ode.*`, Chapra's
+  `ode.classical`.
+- `allgo.planning` is now `allgo.planning.classical`, and SATPlan moved
+  beside it from `logic` as `allgo.planning.satplan`.
+- About thirty tests named for their books (`chapra_*`, `vallado_*`,
+  `meeus_*`, the mission handbook's) are named for their subjects --
+  `roots_test`, `iod_test`, `moon_test` -- three merged into the
+  subject test that already existed; the books are still cited in each
+  docstring.
+
+*One representation where speed matters.* Where an algorithm was
+written twice, once on vectors and once on arrays, the fast one is kept
+and the other is a thin wrapper over it, or else the two are side by
+side and say which is which:
+- The flat-array Cholesky that `physics.articulated` kept privately is
+  now `numerics.linear/flat-cholesky!`, `flat-cholesky-solve` and
+  `flat-spd-inverse`. The vector `cholesky`, `cholesky-solve` and
+  `spd-inverse` copy into them, with the same arithmetic in the same
+  order.
+- `linear/mat-mul` is the loop version the autodiff module kept for
+  itself, summing in the same order.
+- The flocks already stood this way: two implementations behind one
+  protocol.
+- The rigid bodies stay two, with each pointing at the other:
+  `physics.rigid` on maps is the reference that the joints build on,
+  and `physics.solver`'s `:xpbd` mode is the same correction on arrays,
+  for piles of bodies. Merging them would mean rewriting the joints for
+  the arrays, for scenes of a few bodies where the maps cost nothing.
 
 ## Computer vision, after Russell & Norvig
 

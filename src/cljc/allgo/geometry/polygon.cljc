@@ -18,7 +18,9 @@
 (defn dot ^double [[ax ay] [bx by]] (+ (* (double ax) (double bx)) (* (double ay) (double by))))
 (defn cross ^double [[ax ay] [bx by]] (- (* (double ax) (double by)) (* (double ay) (double bx))))
 (defn norm ^double [[x y]] (math/sqrt (+ (* (double x) (double x)) (* (double y) (double y)))))
-(defn distance ^double [a b] (norm (sub a b)))
+(defn distance ^double [[ax ay] [bx by]]
+  (let [dx (- (double bx) (double ax)) dy (- (double by) (double ay))]
+    (math/sqrt (+ (* dx dx) (* dy dy)))))
 
 (defn lerp [[ax ay] [bx by] t]
   (let [t (double t)]

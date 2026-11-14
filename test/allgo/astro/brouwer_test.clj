@@ -13,7 +13,7 @@
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
             [allgo.numerics.differentiation :as diff]
-            [allgo.numerics.gauss-jackson :as gj]
+            [allgo.numerics.ode.gauss-jackson :as gj]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 

@@ -38,7 +38,9 @@
   critical value is numerical: its roots in y are found in floating
   point, and two closer than a millionth are one -- the precision
   parameter the book says a practical implementation chooses."
-  (:require [allgo.numerics.algebraic :as alg]
+  (:require [allgo.geometry.polygon :as polygon]
+            [allgo.graph :as graph]
+            [allgo.numerics.algebraic :as alg]
             [allgo.numerics.multivariate :as mv]
             [allgo.numerics.polynomial :as poly]
             [allgo.search :as search]
@@ -306,8 +308,6 @@
 
 ;; --------------------------------------------------------------- roadmap
 
-(defn- distance [[ax ay] [bx by]] (math/hypot (- bx ax) (- by ay)))
-
 (defn roadmap
   "The roadmap of the cells whose signs satisfy `free?`: each free 2-cell
   joined to the free vertical 1-cells beside it in the neighboring
@@ -318,7 +318,7 @@
   (let [free (set (map :id (filter (comp free? :signs) (cells cad))))
         sample #(:sample (cell cad %))
         edge (fn [graph a b]
-               (let [d (distance (sample a) (sample b))]
+               (let [d (polygon/distance (sample a) (sample b))]
                  (-> graph (assoc-in [a b] d) (assoc-in [b a] d))))
         columns (:columns cad)
         across (for [{:keys [index kind lo hi roots]} columns
@@ -344,14 +344,7 @@
 (defn components
   "The connected components of the roadmap, as sets of cell ids."
   [{:keys [graph]}]
-  (let [fill (fn [n] (-> (search/breadth-first-seq {:start n :goal? (constantly false) :neighbors #(keys (graph %))})
-                         last :came-from keys set))]
-    (second (reduce (fn [[seen comps :as acc] n]
-                      (if (seen n) acc (let [c (fill n)] [(into seen c) (conj comps c)])))
-                    [#{} []]
-                    (sort (keys graph))))))
-
-;; ----------------------------------------------------------------- paths
+  (graph/components-by (sort (keys graph)) #(keys (graph %))))
 
 (defn sections
   "The heights of the sections over `x`, ascending, an x between critical

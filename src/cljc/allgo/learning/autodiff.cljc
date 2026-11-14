@@ -49,24 +49,11 @@
 ;; Operations: each a value and, per parent, what a gradient G of the
 ;; result sends back to it
 
-(defn- row-dot
-  "The dot product of two rows of length `n`."
-  [a b n]
-  (loop [i 0 acc 0.0]
-    (if (= i n) acc (recur (inc i) (+ acc (* (double (nth a i)) (double (nth b i))))))))
-
-(defn- mat-mul
-  "A B, in loops: the product every layer makes, and most of the time a
-  model takes to train."
-  [A B]
-  (let [Bt (lin/transpose B) n (count (first A))]
-    (mapv (fn [a] (mapv #(row-dot a % n) Bt)) A)))
-
 (defn matmul [a b]
   (let [A (value a) B (value b)]
-    (node (mat-mul A B)
-          [[a #(mat-mul % (lin/transpose B))]
-           [b #(mat-mul (lin/transpose A) %)]])))
+    (node (lin/mat-mul A B)
+          [[a #(lin/mat-mul % (lin/transpose B))]
+           [b #(lin/mat-mul (lin/transpose A) %)]])))
 
 (defn add [a b] (node (emap2 + (value a) (value b)) [[a identity] [b identity]]))
 (defn sub [a b] (node (emap2 - (value a) (value b)) [[a identity] [b #(emap - %)]]))

@@ -17,7 +17,7 @@ https://ntrs.nasa.gov/citations/20100037210
 The rows are as printed. The handbook computes each point on a two-day
 grid of dates, at 0h, and prints two decimals of C3; its asymptote
 angles are referred to the mean equator and equinox of the launch date.
-`mission_handbook_test` checks every row against
+`allgo.astro.interplanetary-test` checks every row against
 `allgo.astro.interplanetary/transfer`, and in doing so found these slips
 in the tables, which it corrects and says why:
 

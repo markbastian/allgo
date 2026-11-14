@@ -55,7 +55,7 @@
                           :let [[z cov] (reduce #(loc/ekf-predict world %1 %2)
                                                 [[0.0 0.0 0.0] (vec (repeat 3 [0.0 0.0 0.0]))]
                                                 (subvec (vec controls) s e))]]
-                      {:from k :to (inc k) :z z :info (lin/inverse cov)}))
+                      {:from k :to (inc k) :z z :info (lin/spd-inverse cov)}))
      ;; Observations are made after each control: those after step s are
      ;; seen from the pose at s.
      :sightings (vec (for [[k s] (map-indexed vector kept)

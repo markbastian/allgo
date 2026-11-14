@@ -11,8 +11,8 @@
             [allgo.astro.perturbations :as pt]
             [allgo.astro.semianalytic :as sa]
             [allgo.geometry.vec3 :as v3]
-            [allgo.numerics.core :as core]
-            [allgo.numerics.rk :as rk]
+            [allgo.numerics.ode.core :as core]
+            [allgo.numerics.ode.rk :as rk]
             [clojure.math :as math]
             [clojure.test :refer [deftest is testing]]))
 
@@ -38,14 +38,14 @@
     (doseq [el [{:a 7200.0 :e 0.05 :i 0.9 :raan 0.4 :argp 1.1 :M 2.0}
                 {:a 42164.0 :e 0.0001 :i 0.001 :raan 3.0 :argp 0.5 :M 5.0}
                 {:a 26000.0 :e 0.7 :i 1.1 :raan 5.0 :argp 4.0 :M 0.3}]]
-      (let [[r v :as s] (kep/elements->state mu el)
-            [r' v'] (sa/elements->state (sa/state->elements s))]
+      (let [[r v] (kep/elements->state mu el)
+            [r' v'] (kep/equinoctial->state mu (kep/state->equinoctial mu r v))]
         (is (< (v3/distance r r') 1e-8))
         (is (< (v3/distance v v') 1e-11))))))
 
 (deftest averaged-rates
   (testing "J2's rates averaged round the orbit are its closed-form secular rates"
-    (let [x (sa/state->elements s0)
+    (let [x (kep/state->equinoctial mu (first s0) (second s0))
           {:keys [a e i]} (kep/state->elements mu (first s0) (second s0))
           [_ af ag chi psi] x
           [_ daf dag dchi dpsi dlam] (sa/mean-rates (zonal 2 geo/J2 0.0) mu 0.0 x 64 false)
@@ -99,6 +99,6 @@
           [y] (integrate pert s0 t)
           x (sa/propagate-mean pert mu (sa/mean-elements pert 0.0 s0) 0.0 t 21600.0 true)
           [r] (sa/osculating pert t x)
-          a-decay (- (first (sa/state->elements s0)) (first (sa/state->elements (integrate pert s0 t))))]
+          a-decay (- (first (kep/state->equinoctial mu (first s0) (second s0))) (first (let [[r v] (integrate pert s0 t)] (kep/state->equinoctial mu r v))))]
       (is (> a-decay 0.05) "the orbit does decay")
       (is (< (v3/distance r y) 0.05)))))

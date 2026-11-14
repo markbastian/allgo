@@ -50,7 +50,7 @@
   [rows n]
   (let [{:keys [N b]} (normal-equations rows n)]
     (when-let [dx (lin/cholesky-solve N b)]
-      {:correction dx :information N :covariance (lin/inverse N)})))
+      {:correction dx :information N :covariance (lin/spd-inverse N)})))
 
 (defn rms
   "Root-mean-square residual, the number that says whether an iteration

@@ -7,7 +7,7 @@
   last no longer than a shadow crossing the planet's full width would,
   and Callisto's skips the years either side of Jupiter's solstice. The
   positions underneath are checked against JPL Horizons in
-  `allgo.astro.meeus-independent-test`."
+  `allgo.astro.ephemerides-crosscheck-test`."
   (:require [allgo.astro.almanac :as al]
             [allgo.astro.jupiter-moons :as jm]
             [clojure.test :refer [deftest is testing]]))

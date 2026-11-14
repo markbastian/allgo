@@ -44,7 +44,7 @@
     (testing "samples from the model have the data's mean and covariance"
       (let [m (nth models 2000) rng (random/rng 3)
             xs (vec (repeatedly 20000 #(gen/ppca-sample m rng)))]
-        (is (< (max-abs (lin/sub (#'gen/mean-of xs) (:mean m))) 0.05))
+        (is (< (max-abs (lin/sub (lin/mean xs) (:mean m))) 0.05))
         (is (< (max-abs (lin/mat-sub (gen/covariance xs) S)) 0.3))))
     (testing "a point off the plane is far less probable than one on it: an anomaly"
       (let [m (nth models 2000)]

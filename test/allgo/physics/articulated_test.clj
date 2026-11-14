@@ -92,7 +92,7 @@
             qd (mapv #(* -0.23 (inc (long %))) (range n))
             tau (mapv #(* 0.9 (- 2 (long %))) (range n))
             fast (:qdd (ab/forward-dynamics model q qd tau opts))
-            slow (lin/mat-vec (lin/inverse (ab/mass-matrix model q))
+            slow (lin/mat-vec (lin/spd-inverse (ab/mass-matrix model q))
                               (mapv - tau (ab/bias-forces model q qd opts)))]
         (is (every? #(< (abs (double %)) 1e-9) (map - fast slow))
             (str "n=" n " " fast " vs " slow)))))
@@ -117,7 +117,7 @@
           qd [-0.23 -0.46 -0.69 -0.92]
           tau [1.8 0.9 0.0 -0.9]
           fast (:qdd (ab/forward-dynamics model q qd tau opts))
-          slow (lin/mat-vec (lin/inverse (ab/mass-matrix model q))
+          slow (lin/mat-vec (lin/spd-inverse (ab/mass-matrix model q))
                             (mapv - tau (ab/bias-forces model q qd opts)))
           bare (ab/mass-matrix (chain 4 0.8 1.7) q)
           with (ab/mass-matrix model q)]

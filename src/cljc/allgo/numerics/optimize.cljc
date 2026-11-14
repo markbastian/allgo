@@ -14,8 +14,8 @@
 
   And the rest of the classical optimizers (Chapra and Canale, *Numerical
   Methods for Engineers*, chapters 13-15): in one variable, parabolic
-  interpolation, Newton's method and Brent's method (golden section is
-  `allgo.numerics.roots/minimize`); in several, random search, univariate
+  golden-section search, parabolic interpolation, Newton's method and
+  Brent's method; in several, random search, univariate
   and Powell's pattern searches, steepest descent, Fletcher-Reeves
   conjugate gradients, Newton's method, Marquardt's method and the
   quasi-Newton BFGS and DFP updates; the simplex method for linear
@@ -25,6 +25,7 @@
   (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
+            [allgo.numerics.roots :as roots]
             [allgo.random :as random]
             [clojure.math :as math]))
 
@@ -89,6 +90,31 @@
 
 ;; ---------------------------------------------------------- one variable
 
+(def ^:private golden (/ (- (math/sqrt 5.0) 1.0) 2.0))
+
+(defn golden-minimize
+  "The `x` between `a` and `b` where `f`, which has a single minimum there,
+  is least, by golden-section search: until the bracket is narrower than
+  `:tol`, or after `:max-iter` narrowings."
+  ([f a b] (golden-minimize f a b {}))
+  ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 10000}}]
+   (loop [a a b b i 0]
+     (if (or (> i max-iter) (< (abs (- b a)) tol))
+       (* 0.5 (+ a b))
+       (let [x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
+         (if (< (f x1) (f x2)) (recur a x2 (inc i)) (recur x1 b (inc i))))))))
+
+(defn golden-maximize
+  "The `x` between `a` and `b` where `f`, which has a single maximum there,
+  is greatest, by golden-section search; options as `golden-minimize`'s."
+  ([f a b] (golden-maximize f a b {}))
+  ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 10000}}]
+   (loop [a a b b i 0]
+     (if (or (> i max-iter) (< (abs (- b a)) tol))
+       (* 0.5 (+ a b))
+       (let [x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
+         (if (< (f x1) (f x2)) (recur x1 b (inc i)) (recur a x2 (inc i))))))))
+
 (defn parabolic
   "The minimum of `f` by successive parabolic interpolation from three
   points bracketing it, `x0` < `x1` < `x2` with f(x1) below both ends: the
@@ -118,13 +144,7 @@
   f'(x)/f''(x). From `x0`; nil if it does not settle in `:max-iter`
   (default 50)."
   ([df d2f x0] (newton-1d df d2f x0 {}))
-  ([df d2f x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 50}}]
-   (loop [x x0 i 0]
-     (when (< i max-iter)
-       (let [d2 (d2f x)]
-         (when-not (zero? d2)
-           (let [x' (- x (/ (df x) d2))]
-             (if (<= (abs (- x' x)) (* tol (max 1.0 (abs x')))) x' (recur x' (inc i))))))))))
+  ([df d2f x0 opts] (roots/newton df d2f x0 opts)))
 
 (def ^:private cgold (* 0.5 (- 3.0 (math/sqrt 5.0))))
 

@@ -6,7 +6,8 @@
   can be any value that works as a map key. Weights are supplied as a
   function of an edge rather than stored on it, so the same edge set can be
   measured different ways without being rebuilt."
-  (:require [clojure.set :as set]))
+  (:require [allgo.search :as search]
+            [clojure.set :as set]))
 
 ;; ---------------------------------------------------------------------------
 ;; Disjoint sets
@@ -61,6 +62,20 @@
          vals
          (map set)
          set)))
+
+(defn components-by
+  "The connected components of `nodes` under `neighbors`, a function from
+  a node to its neighbors: a vector of sets, in the order of their first
+  node in `nodes`, each filled breadth first. For graphs held as a
+  neighbor function -- a roadmap, a lattice -- where gathering the edges
+  for `components` would cost more than the search."
+  [nodes neighbors]
+  (let [fill (fn [n] (-> (search/breadth-first-seq {:start n :goal? (constantly false) :neighbors neighbors})
+                         last :came-from keys set))]
+    (second (reduce (fn [[seen comps :as acc] n]
+                      (if (seen n) acc (let [c (fill n)] [(into seen c) (conj comps c)])))
+                    [#{} []]
+                    nodes))))
 
 (defn connected-graph?
   "Whether every node is reachable from every other."

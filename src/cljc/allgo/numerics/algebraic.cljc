@@ -22,6 +22,7 @@
   matrix, by Bareiss's fraction-free elimination, whose divisions are
   exact -- a polynomial in x vanishing where the two share a root."
   (:require [allgo.numerics.polynomial :as poly]
+            [allgo.numerics.roots :as roots]
             [allgo.search :as search]
             [clojure.math :as math]))
 
@@ -229,26 +230,11 @@
         (->> (search/step-seq (partial isolate-step p chain) {:pending [[(- r) r]] :isolated []})
              last :isolated (sort-by first) vec)))))
 
-(defn- refine-step
-  "Halve an interval (a, b] holding one root of `p`, keeping the half
-  that holds it."
-  [p [a b]]
-  (let [m (* 0.5 (+ a b))
-        pm (poly/horner p m)
-        pb (poly/horner p b)]
-    (when (and (< a m b) (> (- b a) (* 1e-15 (max 1.0 (abs a) (abs b)))))
-      (cond
-        (zero? pb) [b b]
-        (zero? pm) [m m]
-        (neg? (* pm pb)) [m b]
-        :else [a m]))))
-
 (defn refine
-  "The root of `p` in the interval (a, b], by bisection until rounding
-  blurs the sign -- or exactly, when the root is an integer."
+  "The root of `p` in the interval (a, b], by bisection -- exactly, when
+  the root is an integer, which rounding near it would otherwise blur."
   [p [a b]]
-  (let [[a b] (last (search/step-seq (partial refine-step p) [a b]))
-        x (* 0.5 (+ a b))
+  (let [x (roots/bisect #(poly/horner p %) a b)
         k (math/rint x)]
     (if (and (< (abs (- k x)) 1e-9) (zero? (poly/horner p k))) (+ k 0.0) x)))
 

@@ -19,7 +19,9 @@
     :xpbd                 do not solve velocities at all. Move the bodies
                           until they no longer overlap, then read the
                           velocity back off how far each one traveled.
-                          `allgo.physics.rigid` and Müller's papers.
+                          Müller's papers; the fast version of
+                          `allgo.physics.rigid`'s correction, which stays
+                          the reference and carries the joints.
     :convex               every contact at once. The step's velocities as the
                           minimum of one convex function, found by Newton's
                           method: MuJoCo's solver, and Drake's SAP. See

@@ -12,7 +12,8 @@
   it is the factorization that says so: it returns nil exactly when they
   are not, which is a fact about the problem rather than a numerical
   mishap."
-  (:require [clojure.math :as math]))
+  (:require [allgo.array :as a]
+            [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------- vectors
 ;;
@@ -26,8 +27,12 @@
 (defn dot [a b] (reduce + (map * a b)))
 (defn length-squared [v] (dot v v))
 (defn length [v] (math/sqrt (dot v v)))
-(defn distance-squared [a b] (length-squared (sub a b)))
-(defn distance [a b] (length (sub a b)))
+(defn distance-squared [a b] (reduce + (map (fn [x y] (let [d (- x y)] (* d d))) a b)))
+(defn distance [a b] (math/sqrt (distance-squared a b)))
+(defn mean
+  "The mean of the vectors `vs`."
+  [vs]
+  (let [n (count vs)] (mapv #(/ % n) (apply mapv + vs))))
 
 (defn normalize
   "A unit vector in the same direction, or `v` itself if it has none."
@@ -39,9 +44,19 @@
 
 (defn transpose [m] (apply mapv vector m))
 
-(defn mat-mul [a b]
-  (let [bt (transpose b)]
-    (mapv (fn [row] (mapv #(dot row %) bt)) a)))
+(defn- row-dot
+  "The dot product of two rows of length `n`, in a loop."
+  ^double [a b n]
+  (let [n (long n)]
+    (loop [i 0 acc 0.0]
+      (if (== i n) acc (recur (inc i) (+ acc (* (double (nth a i)) (double (nth b i)))))))))
+
+(defn mat-mul
+  "A B, in loops: the product every layer of a network makes, and most of
+  the time one takes to train."
+  [a b]
+  (let [bt (transpose b) n (count (first a))]
+    (mapv (fn [row] (mapv #(row-dot row % n) bt)) a)))
 
 (defn mat-vec [m v] (mapv #(dot % v) m))
 
@@ -50,8 +65,79 @@
 (defn mat-scale [m s] (mapv (fn [r] (mapv #(* % s) r)) m))
 (defn eye [n] (mapv (fn [i] (mapv #(if (= i %) 1.0 0.0) (range n))) (range n)))
 
+(defn flat-cholesky!
+  "The Cholesky factor L, L L^T = A, of the symmetric positive definite
+  `n` by `n` matrix in `a` -- a flat double array, row by row, of which
+  only the lower triangle is read -- written over that lower triangle,
+  and returned; nil if A is not positive definite.
+
+  The array form is the one to use where speed matters: on vectors of
+  rows the joints' and the root's factors of `allgo.physics.articulated`
+  were a third of a motorcycle step in a browser. `cholesky` is this on
+  vectors."
+  [^doubles a n]
+  (let [n (long n)]
+    (loop [i 0]
+      (if (== i n)
+        a
+        (when (loop [j 0]
+                (if (> j i)
+                  true
+                  (let [s (if (zero? j)
+                            0.0
+                            (loop [k 1 s (* (aget a (* n i)) (aget a (* n j)))]
+                              (if (== k j) s (recur (inc k) (+ s (* (aget a (+ (* n i) k)) (aget a (+ (* n j) k))))))))
+                        v (- (aget a (+ (* n i) j)) s)]
+                    (if (== i j)
+                      (when (> v 0.0) (aset a (+ (* n i) i) (math/sqrt v)) (recur (inc j)))
+                      (do (aset a (+ (* n i) j) (/ v (aget a (+ (* n j) j)))) (recur (inc j)))))))
+          (recur (inc i)))))))
+
+(defn flat-cholesky-solve
+  "x of A x = `b`, through `flat-cholesky!`'s factor `l` of the `n` by `n`
+  A: forward substitution through L, then back through L^T. A new array."
+  ^doubles [^doubles l n ^doubles b]
+  (let [n (long n) y (a/f64 n) x (a/f64 n)]
+    (dotimes [i n]
+      (let [s (if (zero? i)
+                0.0
+                (loop [k 1 s (* (aget l (* n i)) (aget y 0))]
+                  (if (== k i) s (recur (inc k) (+ s (* (aget l (+ (* n i) k)) (aget y k)))))))]
+        (aset y i (/ (- (aget b i) s) (aget l (+ (* n i) i))))))
+    (loop [i (dec n)]
+      (when (>= i 0)
+        (let [s (if (== i (dec n))
+                  0.0
+                  (loop [k (+ i 2) s (* (aget l (+ (* n (inc i)) i)) (aget x (inc i)))]
+                    (if (== k n) s (recur (inc k) (+ s (* (aget l (+ (* n k) i)) (aget x k)))))))]
+          (aset x i (/ (- (aget y i) s) (aget l (+ (* n i) i))))
+          (recur (dec i)))))
+    x))
+
+(defn flat-spd-inverse
+  "The inverse of the symmetric positive definite `n` by `n` matrix in the
+  flat array `a`, as a new flat array, a column solved for each column of
+  the identity; nil if it is not positive definite. `a` is left alone."
+  ^doubles [^doubles a n]
+  (let [n (long n)]
+    (when-let [l (flat-cholesky! (a/f64 (seq a)) n)]
+      (let [out (a/f64 (* n n))]
+        (dotimes [c n]
+          (let [e (a/f64 n)]
+            (aset e c 1.0)
+            (let [^doubles x (flat-cholesky-solve l n e)]
+              (dotimes [r n] (aset out (+ (* n r) c) (aget x r))))))
+        out))))
+
+(defn- flat [A] (a/f64 (apply concat A)))
+
+(defn- rows [^doubles m n lower?]
+  (let [n (long n)]
+    (mapv (fn [i] (mapv (fn [j] (if (and lower? (> j i)) 0.0 (aget m (+ (* n i) j)))) (range n))) (range n))))
+
 (defn cholesky
-  "Lower-triangular L with L L^T = A, for symmetric positive definite A.
+  "Lower-triangular L with L L^T = A, for symmetric positive definite A,
+  on vectors of rows: `flat-cholesky!` on a copy.
 
   Returns nil when A is not positive definite. For a normal matrix that is
   not a numerical mishap but a statement about the data: some direction of
@@ -59,49 +145,24 @@
   will invent it."
   [A]
   (let [n (count A)]
-    (loop [i 0 L (vec (repeat n (vec (repeat n 0.0))))]
-      (cond
-        (nil? L) nil
-        (= i n)  L
-        :else
-        (recur (inc i)
-               (loop [j 0 L L]
-                 (cond
-                   (nil? L) nil
-                   (> j i)  L
-                   :else
-                   (let [s (reduce + (map * (take j (nth L i)) (take j (nth L j))))
-                         v (- (nth (nth A i) j) s)]
-                     (if (= i j)
-                       (if (<= v 0.0)
-                         nil
-                         (recur (inc j) (assoc-in L [i j] (math/sqrt v))))
-                       (recur (inc j) (assoc-in L [i j] (/ v (nth (nth L j) j)))))))))))))
+    (some-> (flat-cholesky! (flat A) n) (rows n true))))
 
 (defn cholesky-solve
   "Solve A x = b for symmetric positive definite A, by forward then back
-  substitution through the Cholesky factor."
+  substitution through the Cholesky factor: `flat-cholesky-solve` on
+  vectors. nil if A is not positive definite."
   [A b]
-  (when-let [L (cholesky A)]
-    (let [n (count A)
-          y (reduce (fn [y i]
-                      (conj y (/ (- (nth b i) (reduce + (map * (take i (nth L i)) y)))
-                                 (nth (nth L i) i))))
-                    [] (range n))
-          x (reduce (fn [x i]
-                      (let [s (reduce + (map (fn [k] (* (nth (nth L k) i) (get x k 0.0)))
-                                             (range (inc i) n)))]
-                        (assoc x i (/ (- (nth y i) s) (nth (nth L i) i)))))
-                    (vec (repeat n 0.0)) (reverse (range n)))]
-      x)))
+  (let [n (count A)]
+    (when-let [l (flat-cholesky! (flat A) n)]
+      (vec (flat-cholesky-solve l n (a/f64 b))))))
 
-(defn inverse
-  "Inverse of a symmetric positive definite matrix, column by column."
+(defn spd-inverse
+  "Inverse of a symmetric positive definite matrix, on vectors of rows:
+  `flat-spd-inverse`. nil if it is not one. Any invertible matrix is
+  `allgo.numerics.linear-systems/inverse`."
   [A]
   (let [n (count A)]
-    (when (cholesky A)
-      (transpose (mapv (fn [i] (cholesky-solve A (mapv #(if (= i %) 1.0 0.0) (range n))))
-                       (range n))))))
+    (some-> (flat-spd-inverse (flat A) n) (rows n false))))
 
 (defn det-3
   "The determinant of a 3x3 matrix, written out -- the closed form for the

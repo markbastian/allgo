@@ -34,7 +34,14 @@
   index. That is the opposite of the flat arrays elsewhere in this
   library, and deliberately: a scene has tens of rigid bodies where a
   fluid has thousands of particles, and at tens the clarity is worth more
-  than the allocation."
+  than the allocation.
+
+  This is the reference version; `allgo.physics.solver`'s `:xpbd` mode is
+  the fast one -- the same correction, in the same order, on flat
+  per-body arrays (`project-contacts!` there). Use that for piles of
+  loose bodies, where the allocation here is most of a frame. This one is
+  what `allgo.physics.joint` builds joints on, for figures of a few
+  bodies."
   (:require [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [clojure.math :as math]))

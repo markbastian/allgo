@@ -17,7 +17,8 @@
   controller's next memory; `simulate` iterates a plant and a controller
   together; `riccati-seq` is the cost-to-go one more step out, each step
   a matrix and the gain it implies."
-  (:require [allgo.numerics.linear :as lin]
+  (:require [allgo.numerics.differentiation :as d]
+            [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as linear-systems]))
 
 ;; ---------------------------------------------------------------------------
@@ -65,7 +66,7 @@
   [A B Q R {:keys [P]}]
   (let [At (lin/transpose A)
         BtP (lin/mat-mul (lin/transpose B) P)
-        K (lin/mat-mul (lin/inverse (lin/mat-add R (lin/mat-mul BtP B))) (lin/mat-mul BtP A))
+        K (lin/mat-mul (lin/spd-inverse (lin/mat-add R (lin/mat-mul BtP B))) (lin/mat-mul BtP A))
         P' (lin/mat-add Q (lin/mat-sub (lin/mat-mul (lin/mat-mul At P) A)
                                        (lin/mat-mul (lin/mat-mul (lin/mat-mul At P) B) K)))]
     {:P P' :K K}))
@@ -101,14 +102,10 @@
 ;; Iterative LQR
 
 (defn- jacobian
-  "The partials of `f` (vector to vector) at `x`, by central differences:
-  a matrix, a row per output."
+  "The partials of `f` (vector to vector) at `x`, a row per output: plain
+  central differences of 1e-6."
   [f x]
-  (let [h 1e-6
-        cols (mapv (fn [j] (let [up (f (update x j + h)) down (f (update x j - h))]
-                             (mapv #(/ (- %1 %2) (* 2 h)) up down)))
-                   (range (count x)))]
-    (lin/transpose cols)))
+  (d/jacobian f x {:steps (mapv (constantly 1e-6) x) :richardson? false}))
 
 (defn- quad-cost [Q x] (lin/dot x (lin/mat-vec Q x)))
 
@@ -147,7 +144,7 @@
                           qxx (lin/mat-add (two Q) (lin/mat-mul (lin/mat-mul At vxx) A))
                           quu (lin/mat-add (lin/mat-add (two R) (lin/mat-mul (lin/mat-mul Bt vxx) B)) (lin/mat-scale (lin/eye m) mu))
                           qux (lin/mat-mul (lin/mat-mul Bt vxx) A)
-                          inv (lin/inverse quu)
+                          inv (lin/spd-inverse quu)
                           k (lin/scale (lin/mat-vec inv qu) -1.0)
                           K (lin/mat-scale (lin/mat-mul inv qux) -1.0)
                           Kt (lin/transpose K)

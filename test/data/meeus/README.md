@@ -16,4 +16,4 @@ All are works of the US government, retrieved in September 2026.
 | `nasa-solar-eclipses.txt`, `nasa-lunar-eclipses.txt` | Eclipse predictions by Fred Espenak, NASA's GSFC: the *Five Millennium Canon* catalogs for 2001-2100, https://eclipse.gsfc.nasa.gov/ | each eclipse's catalog line: number, date, time of greatest eclipse (TD), delta T, lunation, saros, type, gamma, magnitudes and more |
 
 The Moon's series (chapter 47) is checked separately, against ERFA's
-eraMoon98, in `test/allgo/meeus_moon_test.clj`.
+eraMoon98, in `test/allgo/astro/moon_test.clj`.

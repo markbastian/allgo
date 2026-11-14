@@ -42,18 +42,14 @@
 (defn- refine
   "The time of least distance on the true ephemerides near `t`, by
   Newton's method on the range-rate, its derivative by central
-  difference."
+  difference -- or `t` itself if that does not settle on a minimum."
   [eph-a eph-b t h]
   (let [g (fn [t] (let [[ra va] (eph-a t) [rb vb] (eph-b t)]
                     (v3/dot (v3/sub ra rb) (v3/sub va vb))))
-        dt (* 1e-3 h)]
-    (loop [t t i 0]
-      (let [gt (g t)
-            dg (/ (- (g (+ t dt)) (g (- t dt))) (* 2.0 dt))
-            step (/ gt dg)]
-        (if (or (> i 30) (< (abs step) 1e-9) (not (pos? dg)))
-          t
-          (recur (- t step) (inc i)))))))
+        dt (* 1e-3 h)
+        dg (fn [t] (/ (- (g (+ t dt)) (g (- t dt))) (* 2.0 dt)))
+        t' (roots/newton g dg t {:max-iter 30 :tol (/ 1e-9 (max 1.0 (abs t)))})]
+    (if (and t' (pos? (dg t'))) t' t)))
 
 (defn close-approaches
   "Every close approach between the objects of ephemerides `eph-a` and

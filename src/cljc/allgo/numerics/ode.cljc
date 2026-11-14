@@ -1,160 +1,112 @@
 (ns allgo.numerics.ode
-  "Ordinary differential equations beyond the Runge-Kutta tableaux of
-  `allgo.numerics.rk` (Chapra and Canale, *Numerical Methods for
-  Engineers*, chapters 25-26): Heun's method with its corrector iterated,
-  the second-order Taylor method, adaptive fourth-order Runge-Kutta by
-  step halving, the implicit (backward) Euler method for stiff systems,
-  and the fixed-step multistep methods -- the non-self-starting Heun
-  method, Milne's method and the fourth-order Adams method -- each a
-  predictor and an iterated corrector, with the optional modifiers that
-  fold each step's error estimate back in.
+  "Ordinary differential equations: one door onto the integrators of
+  `allgo.numerics.ode.*` -- Runge-Kutta tableaux, Runge-Kutta-Nystrom,
+  Adams and Stoermer-Cowell multistep methods, extrapolation and
+  Gauss-Jackson -- after Montenbruck & Gill, *Satellite Orbits*, chapter
+  4. The classical one-off solvers -- Heun, Taylor, implicit Euler,
+  Milne -- are `allgo.numerics.ode.classical`.
 
-  `f` is `(f t y)` with `y` a vector; results are `[[t y] ...]`, the start
-  first."
-  (:require [allgo.numerics.differentiation :as d]
-            [allgo.numerics.linear :as lin]
-            [allgo.numerics.linear-systems :as ls]
-            [allgo.numerics.rk :as rk]
+  The families differ in what they need to get going -- a tableau method
+  needs nothing, a multistep method a history, an extrapolation method a
+  sub-step sequence -- so each has its own constructor. This dispatches on
+  the method itself, which is what a caller offering a menu of methods
+  actually wants."
+  (:require [allgo.numerics.linear :as lin]
+            [allgo.numerics.ode.core :as core]
+            [allgo.numerics.ode.extrapolation :as ex]
+            [allgo.numerics.ode.multistep :as ms]
+            [allgo.numerics.ode.rk :as rk]
+            [allgo.numerics.ode.rkn :as rkn]
             [clojure.math :as math]))
 
-(defn- lin-comb [pairs] (reduce (fn [acc [c v]] (lin/add acc (lin/scale v c))) (vec (repeat (count (second (first pairs))) 0.0)) pairs))
-(defn- rel-change [a b] (apply max (map (fn [x y] (if (zero? y) (abs (- y x)) (abs (/ (- y x) y)))) a b)))
+(def first-order
+  "Everything that integrates y' = f(t, y), in rough order of cost."
+  (vec (concat rk/catalog ms/catalog ex/catalog)))
 
-(defn- iterate-corrector
-  "Iterates y <- (corrector y) from `y0` until it settles to `tol`
-  relative or `max-iter` times."
-  [corrector y0 tol max-iter]
-  (loop [y y0 k 0]
-    (let [y' (corrector y)]
-      (if (or (>= (inc k) max-iter) (< (rel-change y y') tol)) y' (recur y' (inc k))))))
+(def second-order
+  "Everything that integrates y'' = f(t, y) directly, without first turning
+  it into twice as many first-order equations."
+  (vec (concat rkn/catalog ms/catalog-2 ex/catalog-2)))
 
-;; ------------------------------------------------- one-step, continued
+(defn integrator
+  "An integrator for `y' = (f t y)`, whichever family `method` belongs to."
+  ([method f t0 y0 h] (integrator method f t0 y0 h {}))
+  ([method f t0 y0 h opts]
+   (case (:kind method)
+     :runge-kutta   (rk/integrator method f t0 y0 h opts)
+     :multistep     (ms/integrator method f t0 y0 h opts)
+     :extrapolation (ex/integrator method f t0 y0 h opts))))
 
-(defn heun
-  "Heun's method, `n` steps of `h` from `y0` at `t0`: Euler's step
-  predicts, and the trapezoid of the slopes at both ends corrects -- the
-  corrector iterated `:iterations` times (default 1, the plain method) or
-  until it settles to `:tol` (Chapra and Canale 25.2.1)."
-  ([f t0 y0 h n] (heun f t0 y0 h n {}))
-  ([f t0 y0 h n {:keys [iterations tol] :or {iterations 1 tol 0.0}}]
-   (vec (reductions (fn [[t y] _]
-                      (let [s0 (f t y)
-                            t1 (+ t h)
-                            y1 (iterate-corrector #(lin/add y (lin/scale (lin/add s0 (f t1 %)) (* 0.5 h)))
-                                                  (lin/add y (lin/scale s0 h)) tol iterations)]
-                        [t1 y1]))
-                    [t0 (vec y0)] (range n)))))
+(defn integrator-2
+  "An integrator for `y'' = (f t y)`, whichever family `method` belongs to."
+  ([method f t0 y0 dy0 h] (integrator-2 method f t0 y0 dy0 h {}))
+  ([method f t0 y0 dy0 h opts]
+   (case (:kind method)
+     :nystrom          (rkn/integrator method f t0 y0 dy0 h opts)
+     :multistep-2      (ms/integrator-2 method f t0 y0 dy0 h opts)
+     :extrapolation-2  (ex/integrator-2 method f t0 y0 dy0 h opts))))
 
-(defn taylor-2
-  "The second-order Taylor-series method, `n` steps of `h`: y + h y' +
-  h^2/2 y'', `ddf` the second derivative of y as a function of t and y
-  -- f's total derivative, f_t + f_y f, which the user supplies (Chapra
-  and Canale 25.1.3)."
-  [f ddf t0 y0 h n]
-  (vec (reductions (fn [[t y] _] [(+ t h) (lin/add y (lin/add (lin/scale (f t y) h) (lin/scale (ddf t y) (* 0.5 h h))))])
-                   [t0 (vec y0)] (range n))))
+(def step core/step)
+(def step-until core/step-until)
+(def trajectory core/trajectory)
 
-(defn- rk4-step [f t y h]
-  (first (rk/tableau-step rk/rk4 (:c rk/rk4) f t y h)))
+;; ------------------------------------------------------------ test systems
 
-(defn step-halving
-  "Adaptive fourth-order Runge-Kutta by step halving (Chapra and Canale
-  25.5.1): each step of h taken once and as two halves, their difference
-  the error estimate, the halves' result corrected by it over 15 (to
-  fifth order); the step shrunk when the error exceeds `:tol` relative to
-  the solution's scale, grown after easy steps, by the fifth-root law
-  (25.5.3). From `t0` to `t1`, starting at `:h` (default a hundredth of
-  the span). `[[t y] ...]`."
-  ([f t0 y0 t1] (step-halving f t0 y0 t1 {}))
-  ([f t0 y0 t1 {:keys [tol h] :or {tol 1e-8}}]
-   (loop [t t0 y (vec y0) h (or h (* 0.01 (- t1 t0))) out [[t0 (vec y0)]]]
-     (if (>= t (- t1 (* 1e-12 (abs t1))))
-       out
-       (let [h (min h (- t1 t))
-             whole (rk4-step f t y h)
-             half (rk4-step f (+ t (* 0.5 h)) (rk4-step f t y (* 0.5 h)) (* 0.5 h))
-             delta (mapv - half whole)
-             scale (mapv #(max (abs %1) (abs (* h %2)) 1e-30) y (f t y))
-             err (/ (apply max (map #(abs (/ %1 %2)) delta scale)) tol)]
-         (if (<= err 1.0)
-           (let [y' (lin/add half (mapv #(/ % 15.0) delta))]
-             (recur (+ t h) y' (* h (min 4.0 (* 0.9 (math/pow (max err 1e-10) -0.2)))) (conj out [(+ t h) y'])))
-           (recur t y (* h (max 0.1 (* 0.9 (math/pow err -0.25)))) out)))))))
+(defn lorenz
+  "Lorenz's 1963 convection model. Chaotic at the classical parameters, so
+  two trajectories a hair apart separate exponentially -- which makes it a
+  searching test of an integrator: any error is amplified, not averaged
+  away, and different methods visibly part company."
+  ([] (lorenz {}))
+  ([{:keys [sigma rho beta] :or {sigma 10.0 rho 28.0 beta (/ 8.0 3.0)}}]
+   (fn [_ [x y z]]
+     [(* sigma (- y x))
+      (- (* x (- rho z)) y)
+      (- (* x y) (* beta z))])))
 
-(defn backward-euler
-  "The implicit (backward) Euler method, `n` steps of `h`: y_i+1 = y_i +
-  h f(t_i+1, y_i+1), solved for y_i+1 by Newton's method each step (the
-  Jacobian of f by central differences). First order, but stable at any
-  step for a decaying solution -- the remedy for stiff systems, where the
-  explicit methods must crawl at the fastest transient's pace (Chapra and
-  Canale 26.1)."
-  [f t0 y0 h n]
-  (vec (reductions (fn [[t y] _]
-                     (let [t1 (+ t h)
-                           g (fn [z] (mapv - z y (lin/scale (f t1 z) h)))
-                           y1 (loop [z (lin/add y (lin/scale (f t y) h)) k 0]
-                                (let [dz (ls/gauss (d/jacobian g z {:steps (mapv #(* 1e-7 (max 1.0 (abs %))) z) :richardson? false}) (mapv - (g z)))]
-                                  (if (or (nil? dz) (> k 50))
-                                    z
-                                    (let [z' (lin/add z dz)]
-                                      (if (< (rel-change z z') 1e-14) z' (recur z' (inc k)))))))]
-                       [t1 y1]))
-                   [t0 (vec y0)] (range n))))
+(defn harmonic
+  "y'' = -w^2 y, as a second-order system for the Nystrom family."
+  ([] (harmonic 1.0))
+  ([w] (fn [_ y] (lin/scale y (- (* w w))))))
 
-;; ------------------------------------------------------------- multistep
+(defn kepler
+  "Two-body acceleration toward the origin: the problem the whole chapter is
+  written for."
+  ([] (kepler 1.0))
+  ([mu]
+   (fn [_ r]
+     (let [d2 (lin/length-squared r)
+           d3 (* d2 (math/sqrt d2))]
+       (lin/scale r (- (/ mu d3)))))))
 
-(def ^:private multistep-methods
-  "Each multistep method: how many past points it needs, its predictor
-  and corrector (functions of the step, the past values ys and slopes fs,
-  newest last, and for the corrector the new slope), and its modifiers'
-  constants -- the predictor's p (added times the last step's corrector
-  minus predictor) and the corrector's c (subtracted times this step's)
-  (Chapra and Canale 26.2, Box 26.1)."
-  {:heun {:history 2
-          :predict (fn [h ys fs] (lin/add (ys 0) (lin/scale (fs 1) (* 2.0 h))))
-          :correct (fn [h ys fs f+] (lin/add (ys 1) (lin/scale (lin/add (fs 1) f+) (* 0.5 h))))
-          :modify [0.8 0.2]}
-   :milne {:history 4
-           :predict (fn [h ys fs] (lin/add (ys 0) (lin/scale (lin-comb [[2.0 (fs 3)] [-1.0 (fs 2)] [2.0 (fs 1)]]) (/ (* 4.0 h) 3.0))))
-           :correct (fn [h ys fs f+] (lin/add (ys 2) (lin/scale (lin-comb [[1.0 (fs 2)] [4.0 (fs 3)] [1.0 f+]]) (/ h 3.0))))
-           :modify [(/ 28.0 29.0) (/ 1.0 29.0)]}
-   :adams {:history 4
-           :predict (fn [h ys fs] (lin/add (ys 3) (lin/scale (lin-comb [[55.0 (fs 3)] [-59.0 (fs 2)] [37.0 (fs 1)] [-9.0 (fs 0)]]) (/ h 24.0))))
-           :correct (fn [h ys fs f+] (lin/add (ys 3) (lin/scale (lin-comb [[9.0 f+] [19.0 (fs 3)] [-5.0 (fs 2)] [1.0 (fs 1)]]) (/ h 24.0))))
-           :modify [(/ 251.0 270.0) (/ 19.0 270.0)]}})
+;; Kepler motion has conserved quantities, and watching them decay is a
+;; sharper test of an integrator than watching the position: a trajectory
+;; can look perfectly elliptical while its energy walks steadily away.
 
-(defn- rk4-back
-  "A fourth-order Runge-Kutta step of `h` backward from `[t y]`."
-  [f h [t y]]
-  [(- t h) (rk4-step f t y (- h))])
+(defn specific-energy
+  "v^2/2 - mu/r. Constant on an exact orbit, and equal to -mu/(2a)."
+  [mu r v]
+  (- (* 0.5 (lin/length-squared v))
+     (/ mu (lin/length r))))
 
-(defn multistep
-  "The multistep `method` -- `:heun` (the non-self-starting Heun method,
-  second order), `:milne` or `:adams` (fourth order) -- `n` steps of `h`
-  from `y0` at `t0`. Each step predicts from the past points and corrects
-  by iterating the corrector to `:tol` (default 1e-12) or `:iterations`
-  times (default 100); with `:modify? true` the predictor and the
-  corrector are each adjusted by their error estimates. The past points
-  before t0 come from `:history`, `[[t y] ...]` oldest first, or are made
-  by fourth-order Runge-Kutta steps backward from t0."
-  ([method f t0 y0 h n] (multistep method f t0 y0 h n {}))
-  ([method f t0 y0 h n {:keys [history modify? tol iterations] :or {tol 1e-12 iterations 100}}]
-   (let [{:keys [predict correct modify] need :history} (multistep-methods method)
-         [pm cm] modify
-         past (or history
-                  (vec (reverse (take (dec need)
-                                      (rest (iterate (partial rk4-back f h) [t0 (vec y0)]))))))
-         start (conj (mapv (fn [[t y]] [t (vec y)]) past) [t0 (vec y0)])]
-     (loop [pts (vec (take-last need start)) out [[t0 (vec y0)]] k 0 last-pc nil]
-       (if (= k n)
-         out
-         (let [ys (mapv second pts)
-               ts (mapv first pts)
-               fs (mapv f ts ys)
-               t1 (+ (peek ts) h)
-               p0 (predict h ys fs)
-               ;; the predictor modifier uses the last step's corrector-predictor gap
-               p (if (and modify? last-pc) (lin/add p0 (lin/scale last-pc pm)) p0)
-               c (iterate-corrector #(correct h ys fs (f t1 %)) p tol iterations)
-               y1 (if modify? (mapv - c (lin/scale (mapv - c p0) cm)) c)]
-           (recur (conj (subvec pts 1) [t1 y1]) (conj out [t1 y1]) (inc k) (mapv - c p0))))))))
+(defn angular-momentum
+  "r x v, conserved in any central field."
+  [[rx ry rz] [vx vy vz]]
+  [(- (* ry vz) (* rz vy))
+   (- (* rz vx) (* rx vz))
+   (- (* rx vy) (* ry vx))])
+
+(defn orbital-period
+  "2*pi*sqrt(a^3/mu)."
+  [mu a]
+  (* 2.0 math/PI (math/sqrt (/ (* a a a) mu))))
+
+(defn periapsis-state
+  "Position and velocity at closest approach of an ellipse of semi-major
+  axis `a` and eccentricity `e`, in the xy plane. Starting at periapsis puts
+  the fastest, most sharply curving part of the orbit first, which is where
+  a fixed step is most exposed."
+  [mu a e]
+  (let [rp (* a (- 1.0 e))
+        vp (math/sqrt (/ (* mu (+ 1.0 e)) rp))]
+    [[rp 0.0 0.0] [0.0 vp 0.0]]))

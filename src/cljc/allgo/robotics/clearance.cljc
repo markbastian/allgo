@@ -31,6 +31,7 @@
   Worlds are `allgo.robotics.motion`'s: `:bounds`, the room, and
   `:obstacles`, disjoint counterclockwise polygons inside it."
   (:require [allgo.geometry.polygon :as polygon]
+            [allgo.numerics.roots :as roots]
             [allgo.search :as search]
             [clojure.math :as math]))
 
@@ -152,16 +153,10 @@
                              (>= (distance-to h p) (- r (* 1e-14 (+ 1.0 r))))))
                  fs))))
 
-(defn- narrow-step
-  "Halve the bracket [in out] between a parameter that passes and one
-  that fails."
-  [ok? [in out]]
-  (when (> (abs (- out in)) (* 1e-12 (max 1.0 (abs in))))
-    (let [m (* 0.5 (+ in out))]
-      (if (ok? m) [m out] [in m]))))
-
-(defn- narrow [ok? in out]
-  (first (last (search/step-seq (partial narrow-step ok?) [in out]))))
+(defn- narrow
+  "Where `ok?` stops holding between `in`, where it does, and `out`."
+  [ok? in out]
+  (roots/crossing ok? in out (* 1e-12 (max 1.0 (abs in)))))
 
 (defn- runs
   "The intervals of [t0, t1] where `ok?` holds, from `n` samples, each end

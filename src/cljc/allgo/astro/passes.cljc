@@ -11,6 +11,7 @@
   (:require [allgo.astro.geodesy :as geodesy]
             [allgo.astro.reduction :as reduction]
             [allgo.astro.sgp4 :as sgp4]
+            [allgo.numerics.optimize :as opt]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
@@ -33,7 +34,7 @@
                       (recur more {:rise t} out))
                     (if current (conj out (assoc current :set nil)) out)))]
      (mapv (fn [{:keys [rise set] :as p}]
-             (let [c (roots/maximize elevation (or rise t0) (or set t1) {:tol tol})]
+             (let [c (opt/golden-maximize elevation (or rise t0) (or set t1) {:tol tol})]
                (assoc p :culmination c :max-elevation (elevation c))))
            bounds))))
 

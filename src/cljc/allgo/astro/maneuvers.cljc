@@ -17,6 +17,7 @@
   defaults to the Earth's."
   (:require [allgo.astro.constants :as c]
             [allgo.astro.kepler :as kepler]
+            [allgo.numerics.optimize :as opt]
             [allgo.numerics.roots :as roots]
             [clojure.math :as math]))
 
@@ -167,7 +168,7 @@
          total (fn [d1] (+ (delta-v vi vta d1) (delta-v vtb vf (- di d1))))
          di1 (if optimal
                ;; golden-section search over the first burn's share
-               (roots/minimize total 0.0 di {:tol 0.0 :max-iter 100})
+               (opt/golden-minimize total 0.0 di {:tol 0.0 :max-iter 100})
                (let [R (/ rfinal rinit)]
                  (math/atan (/ (math/sin di) (+ (math/pow R 1.5) (math/cos di))))))]
      {:di1 di1 :di2 (- di di1)

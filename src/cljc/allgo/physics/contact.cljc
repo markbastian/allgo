@@ -75,7 +75,7 @@
             [allgo.geometry.quaternion :as q]
             [allgo.geometry.vec3 :as v]
             [allgo.math :as am]
-            [allgo.numerics.roots :as roots]
+            [allgo.numerics.optimize :as opt]
             [allgo.physics.rigid :as rigid]
             [allgo.spatial.sweep :as sweep]
             [clojure.math :as math]))
@@ -677,7 +677,7 @@
     (if (= ##-Inf (depth-at best))
       []
       (let [;; golden section between the best sample's neighbors, 24 narrowings
-            t (roots/maximize depth-at (- (double best) step) (+ (double best) step) {:tol 0.0 :max-iter 23})
+            t (opt/golden-maximize depth-at (- (double best) step) (+ (double best) step) {:tol 0.0 :max-iter 23})
             t (if (>= (depth-at t) (depth-at best)) t best)]
         (mapv #(assoc % :id :torus-box)
               (sphere-box ia ib {:pos (ring-point a t) :radius r} b margin))))))
@@ -823,7 +823,7 @@
         [p q] (capsule-ends a)
         d (v/sub q p)
         at (fn [t] (v/add-scaled p d (double t)))
-        t (roots/maximize (fn [t] (- (box-signed-distance b (at t)))) 0.0 1.0 {:tol 1e-6 :max-iter 40})
+        t (opt/golden-maximize (fn [t] (- (box-signed-distance b (at t)))) 0.0 1.0 {:tol 1e-6 :max-iter 40})
         ball (fn [x id] (mapv #(assoc % :id id) (sphere-box ia ib {:pos x :radius r} b margin)))
         cs (concat (ball p [:capsule-box 0])
                    (ball q [:capsule-box 1])

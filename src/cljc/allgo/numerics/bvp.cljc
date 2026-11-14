@@ -12,7 +12,7 @@
   Solutions are `[[x y] ...]` at the grid points, both ends included."
   (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear-systems :as ls]
-            [allgo.numerics.rk :as rk]
+            [allgo.numerics.ode.rk :as rk]
             [allgo.numerics.roots :as roots]
             [allgo.numerics.tridiagonal :as tri]))
 
