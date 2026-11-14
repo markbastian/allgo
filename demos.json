@@ -299,6 +299,16 @@
    "href": "play/?demo=canny-roadmap"
   },
   {
+   "id": "algebraic-decomposition",
+   "group": "Robotics",
+   "label": "Algebraic Decomposition",
+   "blurb": "Collins's cylindrical algebraic decomposition: curves projected to their critical values, the plane cut into sign-invariant cells, and a roadmap through the free ones",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=algebraic-decomposition"
+  },
+  {
    "id": "grid-navigation",
    "group": "Robotics",
    "label": "Grid Navigation",
