@@ -6,7 +6,8 @@
   window on the player page, `play/?demo=<id>`; the gallery that links
   there is `index.html`, and needs none of this -- it is plain HTML that
   loads without the bundle."
-  (:require [allgo.demo.antialias :as antialias]
+  (:require [allgo.demo.algebraic-decomposition :as algebraic-decomposition]
+            [allgo.demo.antialias :as antialias]
             [allgo.demo.arm :as arm]
             [allgo.demo.boids-3d :as boids-3d]
             [allgo.demo.boids-viewer :as boids-2d]
@@ -105,6 +106,7 @@
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
    "car-paths" {:start car-paths/start! :stop car-paths/stop!}
    "canny-roadmap" {:start canny-roadmap/start! :stop canny-roadmap/stop!}
+   "algebraic-decomposition" {:start algebraic-decomposition/start! :stop algebraic-decomposition/stop!}
    "grid-navigation" {:start grid-navigation/start! :stop grid-navigation/stop!}
    "many-robots" {:start many-robots/start! :stop many-robots/stop!}
    "pursuit-evasion" {:start pursuit-evasion/start! :stop pursuit-evasion/stop!}

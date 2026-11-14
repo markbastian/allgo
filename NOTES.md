@@ -1525,6 +1525,9 @@ and is now here, by package rather than by book:
 | `allgo.robotics.control`          | The Kalman controllability rank and the discrete Lyapunov equation (15.1)                |
 | `allgo.robotics.pursuit`          | Visibility-based pursuit-evasion: the information-space search for a pursuer (12.4)       |
 | `allgo.robotics.canny`            | Canny's roadmap of an algebraic surface: silhouettes, critical points, slices (6.4.3)     |
+| `allgo.robotics.cylindrical`      | Cylindrical algebraic decomposition of the plane: projection, lifting, samples (6.4.2)   |
+| `allgo.numerics.algebraic`        | Exact integer polynomials: gcds, square-free parts, Sturm sequences, resultants (6.4.2)  |
+| `allgo.robotics.clearance`        | The exact maximum-clearance roadmap, from the bisectors of every pair of features (6.2.3) |
 | `allgo.decision.nature`           | Games against nature: minimax, expected cost, regret, Hurwicz, observations (9.2)        |
 
 **Checks.** Each is tested against something independent of it:
@@ -1664,7 +1667,102 @@ junctions, a route -- for the sphere, the torus and the double torus;
 turn slices off to see the torus's roadmap fall apart, drag to turn it,
 click to move a query.
 
-**Left out:** cylindrical algebraic decomposition (6.4); Canny's roadmap
+**Cylindrical algebraic decomposition, later.** `allgo.robotics.cylindrical`
+is section 6.4.2's decomposition, in the plane. The projection finds
+where the cells must change in x: where a curve folds over in y (the
+resultant of f and df/dy), where two cross (their resultant), where a
+curve's leading coefficient in y vanishes -- a vertical asymptote or a
+vertical line. The book does this with subresultants; in the plane the
+discriminants, resultants and leading coefficients are enough. The
+projection is exact. `allgo.numerics.algebraic` works integer
+polynomials in doubles, which hold every integer to 2^53 exactly, and
+throws rather than round past that:
+- resultants are Sylvester determinants by Bareiss's fraction-free
+  elimination, whose divisions come out even;
+- gcds and square-free parts use the primitive remainder sequence, the
+  content divided out at every step of every division. The plain
+  pseudo-remainder's multiplier grows as a power of the leading
+  coefficient. Even so, a quadratic with roots a ten-millionth apart
+  (coefficients near 10^14) outgrows 2^53 and throws; one with roots a
+  thousandth apart works;
+- real roots are isolated by Sturm sequences, as the section suggests,
+  then narrowed by bisection, an integer root coming out exact.
+
+A root of the projection where the shared or double root y is complex
+changes nothing in the real plane and is skipped; without that, two
+eyes of the face would add a critical value between them. Lifting is
+numerical, roots in y within a millionth of each other taken as one
+over a critical value -- the precision parameter the section says a
+practical implementation chooses. Between critical values nothing is
+merged: near a crossing two sections are as close as you like, and
+merging them there lost a section.
+
+The roadmap joins each free 2-cell to the free vertical 1-cells over
+the critical values beside it -- the adjacency across cylinders the book
+calls technical -- by following each section to its limit and taking the
+vertical sectors between the limits of a sector's two sides. Two
+sectors of one cylinder join through a free section. A path slides
+across a 2-cell with its height a fixed fraction between the curves
+bounding it, so it never leaves the cell.
+
+Checked:
+- Example 6.5: five 1-cells and four 0-cells, sampled at -1, 1/2, 3/2,
+  5/2, 4 and 0, 1, 2, 3.
+- Figure 6.35: the gingerbread face of Example 3.1 in 37 2-cells, 64
+  1-cells and 28 0-cells. The book gives no sizes; the counts follow
+  once the mouth's ends lie between the eyes', as the figure draws them.
+- Figure 6.30's nine sign-invariant regions, five of them open, as nine
+  distinct sign vectors among the cells.
+- 400 random points, each with the signs of its cell's sample.
+- Routes kept in the free space; straight edges, vertical ones among
+  them, with the Euler characteristic of the plane from the counts.
+
+**A slip in the book.** Example 6.5's formula (6.21) is printed with
+both inequalities at least zero, but Figure 6.31 says the polynomials
+define [1, 2], and the text finds the sentence true at x = 1. Both need
+at most zero: as printed the set is (-inf, 0] and [3, inf), and the
+sentence is true already at the first sample, -1. The test says so.
+
+The demo, Algebraic Decomposition, draws the curves, then the critical
+values on the line below, colored by why, then the cells a cylinder at
+a time, the samples, the roadmap and a route. It has the face, three
+crossing discs, and a square and triangle as half-planes. Hover a cell
+for its signs.
+
+**The maximum-clearance roadmap, later.** `allgo.robotics.motion`'s
+Voronoi graph is approximated from points sampled along the boundaries,
+as Russell & Norvig suggest. `allgo.robotics.clearance` builds it exactly
+the way section 6.2.3 describes, which Exercise 14 asks for:
+- every pair of features -- corners and edges of the obstacles and the
+  room -- has its bisector, a line for two edges or two corners and a
+  parabola for a corner and an edge;
+- each bisector is walked and kept where the pair is nearest of all,
+  each end narrowed by bisection to where a third feature comes as near.
+
+That is the naive construction, not the n log n sweep the section cites.
+Pairs on one convex obstacle are skipped. The test for "no other feature
+nearer" needs a tight slack: where a piece ends, the third feature's
+distance departs only to second order, and a slack e runs the piece on
+by sqrt(2 r e). A slack of 1e-9 left the pieces' ends 5e-5 apart, unjoined.
+A disk robot keeps the parts with at least its radius of clearance, so
+nothing is grown. Queries join by retraction, moving straight away from
+the nearest boundary point until another is as near.
+
+Checked:
+- a block in a room gives twelve pieces, eight straight and four
+  parabolic, meeting at the twelve nodes they should;
+- every point of every piece is, measured edge by edge, exactly as near
+  its two features as any edge;
+- a route keeps 0.75 m from the walls, half the gap beside the block --
+  the most any path can;
+- a disk of radius 0.8 finds no way past the block, and one of 0.7 does;
+- an L-shaped obstacle has its inner corner's piece, and its roadmap is
+  in one piece.
+
+Motion Planning shows it as "maximum clearance", beside the sampled
+Voronoi graph, its straight and parabolic pieces in two colors.
+
+**Left out:** cylindrical algebraic decomposition beyond the plane; Canny's roadmap
 in more than three dimensions, for semi-algebraic sets of several
 polynomials, and its exact, symbolic form; pursuit-evasion's exact
 critical-ray cells and several pursuers;

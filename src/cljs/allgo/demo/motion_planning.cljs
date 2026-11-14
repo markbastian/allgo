@@ -25,12 +25,16 @@
   large gap for long; the visibility roadmap, a few guards and the
   connectors that join them; randomized potential fields, which walk at
   random when descent stalls; the exact vertical decomposition into
-  trapezoids, and the boustrophedon sweep that covers every one; and a
+  trapezoids, and the boustrophedon sweep that covers every one; the
+  exact maximum-clearance roadmap, the Voronoi graph built from the
+  bisectors of every pair of corners and edges -- lines and parabolas --
+  for the disk itself, nothing grown; and a
   robot with momentum -- a double integrator -- planned on a lattice of
   its exact motions by A*, or by a kinodynamic RRT. Click to move the
   goal."
   (:require [allgo.geometry.polygon :as polygon]
             [allgo.random :as random]
+            [allgo.robotics.clearance :as clearance]
             [allgo.robotics.decomposition :as decomposition]
             [allgo.robotics.kinodynamic :as kinodynamic]
             [allgo.robotics.motion :as motion]
@@ -52,6 +56,9 @@
 
 ;; The exact decomposition is of a point robot's free space.
 (def ^:private point-world (assoc world :radius 0.0))
+
+;; The exact maximum-clearance roadmap is built once, when first asked for.
+(def ^:private clearance-roadmap (delay (clearance/roadmap world :radius (:radius world))))
 
 (def ^:private double-integrator {:amax 0.5 :vmax 1.0 :dt 1.0 :tolerance 0.4 :slow 0.3})
 
@@ -86,6 +93,8 @@
                            (repeat {:graph g :path (motion/visibility-path world start goal)}))
       "Voronoi graph" (let [g (motion/voronoi-graph world 0.15)]
                         (repeat {:graph g :path (motion/voronoi-path world g start goal)}))
+      "maximum clearance" (let [rm @clearance-roadmap]
+                            (repeat {:roadmap rm :path (clearance/route rm start goal)}))
       "cell decomposition" (let [grid (motion/cell-grid world 0.25)
                                  ;; up to and including the step that reaches the goal
                                  [before after] (split-with (complement :solved?) (motion/cell-seq grid start goal))]
@@ -227,6 +236,22 @@
                                            (.toFixed (reduce min (map #(motion/clearance world %) (subvec path 1 (dec (count path))))) 2)
                                            " m from every obstacle along the graph")
                                  "; the goal cannot reach the graph")))
+
+                      "maximum clearance"
+                      (let [{{:keys [pieces nodes] :as rm} :roadmap path :path} st
+                            parabolic (count (filter #(> (count (:points %)) 2) pieces))]
+                        (doseq [{:keys [points]} pieces]
+                          (doseq [[a b] (partition 2 1 points)]
+                            (line! px a b (if (> (count points) 2) "rgba(255,170,120,0.7)" "rgba(140,190,255,0.7)") 1.5)))
+                        (doseq [n nodes] (dot! px n 2 "#c9d2e0"))
+                        (when path (path! px path "#ffd479") (robot-on! px scale path path-t))
+                        (str (count pieces) " pieces of the generalized Voronoi diagram, exact: "
+                             (- (count pieces) parabolic) " straight (blue), " parabolic " parabolic (orange)"
+                             (if path
+                               (str "; path " (.toFixed (motion/path-length path) 2) " m, at least "
+                                    (.toFixed (reduce min (map #(clearance/clearance rm %) (subvec path 1 (dec (count path))))) 2)
+                                    " m from every obstacle along the roadmap")
+                               "; the goal cannot reach it")))
 
                       "cell decomposition"
                       (let [{:keys [grid search]} st
@@ -442,7 +467,7 @@
                                  (reset! goal [x y])
                                  (restart!))))))
       (let [gui (GUI. #js {:container container})]
-        (.onChange (.add gui controls "method" #js ["visibility graph" "Voronoi graph" "cell decomposition" "vertical decomposition"
+        (.onChange (.add gui controls "method" #js ["visibility graph" "Voronoi graph" "maximum clearance" "cell decomposition" "vertical decomposition"
                                                     "boustrophedon coverage" "PRM" "Halton PRM" "visibility PRM" "RRT" "RRT*"
                                                     "potential field" "randomized potential field" "subdivision" "bidirectional RRT"
                                                     "hybrid A*" "lattice planner" "kinodynamic RRT"
