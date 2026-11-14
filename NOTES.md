@@ -1524,6 +1524,7 @@ and is now here, by package rather than by book:
 | `allgo.robotics.tracking`         | The time-optimal speed along a path, by a forward and a backward pass (14.6.3)           |
 | `allgo.robotics.control`          | The Kalman controllability rank and the discrete Lyapunov equation (15.1)                |
 | `allgo.robotics.pursuit`          | Visibility-based pursuit-evasion: the information-space search for a pursuer (12.4)       |
+| `allgo.robotics.canny`            | Canny's roadmap of an algebraic surface: silhouettes, critical points, slices (6.4.3)     |
 | `allgo.decision.nature`           | Games against nature: minimax, expected cost, regret, Hurwicz, observations (9.2)        |
 
 **Checks.** Each is tested against something independent of it:
@@ -1625,8 +1626,48 @@ milliseconds a frame, then walks the plan, naming each critical event; a
 drive mode lets you drag the pursuer, and with three hooks shows the
 three hiding places' V(V(p)).
 
-**Left out:** cylindrical algebraic decomposition and Canny's roadmap
-(6.4); pursuit-evasion's exact critical-ray cells and several pursuers;
+**Canny's roadmap, later.** `allgo.robotics.canny` builds section
+6.4.3's roadmap for a smooth surface in R^3, the zeros of one polynomial
+-- the book's own setting in Examples 6.7 and 6.8. The book notes that no
+general implementation exists: Canny's algorithm works symbolically, with
+subresultants, in any dimension. This is the case the book draws, done
+numerically. The silhouette under a map to the plane is where f = 0 and
+the gradient is perpendicular to the view; the critical points of the
+map's first coordinate are where the silhouette turns back in the sweep,
+polished by Newton's method on three equations; the slice through each
+critical point and each query is the recursion's step, and a slice of a
+surface is already a curve, its base case. Each curve is the zeros of two
+functions, traced from lattice seeds by a predictor along the cross
+product of their gradients and a Newton corrector back onto both, the
+step halved where the curve bends; a branch ends at a critical point,
+where the slice through a saddle crosses itself. Junctions -- slice
+meets silhouette -- are solved for exactly. The polynomials are exact
+too: `allgo.numerics.multivariate` builds them from variables by sums,
+products and powers and differentiates them term by term, so the
+Hessian the silhouette's corrector needs has no step size.
+
+Checked: Example 6.7's sphere, whose silhouette is the equator and whose
+critical points are (-1, 0, 0) and (1, 0, 0), as the book says; Example
+6.8's torus, two rings and four critical points at x = ±1.4 and ±0.6, in
+two components without slices (Figure 6.37) and one with them, the
+slices through the inner saddles figure eights whose branches end at the
+saddle, meeting the outer ring where x = ±0.6 and y = ±1.265; a surface
+of genus two, a tube around the lemniscate of Gerono, in a turned frame:
+three silhouette loops, six critical points, three components joined into
+one; and a route between queries, on the surface to 1e-9. The first
+traces left a gap where a closed curve met its start, up to two and a
+half steps; the route test caught it.
+
+The demo, Canny's Roadmap, draws the surface in cross-sections and builds
+the roadmap a stage at a time -- silhouette, critical points, slices,
+junctions, a route -- for the sphere, the torus and the double torus;
+turn slices off to see the torus's roadmap fall apart, drag to turn it,
+click to move a query.
+
+**Left out:** cylindrical algebraic decomposition (6.4); Canny's roadmap
+in more than three dimensions, for semi-algebraic sets of several
+polynomials, and its exact, symbolic form; pursuit-evasion's exact
+critical-ray cells and several pursuers;
 the general
 time-optimal problem under full manipulator dynamics, beyond speed,
 acceleration and curvature bounds.

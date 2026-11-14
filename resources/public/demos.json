@@ -289,6 +289,16 @@
    "href": "play/?demo=car-paths"
   },
   {
+   "id": "canny-roadmap",
+   "group": "Robotics",
+   "label": "Canny's Roadmap",
+   "blurb": "A roadmap of a surface made of its critical curves: the silhouette, the critical points of a sweep, and slices through them that join what the silhouette leaves apart",
+   "badges": [
+    "Interactive"
+   ],
+   "href": "play/?demo=canny-roadmap"
+  },
+  {
    "id": "grid-navigation",
    "group": "Robotics",
    "label": "Grid Navigation",

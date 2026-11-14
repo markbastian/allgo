@@ -14,6 +14,7 @@
             [allgo.demo.boids-voronoi-3d :as boids-voronoi-3d]
             [allgo.demo.bricks :as bricks]
             [allgo.demo.broad-phase :as broad-phase]
+            [allgo.demo.canny-roadmap :as canny-roadmap]
             [allgo.demo.car-paths :as car-paths]
             [allgo.demo.cave :as cave]
             [allgo.demo.city :as city]
@@ -103,6 +104,7 @@
    "localization" {:start localization/start! :stop localization/stop!}
    "motion-planning" {:start motion-planning/start! :stop motion-planning/stop!}
    "car-paths" {:start car-paths/start! :stop car-paths/stop!}
+   "canny-roadmap" {:start canny-roadmap/start! :stop canny-roadmap/stop!}
    "grid-navigation" {:start grid-navigation/start! :stop grid-navigation/stop!}
    "many-robots" {:start many-robots/start! :stop many-robots/stop!}
    "pursuit-evasion" {:start pursuit-evasion/start! :stop pursuit-evasion/stop!}
