@@ -1,4 +1,4 @@
-{:deps {:aliases [:cljs]}
+{:deps {:aliases [:demo :cljs]}
 
  :dev-http {3000 "resources/public"}
 

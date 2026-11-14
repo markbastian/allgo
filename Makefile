@@ -35,7 +35,7 @@ lint: ## Lint every source and test namespace
 	@clj-kondo --lint src test
 
 reflect: ## Fail if any namespace uses reflection
-	@$(JAVA) clojure -M script_reflect.clj
+	@$(JAVA) clojure -M:demo script_reflect.clj
 
 check: lint reflect test ## Lint, reflection check, and tests
 
@@ -71,7 +71,7 @@ bundle: ## Build the minified bundle without compressing it
 	@$(SHADOW) release app
 
 repl: ## Start an nREPL with CIDER middleware
-	@$(JAVA) clojure -M:nrepl
+	@$(JAVA) clojure -M:demo:nrepl
 
 thumbs: ## Screenshot every demo for the gallery (needs `make serve` running)
 	@node script/thumbnails.mjs
