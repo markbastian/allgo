@@ -250,6 +250,32 @@
   [step init]
   (take-while some? (iterate #(some-> % step) init)))
 
+(defn- steps
+  "Room for the steps from the first of `n` states to the last: what the
+  drivers below reduce over, `n` infinite for no limit."
+  [n]
+  (if (infinite? n) (repeat nil) (repeat (dec (long n)) nil)))
+
+(defn converge
+  "The first state from `init` by `step`, looking at no more than `n`,
+  that is `done?` -- or nil if none is, or a step returns nil first.
+
+  The same states as `(take n (step-seq step init))`, and the
+  same answer as filtering them, but reduced over rather than built as a
+  seq: a numerical method's step is often only a few arithmetic
+  operations, and the seq would cost more than they do."
+  [done? n step init]
+  (let [s (reduce (fn [s _] (if (done? s) (reduced s) (or (step s) (reduced nil)))) init (steps n))]
+    (when (and s (done? s)) s)))
+
+(defn settle
+  "The first state from `init` by `step`, looking at no more than `n`,
+  that is `done?` -- or else the last one looked at: for the methods that
+  are as good as they will get when they run out. Reduced over, as
+  `converge` is."
+  [done? n step init]
+  (reduce (fn [s _] (if (done? s) (reduced s) (or (step s) (reduced s)))) init (steps n)))
+
 (defn- searcher [step frontier]
   (fn [search]
     (step-seq step (initialize (assoc search :frontier (frontier search))))))

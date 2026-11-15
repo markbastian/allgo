@@ -2171,6 +2171,84 @@ Three driver designs were tried before settling:
 Giving each method its own copy of the driver, by macro, helped only
 `fixed-point`, which nothing in the library calls, so it was not done.
 
+## Optimizers as steps
+
+`numerics.optimize` got the same treatment next, and `converge` and
+`settle` moved from `roots` into `allgo.search`, beside `step-seq`, now
+that two namespaces use them.
+
+**What changed.** Every iterative method is now a private step function,
+a public `-seq` and the original function on top:
+
+- in one variable: golden section (both ways), parabolic interpolation,
+  Newton's method (which is `roots/newton-seq` on the derivative) and
+  Brent's minimizer;
+- in several: Nelder-Mead, univariate search, Powell, steepest descent,
+  Fletcher-Reeves conjugate gradients, Newton, Marquardt and the
+  quasi-Newton updates;
+- the simplex method's pivots and the penalty method's rounds.
+
+Each state also says what the step did:
+
+- Nelder-Mead's `:by` names the move (reflect, expand, contract outside
+  or inside, shrink);
+- Brent's minimizer's `:by` says whether the step was parabolic or
+  golden;
+- Marquardt's states carry the damping `:alpha`;
+- the penalty method's states carry `:mu` and the violation.
+
+The doubling walks that bracket a line search are steps too.
+
+**Same answers.** Every function was compared with the loop version it
+replaced on 19 cases: the book's examples, Rosenbrock, a five-variable
+quadratic, three linear programs and a penalty problem. Every result was
+bit-identical. One edge case was changed on purpose. Where the gradient
+vanishes, or Newton's Hessian is singular, the step now returns nil, as
+the `roots` steps do. So `:iterations` counts only the steps actually
+taken, one fewer than the loops used to report.
+
+**The book's tables.** Examples 13.1 (golden section, bracket by
+bracket), 13.2 (parabolic interpolation, its three points and their
+vertex), 13.3 (Newton) and 14.4 (steepest ascent's first two moves) are
+tests now. So is what the paths show:
+
+- steepest descent's steps meet at right angles;
+- conjugate gradients reach the top of 14.4's quadratic in two steps,
+  where steepest descent is still 0.6 away;
+- Nelder-Mead's best point never gets worse;
+- Marquardt never accepts an uphill step;
+- the penalty method's mu grows tenfold a round while the violation
+  falls.
+
+**What it costs.** The two implementations were timed in the same warm
+JVM. On the first pass the many-variable methods were 1.2 to 1.3 times
+slower, nearly all of it in `line-minimize`, which every line search
+calls. Two fixes brought them back to parity: Brent's step no longer
+destructures vectors, and the bracketing walks became record steps
+instead of lazy seqs of tuples.
+
+| method | loop | steps |
+|---|---|---|
+| line-minimize | 14.6 us | 14.5 us |
+| Powell, BFGS, DFP, steepest descent, CG | | 1.00-1.03x |
+| Nelder-Mead, linear programs, penalty | | 1.00-1.03x |
+| Newton, Marquardt | | 1.10-1.13x |
+| Brent's minimizer | 3.0 us | 3.3 us |
+| parabolic interpolation | 49 us | 38 us |
+| golden section | 3.6-4.4 us | 6.0-7.8 us |
+
+Golden section pays the same toll as bisection did: a few arithmetic
+operations a step, behind a driver the JIT cannot inline.
+
+The callers were timed A/B as well: three rounds each of the 15 test
+namespaces that use `optimize`. These cover physics contact, the world
+and the solver, passes, Lambert, maneuvers, porkchop plots, tours, domain
+randomization, games, MDPs, curve fitting, camera calibration and close
+approaches. All came out within 3% of the loop version, apart from
+namespaces too quick (1-20 ms) to time. That includes the two golden
+sections in the physics narrowphase, where each evaluation costs more
+than the stepping.
+
 ## Computer vision, after Russell & Norvig
 
 Chapter 25 of *Artificial Intelligence: A Modern Approach* (4th ed.), in

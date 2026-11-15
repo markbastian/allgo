@@ -111,3 +111,56 @@
     (let [{:keys [x]} (opt/penalty (fn [[x y]] (+ (math/pow (- x 2.0) 2.0) (math/pow (- y 1.0) 2.0)))
                                    [] [(fn [[x y]] (- x y))] [0.0 0.0])]
       (is (close? x [1.5 1.5] 1e-6)))))
+
+(deftest iterations
+  (testing "Example 13.1: golden-section search for the maximum of 2 sin x - x^2/10 on [0, 4], bracket by bracket"
+    (is (close? [[0.0 4.0] [0.0 2.4721] [0.9443 2.4721] [0.9443 1.8885]
+                 [1.3050 1.8885] [1.3050 1.6656] [1.3050 1.5279] [1.3901 1.5279]]
+                (map (juxt :a :b) (take 8 (opt/golden-maximize-seq g 0.0 4.0)))
+                5e-5)))
+  (testing "Example 13.2: parabolic interpolation from 0, 1 and 4 -- the three points and the vertex they give"
+    (let [states (opt/parabolic-seq #(- (g %)) 0.0 1.0 4.0)]
+      (is (close? [[0.0 1.0 4.0] [1.0 1.5055 4.0] [1.0 1.4903 1.5055] [1.0 1.4256 1.4903] [1.4256 1.4266 1.4903]]
+                  (map (juxt :x0 :x1 :x2) (take 5 states))
+                  5e-5))
+      (is (close? [1.5055 1.4903 1.4256 1.4266 1.4275] (map :x (take 5 (rest states))) 5e-5))))
+  (testing "Example 13.3: Newton's method from 2.5"
+    (is (close? [2.5 0.99508 1.46901 1.42764 1.42755]
+                (map :x (take 5 (opt/newton-1d-seq #(- (* 2.0 (math/cos %)) (/ % 5.0)) #(- (* -2.0 (math/sin %)) 0.2) 2.5)))
+                5e-6)))
+  (testing "Example 14.4: steepest ascent on 2xy + 2x - x^2 - 2y^2 from (-1, 1): to (0.2, -0.2), then (1.4, 1)"
+    (let [h (fn [[x y]] (- (- (+ (* 2.0 x y) (* 2.0 x)) (* x x) (* 2.0 y y))))]
+      (is (close? [[-1.0 1.0] [0.2 -0.2] [1.4 1.0]] (map :x (take 3 (opt/steepest-descent-seq h nil [-1.0 1.0]))) 1e-6)))))
+
+(defn- dot [u v] (reduce + (map * u v)))
+
+(deftest paths
+  (let [h (fn [[x y]] (- (- (+ (* 2.0 x y) (* 2.0 x)) (* x x) (* 2.0 y y))))
+        steps (fn [xs] (map (fn [a b] (mapv - b a)) xs (rest xs)))]
+    (testing "steepest descent zigzags: each step at right angles to the one before"
+      (let [ss (steps (map :x (take 8 (opt/steepest-descent-seq h nil [-1.0 1.0]))))]
+        (is (every? #(< (abs (apply dot %)) 1e-6) (map vector ss (rest ss))))))
+    (testing "conjugate gradients reach the top of the quadratic in two steps, where steepest descent is still far off"
+      (is (close? [2.0 1.0] (:x (nth (opt/conjugate-gradient-seq h nil [-1.0 1.0]) 2)) 1e-6))
+      (is (> (abs (- 2.0 (first (:x (nth (opt/steepest-descent-seq h nil [-1.0 1.0]) 2))))) 0.5))))
+  (testing "Nelder-Mead on Rosenbrock's valley: the best point never gets worse, and the simplex reflects, expands and contracts"
+    (let [states (take 300 (opt/nelder-mead-seq rosenbrock-f [-1.2 1.0]))
+          best (map #(second (first (:simplex %))) states)]
+      (is (every? true? (map >= best (rest best))))
+      (is (every? (set (map :by states)) [:reflect :expand :contract-inside]))))
+  (testing "Brent's minimizer mixes parabolic and golden steps, and its interval always holds its best point"
+    (let [states (take 20 (opt/brent-minimize-seq #(- (g %)) 0.0 4.0 1e-10))]
+      (is (every? (set (map :by states)) [:parabolic :golden]))
+      (is (every? #(<= (:a %) (:x %) (:b %)) states))))
+  (testing "Marquardt's method never accepts a step uphill"
+    (let [fs (map :f (take 60 (opt/marquardt-seq rosenbrock-f nil nil [-1.2 1.0])))]
+      (is (every? true? (map >= fs (rest fs))))))
+  (testing "the penalty method raises mu tenfold a round and the violation falls"
+    (let [states (take 5 (opt/penalty-seq (fn [[x y]] (+ (math/pow (- x 2.0) 2.0) (math/pow (- y 1.0) 2.0)))
+                                          [(fn [[x y]] (- (+ x y) 2.0))] [] [0.0 0.0]))]
+      (is (= [1.0 10.0 100.0 1000.0 10000.0] (map :mu states)))
+      (is (every? true? (map > (map :violation states) (rest (map :violation states)))))))
+  (testing "a method that starts where the gradient vanishes takes no step"
+    (is (= {:x [1.0 2.0] :f 0.0 :iterations 0}
+           (opt/steepest-descent (fn [[x y]] (+ (math/pow (- x 1.0) 2.0) (math/pow (- y 2.0) 2.0)))
+                                 (fn [[x y]] [(* 2.0 (- x 1.0)) (* 2.0 (- y 2.0))]) [1.0 2.0])))))

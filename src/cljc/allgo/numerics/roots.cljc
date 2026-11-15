@@ -18,37 +18,12 @@
   between the ends -- and never because it has converged: when to stop
   is the caller's, so that the iteration can be watched, tabulated, cut
   short or handed from one method to another. The plain functions,
-  `newton` and the rest, run the same steps by `converge` or `settle`,
-  which reduce over them rather than build a seq, and return the root."
+  `newton` and the rest, run the same steps by `allgo.search/converge`
+  or `settle`, which reduce over them rather than build a seq, and
+  return the root."
   (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear-systems :as ls]
             [allgo.search :as search]))
-
-(defn- steps
-  "Room for the steps from the first of `n` states to the last: what the
-  drivers below reduce over, `n` infinite for no limit."
-  [n]
-  (if (infinite? n) (repeat nil) (repeat (dec (long n)) nil)))
-
-(defn converge
-  "The first state from `init` by `step`, looking at no more than `n`,
-  that is `done?` -- or nil if none is, or a step returns nil first.
-
-  The same states as `(take n (search/step-seq step init))`, and the
-  same answer as filtering them, but reduced over rather than built as a
-  seq: a root finder's step is often only a few arithmetic operations,
-  and the seq would cost more than they do."
-  [done? n step init]
-  (let [s (reduce (fn [s _] (if (done? s) (reduced s) (or (step s) (reduced nil)))) init (steps n))]
-    (when (and s (done? s)) s)))
-
-(defn settle
-  "The first state from `init` by `step`, looking at no more than `n`,
-  that is `done?` -- or else the last one looked at: for the methods that
-  are as good as they will get when they run out. Reduced over, as
-  `converge` is."
-  [done? n step init]
-  (reduce (fn [s _] (if (done? s) (reduced s) (or (step s) (reduced s)))) init (steps n)))
 
 ;; An estimate, and the step that reached it -- a number, or for a system
 ;; a vector of them.
@@ -95,7 +70,7 @@
   is known, which is why Meeus recommends it for Kepler's equation at
   eccentricities near one, where Newton's method may not converge."
   [f lo hi]
-  (:x (settle (constantly false) 65 (partial bisect-step f) (bisect-start f lo hi))))
+  (:x (search/settle (constantly false) 65 (partial bisect-step f) (bisect-start f lo hi))))
 
 (defn- fixed-point-step
   "One step of x <- (better x)."
@@ -121,8 +96,8 @@
   more slowly than its argument."
   ([better start] (fixed-point better start 1e-15 100))
   ([better start tol max-iterations]
-   (:x (converge (partial small-step? tol 1.0) (inc max-iterations)
-                 (partial fixed-point-step better) (->Estimate start ##Inf)))))
+   (:x (search/converge (partial small-step? tol 1.0) (inc max-iterations)
+                        (partial fixed-point-step better) (->Estimate start ##Inf)))))
 
 ;; A bracket `[a b]` about where a condition changes, holding at a.
 (defrecord Interval [a b])
@@ -147,8 +122,8 @@
   is finer than they are there. The last place found where `pred` still
   holds, so the answer is always on a's side of the change."
   [pred a b tol]
-  (:a (settle (fn [^Interval i] (<= (abs (- (.-b i) (.-a i))) tol)) ##Inf
-              (partial crossing-step pred) (->Interval a b))))
+  (:a (search/settle (fn [^Interval i] (<= (abs (- (.-b i) (.-a i))) tol)) ##Inf
+                     (partial crossing-step pred) (->Interval a b))))
 
 (defn transitions
   "Where `pred` changes between `t0` and `t1`, sampling every `step` and
@@ -226,9 +201,9 @@
   crawl plain false position makes on a strongly curved function."
   ([f lo hi] (false-position f lo hi {}))
   ([f lo hi {:keys [tol max-iter modified?] :or {tol 1e-12 max-iter 100 modified? true}}]
-   (:x (settle (fn [^FalsePosition s]
-                 (or (zero? (.-fx s)) (<= (abs (.-dx s)) (* tol (max 1e-300 (abs (.-x s)))))))
-               (inc max-iter) (partial false-position-step f modified?) (false-position-start f lo hi)))))
+   (:x (search/settle (fn [^FalsePosition s]
+                        (or (zero? (.-fx s)) (<= (abs (.-dx s)) (* tol (max 1e-300 (abs (.-x s)))))))
+                      (inc max-iter) (partial false-position-step f modified?) (false-position-start f lo hi)))))
 
 ;; ---------------------------------------------------------- open methods
 
@@ -237,7 +212,7 @@
   whose step is within `:tol` relative, looking no further than
   `:max-iter` steps; nil if none is."
   [step init {:keys [tol max-iter]}]
-  (:x (converge (partial small-step? tol 1e-300) (inc max-iter) step init)))
+  (:x (search/converge (partial small-step? tol 1e-300) (inc max-iter) step init)))
 
 (defn- newton-step
   "One Newton-Raphson step, x <- x - f(x)/f'(x). nil at a zero
@@ -320,8 +295,8 @@
   converge). Options as `newton`'s."
   ([f x-1 x0] (secant f x-1 x0 {}))
   ([f x-1 x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 100}}]
-   (:x (converge (fn [^Secant s] (<= (abs (.-dx s)) (* tol (max 1e-300 (abs (.-x s))))))
-                 (inc max-iter) (partial secant-step f) (->Secant x-1 (f x-1) x0 ##Inf)))))
+   (:x (search/converge (fn [^Secant s] (<= (abs (.-dx s)) (* tol (max 1e-300 (abs (.-x s))))))
+                        (inc max-iter) (partial secant-step f) (->Secant x-1 (f x-1) x0 ##Inf)))))
 
 (defn- modified-secant-step
   "One Newton-Raphson step with the slope over the perturbation `delta` x.
@@ -433,7 +408,7 @@
   absolute)."
   ([f a b] (brent f a b {}))
   ([f a b {:keys [tol max-iter] :or {tol 1e-15 max-iter 200}}]
-   (some->> (brent-start f a b) (settle (partial brent-done? tol) (inc max-iter) (partial brent-step f tol)) :b)))
+   (some->> (brent-start f a b) (search/settle (partial brent-done? tol) (inc max-iter) (partial brent-step f tol)) :b)))
 
 ;; --------------------------------------------------------------- systems
 
@@ -466,7 +441,7 @@
   equation."
   ([g x0] (fixed-point-system g x0 {}))
   ([g x0 {:keys [tol max-iter] :or {tol 1e-12 max-iter 500}}]
-   (:x (converge (partial small-steps? tol) (inc max-iter) (partial fixed-point-system-step g) (system-start x0)))))
+   (:x (search/converge (partial small-steps? tol) (inc max-iter) (partial fixed-point-system-step g) (system-start x0)))))
 
 (defn- newton-system-step
   "One Newton-Raphson step for a system: solve J dx = -F. nil at a
@@ -499,5 +474,5 @@
   ([F x0] (newton-system F nil x0 {}))
   ([F jacobian x0] (newton-system F jacobian x0 {}))
   ([F jacobian x0 {:keys [tol max-iter] :or {tol 1e-13 max-iter 50}}]
-   (:x (converge (partial small-steps? tol) (inc max-iter)
-                 (partial newton-system-step F (jacobian-or-differences F jacobian)) (system-start x0)))))
+   (:x (search/converge (partial small-steps? tol) (inc max-iter)
+                        (partial newton-system-step F (jacobian-or-differences F jacobian)) (system-start x0)))))

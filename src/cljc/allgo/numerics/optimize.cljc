@@ -21,12 +21,25 @@
   quasi-Newton BFGS and DFP updates; the simplex method for linear
   programs; and penalty functions for nonlinear constraints.
 
-  Everything here minimizes; to maximize f, minimize -f."
+  Everything here minimizes; to maximize f, minimize -f.
+
+  Each iterative method is a step, as in `allgo.search` and
+  `allgo.numerics.roots`: a private step function from one state to the
+  next, a public `-seq` of the states it makes, and the plain function,
+  which runs the same steps by `allgo.search/converge` or `settle` to its
+  stopping rule. A step returns nil only when the method cannot go on --
+  at a point where the gradient vanishes, at a singular Hessian -- never
+  because it has converged, so the seqs show the whole path: steepest
+  descent zigzagging, conjugate gradients cutting across, a simplex
+  reflecting, expanding and shrinking. The one-variable states are
+  records; the many-variable states are maps with `:x`, `:f` and
+  `:iterations`, and `:last-x` and `:last-f` for the point before."
   (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.roots :as roots]
             [allgo.random :as random]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 (defn- replace-worst
@@ -36,6 +49,68 @@
 
 (defn- centroid [points]
   (lin/scale (reduce lin/add points) (/ 1.0 (count points))))
+
+(defn- sorted-simplex [ps] (vec (sort-by second ps)))
+
+(defn- nelder-mead-step
+  "One step of the simplex `[[x f] ...]`, best first, `g` the function: its
+  worst point reflected through the others' centroid, the reflection
+  stretched if it beats the best, pulled back in if it beats nothing --
+  outside the simplex if it at least beat the worst, inside if not -- and
+  the whole simplex shrunk toward its best point if even that fails.
+  `:by` says which."
+  [g n {:keys [simplex iterations]}]
+  (let [[[xb fb]] simplex
+        [xw fw] (peek simplex)
+        [_ fs] (simplex (dec n))
+        c (centroid (map first (pop simplex)))
+        at (fn [t] (let [x (lin/add c (lin/scale (lin/sub c xw) t))] [x (g x)]))
+        [_ fr :as r] (at 1.0)
+        [simplex by]
+        (cond
+          (< fr fb) (let [e (at 2.0)] (if (< (second e) fr) [(replace-worst simplex e) :expand] [(replace-worst simplex r) :reflect]))
+          (< fr fs) [(replace-worst simplex r) :reflect]
+          :else
+          (let [outside? (< fr fw)
+                [_ fc :as cp] (at (if outside? 0.5 -0.5))]
+            (if (if outside? (<= fc fr) (< fc fw))
+              [(replace-worst simplex cp) (if outside? :contract-outside :contract-inside)]
+              [(sorted-simplex (cons [xb fb] (for [[x _] (rest simplex)]
+                                               (let [y (lin/add xb (lin/scale (lin/sub x xb) 0.5))] [y (g y)]))))
+               :shrink])))]
+    {:simplex simplex :iterations (inc iterations) :by by}))
+
+(defn- nelder-mead-setup
+  "The function Nelder-Mead minimizes -- `f` with nil and NaN made
+  uphill -- its first state, and its options filled in."
+  [f x0 {:keys [step tol-x tol-f max-iter] :or {tol-x 1e-8 tol-f 1e-10}}]
+  (let [n (count x0)
+        x0 (mapv double x0)
+        g (fn [x] (let [v (f x)] (if (and v (not (NaN? v))) (double v) ##Inf)))
+        steps (cond (vector? step) step
+                    (number? step) (vec (repeat n step))
+                    :else (mapv #(if (zero? %) 0.00025 (* 0.05 %)) x0))
+        start (cons x0 (for [i (range n)] (update x0 i + (steps i))))]
+    {:g g :n n :tol-x tol-x :tol-f tol-f :max-iter (or max-iter (* 200 n))
+     :init {:simplex (sorted-simplex (map (juxt identity g) start)) :iterations 0 :by :start}}))
+
+(defn nelder-mead-seq
+  "The simplexes of Nelder-Mead from `x0`: `{:simplex :iterations :by}`,
+  the simplex `[[x f] ...]` best first, `:by` how it was reached
+  (`:reflect`, `:expand`, `:contract-outside`, `:contract-inside` or
+  `:shrink`). Options as `nelder-mead`'s."
+  ([f x0] (nelder-mead-seq f x0 {}))
+  ([f x0 opts]
+   (let [{:keys [g n init]} (nelder-mead-setup f x0 opts)]
+     (iterate (partial nelder-mead-step g n) init))))
+
+(defn- simplex-small?
+  "Whether every point of the simplex is within `tol-x` of the best, and
+  its value within `tol-f` of the best's."
+  [tol-x tol-f {:keys [simplex]}]
+  (let [[[xb fb]] simplex]
+    (and (every? (fn [[x _]] (every? #(<= (abs %) tol-x) (lin/sub x xb))) simplex)
+         (every? (fn [[_ v]] (<= (abs (- v fb)) tol-f)) simplex))))
 
 (defn nelder-mead
   "The `x` near `x0` where `f` is least: `{:x :f :iterations}`. `f`
@@ -49,48 +124,52 @@
     :tol-f     ... and their values this close to its value (1e-10)
     :max-iter  or after this many steps (200 per variable)"
   ([f x0] (nelder-mead f x0 {}))
-  ([f x0 {:keys [step tol-x tol-f max-iter]
-          :or {tol-x 1e-8 tol-f 1e-10}}]
-   (let [n (count x0)
-         x0 (mapv double x0)
-         max-iter (or max-iter (* 200 n))
-         g (fn [x] (let [v (f x)] (if (and v (not (NaN? v))) (double v) ##Inf)))
-         steps (cond (vector? step) step
-                     (number? step) (vec (repeat n step))
-                     :else (mapv #(if (zero? %) 0.00025 (* 0.05 %)) x0))
-         start (cons x0 (for [i (range n)] (update x0 i + (steps i))))
-         sorted (fn [ps] (vec (sort-by second ps)))]
-     (loop [simplex (sorted (map (juxt identity g) start)) k 0]
-       (let [[[xb fb]] simplex
-             [xw fw] (peek simplex)
-             [_ fs] (simplex (dec n))]
-         (if (or (>= k max-iter)
-                 (and (every? (fn [[x _]] (every? #(<= (abs %) tol-x) (lin/sub x xb))) simplex)
-                      (every? (fn [[_ v]] (<= (abs (- v fb)) tol-f)) simplex)))
-           {:x xb :f fb :iterations k}
-           (let [c (centroid (map first (pop simplex)))
-                 at (fn [t] (let [x (lin/add c (lin/scale (lin/sub c xw) t))] [x (g x)]))
-                 replace #(replace-worst simplex %)
-                 [_ fr :as r] (at 1.0)]
-             (recur
-              (cond
-                (< fr fb) (let [e (at 2.0)] (replace (if (< (second e) fr) e r)))
-                (< fr fs) (replace r)
-                :else
-                ;; contract: outside the simplex if the reflection beat
-                ;; the worst point, inside if not
-                (let [outside? (< fr fw)
-                      [_ fc :as cp] (at (if outside? 0.5 -0.5))]
-                  (if (if outside? (<= fc fr) (< fc fw))
-                    (replace cp)
-                    ;; shrink everything toward the best point
-                    (sorted (cons [xb fb] (for [[x _] (rest simplex)]
-                                            (let [y (lin/add xb (lin/scale (lin/sub x xb) 0.5))] [y (g y)])))))))
-              (inc k)))))))))
+  ([f x0 opts]
+   (let [{:keys [g n tol-x tol-f max-iter init]} (nelder-mead-setup f x0 opts)
+         {:keys [simplex iterations]} (search/settle (partial simplex-small? tol-x tol-f) (inc max-iter)
+                                                     (partial nelder-mead-step g n) init)
+         [[xb fb]] simplex]
+     {:x xb :f fb :iterations iterations})))
 
 ;; ---------------------------------------------------------- one variable
 
 (def ^:private golden (/ (- (math/sqrt 5.0) 1.0) 2.0))
+
+;; A bracket `[a b]` about an extremum.
+(defrecord Bracket [a b])
+
+(defn- golden-minimize-step
+  "Narrow the bracket by the golden section, keeping the side of the
+  lower of its interior points."
+  [f ^Bracket br]
+  (let [a (.-a br) b (.-b br)
+        x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
+    (if (< (f x1) (f x2)) (->Bracket a x2) (->Bracket x1 b))))
+
+(defn- golden-maximize-step
+  "Narrow the bracket by the golden section, keeping the side of the
+  higher of its interior points."
+  [f ^Bracket br]
+  (let [a (.-a br) b (.-b br)
+        x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
+    (if (< (f x1) (f x2)) (->Bracket x1 b) (->Bracket a x2))))
+
+(defn golden-minimize-seq
+  "The brackets `{:a :b}` of golden-section search for the minimum of `f`
+  between `a` and `b`."
+  [f a b]
+  (iterate (partial golden-minimize-step f) (->Bracket a b)))
+
+(defn golden-maximize-seq
+  "The brackets `{:a :b}` of golden-section search for the maximum of `f`
+  between `a` and `b`: those of Chapra and Canale's example 13.1."
+  [f a b]
+  (iterate (partial golden-maximize-step f) (->Bracket a b)))
+
+(defn- golden-search [step a b tol max-iter]
+  (let [^Bracket br (search/settle (fn [^Bracket br] (< (abs (- (.-b br) (.-a br))) tol)) (+ 2 max-iter)
+                                   step (->Bracket a b))]
+    (* 0.5 (+ (.-a br) (.-b br)))))
 
 (defn golden-minimize
   "The `x` between `a` and `b` where `f`, which has a single minimum there,
@@ -98,22 +177,40 @@
   `:tol`, or after `:max-iter` narrowings."
   ([f a b] (golden-minimize f a b {}))
   ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 10000}}]
-   (loop [a a b b i 0]
-     (if (or (> i max-iter) (< (abs (- b a)) tol))
-       (* 0.5 (+ a b))
-       (let [x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
-         (if (< (f x1) (f x2)) (recur a x2 (inc i)) (recur x1 b (inc i))))))))
+   (golden-search (partial golden-minimize-step f) a b tol max-iter)))
 
 (defn golden-maximize
   "The `x` between `a` and `b` where `f`, which has a single maximum there,
   is greatest, by golden-section search; options as `golden-minimize`'s."
   ([f a b] (golden-maximize f a b {}))
   ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 10000}}]
-   (loop [a a b b i 0]
-     (if (or (> i max-iter) (< (abs (- b a)) tol))
-       (* 0.5 (+ a b))
-       (let [x1 (- b (* golden (- b a))) x2 (+ a (* golden (- b a)))]
-         (if (< (f x1) (f x2)) (recur x1 b (inc i)) (recur a x2 (inc i))))))))
+   (golden-search (partial golden-maximize-step f) a b tol max-iter)))
+
+;; Three points bracketing a minimum, `x1` the lowest, and the vertex `x`
+;; of the parabola through the three before, the step `dx` to it from
+;; the vertex before that.
+(defrecord Parabola [x0 x1 x2 f0 f1 f2 x dx])
+
+(defn- parabolic-step
+  "The vertex of the parabola through the three points, and the three
+  that bracket the lowest of the four. nil where the three are in a
+  line."
+  [f ^Parabola p]
+  (let [x0 (.-x0 p) x1 (.-x1 p) x2 (.-x2 p) f0 (.-f0 p) f1 (.-f1 p) f2 (.-f2 p) x (.-x p)
+        num (+ (* f0 (- (* x1 x1) (* x2 x2))) (* f1 (- (* x2 x2) (* x0 x0))) (* f2 (- (* x0 x0) (* x1 x1))))
+        den (* 2.0 (+ (* f0 (- x1 x2)) (* f1 (- x2 x0)) (* f2 (- x0 x1))))]
+    (when-not (zero? den)
+      (let [x3 (/ num den) f3 (f x3) dx (if x (- x3 x) ##Inf)]
+        (if (> x3 x1)
+          (if (< f3 f1) (->Parabola x1 x3 x2 f1 f3 f2 x3 dx) (->Parabola x0 x1 x3 f0 f1 f3 x3 dx))
+          (if (< f3 f1) (->Parabola x0 x3 x1 f0 f3 f1 x3 dx) (->Parabola x3 x1 x2 f3 f1 f2 x3 dx)))))))
+
+(defn parabolic-seq
+  "The states of successive parabolic interpolation from `x0` < `x1` <
+  `x2`: `{:x0 :x1 :x2 :x}`, `:x` the vertex that chose the three -- those
+  of Chapra and Canale's example 13.2."
+  [f x0 x1 x2]
+  (search/step-seq (partial parabolic-step f) (->Parabola x0 x1 x2 (f x0) (f x1) (f x2) nil ##Inf)))
 
 (defn parabolic
   "The minimum of `f` by successive parabolic interpolation from three
@@ -123,20 +220,15 @@
   `:tol` (default 1e-10); `x` at the minimum."
   ([f x0 x1 x2] (parabolic f x0 x1 x2 {}))
   ([f x0 x1 x2 {:keys [tol max-iter] :or {tol 1e-10 max-iter 200}}]
-   (loop [x0 x0 x1 x1 x2 x2 f0 (f x0) f1 (f x1) f2 (f x2) prev nil i 0]
-     (let [num (+ (* f0 (- (* x1 x1) (* x2 x2))) (* f1 (- (* x2 x2) (* x0 x0))) (* f2 (- (* x0 x0) (* x1 x1))))
-           den (* 2.0 (+ (* f0 (- x1 x2)) (* f1 (- x2 x0)) (* f2 (- x0 x1))))]
-       (if (or (zero? den) (>= i max-iter))
-         x1
-         (let [x3 (/ num den) f3 (f x3)]
-           (if (and prev (<= (abs (- x3 prev)) (* tol (max 1.0 (abs x3)))))
-             x3
-             ;; keep the three that bracket the lowest
-             (let [[x0 x1 x2 f0 f1 f2]
-                   (if (> x3 x1)
-                     (if (< f3 f1) [x1 x3 x2 f1 f3 f2] [x0 x1 x3 f0 f1 f3])
-                     (if (< f3 f1) [x0 x3 x1 f0 f3 f1] [x3 x1 x2 f3 f1 f2]))]
-               (recur x0 x1 x2 f0 f1 f2 x3 (inc i))))))))))
+   (let [done? (fn [^Parabola p] (and (.-x p) (<= (abs (.-dx p)) (* tol (max 1.0 (abs (.-x p)))))))
+         p (search/settle done? (inc max-iter) (partial parabolic-step f) (->Parabola x0 x1 x2 (f x0) (f x1) (f x2) nil ##Inf))]
+     (if (done? p) (:x p) (:x1 p)))))
+
+(defn newton-1d-seq
+  "The estimates `{:x :dx}` of Newton's method on the derivative `df`
+  from `x0`: those of Chapra and Canale's example 13.3."
+  [df d2f x0]
+  (roots/newton-seq df d2f x0))
 
 (defn newton-1d
   "A stationary point of f -- a minimum where f'' > 0 -- by Newton's
@@ -147,6 +239,72 @@
   ([df d2f x0 opts] (roots/newton df d2f x0 opts)))
 
 (def ^:private cgold (* 0.5 (- 3.0 (math/sqrt 5.0))))
+
+;; Brent's minimizer: the interval `[a b]`, `x` the best point, `w` the
+;; second best and `v` the previous w, with their values; `d` the last
+;; step and `e` the one before; `by` how the last was taken.
+(defrecord BrentMinimum [a b x w v fx fw fv d e by])
+
+(defn- brent-tolerance [tol x] (+ (* tol (abs x)) 1e-12))
+
+(defn- brent-minimum-done?
+  "Whether Brent's interval is within its tolerance of the best point."
+  [tol ^BrentMinimum s]
+  (let [a (.-a s) b (.-b s) x (.-x s)]
+    (<= (abs (- x (* 0.5 (+ a b)))) (- (* 2.0 (brent-tolerance tol x)) (* 0.5 (- b a))))))
+
+(defn- brent-minimum-next
+  "Brent's state after the step `d` from x, `e` the step before and `by`
+  how it was chosen: u = x + d, at least the tolerance from x, and the
+  interval and the three best points updated with it."
+  [f ^BrentMinimum s t1 d e by]
+  (let [a (.-a s) b (.-b s) x (.-x s) w (.-w s) v (.-v s) fx (.-fx s) fw (.-fw s) fv (.-fv s)
+        u (+ x (if (>= (abs d) t1) d (if (pos? d) t1 (- t1))))
+        fu (f u)]
+    (if (<= fu fx)
+      (if (< u x) (->BrentMinimum a x u x w fu fx fw d e by) (->BrentMinimum x b u x w fu fx fw d e by))
+      (let [a (if (< u x) u a) b (if (< u x) b u)]
+        (cond
+          (or (<= fu fw) (= w x)) (->BrentMinimum a b x u w fx fu fw d e by)
+          (or (<= fu fv) (= v x) (= v w)) (->BrentMinimum a b x w u fx fw fu d e by)
+          :else (->BrentMinimum a b x w v fx fw fv d e by))))))
+
+(defn- brent-minimize-step
+  "One step of Brent's minimizer: the vertex of the parabola through x,
+  w and v where it is safe -- inside the interval and shorter than half
+  the step before last -- a golden section of the larger side
+  otherwise; `:by` says which."
+  [f tol ^BrentMinimum s]
+  (let [a (.-a s) b (.-b s) x (.-x s) w (.-w s) v (.-v s) fx (.-fx s) fw (.-fw s) fv (.-fv s) d (.-d s) e (.-e s)
+        m (* 0.5 (+ a b))
+        t1 (brent-tolerance tol x)
+        t2 (* 2.0 t1)
+        ge (if (< x m) (- b x) (- a x))]
+    (if (> (abs e) t1)
+      ;; try the parabola through x, w and v
+      (let [r (* (- x w) (- fx fv))
+            q (* (- x v) (- fx fw))
+            p (- (* (- x v) q) (* (- x w) r))
+            q (* 2.0 (- q r))
+            p (if (pos? q) (- p) p)
+            q (if (pos? q) q (- q))]
+        (if (and (< (abs p) (abs (* 0.5 q e))) (> p (* q (- a x))) (< p (* q (- b x))))
+          ;; the parabola's step taken; the one before it remembered
+          (let [step (/ p q) u (+ x step)]
+            (brent-minimum-next f s t1 (if (or (< (- u a) t2) (< (- b u) t2)) (if (< x m) t1 (- t1)) step) d :parabolic))
+          (brent-minimum-next f s t1 (* cgold ge) ge :golden)))
+      (brent-minimum-next f s t1 (* cgold ge) ge :golden))))
+
+(defn- brent-minimum-start [f a b]
+  (let [x0 (+ a (* cgold (- b a))) f0 (f x0)]
+    (->BrentMinimum a b x0 x0 x0 f0 f0 f0 0.0 0.0 :start)))
+
+(defn brent-minimize-seq
+  "The states of Brent's minimizer between `a` and `b`: `{:a :b :x :fx
+  :by}`, `:x` the best point so far, `:by` `:parabolic` or `:golden`.
+  `tol` as `brent-minimize`'s."
+  [f a b tol]
+  (iterate (partial brent-minimize-step f tol) (brent-minimum-start f a b)))
 
 (defn brent-minimize
   "The minimum of `f` between `a` and `b` by Brent's method (Brent,
@@ -159,40 +317,41 @@
   precision, 1e-8: near a minimum f changes only as the step squared."
   ([f a b] (brent-minimize f a b {}))
   ([f a b {:keys [tol max-iter] :or {tol 1e-10 max-iter 500}}]
-   (let [x0 (+ a (* cgold (- b a))) f0 (f x0)]
-     ;; x the best point, w the second best, v the previous w
-     (loop [a a b b x x0 w x0 v x0 fx f0 fw f0 fv f0 d 0.0 e 0.0 i 0]
-       (let [m (* 0.5 (+ a b))
-             t1 (+ (* tol (abs x)) 1e-12)
-             t2 (* 2.0 t1)]
-         (if (or (<= (abs (- x m)) (- t2 (* 0.5 (- b a)))) (>= i max-iter))
-           {:x x :f fx}
-           (let [[d e]
-                 (if (> (abs e) t1)
-                   ;; try the parabola through x, w and v
-                   (let [r (* (- x w) (- fx fv))
-                         q (* (- x v) (- fx fw))
-                         p (- (* (- x v) q) (* (- x w) r))
-                         q (* 2.0 (- q r))
-                         [p q] (if (pos? q) [(- p) q] [p (- q)])]
-                     (if (and (< (abs p) (abs (* 0.5 q e))) (> p (* q (- a x))) (< p (* q (- b x))))
-                       ;; the parabola's step taken; the one before it remembered
-                       (let [step (/ p q) u (+ x step)]
-                         [(if (or (< (- u a) t2) (< (- b u) t2)) (if (< x m) t1 (- t1)) step) d])
-                       (let [e (if (< x m) (- b x) (- a x))] [(* cgold e) e])))
-                   (let [e (if (< x m) (- b x) (- a x))] [(* cgold e) e]))
-                 u (+ x (if (>= (abs d) t1) d (if (pos? d) t1 (- t1))))
-                 fu (f u)]
-             (if (<= fu fx)
-               (let [[a b] (if (< u x) [a x] [x b])]
-                 (recur a b u x w fu fx fw d e (inc i)))
-               (let [[a b] (if (< u x) [u b] [a u])]
-                 (cond
-                   (or (<= fu fw) (= w x)) (recur a b x u w fx fu fw d e (inc i))
-                   (or (<= fu fv) (= v x) (= v w)) (recur a b x w u fx fw fu d e (inc i))
-                   :else (recur a b x w v fx fw fv d e (inc i))))))))))))
+   (let [^BrentMinimum s (search/settle (partial brent-minimum-done? tol) (inc max-iter)
+                                        (partial brent-minimize-step f tol) (brent-minimum-start f a b))]
+     {:x (.-x s) :f (.-fx s)})))
 
 ;; ---------------------------------------------------------- line search
+
+;; Walking out from 0 by doubling steps: the last three points `a`, `b`
+;; and `c`, and the values at the last two.
+(defrecord Walk [a b c fb fc])
+
+(defn- walk-step [g ^Walk w]
+  (let [c' (* 2.0 (.-c w))] (->Walk (.-b w) (.-c w) c' (.-fc w) (g c'))))
+
+(defn- bracket-forward
+  "Walking downhill from 0 by doubling steps from `h`, `g` falling there:
+  the first three points whose last rises, `[a c]` its ends."
+  [g h]
+  (let [^Walk w (search/settle (fn [^Walk w] (or (>= (.-fc w) (.-fb w)) (> (.-c w) 1e12))) ##Inf
+                               (partial walk-step g) (->Walk 0.0 h (* 2.0 h) (g h) (g (* 2.0 h))))]
+    [(.-a w) (.-c w)]))
+
+;; Walking back from 0 by doubling steps: how many, the point `a` reached
+;; and the values there and at the point before.
+(defrecord Retreat [k a fa fb])
+
+(defn- retreat-step [g ^Retreat r]
+  (let [a' (* 2.0 (.-a r))] (->Retreat (inc (.-k r)) a' (g a') (.-fa r))))
+
+(defn- bracket-backward
+  "Walking from 0 the other way, `g` rising forward: doubling steps back
+  from -`h` until g stops falling, or 61 doublings. `[a h]`."
+  [g h f0]
+  (let [^Retreat r (search/settle (fn [^Retreat r] (or (>= (.-fa r) (.-fb r)) (> (.-k r) 60))) ##Inf
+                                  (partial retreat-step g) (->Retreat 0 (- h) (g (- h)) f0))]
+    [(.-a r) h]))
 
 (defn line-minimize
   "The step t along direction `d` from `x` that minimizes f(x + t d):
@@ -202,14 +361,7 @@
   (let [g (fn [t] (f (lin/add x (lin/scale d t))))
         f0 (g 0.0)
         h (/ 1e-2 (max 1e-12 (math/sqrt (reduce + (map * d d)))))
-        ;; walk downhill from 0, doubling, until f rises
-        [lo hi] (if (< (g h) f0)
-                  (loop [a 0.0 b h fb (g h)]
-                    (let [c (* 2.0 b) fc (g c)]
-                      (if (or (>= fc fb) (> c 1e12)) [a c] (recur b c fc))))
-                  (loop [a (- h) fb f0 k 0]
-                    (let [fa (g a)]
-                      (if (or (>= fa fb) (> k 60)) [a h] (recur (* 2.0 a) fa (inc k))))))
+        [lo hi] (if (< (g h) f0) (bracket-forward g h) (bracket-backward g h f0))
         {t :x fv :f} (brent-minimize g lo hi {:tol 1e-12})]
     [t (lin/add x (lin/scale d t)) fv]))
 
@@ -235,21 +387,70 @@
   (and (<= (abs (- fx fx')) (* tol (max 1.0 (abs fx'))))
        (every? true? (map #(<= (abs (- %1 %2)) (* (math/sqrt tol) (max 1.0 (abs %2)))) x x'))))
 
+(defn- moved-little?
+  "Whether a many-variable state has moved, and changed its value, by
+  less than `tol` from the point before -- or has stopped."
+  [tol {:keys [x f last-x last-f stopped?]}]
+  (or stopped? (and last-x (settled? last-x x last-f f tol))))
+
+(defn- start [f x0] {:x (mapv double x0) :f (f x0) :iterations 0})
+
+(defn- moved
+  "The state `st` moved to `x'` with value `fx'`, and the map `more`
+  merged in."
+  ([st x' fx'] (moved st x' fx' nil))
+  ([{:keys [x iterations] fx :f :as st} x' fx' more]
+   (into (assoc st :x x' :f fx' :iterations (inc iterations) :last-x x :last-f fx) more)))
+
+(defn- descend
+  "The state the many-variable method's `step` reaches from `init`: the
+  first that has moved little, or the last within `max-iter` steps --
+  `{:x :f :iterations}`."
+  [tol max-iter step init]
+  (select-keys (search/settle (partial moved-little? tol) (inc max-iter) step init) [:x :f :iterations]))
+
+(defn- axis [n i] (assoc (vec (repeat n 0.0)) i 1.0))
+
+(defn- univariate-step
+  "A line minimization along each coordinate in turn."
+  [f {:keys [x] fx :f :as st}]
+  (let [[x' fx'] (reduce (fn [[x _] i] (let [[_ x' fv] (line-minimize f x (axis (count x) i))] [x' fv]))
+                         [x fx] (range (count x)))]
+    (moved st x' fx')))
+
+(defn univariate-seq
+  "The points `{:x :f :iterations}` of univariate search from `x0`, one
+  round of the axes a step."
+  [f x0]
+  (iterate (partial univariate-step f) (start f x0)))
+
 (defn univariate
   "The minimum of `f` from `x0` by univariate search: a line minimization
   along each coordinate in turn, round and round -- simple, and slow in a
   narrow valley that runs across the axes. `{:x :f :iterations}`."
   ([f x0] (univariate f x0 {}))
   ([f x0 {:keys [tol max-iter] :or {tol 1e-12 max-iter 1000}}]
-   (let [n (count x0)]
-     (loop [x (mapv double x0) fx (f x0) k 1]
-       (let [[x' fx'] (reduce (fn [[x _] i]
-                                (let [[_ x' fv] (line-minimize f x (assoc (vec (repeat n 0.0)) i 1.0))]
-                                  [x' fv]))
-                              [x fx] (range n))]
-         (if (or (settled? x x' fx fx' tol) (>= k max-iter))
-           {:x x' :f fx' :iterations k}
-           (recur x' fx' (inc k))))))))
+   (descend tol max-iter (partial univariate-step f) (start f x0))))
+
+(defn- powell-step
+  "A line minimization along each direction in turn, then along the net
+  displacement, which replaces the oldest direction."
+  [f {:keys [x dirs] fx :f :as st}]
+  (let [[y fy] (reduce (fn [[y _] d] (let [[_ y' fv] (line-minimize f y d)] [y' fv])) [x fx] dirs)
+        net (lin/sub y x)]
+    (if (every? zero? net)
+      (moved st y fy)
+      (let [[_ z fz] (line-minimize f y net)]
+        (moved st z fz {:dirs (conj (subvec dirs 1) net)})))))
+
+(defn- powell-start [f x0]
+  (let [n (count x0)] (assoc (start f x0) :dirs (mapv (partial axis n) (range n)))))
+
+(defn powell-seq
+  "The points `{:x :f :iterations :dirs}` of Powell's method from `x0`,
+  one round of the directions a step."
+  [f x0]
+  (iterate (partial powell-step f) (powell-start f x0)))
 
 (defn powell
   "The minimum of `f` from `x0` by Powell's method (Powell 1964): line
@@ -259,22 +460,26 @@
   variables is minimized in n rounds. `{:x :f :iterations}`."
   ([f x0] (powell f x0 {}))
   ([f x0 {:keys [tol max-iter] :or {tol 1e-12 max-iter 500}}]
-   (let [n (count x0)]
-     (loop [x (mapv double x0) fx (f x0)
-            dirs (mapv (fn [i] (assoc (vec (repeat n 0.0)) i 1.0)) (range n)) k 1]
-       (let [[y fy] (reduce (fn [[y _] d] (let [[_ y' fv] (line-minimize f y d)] [y' fv])) [x fx] dirs)
-             net (lin/sub y x)
-             [x' fx' dirs] (if (every? zero? net)
-                             [y fy dirs]
-                             (let [[_ z fz] (line-minimize f y net)]
-                               [z fz (conj (subvec dirs 1) net)]))]
-         (if (or (settled? x x' fx fx' tol) (>= k max-iter))
-           {:x x' :f fx' :iterations k}
-           (recur x' fx' dirs (inc k))))))))
+   (descend tol max-iter (partial powell-step f) (powell-start f x0))))
 
 ;; -------------------------------------------- several variables: gradients
 
 (defn- grad-fn [f grad] (or grad #(d/gradient f %)))
+
+(defn- steepest-descent-step
+  "A line minimization down the gradient. nil where it vanishes."
+  [f grad {:keys [x] :as st}]
+  (let [g (grad x)]
+    (when-not (every? zero? g)
+      (let [[_ x' fx'] (line-minimize f x (lin/scale g -1.0))]
+        (moved st x' fx')))))
+
+(defn steepest-descent-seq
+  "The points `{:x :f :iterations}` of steepest descent from `x0`:
+  those of Chapra and Canale's example 14.4. `grad` as
+  `steepest-descent`'s."
+  [f grad x0]
+  (search/step-seq (partial steepest-descent-step f (grad-fn f grad)) (start f x0)))
 
 (defn steepest-descent
   "The minimum of `f` from `x0` by steepest descent: a line minimization
@@ -285,15 +490,32 @@
   ([f x0] (steepest-descent f nil x0 {}))
   ([f grad x0] (steepest-descent f grad x0 {}))
   ([f grad x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 5000}}]
-   (let [grad (grad-fn f grad)]
-     (loop [x (mapv double x0) fx (f x0) k 1]
-       (let [g (grad x)]
-         (if (every? zero? g)
-           {:x x :f fx :iterations k}
-           (let [[_ x' fx'] (line-minimize f x (lin/scale g -1.0))]
-             (if (or (settled? x x' fx fx' tol) (>= k max-iter))
-               {:x x' :f fx' :iterations k}
-               (recur x' fx' (inc k))))))))))
+   (descend tol max-iter (partial steepest-descent-step f (grad-fn f grad)) (start f x0))))
+
+(defn- conjugate-gradient-step
+  "A line minimization along the direction `d`, and the next direction:
+  the new negative gradient plus d times |g_new|^2 / |g_old|^2, or the
+  negative gradient alone every `n` steps. nil where the gradient
+  vanishes."
+  [f grad n {:keys [x g d iterations] :as st}]
+  (when-not (every? zero? g)
+    (let [[_ x' fx'] (line-minimize f x d)
+          g' (grad x')
+          beta (/ (reduce + (map * g' g')) (reduce + (map * g g)))
+          k (inc iterations)
+          d' (if (zero? (mod k n)) (lin/scale g' -1.0) (lin/add (lin/scale g' -1.0) (lin/scale d beta)))]
+      (moved st x' fx' {:g g' :d d'}))))
+
+(defn- conjugate-gradient-start [f grad x0]
+  (assoc (start f x0) :g (grad x0) :d (lin/scale (grad x0) -1.0)))
+
+(defn conjugate-gradient-seq
+  "The points `{:x :f :iterations :g :d}` of Fletcher-Reeves conjugate
+  gradients from `x0`, `:g` the gradient there and `:d` the next
+  direction. Arguments as `conjugate-gradient`'s."
+  [f grad x0]
+  (let [grad (grad-fn f grad)]
+    (search/step-seq (partial conjugate-gradient-step f grad (count x0)) (conjugate-gradient-start f grad x0))))
 
 (defn conjugate-gradient
   "The minimum of `f` from `x0` by the Fletcher-Reeves conjugate gradient
@@ -304,19 +526,25 @@
   ([f x0] (conjugate-gradient f nil x0 {}))
   ([f grad x0] (conjugate-gradient f grad x0 {}))
   ([f grad x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 5000}}]
-   (let [grad (grad-fn f grad) n (count x0)]
-     (loop [x (mapv double x0) fx (f x0) g (grad x0) d (lin/scale (grad x0) -1.0) k 1]
-       (if (every? zero? g)
-         {:x x :f fx :iterations k}
-         (let [[_ x' fx'] (line-minimize f x d)
-               g' (grad x')
-               beta (/ (reduce + (map * g' g')) (reduce + (map * g g)))
-               d' (if (zero? (mod k n)) (lin/scale g' -1.0) (lin/add (lin/scale g' -1.0) (lin/scale d beta)))]
-           (if (or (settled? x x' fx fx' tol) (>= k max-iter))
-             {:x x' :f fx' :iterations k}
-             (recur x' fx' g' d' (inc k)))))))))
+   (let [grad (grad-fn f grad)]
+     (descend tol max-iter (partial conjugate-gradient-step f grad (count x0)) (conjugate-gradient-start f grad x0)))))
 
 (defn- solve-sym [H g] (ls/gauss H g))
+
+(defn- hess-fn [f hess] (or hess #(d/hessian f %)))
+
+(defn- newton-step
+  "Newton's step -H^-1 g. nil at a singular Hessian."
+  [f grad hess {:keys [x] :as st}]
+  (when-let [dx (solve-sym (hess x) (grad x))]
+    (let [x' (lin/sub x dx)]
+      (moved st x' (f x')))))
+
+(defn newton-seq
+  "The points `{:x :f :iterations}` of Newton's method from `x0`.
+  Arguments as `newton`'s."
+  [f grad hess x0]
+  (search/step-seq (partial newton-step f (grad-fn f grad) (hess-fn f hess)) (start f x0)))
 
 (defn newton
   "The minimum of `f` from `x0` by Newton's method: each step -H^-1 g, H
@@ -327,14 +555,35 @@
   ([f x0] (newton f nil nil x0 {}))
   ([f grad hess x0] (newton f grad hess x0 {}))
   ([f grad hess x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 100}}]
-   (let [grad (grad-fn f grad) hess (or hess #(d/hessian f %))]
-     (loop [x (mapv double x0) fx (f x0) k 1]
-       (if-let [dx (solve-sym (hess x) (grad x))]
-         (let [x' (lin/sub x dx) fx' (f x')]
-           (if (or (settled? x x' fx fx' tol) (>= k max-iter))
-             {:x x' :f fx' :iterations k}
-             (recur x' fx' (inc k))))
-         {:x x :f fx :iterations k})))))
+   (descend tol max-iter (partial newton-step f (grad-fn f grad) (hess-fn f hess)) (start f x0))))
+
+(defn- marquardt-step
+  "One trial of Marquardt's step -(H + alpha I)^-1 g: taken, and alpha
+  shrunk tenfold, if it lowers f; refused, and alpha grown tenfold, if
+  not. `:stopped?` once a step moves too little to matter -- the step
+  is what says so, since a refused step leaves the point where it was --
+  or at `max-iter`; nil after that."
+  [f grad hess tol max-iter {:keys [x alpha iterations stopped?] fx :f :as st}]
+  (when-not stopped?
+    (let [n (count x) k (inc iterations)
+          H (hess x)
+          dx (solve-sym (mapv (fn [i row] (update row i + alpha)) (range n) H) (grad x))]
+      (if (nil? dx)
+        (assoc st :alpha (* 10.0 alpha) :iterations k)
+        (let [x' (lin/sub x dx) fx' (f x')]
+          (cond
+            (>= k max-iter) (assoc st :iterations k :stopped? true)
+            (< fx' fx) (assoc st :x x' :f fx' :alpha (* 0.1 alpha) :iterations k :stopped? (settled? x x' fx fx' tol))
+            (settled? x x' fx fx' tol) (assoc st :iterations k :stopped? true)
+            :else (assoc st :alpha (* 10.0 alpha) :iterations k)))))))
+
+(defn marquardt-seq
+  "The trials `{:x :f :alpha :iterations}` of Marquardt's method from
+  `x0`. Arguments as `marquardt`'s."
+  ([f grad hess x0] (marquardt-seq f grad hess x0 {}))
+  ([f grad hess x0 {:keys [tol max-iter alpha] :or {tol 1e-14 max-iter 500 alpha 1e3}}]
+   (search/step-seq (partial marquardt-step f (grad-fn f grad) (hess-fn f hess) tol max-iter)
+                    (assoc (start f x0) :alpha alpha))))
 
 (defn marquardt
   "The minimum of `f` from `x0` by Marquardt's method: each step -(H +
@@ -345,21 +594,53 @@
   ([f x0] (marquardt f nil nil x0 {}))
   ([f grad hess x0] (marquardt f grad hess x0 {}))
   ([f grad hess x0 {:keys [tol max-iter alpha] :or {tol 1e-14 max-iter 500 alpha 1e3}}]
-   (let [grad (grad-fn f grad) hess (or hess #(d/hessian f %)) n (count x0)]
-     (loop [x (mapv double x0) fx (f x0) alpha alpha k 1]
-       (let [g (grad x) H (hess x)
-             damped (mapv (fn [i row] (update row i + alpha)) (range n) H)
-             dx (solve-sym damped g)]
-         (if (nil? dx)
-           (recur x fx (* 10.0 alpha) (inc k))
-           (let [x' (lin/sub x dx) fx' (f x')]
-             (cond
-               (>= k max-iter) {:x x :f fx :iterations k}
-               (< fx' fx) (if (settled? x x' fx fx' tol)
-                            {:x x' :f fx' :iterations k}
-                            (recur x' fx' (* 0.1 alpha) (inc k)))
-               (settled? x x' fx fx' tol) {:x x :f fx :iterations k}
-               :else (recur x fx (* 10.0 alpha) (inc k))))))))))
+   (-> (search/settle :stopped? (inc max-iter)
+                      (partial marquardt-step f (grad-fn f grad) (hess-fn f hess) tol max-iter)
+                      (assoc (start f x0) :alpha alpha))
+       (select-keys [:x :f :iterations]))))
+
+(defn- outer [u v] (mapv (fn [a] (mapv #(* a %) v)) u))
+(defn- mat-sum [& ms] (apply mapv (fn [& rows] (apply mapv + rows)) ms))
+(defn- mat-times [m c] (mapv (fn [row] (mapv #(* c %) row)) m))
+(defn- mat-vec [m v] (mapv #(reduce + (map * % v)) m))
+
+(defn- quasi-newton-step
+  "A line minimization along -B g, B the inverse Hessian built so far,
+  and B updated from the change in the gradient -- by BFGS, or DFP when
+  `update` is `:dfp`; kept as it was where the change gives no
+  curvature. nil where the gradient vanishes."
+  [f grad update {:keys [x g B] :as st}]
+  (when-not (every? zero? g)
+    (let [[_ x' fx'] (line-minimize f x (lin/scale (mat-vec B g) -1.0))
+          g' (grad x')
+          s (lin/sub x' x) y (lin/sub g' g)
+          sy (reduce + (map * s y))
+          By (mat-vec B y)
+          B' (cond
+               (<= sy 0.0) B
+               (= update :dfp)
+               (mat-sum B (mat-times (outer s s) (/ 1.0 sy))
+                        (mat-times (outer By By) (/ -1.0 (reduce + (map * y By)))))
+               :else
+               ;; B' = (I - rho s y^T) B (I - rho y s^T) + rho s s^T
+               (let [rho (/ 1.0 sy)
+                     yBy (reduce + (map * y By))]
+                 (mat-sum B
+                          (mat-times (outer s s) (* rho (+ 1.0 (* rho yBy))))
+                          (mat-times (mat-sum (outer By s) (outer s By)) (- rho)))))]
+      (moved st x' fx' {:g g' :B B'}))))
+
+(defn- quasi-newton-start [f grad x0]
+  (let [n (count x0)] (assoc (start f x0) :g (grad x0) :B (mapv (partial axis n) (range n)))))
+
+(defn quasi-newton-seq
+  "The points `{:x :f :iterations :g :B}` of a quasi-Newton method from
+  `x0`, `:B` the inverse Hessian built so far. Arguments as
+  `quasi-newton`'s."
+  ([f grad x0] (quasi-newton-seq f grad x0 {}))
+  ([f grad x0 {:keys [update] :or {update :bfgs}}]
+   (let [grad (grad-fn f grad)]
+     (search/step-seq (partial quasi-newton-step f grad update) (quasi-newton-start f grad x0)))))
 
 (defn quasi-newton
   "The minimum of `f` from `x0` by a quasi-Newton method: Newton's step
@@ -371,35 +652,8 @@
   ([f x0] (quasi-newton f nil x0 {}))
   ([f grad x0] (quasi-newton f grad x0 {}))
   ([f grad x0 {:keys [tol max-iter update] :or {tol 1e-14 max-iter 500 update :bfgs}}]
-   (let [grad (grad-fn f grad) n (count x0)
-         outer (fn [u v] (mapv (fn [a] (mapv #(* a %) v)) u))
-         mat-add (fn [& ms] (apply mapv (fn [& rows] (apply mapv + rows)) ms))
-         mat-scale (fn [m c] (mapv (fn [row] (mapv #(* c %) row)) m))
-         mv (fn [m v] (mapv #(reduce + (map * % v)) m))]
-     (loop [x (mapv double x0) fx (f x0) g (grad x0)
-            B (mapv (fn [i] (assoc (vec (repeat n 0.0)) i 1.0)) (range n)) k 1]
-       (if (every? zero? g)
-         {:x x :f fx :iterations k}
-         (let [[_ x' fx'] (line-minimize f x (lin/scale (mv B g) -1.0))
-               g' (grad x')
-               s (lin/sub x' x) y (lin/sub g' g)
-               sy (reduce + (map * s y))
-               By (mv B y)
-               B' (cond
-                    (<= sy 0.0) B
-                    (= update :dfp)
-                    (mat-add B (mat-scale (outer s s) (/ 1.0 sy))
-                             (mat-scale (outer By By) (/ -1.0 (reduce + (map * y By)))))
-                    :else
-                    ;; B' = (I - rho s y^T) B (I - rho y s^T) + rho s s^T
-                    (let [rho (/ 1.0 sy)
-                          yBy (reduce + (map * y By))]
-                      (mat-add B
-                               (mat-scale (outer s s) (* rho (+ 1.0 (* rho yBy))))
-                               (mat-scale (mat-add (outer By s) (outer s By)) (- rho)))))]
-           (if (or (settled? x x' fx fx' tol) (>= k max-iter))
-             {:x x' :f fx' :iterations k}
-             (recur x' fx' g' B' (inc k)))))))))
+   (let [grad (grad-fn f grad)]
+     (descend tol max-iter (partial quasi-newton-step f grad update) (quasi-newton-start f grad x0)))))
 
 ;; ----------------------------------------------------------- constrained
 
@@ -408,26 +662,33 @@
         prow (mapv #(/ % pv) prow)]
     (mapv (fn [i row] (if (= i r) prow (let [f (row c)] (mapv - row (mapv #(* f %) prow))))) (range (count T)) T)))
 
-(defn- simplex-run
-  "Runs the simplex method on tableau `T` (last row the objective, to be
-  made non-negative), `basis` the basic variable of each constraint row.
-  Bland's rule -- the lowest-indexed entering and leaving variable -- so
-  it cannot cycle. `[T basis]`, or nil if unbounded."
-  [T basis ncols]
-  (loop [T T basis basis]
-    (let [obj (peek T)
-          c (first (filter #(< (obj %) -1e-12) (range ncols)))]
-      (if (nil? c)
-        [T basis]
+(defn- simplex-step
+  "One pivot of the simplex method on the tableau `T` (last row the
+  objective, to be made non-negative), `basis` the basic variable of each
+  constraint row, by Bland's rule -- the lowest-indexed entering and
+  leaving variable -- so it cannot cycle. nil at the optimum, where no
+  column enters; `:unbounded?` where one enters and nothing bounds it."
+  [ncols {:keys [T basis unbounded?]}]
+  (when-not unbounded?
+    (let [obj (peek T)]
+      (when-let [c (first (filter #(< (obj %) -1e-12) (range ncols)))]
         (let [rows (keep (fn [i] (let [a (get-in T [i c])]
                                    (when (> a 1e-12) [(/ (peek (T i)) a) (basis i) i])))
                          (range (dec (count T))))]
-          (when (seq rows)
+          (if (empty? rows)
+            {:T T :basis basis :unbounded? true}
             ;; the least ratio, ties -- to a tolerance, rounding being
             ;; what it is -- going to the lowest-indexed basic variable
             (let [least (reduce min (map first rows))
                   [_ _ r] (first (sort-by second (filter #(<= (first %) (+ least (* 1e-11 (max 1.0 (abs least))))) rows)))]
-              (recur (pivot T r c) (assoc basis r c)))))))))
+              {:T (pivot T r c) :basis (assoc basis r c)})))))))
+
+(defn- simplex-run
+  "The simplex method on tableau `T`, `basis` the basic variable of each
+  constraint row, to the optimum: `[T basis]`, or nil if unbounded."
+  [T basis ncols]
+  (let [{:keys [T basis unbounded?]} (search/settle :unbounded? ##Inf (partial simplex-step ncols) {:T T :basis basis})]
+    (when-not unbounded? [T basis])))
 
 (defn- drive-out-artificials
   "After phase one, an artificial variable still basic -- at zero, the
@@ -506,6 +767,32 @@
                            (vec (repeat n 0.0)) (range m))]
              {:x x :value (reduce + (map * c x))})))))))
 
+(defn- penalized
+  "f plus `mu` times the squared violations of the constraints."
+  [f inequalities equalities mu]
+  (fn [x] (+ (f x) (* mu (+ (reduce + (map #(let [v (% x)] (if (pos? v) (* v v) 0.0)) inequalities))
+                            (reduce + (map #(let [v (% x)] (* v v)) equalities)))))))
+
+(defn- violation [inequalities equalities x]
+  (max (reduce max 0.0 (map #(% x) inequalities))
+       (reduce max 0.0 (map #(abs (% x)) equalities))))
+
+(defn- penalty-step
+  "The penalized problem with `:next-mu` minimized from the last point,
+  and mu grown tenfold for the next."
+  [f inequalities equalities {:keys [x next-mu iterations]}]
+  (let [{x' :x} (quasi-newton (penalized f inequalities equalities next-mu) x)]
+    {:x x' :mu next-mu :next-mu (* 10.0 next-mu) :violation (violation inequalities equalities x')
+     :iterations (inc iterations)}))
+
+(defn penalty-seq
+  "The points `{:x :mu :violation :iterations}` of the exterior penalty
+  method from `x0`, each the minimum with penalty `:mu`. Arguments as
+  `penalty`'s."
+  ([f inequalities equalities x0] (penalty-seq f inequalities equalities x0 {}))
+  ([f inequalities equalities x0 {:keys [mu] :or {mu 1.0}}]
+   (rest (iterate (partial penalty-step f inequalities equalities) {:x (mapv double x0) :next-mu mu :iterations 0}))))
+
 (defn penalty
   "The minimum of `f` subject to inequality constraints g(x) <= 0 (each
   of `inequalities`) and equality constraints h(x) = 0 (`equalities`),
@@ -516,12 +803,7 @@
   `{:x :f :mu}`."
   ([f inequalities equalities x0] (penalty f inequalities equalities x0 {}))
   ([f inequalities equalities x0 {:keys [tol mu max-iter] :or {tol 1e-8 mu 1.0 max-iter 20}}]
-   (loop [x (mapv double x0) mu mu k 0]
-     (let [P (fn [x] (+ (f x) (* mu (+ (reduce + (map #(let [v (% x)] (if (pos? v) (* v v) 0.0)) inequalities))
-                                       (reduce + (map #(let [v (% x)] (* v v)) equalities))))))
-           {x' :x} (quasi-newton P x)
-           violation (max (reduce max 0.0 (map #(% x') inequalities))
-                          (reduce max 0.0 (map #(abs (% x')) equalities)))]
-       (if (or (<= violation tol) (>= k max-iter))
-         {:x x' :f (f x') :mu mu}
-         (recur x' (* 10.0 mu) (inc k)))))))
+   (let [{:keys [x mu]} (search/settle #(some-> (:violation %) (<= tol)) (+ 2 max-iter)
+                                       (partial penalty-step f inequalities equalities)
+                                       {:x (mapv double x0) :next-mu mu :iterations 0})]
+     {:x x :f (f x) :mu mu})))
