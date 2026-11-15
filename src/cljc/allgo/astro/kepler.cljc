@@ -16,7 +16,18 @@
   (:require [allgo.astro.constants :as c]
             [allgo.geometry.vec3 :as v3]
             [allgo.math :as am]
-            [clojure.math :as math]))
+            [allgo.numerics.roots :as roots]
+            [allgo.search :as search]
+            [clojure.math :as math])
+  #?(:clj (:import [allgo.numerics.roots Estimate])))
+
+(defn- newton-solve
+  "The root of a Kepler equation by Newton's method from `x0`, given its
+  correction f/f' (`allgo.numerics.roots/newton-correction-step`): the
+  first estimate whose step is under `tol`, or the last of `steps`."
+  [correction x0 tol steps]
+  (:x (search/settle (fn [^Estimate s] (< (abs (.-dx s)) tol)) (inc steps)
+                     (partial roots/newton-correction-step correction) (roots/->Estimate x0 ##Inf))))
 
 ;; ------------------------------------------------------------ scalar results
 
@@ -48,13 +59,8 @@
   ([M e] (kepler-equation M e 1e-13))
   ([M e tol]
    (let [M (am/wrap-2pi M)]
-     (loop [E (+ M (* e (math/sin M))) n 0]
-       (let [f  (- E (* e (math/sin E)) M)
-             fp (- 1.0 (* e (math/cos E)))
-             dE (/ f fp)]
-         (if (or (< (abs dE) tol) (>= n 60))
-           (- E dE)
-           (recur (- E dE) (inc n))))))))
+     (newton-solve (fn [E] (/ (- E (* e (math/sin E)) M) (- 1.0 (* e (math/cos E)))))
+                   (+ M (* e (math/sin M))) tol 61))))
 
 (defn eccentric->true
   "The eccentric anomaly is measured on the circumscribing circle, the true
@@ -88,6 +94,12 @@
     {:a a :e (math/hypot af ag) :i (* 2.0 (math/atan (math/hypot chi psi)))
      :raan (am/wrap-2pi node) :argp (am/wrap-2pi (- lp node)) :M (am/wrap-2pi (- lam lp))}))
 
+(defn- sinnott-step
+  "One halving of Sinnott's search: E moved by `d` toward the solution of
+  M = E - e sin E, and d halved."
+  [M e [E d]]
+  [(if (neg? (- M (- E (* e (math/sin E))))) (- E d) (+ E d)) (* 0.5 d)])
+
 (defn kepler-bisection
   "Solve Kepler's equation by Sinnott's binary search (Meeus 30, third
   method): fifty-odd halvings of a quarter circle, each fixing one bit of
@@ -99,11 +111,7 @@
   [M e]
   (let [M  (am/wrap-2pi M)
         [M sign] (if (> M math/PI) [(- c/two-pi M) -1.0] [M 1.0])]
-    (loop [E (* 0.5 math/PI) d (* 0.25 math/PI) i 0]
-      (if (= i 53)
-        (am/wrap-2pi (* sign E))
-        (recur (if (neg? (- M (- E (* e (math/sin E))))) (- E d) (+ E d))
-               (* 0.5 d) (inc i))))))
+    (am/wrap-2pi (* sign (first (search/settle (constantly false) 54 (partial sinnott-step M e) [(* 0.5 math/PI) (* 0.25 math/PI)]))))))
 
 (defn kepler-approximate
   "The eccentric anomaly to first order in `e` (Meeus 30.8), tan E =
@@ -162,11 +170,7 @@
              (< e 1.6) (if (or (and (< M 0.0) (> M (- math/PI))) (> M math/PI)) (- M e) (+ M e))
              (and (< e 3.6) (> (abs M) math/PI)) (- M (* (math/signum M) e))
              :else (/ M (- e 1.0)))]
-    (loop [H H0 n 0]
-      (let [dH (/ (- (* e (math/sinh H)) H M) (- (* e (math/cosh H)) 1.0))]
-        (if (or (< (abs dH) 1e-13) (>= n 60))
-          (- H dH)
-          (recur (- H dH) (inc n)))))))
+    (newton-solve (fn [H] (/ (- (* e (math/sinh H)) H M) (- (* e (math/cosh H)) 1.0))) H0 1e-13 61)))
 
 (defn kepler-parabolic
   "Solve M = B + B^3/3 for Barker's parabolic anomaly: a cubic, so in
@@ -200,6 +204,38 @@
 
 ;; ---------------------------------------- near-parabolic orbits (Meeus 35)
 
+(defn- landgraf-term-step
+  "The next term of Landgraf's series (his line 42 onward), added in.
+  nil once it diverges: past fifty terms, or a term over ten thousand."
+  [g y {:keys [z g1 q3]}]
+  (let [z (inc z)
+        g1 (* (- g1) g y)
+        f (* g1 (/ (- z (* (inc z) g)) (inc (* 2.0 z))))]
+    (when-not (or (> z 50.0) (> (abs f) 10000.0))
+      {:z z :g1 g1 :q3 (+ q3 f) :f f})))
+
+(defn- landgraf-series
+  "Landgraf's series summed for one `s`, until a term is under `tol`;
+  nil if it diverges."
+  [g q2 tol s]
+  (let [y (* s s)]
+    (:q3 (search/converge #(<= (abs (:f %)) tol) ##Inf (partial landgraf-term-step g y)
+                          {:z 1.0 :g1 (- (* y s)) :q3 (+ q2 (/ (* 2.0 g s y) 3.0)) :f ##Inf}))))
+
+(defn- landgraf-solve-step
+  "One step of s <- (2 s^3/3 + q3)/(s^2 + 1)."
+  [q3 {s :x}]
+  (let [s' (/ (+ (/ (* 2.0 s s s) 3.0) q3) (+ (* s s) 1.0))]
+    {:x s' :dx (- s' s)}))
+
+(defn- landgraf-step
+  "One round of Landgraf's method: the series summed at `s`, and s
+  solved again with it. nil if the series diverges."
+  [g q2 tol {s :x}]
+  (when-let [q3 (landgraf-series g q2 tol s)]
+    (let [s' (:x (search/settle #(<= (abs (:dx %)) tol) 1003 (partial landgraf-solve-step q3) {:x s :dx ##Inf}))]
+      {:x s' :dx (- s' s)})))
+
 (defn near-parabolic
   "`[nu r]` `t` days after perihelion on an orbit of perihelion distance
   `q` AU and eccentricity `e` near one, by Landgraf's method, or nil if it
@@ -219,29 +255,9 @@
           s0 (/ 2.0 (math/tan (* 2.0 (math/atan (math/cbrt (math/tan (* 0.5 (math/atan s0))))))))
           s0 (if (neg? t) (- s0) s0)
           tol 1e-9
-          ;; the series of Landgraf's line 42 onward, summed for one s
-          q3-of (fn [s]
-                  (let [y (* s s)]
-                    (loop [z 1.0 g1 (- (* y s)) q3 (+ q2 (/ (* 2.0 g s y) 3.0))]
-                      (let [z  (inc z)
-                            g1 (* (- g1) g y)
-                            f  (* g1 (/ (- z (* (inc z) g)) (inc (* 2.0 z))))
-                            q3 (+ q3 f)]
-                        (cond
-                          (or (> z 50.0) (> (abs f) 10000.0)) nil
-                          (<= (abs f) tol) q3
-                          :else (recur z g1 q3))))))
-          solve (fn [s q3]
-                  (loop [s s i 0]
-                    (let [s' (/ (+ (/ (* 2.0 s s s) 3.0) q3) (+ (* s s) 1.0))]
-                      (if (or (<= (abs (- s' s)) tol) (> i 1000)) s' (recur s' (inc i))))))
           s  (if (= e 1.0)
                s0
-               (loop [s s0 l 0]
-                 (when (<= l 50)
-                   (when-let [q3 (q3-of s)]
-                     (let [s' (solve s q3)]
-                       (if (<= (abs (- s' s)) tol) s' (recur s' (inc l))))))))]
+               (:x (search/converge #(<= (abs (:dx %)) tol) 52 (partial landgraf-step g q2 tol) {:x s0 :dx ##Inf})))]
       (when s
         (let [nu (* 2.0 (math/atan s))]
           [(am/wrap-2pi nu) (/ (* q (+ 1.0 e)) (+ 1.0 (* e (math/cos nu))))])))))
@@ -358,10 +374,9 @@
   "The eccentric longitude F of mean longitude `lam`: Kepler's equation
   in equinoctial form, lam = F + ag cos F - af sin F, by Newton's method."
   [af ag lam]
-  (loop [F lam k 0]
-    (let [d (/ (- (+ (- F (* af (math/sin F))) (* ag (math/cos F))) lam)
-               (- 1.0 (* af (math/cos F)) (* ag (math/sin F))))]
-      (if (or (< (abs d) 1e-15) (> k 50)) (- F d) (recur (- F d) (inc k))))))
+  (newton-solve (fn [F] (/ (- (+ (- F (* af (math/sin F))) (* ag (math/cos F))) lam)
+                           (- 1.0 (* af (math/cos F)) (* ag (math/sin F)))))
+                lam 1e-15 52))
 
 (defn equinoctial-frame
   "The equinoctial frame's axes `[f g w]` of node vector `chi` `psi`: f

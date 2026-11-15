@@ -108,6 +108,23 @@
         (is (close? (:value (eigen/inverse-power A)) (* 1.778 (first truth)) 1e-10))
         (testing "and shifted, the middle one"
           (is (close? (:value (eigen/inverse-power A {:shift 3.0})) (* 1.778 (second truth)) 1e-10)))))
+    (testing "Example 27.7: the power method's estimates, the sign flipping as it goes"
+      (let [A (mapv (fn [row] (mapv #(* 1.778 %) row)) K)
+            states (take 5 (eigen/power-seq A))]
+        ;; the book's fifth estimate, 6.095, comes from the fourth vector
+        ;; rounded to -0.714; unrounded it is 6.096
+        (is (close? [1.778 3.556 -7.112 6.223 6.096] (map :value states) 5e-4))
+        (is (close? [[1 0 1] [1 -1 1] [-0.75 1 -0.75] [-0.714 1 -0.714] [-0.708 1 -0.708]] (map :vector states) 5e-4))))
+    (testing "Example 27.8: on the inverse, 1/lambda's estimates"
+      (let [A (mapv (fn [row] (mapv #(* 1.778 %) row)) K)]
+        (is (close? [1.124 0.984 0.964] (map #(/ 1.0 (:value %)) (take 3 (eigen/inverse-power-seq A))) 2e-3))))
+    (testing "Jacobi's sweeps shrink the off-diagonal part every time, and the QR algorithm deflates one eigenvalue at a time"
+      (let [S [[4.0 1.0 -2.0 2.0] [1.0 2.0 0.0 1.0] [-2.0 0.0 3.0 -2.0] [2.0 1.0 -2.0 -1.0]]
+            offs (map :off (take 6 (eigen/jacobi-seq S)))
+            qr (eigen/qr-algorithm-seq S)]
+        (is (every? true? (map > offs (rest offs))))
+        (is (= 4 (count (filter #(= :deflate (:by %)) qr))))
+        (is (close? (sort (:out (last qr))) (eigen/qr-algorithm S) 0.0))))
     (testing "Jacobi's method and the QR algorithm on a symmetric 5x5"
       (let [S [[4.0 1.0 -2.0 2.0 0.5] [1.0 2.0 0.0 1.0 -1.0] [-2.0 0.0 3.0 -2.0 1.5]
                [2.0 1.0 -2.0 -1.0 0.0] [0.5 -1.0 1.5 0.0 2.5]]

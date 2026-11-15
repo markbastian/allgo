@@ -86,3 +86,12 @@
       (is (close? (d/partial-derivative h [1.5 2.0] 0) (* 2.0 1.5 8.0) 1e-7))
       (is (close? (d/partial-derivative h [1.5 2.0] 1) (* 2.25 3.0 4.0) 1e-7))
       (is (close? (d/mixed-partial h [1.5 2.0] 0 1) (* 2.0 1.5 3.0 4.0) 1e-5)))))
+
+(deftest romberg-table
+  (testing "Figure 22.3: Romberg's table on Example 22.1's integral, a row at a step"
+    (let [tables (map :rows (q/romberg-seq f 0.0 0.8))]
+      (is (close? [[0.172800]] (nth tables 0) 1e-6))
+      (is (close? [[0.172800] [1.068800 1.367467]] (nth tables 1) 1e-6))
+      (is (close? [[0.172800] [1.068800 1.367467] [1.484800 1.623467 1.640533]] (nth tables 2) 1e-6))
+      (is (close? [[0.172800] [1.068800 1.367467] [1.484800 1.623467 1.640533] [1.600800 1.639467 1.640533 1.640533]]
+                  (nth tables 3) 1e-6)))))

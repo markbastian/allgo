@@ -12,8 +12,14 @@
   formulas to six points, integrals of unequally spaced data, double
   integrals, Romberg integration, adaptive quadrature, Gauss-Legendre
   quadrature of any order, the extended midpoint rule, and improper
-  integrals by the change of variable x = 1/t."
-  (:require [clojure.math :as math]))
+  integrals by the change of variable x = 1/t.
+
+  Romberg's table is built a row at a step, as `allgo.search` runs its
+  algorithms: `romberg-seq` gives the rows, and `romberg` runs the same
+  steps by `allgo.search/settle` until the diagonal settles."
+  (:require [allgo.numerics.roots :as roots]
+            [allgo.search :as search]
+            [clojure.math :as math]))
 
 (defn simpson
   "The integral of `f` from `a` to `b` by Simpson's rule on `n` intervals
@@ -116,6 +122,42 @@
 
 ;; ------------------------------------------------------------- Romberg
 
+(defn- extrapolate
+  "Richardson's extrapolation of the estimate `first-col` against the
+  row before, `prev`, `ratio` the factor by which the error's leading
+  term falls between them (4 for halved intervals, 9 for thirds): the
+  new row, `levels` extrapolations long."
+  [ratio first-col prev levels]
+  (reduce (fn [row k]
+            (let [p (math/pow ratio k)]
+              (conj row (/ (- (* p (row (dec k))) (prev (dec k))) (- p 1.0)))))
+          [first-col] (range 1 (inc levels))))
+
+(defn- romberg-step
+  "The next row of Romberg's table: the trapezoid rule on twice as many
+  intervals, reusing the old points, and its extrapolations."
+  [f a b {:keys [level n trap rows]}]
+  (let [level (inc level)
+        n2 (* 2 n) h (/ (- b a) n2)
+        trap (+ (* 0.5 trap) (* h (reduce + (for [k (range 1 n2 2)] (f (+ a (* k h)))))))]
+    {:level level :n n2 :trap trap :rows (conj rows (extrapolate 4.0 trap (peek rows) level))}))
+
+(defn- diagonal-settled?
+  "Whether the last two rows' last values agree within `tol` relative."
+  [tol {:keys [rows]}]
+  (and (> (count rows) 1)
+       (let [row (peek rows) prev (peek (pop rows))]
+         (<= (abs (- (peek row) (peek prev))) (* tol (max 1e-300 (abs (peek row))))))))
+
+(defn- romberg-start [f a b]
+  (let [t (* 0.5 (- b a) (+ (f a) (f b)))] {:level 0 :n 1 :trap t :rows [[t]]}))
+
+(defn romberg-seq
+  "Romberg's table as it grows, `{:rows :level}` a row at a step: the
+  tables of Chapra and Canale's figure 22.3."
+  [f a b]
+  (iterate (partial romberg-step f a b) (romberg-start f a b)))
+
 (defn romberg
   "The integral of `f` from `a` to `b` by Romberg integration: trapezoid
   estimates on 1, 2, 4, ... intervals, each new one reusing the old
@@ -124,19 +166,9 @@
   `:tol` relative (default 1e-12). `{:value :table}`."
   ([f a b] (romberg f a b {}))
   ([f a b {:keys [tol max-level] :or {tol 1e-12 max-level 20}}]
-   (loop [level 1 n 1 trap (* 0.5 (- b a) (+ (f a) (f b))) rows [[(* 0.5 (- b a) (+ (f a) (f b)))]]]
-     (let [n2 (* 2 n) h (/ (- b a) n2)
-           trap (+ (* 0.5 trap) (* h (reduce + (for [k (range 1 n2 2)] (f (+ a (* k h)))))))
-           prev (peek rows)
-           row (reduce (fn [row k]
-                         (let [p (math/pow 4.0 k)]
-                           (conj row (/ (- (* p (row (dec k))) (prev (dec k))) (- p 1.0)))))
-                       [trap] (range 1 (inc level)))
-           rows (conj rows row)]
-       (if (or (>= level max-level)
-               (<= (abs (- (peek row) (peek prev))) (* tol (max 1e-300 (abs (peek row))))))
-         {:value (peek row) :table rows}
-         (recur (inc level) n2 trap rows))))))
+   (let [{:keys [rows]} (search/settle (partial diagonal-settled? tol) (inc max-level)
+                                       (partial romberg-step f a b) (romberg-start f a b))]
+     {:value (peek (peek rows)) :table rows})))
 
 (defn adaptive
   "The integral of `f` from `a` to `b` by adaptive quadrature (Chapra and
@@ -172,11 +204,10 @@
                         (recur (inc k) p1 (/ (- (* (+ (* 2 k) 1) x p1) (* k p0)) (inc k))))))]
     (vec (for [i (range 1 (inc n))]
            (let [x0 (math/cos (/ (* math/PI (- i 0.25)) (+ n 0.5)))
-                 x (loop [x x0 k 0]
-                     (let [[pn dp] (p x) x' (- x (/ pn dp))]
-                       ;; a few ulps of 1: near +-1 Newton can bounce between
-                       ;; neighboring doubles and never meet a 1e-16 test
-                       (if (or (< (abs (- x' x)) (* 4.0 (math/ulp 1.0))) (> k 100)) x' (recur x' (inc k)))))
+                 ;; a few ulps of 1: near +-1 Newton can bounce between
+                 ;; neighboring doubles and never meet a 1e-16 test
+                 xs (take 102 (rest (roots/newton-seq (comp first p) (comp second p) x0)))
+                 x (:x (or (first (filter #(< (abs (:dx %)) (* 4.0 (math/ulp 1.0))) xs)) (last xs)))
                  [_ dp] (p x)]
              [x (/ 2.0 (* (- 1.0 (* x x)) dp dp))])))))
 
@@ -202,22 +233,23 @@
   (let [h (/ (- b a) n)]
     (* h (reduce + (for [k (range n)] (f (+ a (* (+ k 0.5) h))))))))
 
+(defn- midpoint-romberg-step
+  "The next row: the extended midpoint rule on three times as many
+  intervals, extrapolated against the row before (at most six times)."
+  [f a b {:keys [n row k]}]
+  (let [k (inc k) n3 (* 3 n)
+        row' (extrapolate 9.0 (extended-midpoint f a b n3) row (min k 6))]
+    {:n n3 :row (if (> (count row') 7) (subvec row' 0 7) row') :last-row row :k k}))
+
 (defn- midpoint-romberg
   "The extended midpoint rule on 1, 3, 9, ... intervals (tripling reuses
   every point), extrapolated as Romberg does -- the midpoint rule's error
   also runs in even powers of h."
   [f a b tol]
-  (loop [n 1 prev-row [(extended-midpoint f a b 1)] k 1]
-    (let [n3 (* 3 n)
-          m (extended-midpoint f a b n3)
-          row (reduce (fn [row j]
-                        (let [p (math/pow 9.0 j)]
-                          (conj row (/ (- (* p (row (dec j))) (prev-row (dec j))) (- p 1.0)))))
-                      [m] (range 1 (inc (min k 6))))
-          row (if (> (count row) 7) (subvec row 0 7) row)]
-      (if (or (> k 12) (<= (abs (- (peek row) (peek prev-row))) (* tol (max 1e-300 (abs (peek row))))))
-        (peek row)
-        (recur n3 row (inc k))))))
+  (let [settled? (fn [{:keys [row last-row]}]
+                   (and last-row (<= (abs (- (peek row) (peek last-row))) (* tol (max 1e-300 (abs (peek row)))))))]
+    (peek (:row (search/settle settled? 14 (partial midpoint-romberg-step f a b)
+                               {:n 1 :row [(extended-midpoint f a b 1)] :k 0})))))
 
 (defn improper
   "The integral of `f` from `a` to `b`, either or both possibly infinite

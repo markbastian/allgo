@@ -64,7 +64,11 @@
   "`{:chi :psi :c2 :c3 :r}`: the universal variable reached after `dt`
   seconds from `r0` `v0`, the quantities it came with, and the new radius
   -- found by Newton's method on the universal Kepler equation. nil if it
-  does not converge."
+  does not converge.
+
+  Newton's method here is a loop rather than `allgo.numerics.roots`'
+  correction step: propagation calls it in dense scans, and the step
+  form cost close approaches 14% (NOTES, \"Kepler's solvers as steps\")."
   [mu r0 v0 dt]
   (let [rm (v3/length r0)
         rdv (/ (v3/dot r0 v0) (math/sqrt mu))

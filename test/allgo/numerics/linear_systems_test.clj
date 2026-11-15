@@ -77,3 +77,14 @@
     (let [[xr xi] (ls/solve-complex [[1.0 2.0] [1.0 0.0]] [[1.0 0.0] [0.0 -1.0]] [5.0 2.0] [3.0 -2.0])]
       (is (close? xr [1.0 2.0] 1e-12))
       (is (close? xi [0.0 1.0] 1e-12)))))
+
+(deftest sweeps
+  (testing "Example 11.3: Gauss-Seidel's first two sweeps"
+    (is (close? [[2.616667 -2.794524 7.005610] [2.990557 -2.499625 7.000291]]
+                (map :x (take 2 (rest (ls/gauss-seidel-seq A b))))
+                1e-6)))
+  (testing "after the first, Jacobi's sweeps lag Gauss-Seidel's, sweep for sweep"
+    (let [err (fn [st] (reduce max (map #(abs (- %1 %2)) (:x st) x)))]
+      (is (every? true? (map #(< (err %1) (err %2))
+                             (take 5 (drop 2 (ls/gauss-seidel-seq A b)))
+                             (take 5 (drop 2 (ls/jacobi-seq A b)))))))))

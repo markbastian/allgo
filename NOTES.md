@@ -2249,6 +2249,72 @@ namespaces too quick (1-20 ms) to time. That includes the two golden
 sections in the physics narrowphase, where each evaluation costs more
 than the stepping.
 
+## Eigenvalues, iterative solvers and quadrature as steps
+
+The step layout of `roots` and `optimize` now also covers:
+
+- `numerics.eigen`: the power method and its inverse, Jacobi's sweeps,
+  the QR algorithm (each state says whether it took a QR step or
+  deflated an eigenvalue) and Faddeev and LeVerrier's recurrence;
+- `numerics.linear-systems`: the Gauss-Seidel and Jacobi sweeps;
+- `numerics.pde`: Liebmann's sweeps, its setup split out from the sweep;
+- `numerics.quadrature`: Romberg's table, a row at a step, and its
+  midpoint form for improper integrals. The Gauss-Legendre nodes now
+  come from `roots/newton-seq`.
+
+On 18 groups of inputs every rewritten function matches its loop exactly
+(compared with `pr-str`, so that NaNs count as equal). The new tests come
+from the book:
+
+- example 11.3's first two Gauss-Seidel sweeps;
+- figure 22.3's Romberg tables, row by row;
+- examples 27.7 and 27.8's power-method estimates. The book prints the
+  fifth estimate of 27.7 as 6.095, computed from the fourth vector
+  rounded to -0.714; unrounded, it is 6.096;
+- example 29.1's second and ninth Liebmann sweeps. The book labels the
+  second sweep's last value T32 when it is T33, and its values stray by
+  up to 3e-5, as single precision would.
+
+## Kepler's solvers as steps
+
+`kepler-equation`, `kepler-hyperbolic` and the equinoctial solver were
+three hand-written Newton loops. They are now one Newton step,
+`roots/newton-correction-step`, which takes the correction f/f' as a
+single function. Kepler's f and f' share a sine and a cosine, and
+computing the quotient in one function keeps them computed once. The
+step records the correction itself as its step, so each solver's
+absolute stopping test is unchanged. Sinnott's bisection and Landgraf's
+near-parabolic method, three nested loops, are now named steps too.
+
+**Same answers.** Every one matches its loop exactly, checked over:
+
+- Kepler's equation on 228 values of (M, e), with e up to 0.999;
+- the hyperbolic equation on 176 values;
+- near-parabolic orbits on 120 values of (q, e, t).
+
+**Speed.** The microbenchmarks look bad. `kepler-equation` goes from
+about 100 ns to 300-550 ns, because every step is a function call where
+the loop kept a primitive double. Reading the step's field directly,
+instead of by keyword, recovered half of that.
+
+The callers are what count, and they were timed A/B: 20 test namespaces,
+three rounds each. Brouwer, the astro suite, orbit determination,
+semianalytic theory, Encke, stars, covariance, perturbations, vision,
+embeddings, PDEs and quadrature all came out within 2%.
+
+**The exception.** Close approaches were 14% slower, reproducibly: 391-397
+ms against 447-456 ms over five rounds. Swapping the solvers back one at
+a time placed all of it in `universal/chi`:
+
+- the old `kepler-equation` alone: 441 ms;
+- with the old `chi` as well: 396 ms.
+
+Propagation calls `chi` in dense scans. Two other forms were tried, a
+primitive-hinted correction and a named step over a problem record, and
+both were slower still. So `chi` keeps its loop, with a docstring saying
+why. It is the one solver here where the step form cost a caller
+something measurable.
+
 ## Computer vision, after Russell & Norvig
 
 Chapter 25 of *Artificial Intelligence: A Modern Approach* (4th ed.), in

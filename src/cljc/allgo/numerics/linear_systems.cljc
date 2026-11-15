@@ -8,8 +8,11 @@
   Jacobi iteration, and complex systems. The tridiagonal (Thomas) solver
   is `allgo.numerics.tridiagonal`, Cholesky `allgo.numerics.linear`.
 
-  Matrices are vectors of row vectors."
+  Matrices are vectors of row vectors. The iterative methods are steps,
+  as in `allgo.search`: a sweep, a `-seq` of the sweeps, and the
+  function, which runs them by `allgo.search/converge`."
   (:require [allgo.numerics.linear :as lin]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 ;; --------------------------------------------------- Gauss elimination
@@ -205,6 +208,37 @@
 
 ;; ----------------------------------------------------- iterative methods
 
+(defn- relative-change [old new] (if (zero? new) (abs (- new old)) (abs (/ (- new old) new))))
+
+(defn- gauss-seidel-sweep
+  "One Gauss-Seidel sweep: each equation solved for its diagonal unknown
+  in turn, each new value used at once and blended with the old by
+  `lambda`; `:change` the largest relative change."
+  [A b lambda {:keys [x iterations]}]
+  (let [n (count b)
+        [x' change]
+        (reduce (fn [[x change] i]
+                  (let [row (A i)
+                        new (/ (- (b i) (reduce + (map #(if (= % i) 0.0 (* (row %) (x %))) (range n))))
+                               (row i))
+                        new (+ (* lambda new) (* (- 1.0 lambda) (x i)))]
+                    [(assoc x i new) (max change (relative-change (x i) new))]))
+                [x 0.0] (range n))]
+    {:x x' :change change :iterations (inc iterations)}))
+
+(defn- iteration-start [b x0] {:x (vec (or x0 (repeat (count b) 0.0))) :change ##Inf :iterations 0})
+
+(defn- solved [tol max-iter sweep init]
+  (some-> (search/converge #(< (:change %) tol) (inc max-iter) sweep init) (select-keys [:x :iterations])))
+
+(defn gauss-seidel-seq
+  "The sweeps `{:x :change :iterations}` of Gauss-Seidel from `:x0`
+  (default zeros), `:lambda` as `gauss-seidel`'s: those of Chapra and
+  Canale's example 11.3."
+  ([A b] (gauss-seidel-seq A b {}))
+  ([A b {:keys [lambda x0] :or {lambda 1.0}}]
+   (iterate (partial gauss-seidel-sweep A b lambda) (iteration-start b x0))))
+
 (defn gauss-seidel
   "The solution of A x = b by Gauss-Seidel: each equation solved for its
   diagonal unknown in turn, each new value used at once, the new value
@@ -216,21 +250,25 @@
   `{:x :iterations}`, or nil after `:max-iter` (1000)."
   ([A b] (gauss-seidel A b {}))
   ([A b {:keys [lambda tol max-iter x0] :or {lambda 1.0 tol 1e-12 max-iter 1000}}]
-   (let [n (count b)]
-     (loop [x (vec (or x0 (repeat n 0.0))) k 1]
-       (when (<= k max-iter)
-         (let [[x' change]
-               (reduce (fn [[x change] i]
-                         (let [row (A i)
-                               new (/ (- (b i) (reduce + (map #(if (= % i) 0.0 (* (row %) (x %))) (range n))))
-                                      (row i))
-                               new (+ (* lambda new) (* (- 1.0 lambda) (x i)))]
-                           [(assoc x i new)
-                            (max change (if (zero? new) (abs (- new (x i))) (abs (/ (- new (x i)) new))))]))
-                       [x 0.0] (range n))]
-           (if (< change tol)
-             {:x x' :iterations k}
-             (recur x' (inc k)))))))))
+   (solved tol max-iter (partial gauss-seidel-sweep A b lambda) (iteration-start b x0))))
+
+(defn- jacobi-sweep
+  "One Jacobi sweep: every equation solved for its diagonal unknown from
+  the previous sweep's values; `:change` the largest relative change."
+  [A b {:keys [x iterations]}]
+  (let [n (count b)
+        x' (mapv (fn [i]
+                   (let [row (A i)]
+                     (/ (- (b i) (reduce + (map #(if (= % i) 0.0 (* (row %) (x %))) (range n)))) (row i))))
+                 (range n))]
+    {:x x' :change (apply max (map relative-change x x')) :iterations (inc iterations)}))
+
+(defn jacobi-seq
+  "The sweeps `{:x :change :iterations}` of Jacobi iteration from `:x0`
+  (default zeros)."
+  ([A b] (jacobi-seq A b {}))
+  ([A b {:keys [x0]}]
+   (iterate (partial jacobi-sweep A b) (iteration-start b x0))))
 
 (defn jacobi
   "The solution of A x = b by Jacobi iteration: like Gauss-Seidel but
@@ -239,17 +277,7 @@
   result as `gauss-seidel`'s (without relaxation)."
   ([A b] (jacobi A b {}))
   ([A b {:keys [tol max-iter x0] :or {tol 1e-12 max-iter 2000}}]
-   (let [n (count b)]
-     (loop [x (vec (or x0 (repeat n 0.0))) k 1]
-       (when (<= k max-iter)
-         (let [x' (mapv (fn [i]
-                          (let [row (A i)]
-                            (/ (- (b i) (reduce + (map #(if (= % i) 0.0 (* (row %) (x %))) (range n)))) (row i))))
-                        (range n))
-               change (apply max (map (fn [a b] (if (zero? b) (abs (- b a)) (abs (/ (- b a) b)))) x x'))]
-           (if (< change tol)
-             {:x x' :iterations k}
-             (recur x' (inc k)))))))))
+   (solved tol max-iter (partial jacobi-sweep A b) (iteration-start b x0))))
 
 ;; ------------------------------------------------------ complex systems
 

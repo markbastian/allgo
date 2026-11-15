@@ -150,6 +150,13 @@
     (is (= [0.0] (map :x (roots/newton-seq #(+ 1.0 (* % %)) #(* 2.0 %) 0.0))))
     (is (nil? (roots/newton #(+ 1.0 (* % %)) #(* 2.0 %) 0.0)))))
 
+(deftest newton-by-correction
+  (testing "Newton's method given its correction f/f' takes the same steps as given f and f'"
+    (is (close? 0.0 (reduce max (map #(abs (- (:x %1) (:x %2)))
+                                     (take 5 (roots/newton-correction-seq #(/ (f %) (df %)) 0.0))
+                                     (take 5 (roots/newton-seq f df 0.0))))
+                1e-15))))
+
 (deftest polynomials
   (testing "Example 7.1: (x^2 + 2x - 24)/(x - 4) = x + 6"
     (is (= {:quotient [1.0 6.0] :remainder 0.0} (poly/deflate [1.0 2.0 -24.0] 4.0))))

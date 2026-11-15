@@ -17,37 +17,18 @@
   the explicit method and the alternating-direction implicit (ADI) scheme,
   each half step implicit along one axis only, so tridiagonal."
   (:require [allgo.numerics.tridiagonal :as tri]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 ;; ---------------------------------------------------------------- elliptic
 
 (defn- side-value [v k] (if (fn? v) (v k) (double v)))
 
-(defn liebmann
-  "The plate's temperatures by Liebmann's method. The plate has `:nx` by
-  `:ny` intervals of `:dx` by `:dy` (default 1 each); the grid is indexed
-  `[j i]`, j = 0 the bottom edge and i = 0 the left. Options:
-
-    :boundary    {:top :bottom :left :right} the fixed edge temperatures,
-                 each a number or a function of the node index along it
-    :derivative  {side g} edges held at dT/dn = g instead (outward normal
-                 for :right and :top, inward for :left and :bottom, as
-                 dT/dx and dT/dy) -- 0 for an insulated edge; their nodes
-                 become unknowns, balanced against an imaginary node
-                 beyond the edge
-    :arms        (fn [i j dir]) -> nil, or [fraction value]: the boundary
-                 met at that fraction of the spacing in direction dir
-                 (:left :right :down :up) with that temperature, for an
-                 irregular boundary (Chapra and Canale eq. 29.24)
-    :inside?     (fn [i j]) -> whether a node is part of the plate
-                 (default every interior node), for irregular shapes
-    :lambda      over-relaxation weight (default 1.5)
-    :tol         stop when no node changes by more than this relative
-                 (default 1e-10)
-
-  Returns `{:T :iterations}`."
-  [{:keys [nx ny dx dy boundary derivative arms inside? lambda tol max-iter]
-    :or {dx 1.0 dy 1.0 lambda 1.5 tol 1e-10 max-iter 100000}}]
+(defn- liebmann-setup
+  "The plate's starting grid `:T0` -- edges set, the rest zero -- the
+  unknown nodes `[i j]` in sweep order, and `:update-node`, a node's new
+  value from its neighbors in a grid. Options as `liebmann`'s."
+  [{:keys [nx ny dx dy boundary derivative arms inside?] :or {dx 1.0 dy 1.0}}]
   (let [{:keys [top bottom left right]} boundary
         dv (or derivative {})
         free-left? (contains? dv :left) free-right? (contains? dv :right)
@@ -88,17 +69,58 @@
                 cl (/ (* 2.0 rx) (* al (+ al ar))) cr (/ (* 2.0 rx) (* ar (+ al ar)))
                 cd (/ (* 2.0 ry) (* ad (+ ad au))) cu (/ (* 2.0 ry) (* au (+ ad au)))]
             (/ (+ (* cl vl) (* cr vr) (* cd vd) (* cu vu)) (+ cl cr cd cu))))]
-    (loop [T T0 k 1]
-      (let [[T' change]
-            (reduce (fn [[T change] [i j]]
-                      (let [old (get-in T [j i])
-                            new (+ (* lambda (update-node T i j)) (* (- 1.0 lambda) old))]
-                        [(assoc-in T [j i] new)
-                         (max change (if (zero? new) (abs (- new old)) (abs (/ (- new old) new))))]))
-                    [T 0.0] nodes)]
-        (if (or (< change tol) (>= k max-iter))
-          {:T T' :iterations k}
-          (recur T' (inc k)))))))
+    {:T0 T0 :nodes nodes :update-node update-node}))
+
+(defn- liebmann-sweep
+  "One Gauss-Seidel sweep over the plate's unknown nodes, each new value
+  over-relaxed by `lambda` and used at once; `:change` the largest
+  relative change."
+  [nodes update-node lambda {:keys [T iterations]}]
+  (let [[T' change]
+        (reduce (fn [[T change] [i j]]
+                  (let [old (get-in T [j i])
+                        new (+ (* lambda (update-node T i j)) (* (- 1.0 lambda) old))]
+                    [(assoc-in T [j i] new)
+                     (max change (if (zero? new) (abs (- new old)) (abs (/ (- new old) new))))]))
+                [T 0.0] nodes)]
+    {:T T' :change change :iterations (inc iterations)}))
+
+(defn liebmann-seq
+  "The sweeps `{:T :change :iterations}` of Liebmann's method on the
+  plate, options as `liebmann`'s: those of Chapra and Canale's example
+  29.1."
+  [{:keys [lambda] :or {lambda 1.5} :as plate}]
+  (let [{:keys [T0 nodes update-node]} (liebmann-setup plate)]
+    (iterate (partial liebmann-sweep nodes update-node lambda) {:T T0 :change ##Inf :iterations 0})))
+
+(defn liebmann
+  "The plate's temperatures by Liebmann's method. The plate has `:nx` by
+  `:ny` intervals of `:dx` by `:dy` (default 1 each); the grid is indexed
+  `[j i]`, j = 0 the bottom edge and i = 0 the left. Options:
+
+    :boundary    {:top :bottom :left :right} the fixed edge temperatures,
+                 each a number or a function of the node index along it
+    :derivative  {side g} edges held at dT/dn = g instead (outward normal
+                 for :right and :top, inward for :left and :bottom, as
+                 dT/dx and dT/dy) -- 0 for an insulated edge; their nodes
+                 become unknowns, balanced against an imaginary node
+                 beyond the edge
+    :arms        (fn [i j dir]) -> nil, or [fraction value]: the boundary
+                 met at that fraction of the spacing in direction dir
+                 (:left :right :down :up) with that temperature, for an
+                 irregular boundary (Chapra and Canale eq. 29.24)
+    :inside?     (fn [i j]) -> whether a node is part of the plate
+                 (default every interior node), for irregular shapes
+    :lambda      over-relaxation weight (default 1.5)
+    :tol         stop when no node changes by more than this relative
+                 (default 1e-10)
+
+  Returns `{:T :iterations}`."
+  [{:keys [lambda tol max-iter] :or {lambda 1.5 tol 1e-10 max-iter 100000} :as plate}]
+  (let [{:keys [T0 nodes update-node]} (liebmann-setup plate)]
+    (-> (search/settle #(< (:change %) tol) (inc max-iter)
+                       (partial liebmann-sweep nodes update-node lambda) {:T T0 :change ##Inf :iterations 0})
+        (select-keys [:T :iterations]))))
 
 (defn flux
   "The heat flux at the interior node (i, j) of the plate `T`, `k'` the

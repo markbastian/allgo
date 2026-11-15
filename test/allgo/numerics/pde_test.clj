@@ -15,6 +15,17 @@
 (def ^:private plate {:nx 4 :ny 4 :boundary {:top 100.0 :bottom 0.0 :left 75.0 :right 50.0}})
 (defn- interior [T] (for [j [1 2 3] i [1 2 3]] (get-in T [j i])))
 
+(deftest liebmann-sweeps
+  (testing "Example 29.1: the second sweep, and the ninth, the first whose largest change is under 1%"
+    (let [sweeps (vec (take 10 (pde/liebmann-seq plate)))]
+      ;; the book labels the second sweep's last value T32; it is T33. Its
+      ;; values stray by up to 3e-5, as single precision would
+      (is (close? [32.51953 22.35718 28.60108 57.95288 61.63333 71.86833 75.21973 87.95872 67.68736]
+                  (interior (:T (sweeps 2))) 5e-5))
+      (is (close? [43.00061 33.29755 33.88506 63.21152 56.11238 52.33999 78.58718 76.06402 69.71050]
+                  (interior (:T (sweeps 9))) 5e-5))
+      (is (< (:change (sweeps 9)) 0.01 (:change (sweeps 8)))))))
+
 (deftest heated-plate
   (testing "Example 29.1: Liebmann's first sweep, over-relaxed by 1.5"
     (let [{:keys [T]} (pde/liebmann (assoc plate :max-iter 1))]

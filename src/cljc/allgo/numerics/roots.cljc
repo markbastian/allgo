@@ -238,6 +238,23 @@
   ([f df x0 {:keys [tol max-iter] :or {tol 1e-14 max-iter 50}}]
    (open (partial newton-step f df) (->Estimate x0 ##Inf) {:tol tol :max-iter max-iter})))
 
+(defn newton-correction-step
+  "One step of a Newton iteration given its correction, x <- x - (c x):
+  for solvers whose f and f' share work -- the sine and cosine of
+  Kepler's equation -- and are cheaper computed together, as the
+  quotient f/f'. `:dx` is the step, -c exactly. nil where `correction`
+  gives nil. Run it with `allgo.search/converge` or `settle`."
+  [correction ^Estimate e]
+  (let [x (.-x e)]
+    (when-let [c (correction x)]
+      (->Estimate (- x c) (- c)))))
+
+(defn newton-correction-seq
+  "The estimates `{:x :dx}` of the Newton iteration x <- x - (c x) from
+  `x0`, `correction` as `newton-correction-step`'s."
+  [correction x0]
+  (search/step-seq (partial newton-correction-step correction) (->Estimate x0 ##Inf)))
+
 (defn- newton-multiple-step
   "One step of Newton-Raphson on f/f', x <- x - f f' / (f'^2 - f f''):
   none at a zero of f, where it stays. nil where the denominator
