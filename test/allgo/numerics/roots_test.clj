@@ -87,6 +87,69 @@
       (let [g (fn [[x y]] [(/ (- 10.0 (* x x)) y) (- 57.0 (* 3.0 x y y))])]
         (is (nil? (roots/fixed-point-system g [1.5 3.5])))))))
 
+(defn- agree?
+  "Whether `xs` agree with the book's `table` to within `tol`, one for one."
+  [table xs tol]
+  (and (= (count table) (count xs)) (every? true? (map #(close? %1 %2 tol) table xs))))
+
+(deftest iterations
+  (testing "Example 5.4: bisection's estimates for the parachutist from 12 and 16"
+    (is (= [14.0 15.0 14.5 14.75 14.875 14.8125] (map :x (take 6 (roots/bisect-seq parachutist 12.0 16.0))))))
+  (let [g #(- (math/pow % 10.0) 1.0)]
+    (testing "Example 5.6: on x^10 - 1 from 0 and 1.3, bisection is quick"
+      (is (agree? [0.65 0.975 1.1375 1.05625 1.015625] (map :x (take 5 (roots/bisect-seq g 0.0 1.3))) 1e-15)))
+    (testing "and plain false position crawls in from the low end"
+      (is (agree? [0.09430 0.18176 0.26287 0.33811 0.40788]
+                  (map :x (take 5 (roots/false-position-seq g 0.0 1.3 {:modified? false}))) 5e-6))
+      (is (every? #(= 1.3 (:hi %)) (take 5 (roots/false-position-seq g 0.0 1.3 {:modified? false}))))))
+  (testing "Example 5.5: false position's first two estimates for the parachutist"
+    (is (agree? [14.9309 14.8151] (map :x (take 2 (roots/false-position-seq parachutist 12.0 16.0))) 5e-5)))
+  (testing "Example 6.7: false position on ln x from 0.5 and 5"
+    (is (agree? [1.8546 1.2163 1.0585] (map :x (take 3 (roots/false-position-seq math/log 0.5 5.0 {:modified? false}))) 5e-5)))
+  (testing "Example 6.1: fixed-point iteration x <- e^-x from 0, converging linearly"
+    (is (agree? [0.0 1.0 0.367879 0.692201 0.500473 0.606244 0.545396 0.579612 0.560115 0.571143 0.564879]
+                (map :x (take 11 (roots/fixed-point-seq #(math/exp (- %)) 0.0))) 1e-6)))
+  (testing "Example 6.3: Newton-Raphson on e^-x - x from 0, converging quadratically"
+    (is (agree? [0.0 0.5 0.566311003 0.567143165 0.567143290] (map :x (take 5 (roots/newton-seq f df 0.0))) 5e-10)))
+  (testing "Example 6.5: Newton-Raphson on x^10 - 1 from 0.5 overshoots and creeps back"
+    (is (agree? [0.5 51.65 46.485 41.8365 37.65285 33.887565]
+                (map :x (take 6 (roots/newton-seq #(- (math/pow % 10.0) 1.0) #(* 10.0 (math/pow % 9.0)) 0.5))) 5e-7)))
+  (testing "Example 6.6: the secant method from 0 and 1"
+    (is (agree? [1.0 0.61270 0.56384 0.56717] (map :x (take 4 (roots/secant-seq f 0.0 1.0))) 5e-6)))
+  (testing "Example 6.8: the modified secant, delta 0.01, from 1"
+    (is (agree? [1.0 0.537263 0.56701 0.567143] (map :x (take 4 (roots/modified-secant-seq f 1.0 0.01))) 5e-6)))
+  (let [g (fn [x] (* (- x 3.0) (- x 1.0) (- x 1.0)))
+        dg (fn [x] (+ (* (- x 1.0) (- x 1.0)) (* 2.0 (- x 3.0) (- x 1.0))))
+        d2g (fn [x] (+ (* 4.0 (- x 1.0)) (* 2.0 (- x 3.0))))]
+    (testing "Example 6.10: onto the double root of (x - 3)(x - 1)^2 from 0, Newton-Raphson linearly"
+      ;; the book prints the fourth estimate 0.9133290; it is 0.91332989
+      (is (agree? [0.0 0.4285714 0.6857143 0.8328654 0.9133299 0.9557833 0.9776551]
+                  (map :x (take 7 (roots/newton-seq g dg 0.0))) 5e-8)))
+    (testing "and the modified method quadratically"
+      (is (agree? [0.0 1.105263 1.003082 1.000002] (map :x (take 4 (roots/newton-multiple-seq g dg d2g 0.0))) 5e-7)))
+    (testing "and onto the simple root at 3 from 4, both"
+      (is (agree? [4.0 3.4 3.1 3.008696 3.000075 3.0] (map :x (take 6 (roots/newton-seq g dg 4.0))) 5e-7))
+      (is (agree? [4.0 2.636364 2.820225 2.961728 2.998479 2.999998]
+                  (map :x (take 6 (roots/newton-multiple-seq g dg d2g 4.0))) 5e-7))))
+  (testing "Example 6.12: the first Newton-Raphson step for x^2 + xy = 10, y + 3xy^2 = 57 from (1.5, 3.5)"
+    (let [F (fn [[x y]] [(+ (* x x) (* x y) -10.0) (+ y (* 3.0 x y y) -57.0)])
+          J (fn [[x y]] [[(+ (* 2.0 x) y) x] [(* 3.0 y y) (+ 1.0 (* 6.0 x y))]])]
+      (is (agree? [2.03603 2.84388] (:x (second (roots/newton-system-seq F J [1.5 3.5]))) 5e-6)))))
+
+(deftest watching-and-composing
+  (testing "Brent's method on the parachutist: every bracket holds the root, and the steps say how they were taken"
+    (let [states (take-while #(> (abs (- (:c %) (:b %))) 1e-12) (roots/brent-seq parachutist 12.0 16.0 1e-15))]
+      (is (every? #(<= (* (:fb %) (:fc %)) 0.0) states))
+      (is (every? #(<= (abs (:fb %)) (abs (:fc %))) states))
+      (is (= :start (:by (first states))))
+      (is (some #{:interpolation :secant} (map :by states)))))
+  (testing "a hybrid by composition: bisection until the bracket is narrow, then Newton-Raphson from its midpoint"
+    (let [x0 (:x (first (drop-while #(> (- (:hi %) (:lo %)) 0.1) (roots/bisect-seq f 0.0 1.0))))]
+      (is (close? (:x (nth (roots/newton-seq f df x0) 3)) root 1e-15) "three Newton steps from a bracket of 0.1 suffice")))
+  (testing "a step that cannot go on ends the seq: Newton-Raphson at a zero derivative"
+    (is (= [0.0] (map :x (roots/newton-seq #(+ 1.0 (* % %)) #(* 2.0 %) 0.0))))
+    (is (nil? (roots/newton #(+ 1.0 (* % %)) #(* 2.0 %) 0.0)))))
+
 (deftest polynomials
   (testing "Example 7.1: (x^2 + 2x - 24)/(x - 4) = x + 6"
     (is (= {:quotient [1.0 6.0] :remainder 0.0} (poly/deflate [1.0 2.0 -24.0] 4.0))))

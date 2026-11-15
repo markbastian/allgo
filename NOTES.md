@@ -2098,6 +2098,79 @@ side and say which is which:
   for piles of bodies. Merging them would mean rewriting the joints for
   the arrays, for scenes of a few bodies where the maps cost nothing.
 
+## Root finders as steps
+
+`numerics.roots` was the last big namespace written as `loop`/`recur`:
+ten methods, each a loop that mixed the step, the stopping test and the
+iteration cap. Now each is laid out the way `allgo.search` is:
+
+- **a step**, a private named function from one state to the next. It
+  returns nil only when the method cannot go on (a zero derivative, a
+  singular Jacobian, no doubles left between a bracket's ends), and
+  never because it has converged;
+- **a `-seq`**, `step-seq` (or `iterate`) of the step: `bisect-seq`,
+  `crossing-seq`, `fixed-point-seq`, `false-position-seq`, `newton-seq`,
+  `newton-multiple-seq`, `secant-seq`, `modified-secant-seq`,
+  `brent-seq`, `fixed-point-system-seq` and `newton-system-seq`;
+- **a stopping rule**, a predicate on a state, applied by `converge` (the
+  first state that meets it, or nil) or `settle` (that state, or the
+  last one if none does, for the methods that are as good as they will
+  get when they run out).
+
+The old functions keep their names, signatures and answers, and their
+42 call sites are unchanged. The one exception is that `newton-multiple`
+now returns nil, as `newton` does, where its denominator vanishes; it
+used to return the point it had stalled at.
+
+The payoff is in the tests. Chapra and Canale's iteration tables
+(examples 5.4 to 5.6, 6.1, 6.3, 6.5 to 6.8, 6.10 and 6.12) are checked
+estimate by estimate, where before only the final roots could be
+checked. That check found a slip in the book: example 6.10 prints the
+fourth Newton estimate as 0.9133290, and it is 0.91332989. Brent's
+states record whether each step interpolated or bisected. A hybrid,
+bisection down to a narrow bracket and then Newton from its midpoint, is
+a `drop-while` feeding a `newton-seq`.
+
+**What it costs.** Each implementation was timed in the same JVM, warm,
+as the median of five runs:
+
+| method              | loop     | steps    |
+|---------------------|----------|----------|
+| bisect              | 1.8 us   | 3.0-3.6 us |
+| crossing            | 1.4-2.6 us | 2.6-4.8 us |
+| fixed-point (cos)   | 1.0 us   | 2.2-6.7 us |
+| false position      | 0.67 us  | 0.88 us  |
+| Newton              | 0.27 us  | 0.46 us  |
+| Newton, multiple    | 0.40 us  | 0.55 us  |
+| secant              | 0.55 us  | 0.70 us  |
+| modified secant     | 0.57 us  | 0.75 us  |
+| Brent               | 1.65 us  | 1.22 us  |
+| Newton, system      | 13.2 us  | 15.0 us  |
+| fixed point, system | 1.1 us   | 2.9 us   |
+
+These are toy functions that cost a few nanoseconds. The steps add 15 to
+40 ns per iteration: a small record per state, plus calls the JIT cannot
+inline, because one driver calls every method's step. Brent comes out
+faster because its nine-variable loop no longer destructures vectors.
+
+The callers were timed the same way, with the old and new namespaces
+swapped in turn: three rounds each of the 15 test namespaces that use
+`roots`. Every one came out within 5% of the other, either way: astro's
+missions, tours, passes, phenomena and close approaches, Lambert,
+the CAD and clearance roadmaps, and Canny. Wherever a root is found,
+the function being solved costs far more than the stepping does.
+
+Three driver designs were tried before settling:
+
+- **A lazy seq with filter.** Simplest, but 3 to 8 times slower than the
+  loops.
+- **`reduce` over `iterate`.** Better.
+- **`reduce` over a count of steps, calling the step itself.** This is
+  what `converge` and `settle` do. The `-seq`s stay lazy, for watching.
+
+Giving each method its own copy of the driver, by macro, helped only
+`fixed-point`, which nothing in the library calls, so it was not done.
+
 ## Computer vision, after Russell & Norvig
 
 Chapter 25 of *Artificial Intelligence: A Modern Approach* (4th ed.), in
