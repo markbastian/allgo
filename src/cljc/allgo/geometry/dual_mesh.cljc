@@ -289,37 +289,15 @@
                   [(am/clamp cx x0 x1) (am/clamp cy y0 y1)]))))
           centers)))
 
+(defn- relax-step
+  "The mesh after one round of `relax`."
+  [bounds m]
+  (mesh (relax m) bounds))
+
 (defn relaxed
   "A mesh over `points` after `rounds` of `relax`."
   [points bounds rounds]
-  (loop [pts (vec points) i 0]
-    (let [m (mesh pts bounds)]
-      (if (>= i (long rounds))
-        m
-        (recur (relax m) (inc i))))))
-
-;; ---------------------------------------------------------------------------
-;; Noisy edges
-;;
-;; A Voronoi cell drawn as its corners is a polygon, and a map made of
-;; them looks like one: the coastline is a sequence of straight lines
-;; meeting at angles, which is the one thing that says "generated" no
-;; matter how good the biomes are. Amit Patel's fix is to draw each
-;; boundary as a wandering path rather than a segment, and it is worth
-;; being clear that this changes nothing about the model -- the cells,
-;; the adjacency, the elevation and the rivers are all exactly as they
-;; were. It is a change to where the ink goes.
-;;
-;; The path for an edge is stored *on the edge*, which is the whole trick.
-;; Both cells sharing it draw the same points, so the two still tile with
-;; no gap and no overlap; noise generated per cell would tear them apart
-;; along every boundary.
-;;
-;; And each path is confined to the quadrilateral made by the edge's two
-;; corners and the two cell centers either side of it. A path that
-;; wandered outside would cross into a cell that is not one of the two it
-;; separates, and a coastline would start overlapping land two cells
-;; inland. The quad is the guarantee that it cannot.
+  (nth (iterate (partial relax-step bounds) (mesh (vec points) bounds)) (long rounds)))
 
 (defn- subdivide
   "The points strictly between `a` and `c`, wandering inside quad

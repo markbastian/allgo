@@ -116,15 +116,16 @@
 ;; ---------------------------------------------------------------------------
 ;; Policy iteration
 
+(defn- policy-evaluation-step
+  "`U` updated once by the Bellman equation for the fixed policy `pi`."
+  [{:keys [states reward gamma] :as mdp} pi U]
+  (into {} (map (fn [s] [s (+ (reward s) (if (pi s) (* gamma (q-value mdp s (pi s) U)) 0.0))]) states)))
+
 (defn policy-evaluation
   "`U` updated `k` times by the Bellman equation for the fixed policy `pi`:
   modified policy iteration's approximate evaluation."
-  [{:keys [states reward gamma] :as mdp} pi U k]
-  (loop [U U i 0]
-    (if (= i k)
-      U
-      (recur (into {} (map (fn [s] [s (+ (reward s) (if (pi s) (* gamma (q-value mdp s (pi s) U)) 0.0))]) states))
-             (inc i)))))
+  [mdp pi U k]
+  (nth (iterate (partial policy-evaluation-step mdp pi) U) k))
 
 (defn- policy-iteration-step
   "An evaluation of `k` sweeps and an improvement, until no action

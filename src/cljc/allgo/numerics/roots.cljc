@@ -72,8 +72,9 @@
   [f lo hi]
   (:x (search/settle (constantly false) 65 (partial bisect-step f) (bisect-start f lo hi))))
 
-(defn- fixed-point-step
-  "One step of x <- (better x)."
+(defn fixed-point-step
+  "One step of x <- (better x), `:dx` the change. Run it with
+  `allgo.search/converge` or `settle` for a stopping rule of your own."
   [better ^Estimate e]
   (let [x (.-x e) x' (better x)]
     (->Estimate x' (- x' x))))
@@ -102,9 +103,10 @@
 ;; A bracket `[a b]` about where a condition changes, holding at a.
 (defrecord Interval [a b])
 
-(defn- crossing-step
+(defn crossing-step
   "Halve the bracket toward where `pred` changes. nil once the midpoint is
-  one of the ends."
+  one of the ends. Run it with `allgo.search/settle` for a stopping rule
+  of your own."
   [pred ^Interval i]
   (let [a (.-a i) b (.-b i) m (* 0.5 (+ a b))]
     (when-not (or (= m a) (= m b))
@@ -214,9 +216,10 @@
   [step init {:keys [tol max-iter]}]
   (:x (search/converge (partial small-step? tol 1e-300) (inc max-iter) step init)))
 
-(defn- newton-step
-  "One Newton-Raphson step, x <- x - f(x)/f'(x). nil at a zero
-  derivative."
+(defn newton-step
+  "One Newton-Raphson step, x <- x - f(x)/f'(x), `:dx` the change. nil at
+  a zero derivative. Run it with `allgo.search/converge` or `settle` for
+  a stopping rule of your own."
   [f df ^Estimate e]
   (let [x (.-x e) d (df x)]
     (when-not (zero? d)

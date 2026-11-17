@@ -2315,6 +2315,70 @@ both were slower still. So `chi` keeps its loop, with a docstring saying
 why. It is the one solver here where the step form cost a caller
 something measurable.
 
+## The rest of the solvers as steps
+
+A last sweep for loops that are iterations toward an answer, in two
+groups.
+
+**Copies of methods `roots` already had.** `roots` now makes public its
+`newton-step`, `fixed-point-step` and `crossing-step`, beside
+`newton-correction-step`, for other namespaces to drive with
+`search/settle` and a stopping rule of their own. Four loops now use them:
+
+- the Student t quantile: bisection, as the crossing step;
+- the geodetic latitude: a fixed point;
+- Meeus' equinox and solstice correction (27.1): the correction step;
+- IOD's polynomial root: the Newton step.
+
+Six could not use the scalar steps, and got named steps of their own:
+
+- the polishing of complex polynomial roots;
+- the light time to a satellite, and to a planet in `physical`;
+- the corrector iteration and backward Euler's Newton solve in
+  `ode.classical`;
+- `halo`'s power iteration and its Illinois search for the bifurcation.
+
+`halo`'s power iteration differs from `eigen/power`: it keeps a unit
+vector and takes the Rayleigh quotient as its estimate. Moving it to
+`eigen/power` would have changed its results, so it was not moved.
+
+**Consumers of seqs that already existed.**
+
+- `lqr` and `svm-train` read their seqs declaratively.
+- `lyapunov`'s series is a named step.
+- MDP policy evaluation and Lloyd relaxation are `(nth (iterate step x)
+  k)`.
+
+**Same answers.** On 18 groups of inputs every rewritten function matches
+its loop exactly, including:
+
+- geodetic conversions on 99 points, from the surface to geostationary;
+- equinoxes and solstices from 1900 to 2100;
+- the bifurcation search at L1 and L2.
+
+**Speed.** Each step costs more than a loop iteration. The geodetic
+conversion, for one, is about 85 ns (30%) slower per call, and the drag
+model calls it at every force evaluation. Timed A/B over 20 caller
+namespaces, though, every one came out within 3%. These included the
+drag-heavy astro suite, mission, semianalytic and Orekit tests. So
+everything stays as steps.
+
+**A hazard in the measuring.** Swapping `roots` itself back and forth in
+the REPL redefines its `Estimate` record class. Namespaces compiled
+against the old class, with `^Estimate` hints, then fail with a class
+cast exception. A fresh JVM never meets it. The A/B was run again with
+`roots` left loaded, since only its steps' visibility had changed.
+
+**What is still a loop.** These are left as they are:
+
+- the solvers of group 2 still to do: Muller and Bairstow, Gooding and
+  the double-r method, `halo`'s differential correction and
+  continuation, GJK and EPA, and the numeric inverse kinematics driver;
+- `universal/chi`, measured to cost close approaches 14% as a step;
+- SGP4, which must match its C++;
+- the array solvers in physics and `halo/fly!`;
+- loops that index, accumulate or sum a series.
+
 ## Computer vision, after Russell & Norvig
 
 Chapter 25 of *Artificial Intelligence: A Modern Approach* (4th ed.), in

@@ -25,7 +25,9 @@
             [allgo.numerics.linear :as lin]
             [allgo.numerics.optimize :as opt]
             [allgo.numerics.roots :as roots]
-            [clojure.math :as math]))
+            [allgo.search :as search]
+            [clojure.math :as math])
+  #?(:clj (:import [allgo.numerics.roots Estimate])))
 
 (def ^:private mu c/GM-earth)
 
@@ -81,9 +83,8 @@
   [a b c]
   (let [f (fn [x] (+ (math/pow x 8) (* a (math/pow x 6)) (* b x x x) c))
         df (fn [x] (+ (* 8 (math/pow x 7)) (* 6 a (math/pow x 5)) (* 3 b x x)))]
-    (loop [x (* 2.0 (math/pow (max (abs a) 1.0) 0.5)) i 0]
-      (let [x' (- x (/ (f x) (df x)))]
-        (if (or (< (abs (- x' x)) 1e-10) (> i 200)) x' (recur x' (inc i)))))))
+    (:x (search/settle (fn [^Estimate e] (< (abs (.-dx e)) 1e-10)) 203 (partial roots/newton-step f df)
+                       (roots/->Estimate (* 2.0 (math/pow (max (abs a) 1.0) 0.5)) ##Inf)))))
 
 (defn gauss
   "An orbit from three sightings of direction alone: right ascensions and

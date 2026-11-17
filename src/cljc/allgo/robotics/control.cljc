@@ -19,7 +19,8 @@
   a matrix and the gain it implies."
   (:require [allgo.numerics.differentiation :as d]
             [allgo.numerics.linear :as lin]
-            [allgo.numerics.linear-systems :as linear-systems]))
+            [allgo.numerics.linear-systems :as linear-systems]
+            [allgo.search :as search]))
 
 ;; ---------------------------------------------------------------------------
 ;; PID
@@ -86,11 +87,11 @@
   `max-steps` (default 10000). `{:P :K :steps}`."
   ([A B Q R] (lqr A B Q R 1e-12 10000))
   ([A B Q R tol max-steps]
-   (loop [[a b & more] (riccati-seq A B Q R) n 1]
-     (let [change (reduce max 0.0 (map #(abs (- %1 %2)) (flatten (:P a)) (flatten (:P b))))]
-       (if (or (< change tol) (>= n max-steps))
-         (assoc b :steps n)
-         (recur (cons b more) (inc n)))))))
+   (let [steps (riccati-seq A B Q R)]
+     (some (fn [[n a b]]
+             (let [change (reduce max 0.0 (map #(abs (- %1 %2)) (flatten (:P a)) (flatten (:P b))))]
+               (when (or (< change tol) (>= n max-steps)) (assoc b :steps n))))
+           (map vector (iterate inc 1) steps (rest steps))))))
 
 (defn closed-loop
   "The states of x' = (A - B K) x from `x0`."
@@ -222,6 +223,15 @@
   [A B]
   (= (count A) (linear-systems/rank (controllability-matrix A B))))
 
+(defn- lyapunov-step
+  "The next term (A^T)^k Q A^k of the sum, added in. nil once the sum
+  cannot settle: after `max-terms`, or a term past 1e12."
+  [A At tol max-terms {:keys [P term k]}]
+  (let [term (lin/mat-mul (lin/mat-mul At term) A)
+        size (reduce max (map abs (flatten term)))]
+    (when (or (< size tol) (not (or (>= k max-terms) (not (< size 1e12)))))
+      {:P (lin/mat-add P term) :term term :k (inc k) :size size})))
+
 (defn lyapunov
   "For the discrete system x' = A x, the P with A^T P A - P = -`Q` (Q
   positive definite): the sum of (A^T)^k Q A^k, a step a term, stopped
@@ -231,10 +241,5 @@
   sum has not settled after `max-terms` (default 10000)."
   ([A Q] (lyapunov A Q 1e-12 10000))
   ([A Q tol max-terms]
-   (let [At (lin/transpose A)]
-     (loop [P Q term Q k 1]
-       (let [term (lin/mat-mul (lin/mat-mul At term) A)
-             size (reduce max (map abs (flatten term)))]
-         (cond (< size tol) (lin/mat-add P term)
-               (or (>= k max-terms) (not (< size 1e12))) nil
-               :else (recur (lin/mat-add P term) term (inc k))))))))
+   (:P (search/converge #(< (:size %) tol) ##Inf (partial lyapunov-step A (lin/transpose A) tol max-terms)
+                        {:P Q :term Q :k 1 :size ##Inf}))))

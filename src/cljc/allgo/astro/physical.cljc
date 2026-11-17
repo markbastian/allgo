@@ -20,7 +20,20 @@
             [allgo.astro.illumination :as illum]
             [allgo.astro.vsop87 :as vsop87]
             [allgo.math :as am]
+            [allgo.search :as search]
             [clojure.math :as math]))
+
+(defn- light-time-step
+  "The planet where its light left, for the Earth-planet distance
+  `delta` before, seen from `earth`: the new distance and the rest."
+  [planet mjd-tt earth {:keys [delta]}]
+  (let [tau (elliptic/light-time delta)
+        [l b r] (vsop87/heliocentric planet (- mjd-tt tau))
+        [l b] (vsop87/->fk5 [l b] mjd-tt)
+        xyz (mapv - [(* r (math/cos b) (math/cos l)) (* r (math/cos b) (math/sin l)) (* r (math/sin b))]
+                  earth)
+        delta' (math/sqrt (reduce + (map * xyz xyz)))]
+    {:l l :b b :r r :xyz xyz :delta delta' :tau tau :ddelta (- delta' delta)}))
 
 (defn- geometry
   "The planet as seen from the Earth, both in FK5, light time included:
@@ -30,16 +43,10 @@
   (let [[l0 b0 R] (vsop87/heliocentric :earth mjd-tt)
         [l0 b0] (vsop87/->fk5 [l0 b0] mjd-tt)
         earth [(* R (math/cos b0) (math/cos l0)) (* R (math/cos b0) (math/sin l0)) (* R (math/sin b0))]]
-    (loop [delta 0.0 i 0]
-      (let [tau (elliptic/light-time delta)
-            [l b r] (vsop87/heliocentric planet (- mjd-tt tau))
-            [l b] (vsop87/->fk5 [l b] mjd-tt)
-            xyz (mapv - [(* r (math/cos b) (math/cos l)) (* r (math/cos b) (math/sin l)) (* r (math/sin b))]
-                      earth)
-            delta' (math/sqrt (reduce + (map * xyz xyz)))]
-        (if (or (< (abs (- delta' delta)) 1e-10) (> i 10))
-          {:l l :b b :r r :l0 l0 :b0 b0 :R R :xyz xyz :delta delta' :tau tau}
-          (recur delta' (inc i)))))))
+    (-> (search/settle #(< (abs (:ddelta %)) 1e-10) 13 (partial light-time-step planet mjd-tt earth)
+                       {:delta 0.0 :ddelta ##Inf})
+        (dissoc :ddelta)
+        (assoc :l0 l0 :b0 b0 :R R))))
 
 (defn- equatorial-of [[x y z] eps]
   (let [u (- (* y (math/cos eps)) (* z (math/sin eps)))

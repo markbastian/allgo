@@ -14,7 +14,10 @@
   (:require [allgo.astro.constants :as c]
             [allgo.geometry.vec3 :as v3]
             [allgo.numerics.linear :as lin]
-            [clojure.math :as math]))
+            [allgo.numerics.roots :as roots]
+            [allgo.search :as search]
+            [clojure.math :as math])
+  #?(:clj (:import [allgo.numerics.roots Estimate])))
 
 (def a-earth c/R-earth)
 (def b-earth (* c/R-earth (- 1.0 c/flattening)))
@@ -44,6 +47,14 @@
      (* (+ N h) cl (math/sin lon))
      (* (+ (* N (- 1.0 e2)) h) sl)]))
 
+(defn- next-latitude
+  "The geodetic latitude that the height at latitude `lat` implies, for a
+  point `p` from the axis and `z` above the equator."
+  [p z lat]
+  (let [N (prime-vertical (math/sin lat))
+        h (- (/ p (math/cos lat)) N)]
+    (math/atan2 z (* p (- 1.0 (* e2 (/ N (+ N h))))))))
+
 (defn cartesian->geodetic
   "Geodetic latitude, longitude and height from an Earth-fixed position.
 
@@ -56,13 +67,10 @@
     (if (< p 1e-9)
       ;; on the axis: longitude is undefined and latitude is a pole
       [(if (neg? z) (- (/ math/PI 2.0)) (/ math/PI 2.0)) 0.0 (- (abs z) b-earth)]
-      (loop [lat (math/atan2 z (* p (- 1.0 e2))) n 0]
-        (let [N (prime-vertical (math/sin lat))
-              h (- (/ p (math/cos lat)) N)
-              lat' (math/atan2 z (* p (- 1.0 (* e2 (/ N (+ N h))))))]
-          (if (or (>= n 8) (< (abs (- lat' lat)) 1e-14))
-            [lat' (math/atan2 y x) (- (/ p (math/cos lat')) (prime-vertical (math/sin lat')))]
-            (recur lat' (inc n))))))))
+      (let [lat (:x (search/settle (fn [^Estimate e] (< (abs (.-dx e)) 1e-14)) 10
+                                   (partial roots/fixed-point-step (partial next-latitude p z))
+                                   (roots/->Estimate (math/atan2 z (* p (- 1.0 e2))) ##Inf)))]
+        [lat (math/atan2 y x) (- (/ p (math/cos lat)) (prime-vertical (math/sin lat)))]))))
 
 (defn geocentric-latitude
   "Latitude as seen from the center, which is what a spherical model would

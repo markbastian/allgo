@@ -15,6 +15,7 @@
   (:require [allgo.astro.constants :as c]
             [allgo.astro.geodesy :as geodesy]
             [allgo.geometry.vec3 :as v3]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------------------------- range
@@ -41,6 +42,14 @@
     {:range rho
      :range-rate (/ (v3/dot d dv) rho)}))
 
+(defn- light-time-step
+  "The light time implied by the satellite's position `tau` before
+  `t-receive`, and that position."
+  [r-station sat-at t-receive {:keys [tau]}]
+  (let [r-sat (sat-at (- t-receive tau))
+        tau' (/ (v3/distance r-sat r-station) c/c-light)]
+    {:tau tau' :position r-sat :dtau (- tau' tau)}))
+
 (defn light-time
   "Seconds for light to cross a range, and the correction that follows.
 
@@ -52,14 +61,10 @@
   Solved by iteration because the answer feeds its own input: how far the
   satellite was depends on when it was, which depends on how far it was."
   [r-station sat-at t-receive]
-  (loop [tau 0.0 n 0]
-    (let [r-sat (sat-at (- t-receive tau))
-          tau'  (/ (v3/distance r-sat r-station) c/c-light)]
-      (if (or (< (abs (- tau' tau)) 1e-12) (>= n 20))
-        {:light-time tau' :position r-sat :range (* tau' c/c-light)}
-        (recur tau' (inc n))))))
-
-;; ------------------------------------------------------------- troposphere
+  (let [{:keys [tau position]} (search/settle #(< (abs (:dtau %)) 1e-12) 22
+                                              (partial light-time-step r-station sat-at t-receive)
+                                              {:tau 0.0 :dtau ##Inf})]
+    {:light-time tau :position position :range (* tau c/c-light)}))
 
 (def ^:private zenith-hydrostatic 2.3)
 (def ^:private zenith-wet 0.1)

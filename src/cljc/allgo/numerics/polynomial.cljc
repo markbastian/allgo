@@ -15,6 +15,7 @@
   + c. Roots are complex, `[re im]`, real ones with im 0; `real-roots`
   keeps the real ones."
   (:require [allgo.numerics.complex :as cx]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------------ complex numbers
@@ -38,20 +39,22 @@
   [coeffs z]
   (reduce (fn [[p dp] c] [(cx/+ (cx/* p z) [c 0.0]) (cx/+ (cx/* dp z) p)]) [[0.0 0.0] [0.0 0.0]] coeffs))
 
-(defn- polish
-  "Newton's method on the polynomial `coeffs` from root `z`, a few steps,
-  keeping a step only while it lowers the residual."
+(defn- polish-step
+  "One Newton step on the polynomial `coeffs` from `z`, kept only if it
+  lowers the residual. nil at a zero derivative, or where it would not."
   [coeffs z]
-  (loop [z z k 0]
-    (let [[p dp] (c-horner coeffs z)
-          m (math/hypot (first dp) (second dp))]
-      (if (or (> k 4) (zero? m))
-        z
-        (let [z' (cx/- z (cx// p dp))
-              [p'] (c-horner coeffs z')]
-          (if (< (math/hypot (first p') (second p')) (math/hypot (first p) (second p)))
-            (recur z' (inc k))
-            z))))))
+  (let [[p dp] (c-horner coeffs z)]
+    (when-not (zero? (math/hypot (first dp) (second dp)))
+      (let [z' (cx/- z (cx// p dp))
+            [p'] (c-horner coeffs z')]
+        (when (< (math/hypot (first p') (second p')) (math/hypot (first p) (second p)))
+          z')))))
+
+(defn- polish
+  "Newton's method on the polynomial `coeffs` from root `z`, at most five
+  steps, while each lowers the residual."
+  [coeffs z]
+  (search/settle (constantly false) 6 (partial polish-step coeffs) z))
 
 (defn- clean
   "Snap a root's negligible imaginary part to 0."

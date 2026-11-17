@@ -5,8 +5,10 @@
   gamma and incomplete beta functions that statistics needs, with
   Student's t distribution built on them; and the error function, with
   the normal distribution built on it."
-  (:require [allgo.search :as search]
-            [clojure.math :as math]))
+  (:require [allgo.numerics.roots :as roots]
+            [allgo.search :as search]
+            [clojure.math :as math])
+  #?(:clj (:import [allgo.numerics.roots Interval])))
 
 (defn bessel-i
   "The modified Bessel function of the first kind, I_n(x), for integer n >=
@@ -119,15 +121,13 @@
 
 (defn student-t-quantile
   "The t with probability `p` below it, `nu` degrees of freedom: the
-  inverse of `student-t-cdf`, by bisection."
+  inverse of `student-t-cdf`, by bisection (`allgo.numerics.roots`'
+  crossing step) to a bracket under 1e-13."
   [p nu]
-  (let [f #(- (student-t-cdf % nu) p)]
-    (loop [lo -1e3 hi 1e3 i 0]
-      (let [m (* 0.5 (+ lo hi))]
-        (if (or (> i 200) (< (- hi lo) 1e-13)) m
-            (if (neg? (f m)) (recur m hi (inc i)) (recur lo m (inc i))))))))
-
-;; ------------------------------------------------------- error function
+  (let [below? #(neg? (- (student-t-cdf % nu) p))
+        ^Interval br (search/settle (fn [^Interval i] (< (- (.-b i) (.-a i)) 1e-13)) 202
+                                    (partial roots/crossing-step below?) (roots/->Interval -1e3 1e3))]
+    (* 0.5 (+ (.-a br) (.-b br)))))
 
 (defn- erf-series-step
   "The next term of erf's series with every term positive, x e^(-x^2)

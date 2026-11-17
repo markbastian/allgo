@@ -153,14 +153,18 @@
          (assoc model :alphas alphas :b b :changed changed :passes (inc (long (:passes model))))))
      {:X X :ys ys :kernel kernel :alphas (vec (repeat n 0.0)) :b 0.0 :changed nil :passes 0})))
 
+(defn- count-quiet
+  "The pass `m`, and how many passes in a row have changed nothing."
+  [[_ quiet] m]
+  [m (if (zero? (long (:changed m))) (inc quiet) 0)])
+
 (defn svm-train
   "An SVM trained until `max-quiet` (default 5) passes in a row change
   nothing, or `max-passes` (default 200)."
   [X ys opts]
   (let [{:keys [max-quiet max-passes] :or {max-quiet 5 max-passes 200}} opts]
-    (loop [[m & more] (rest (svm-seq X ys opts)) quiet 0]
-      (let [quiet (if (zero? (long (:changed m))) (inc quiet) 0)]
-        (if (or (>= quiet max-quiet) (>= (long (:passes m)) max-passes)) m (recur more quiet))))))
+    (some (fn [[m quiet]] (when (or (>= quiet max-quiet) (>= (long (:passes m)) max-passes)) m))
+          (rest (reductions count-quiet [nil 0] (rest (svm-seq X ys opts)))))))
 
 (defn svm-predict [model x] (if (>= (svm-output model x) 0.0) 1 -1))
 

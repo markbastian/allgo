@@ -32,6 +32,7 @@
             [allgo.numerics.linear :as lin]
             [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.ode.rk :as rk]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 ;; ------------------------------------------------- the flow and its STM
@@ -246,19 +247,24 @@
   [mu {:keys [state period]}]
   (:stm (propagate mu state period {:stm? true})))
 
+(defn- power-step
+  "One power iteration on `m`, the vector normalized to unit length and
+  the Rayleigh quotient its eigenvalue estimate."
+  [m {:keys [v lam]}]
+  (let [w (lin/mat-vec m v)
+        n (math/sqrt (reduce + (map * w w)))]
+    {:v (mapv #(/ % n) w) :lam (/ (reduce + (map * v w)) (reduce + (map * v v))) :last-lam lam}))
+
 (defn- dominant
   "The dominant eigenvalue and unit eigenvector of `m`, by power
   iteration -- quick when, as for an unstable orbit's monodromy, it
-  stands far above the rest."
+  stands far above the rest. Unlike `allgo.numerics.eigen/power`, the
+  vector is kept at unit length and the estimate is the Rayleigh
+  quotient, which suits a matrix this lopsided."
   [m]
-  (loop [v (vec (repeat (count m) 1.0)) lam 0.0 i 0]
-    (let [w (lin/mat-vec m v)
-          n (math/sqrt (reduce + (map * w w)))
-          lam' (/ (reduce + (map * v w)) (reduce + (map * v v)))
-          v' (mapv #(/ % n) w)]
-      (if (or (> i 500) (< (abs (- lam' lam)) (* 1e-12 (abs lam'))))
-        [lam' v']
-        (recur v' lam' (inc i))))))
+  (let [{:keys [v lam]} (search/settle (fn [{:keys [lam last-lam]}] (and last-lam (< (abs (- lam last-lam)) (* 1e-12 (abs lam)))))
+                                       503 (partial power-step m) {:v (vec (repeat (count m) 1.0)) :lam 0.0})]
+    [lam v]))
 
 (defn stability
   "The periodic `orbit`'s stability index, (lambda + 1/lambda)/2 for its
@@ -316,24 +322,36 @@
   (let [m (monodromy mu orbit)]
     (* 0.5 (+ (get-in m [2 2]) (get-in m [5 5])))))
 
+(defn- blend-orbit
+  "The orbit corrected from the initial state a fraction `w` of the way
+  from orbit `a` to orbit `b`."
+  [mu a b w]
+  (let [[xa _ _ _ va] (:state a) [xb _ _ _ vb] (:state b)]
+    (correct mu [(+ xa (* w (- xb xa))) 0.0 0.0 0.0 (+ va (* w (- vb va))) 0.0])))
+
+(defn- illinois-step
+  "One step of regula falsi, the Illinois way, along the family: the
+  bracket's end on the far side of `c` replaced by it, and the value at
+  the end that stays halved if that end has now stayed twice running;
+  then the next orbit `c` where the chord crosses zero."
+  [mu g {:keys [a ga b gb side c gc]}]
+  (let [[a ga b gb side] (if (= (neg? gc) (neg? gb))
+                           [a (if (= side :b) (* 0.5 ga) ga) c gc :b]
+                           [c gc b (if (= side :a) (* 0.5 gb) gb) :a])
+        c (blend-orbit mu a b (/ ga (- ga gb)))]
+    {:a a :ga ga :b b :gb gb :side side :c c :gc (g c)}))
+
 (defn- find-bifurcation [mu point opts]
   (let [fam (lyapunov mu point (merge {:step 2e-3} opts))
         g #(- (vertical-trace mu %) 1.0)
         [[a ga] [b gb]] (first (filter (fn [[[_ ga] [_ gb]]] (not= (neg? ga) (neg? gb)))
                                        (partition 2 1 (map (juxt identity g) fam))))
-        orbit-at (fn [a b w]
-                   (let [[xa _ _ _ va] (:state a) [xb _ _ _ vb] (:state b)]
-                     (correct mu [(+ xa (* w (- xb xa))) 0.0 0.0 0.0 (+ va (* w (- vb va))) 0.0])))]
-    ;; regula falsi, the Illinois way: the trace is smooth along the
-    ;; family, and a handful of corrections find where it crosses
-    (loop [a a ga ga b b gb gb side nil i 0]
-      (let [c (orbit-at a b (/ ga (- ga gb)))
-            gc (g c)
-            [xa] (:state a) [xb] (:state b)]
-        (cond
-          (or (> i 60) (< (abs gc) 1e-12) (< (abs (- xa xb)) 1e-12)) c
-          (= (neg? gc) (neg? gb)) (recur a (if (= side :b) (* 0.5 ga) ga) c gc :b (inc i))
-          :else (recur c gc b (if (= side :a) (* 0.5 gb) gb) :a (inc i)))))))
+        c (blend-orbit mu a b (/ ga (- ga gb)))
+        ;; regula falsi, the Illinois way: the trace is smooth along the
+        ;; family, and a handful of corrections find where it crosses
+        done? (fn [{:keys [a b gc]}]
+                (let [[xa] (:state a) [xb] (:state b)] (or (< (abs gc) 1e-12) (< (abs (- xa xb)) 1e-12))))]
+    (:c (search/settle done? 62 (partial illinois-step mu g) {:a a :ga ga :b b :gb gb :side nil :c c :gc (g c)}))))
 
 (def ^:private bifurcation-memo (memoize find-bifurcation))
 

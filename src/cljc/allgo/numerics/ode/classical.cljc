@@ -16,20 +16,20 @@
             [allgo.numerics.linear-systems :as ls]
             [allgo.numerics.ode.multistep :as ms]
             [allgo.numerics.ode.rk :as rk]
+            [allgo.search :as search]
             [clojure.math :as math]))
 
 (defn- lin-comb [pairs] (reduce (fn [acc [c v]] (lin/add acc (lin/scale v c))) (vec (repeat (count (second (first pairs))) 0.0)) pairs))
 (defn- rel-change [a b] (apply max (map (fn [x y] (if (zero? y) (abs (- y x)) (abs (/ (- y x) y)))) a b)))
 
+(defn- corrector-step [corrector {:keys [y]}] {:y (corrector y) :last y})
+
 (defn- iterate-corrector
   "Iterates y <- (corrector y) from `y0` until it settles to `tol`
   relative or `max-iter` times."
   [corrector y0 tol max-iter]
-  (loop [y y0 k 0]
-    (let [y' (corrector y)]
-      (if (or (>= (inc k) max-iter) (< (rel-change y y') tol)) y' (recur y' (inc k))))))
-
-;; ------------------------------------------------- one-step, continued
+  (:y (search/settle (fn [{:keys [y last]}] (and last (< (rel-change last y) tol))) (inc (max 1 max-iter))
+                     (partial corrector-step corrector) {:y y0})))
 
 (defn heun
   "Heun's method, `n` steps of `h` from `y0` at `t0`: Euler's step
@@ -82,6 +82,22 @@
              (recur (+ t h) y' (* h (min 4.0 (* 0.9 (math/pow (max err 1e-10) -0.2)))) (conj out [(+ t h) y'])))
            (recur t y (* h (max 0.1 (* 0.9 (math/pow err -0.25)))) out)))))))
 
+(defn- implicit-newton-step
+  "One Newton step toward a zero of `g`, its Jacobian by central
+  differences. nil at a singular one."
+  [g {:keys [z]}]
+  (when-let [dz (ls/gauss (d/jacobian g z {:steps (mapv #(* 1e-7 (max 1.0 (abs %))) z) :richardson? false}) (mapv - (g z)))]
+    {:z (lin/add z dz) :last z}))
+
+(defn- backward-euler-step
+  "One step of `h`: y_i+1 = y_i + h f(t_i+1, y_i+1), solved for y_i+1 by
+  Newton's method from the explicit Euler step."
+  [f h [t y]]
+  (let [t1 (+ t h)
+        g (fn [z] (mapv - z y (lin/scale (f t1 z) h)))]
+    [t1 (:z (search/settle (fn [{:keys [z last]}] (and last (< (rel-change last z) 1e-14))) 52
+                           (partial implicit-newton-step g) {:z (lin/add y (lin/scale (f t y) h))}))]))
+
 (defn backward-euler
   "The implicit (backward) Euler method, `n` steps of `h`: y_i+1 = y_i +
   h f(t_i+1, y_i+1), solved for y_i+1 by Newton's method each step (the
@@ -90,19 +106,7 @@
   explicit methods must crawl at the fastest transient's pace (Chapra and
   Canale 26.1)."
   [f t0 y0 h n]
-  (vec (reductions (fn [[t y] _]
-                     (let [t1 (+ t h)
-                           g (fn [z] (mapv - z y (lin/scale (f t1 z) h)))
-                           y1 (loop [z (lin/add y (lin/scale (f t y) h)) k 0]
-                                (let [dz (ls/gauss (d/jacobian g z {:steps (mapv #(* 1e-7 (max 1.0 (abs %))) z) :richardson? false}) (mapv - (g z)))]
-                                  (if (or (nil? dz) (> k 50))
-                                    z
-                                    (let [z' (lin/add z dz)]
-                                      (if (< (rel-change z z') 1e-14) z' (recur z' (inc k)))))))]
-                       [t1 y1]))
-                   [t0 (vec y0)] (range n))))
-
-;; ------------------------------------------------------------- multistep
+  (vec (take (inc n) (iterate (partial backward-euler-step f h) [t0 (vec y0)]))))
 
 (def ^:private multistep-methods
   "Each multistep method: how many past points it needs, its predictor

@@ -25,7 +25,10 @@
             [allgo.math :as am]
             [allgo.numerics.linear :as lin]
             [allgo.numerics.polynomial :as poly]
-            [clojure.math :as math]))
+            [allgo.numerics.roots :as roots]
+            [allgo.search :as search]
+            [clojure.math :as math])
+  #?(:clj (:import [allgo.numerics.roots Estimate])))
 
 ;; --------------------------------------------------- low accuracy (25.2-25.8)
 
@@ -191,16 +194,13 @@
 
 (defn season-exact
   "`season`, found by correcting the mean instant until the Sun's apparent
-  longitude is exactly 0, 90, 180 or 270 degrees (Meeus 27.1)."
+  longitude is exactly 0, 90, 180 or 270 degrees (Meeus 27.1): Newton's
+  method, the correction 58 sin(q - apparent longitude) days."
   [year season]
   (let [q (c/deg ({:march 0 :june 90 :september 180 :december 270} season))]
-    (loop [J (mean-season year season) i 0]
-      (let [dJ (* 58.0 (math/sin (- q (first (apparent J)))))]
-        (if (or (< (abs dJ) 5e-6) (>= i 20))
-          (+ J dJ)
-          (recur (+ J dJ) (inc i)))))))
-
-;; ---------------------------------------------------- equation of time (28)
+    (:x (search/settle (fn [^Estimate e] (< (abs (.-dx e)) 5e-6)) 22
+                       (partial roots/newton-correction-step #(- (* 58.0 (math/sin (- q (first (apparent %)))))))
+                       (roots/->Estimate (mean-season year season) ##Inf)))))
 
 (defn- sun-mean-longitude [mjd-tt]
   (c/deg (poly/horner-ascending [280.4664567 360007.6982779 0.03032028 (/ 1.0 49931) (/ -1.0 15300)
